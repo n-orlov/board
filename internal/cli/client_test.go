@@ -80,6 +80,30 @@ func TestAPIErrorExitCodes(t *testing.T) {
 	}
 }
 
+// TestAPIErrorExitCodeStaysInPhase0Set walks every HTTP error status and
+// requires an exit code in R9's Phase 0 set {0,1,2,4,5}: no status, 409
+// included, maps to a code outside it.
+func TestAPIErrorExitCodeStaysInPhase0Set(t *testing.T) {
+	allowed := map[int]bool{ExitOK: true, ExitError: true, ExitUsage: true, ExitNotFound: true, ExitAuth: true}
+	for status := 400; status <= 599; status++ {
+		if got := (&apiError{Status: status}).exitCode(); !allowed[got] {
+			t.Errorf("status %d: exit %d outside {0,1,2,4,5}", status, got)
+		}
+	}
+}
+
+// TestAPIErrorConflictKeepsOneLineNext pins that a 409 keeps its one-line
+// detail and next action while exiting 1.
+func TestAPIErrorConflictKeepsOneLineNext(t *testing.T) {
+	e := newAPIError(409, []byte(`{"title":"Conflict","detail":"slug taken","next":"choose another slug"}`))
+	if got := e.Error(); got != "slug taken → choose another slug" || strings.Contains(got, "\n") {
+		t.Fatalf("got %q", got)
+	}
+	if e.exitCode() != ExitError {
+		t.Fatalf("exit %d, want %d", e.exitCode(), ExitError)
+	}
+}
+
 func TestAPIErrorText(t *testing.T) {
 	if got := newAPIError(404, []byte(`{"title":"Not Found","detail":"initiative x not found","next":"board init ls"}`)).Error(); got != "initiative x not found → board init ls" {
 		t.Fatalf("got %q", got)
