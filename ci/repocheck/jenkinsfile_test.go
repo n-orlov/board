@@ -82,6 +82,11 @@ func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 			t.Errorf("the %s stage does not run %q", stage, cmd)
 		}
 	}
+	for _, v := range []string{"BOARD_CI_CACHE_VOLUME", "BOARD_CI_NPM_VOLUME"} {
+		if !strings.Contains(readRepoFile(t, "ci", "jenkins-image.sh"), `fix_volume "$`+v+`"`) {
+			t.Errorf("ci/jenkins-image.sh does not make $%s usable by the agent's uid", v)
+		}
+	}
 	if !strings.Contains(readRepoFile(t, "ci", "jenkins-image.sh"), "docker build -t board-ci:local -f ci/Dockerfile ci") {
 		t.Error("ci/jenkins-image.sh does not build board-ci:local from ci/Dockerfile")
 	}
@@ -104,6 +109,10 @@ func TestJenkinsfileDeclaresTheJobShape(t *testing.T) {
 		"disableConcurrentBuilds()",
 		"git clean -ffdxq",
 		"booleanParam(name: 'EXTENDED', defaultValue: false",
+		// ci/run.sh mounts both cache volumes; the agent's uid owns neither
+		// until ci/jenkins-image.sh chowns them.
+		"BOARD_CI_CACHE_VOLUME = 'board-go-cache-jenkins'",
+		"BOARD_CI_NPM_VOLUME = 'board-npm-cache-jenkins'",
 	} {
 		if !strings.Contains(jf, want) {
 			t.Errorf("the Jenkinsfile lacks %q", want)

@@ -100,7 +100,7 @@ The clone is of the committed HEAD, so commit before running it.
 
 | stage | command | runs |
 |---|---|---|
-| CI image | `ci/jenkins-image.sh` (cache volume `board-go-cache-jenkins`) | every build |
+| CI image | `ci/jenkins-image.sh` (cache volumes `board-go-cache-jenkins` and `board-npm-cache-jenkins`, each chowned to the agent's uid once) | every build |
 | Lint | `ci/run.sh ci/lint.sh` | every build |
 | Suite | `ci/run.sh ci/suite.sh` | every build |
 | Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |

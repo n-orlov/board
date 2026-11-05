@@ -47,6 +47,7 @@ pipeline {
   environment {
     BOARD_CI_OUT = 'ci-results'
     BOARD_CI_CACHE_VOLUME = 'board-go-cache-jenkins'
+    BOARD_CI_NPM_VOLUME = 'board-npm-cache-jenkins'
     BOARD_CI_RUN_URL = "${env.BUILD_URL}"
     BOARD_CI_BUILD_NAME = "${env.JOB_NAME} #${env.BUILD_NUMBER}"
   }
