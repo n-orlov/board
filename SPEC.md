@@ -11,7 +11,7 @@ Contents
 
 1. Why
 2. Glossary
-3. Rules of use (no ACL in v1)
+3. Authentication and rules of use
 4. Data model
 5. Derived state: leases, conflicts, attention
 6. HTTP API
@@ -62,7 +62,7 @@ themselves from what their environment exposes (§9).
 
 ### Non-goals (v1)
 
-- Access control, users, teams (§3). One operator, any number of agents.
+- Roles, permissions, teams (§3). One operator, any number of agents; every authenticated principal can do everything.
 - A task queue or automatic pickup (§17).
 - Replacing an external issue tracker. Tasks may link to external tickets; they do not mirror them.
 - Rich text editing, attachments, comments threads. Notes are text (Markdown rendered).
@@ -93,11 +93,71 @@ These names are fixed. Code, API, UI and skill text use exactly these words.
 
 ---
 
-## 3. Rules of use (no ACL in v1)
+## 3. Authentication and rules of use
 
-**B10.** v1 has no authorization. Every actor can do everything the API offers, including
-closing tasks and answering asks. The deployment is expected to sit on a trusted private
-network (or behind an authenticating proxy). Access control is a later addition (§17).
+**B10.** Every request except `GET /healthz` is authenticated, by a browser session (humans)
+or an API key (agents). v1 has **no roles or ACL**: any authenticated principal can do
+everything the API offers, including closing tasks and answering asks. Access control is a
+later addition (§17).
+
+### 3.1 Principal and actor
+
+Two separate things are recorded on every write:
+
+- **Principal**: who authenticated. `oidc:<email>` for a browser session, `key:<key name>` for
+  an API key.
+- **Actor**: who acts on the board (§2). A session principal always acts as the **operator**
+  actor. A key principal acts as the actor named in the `Board-Actor` header (the handle an
+  agent derives, §9); the header is required on key-authenticated requests.
+
+Events (§4.6) store both `principal` and `actor_id`. Revoking a key cuts off every actor that
+used it.
+
+### 3.2 Humans: OIDC
+
+Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
+
+- Configuration (§13): issuer URL, client ID, client secret, **allowed emails** list, public base
+  URL. Discovery via `<issuer>/.well-known/openid-configuration`; ID token signature checked
+  against the issuer's JWKS (cached, refreshed on unknown `kid`).
+- Flow: authorization code with **PKCE (S256)**, plus `state` and `nonce`, both single-use,
+  bound to a short-lived (10 min) HttpOnly pre-login cookie. Scopes `openid email profile`.
+- Callback path is fixed: **`/auth/oidc/callback`** (under `BOARD_BASE_PATH`). Logout:
+  `POST /auth/logout`.
+- Admission: `email_verified` must be true and the email must be in the allowed list
+  (case-insensitive, exact). Anything else gets 403 and no session.
+- Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie, path
+  `BOARD_BASE_PATH`; stored server-side as SHA-256 hash (§4.9) with expiry (default 7 days
+  absolute, 24 h idle), so logout and expiry are real.
+- **CSRF**: every cookie-authenticated non-GET request must carry `X-CSRF-Token` matching the
+  session's CSRF token (delivered to the UI by `GET /auth/session`), and an `Origin` (or
+  `Referer`) equal to the public base URL. Bearer-authenticated requests are exempt (no ambient
+  credential).
+- Unauthenticated browser navigation redirects to login; unauthenticated API calls get 401 with
+  a problem document.
+
+### 3.3 Agents: API keys
+
+- Sent as `Authorization: Bearer <key>`.
+- Format: `brd_` + 32 random bytes from the OS CSPRNG, base32 (Crockford, lowercase), so keys
+  are recognisable to secret scanners. The key is shown **once** at creation and never stored:
+  the DB keeps only its SHA-256 hash, a display prefix (first 8 characters after `brd_`), name,
+  `created_at`, `created_by`, `last_used_at` (coalesced, §14), `expires_at` (optional),
+  `revoked_at`.
+- Lookup is by hash (indexed, unique); comparison cost does not depend on the key.
+- **One key per environment** (e.g. `workstation`, `ralphd`, `laptop`), not per agent, so a
+  leaked environment is revoked alone. Names are unique.
+- A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail).
+- Management:
+  - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
+  - **Bootstrap, no HTTP**: `board admin keys create <name> [--expires 90d]`, `board admin keys
+    list`, `board admin keys revoke <name>`, run inside the container against `BOARD_DB_URL`
+    directly. This is how the first key is made, and the recovery path if SSO is broken.
+  - API: `GET/POST /api/v1/keys`, `POST /api/v1/keys/{name}/revoke` (any principal, v1 has no ACL).
+- **Swagger UI** declares a `bearerAuth` security scheme, so "Authorize" accepts a key; inside a
+  logged-in browser session it also works with the session cookie and CSRF header.
+
+### 3.4 Rules of use
 
 Conventions are carried by the skill (§10), not enforced by the server:
 
@@ -224,6 +284,7 @@ The task timeline and the global change log. Append-only; never updated or delet
 | id | ulid | ordering key for "since" reads |
 | at | ts | |
 | actor_id | fk | who did it |
+| principal | text | who authenticated: `oidc:<email>` or `key:<name>` (§3.1) |
 | on_behalf_of | fk, nullable | |
 | initiative_id | fk, nullable | denormalised for filtering |
 | task_id | fk, nullable | |
@@ -268,7 +329,15 @@ Broadcast = `task_id IS NULL AND initiative_id IS NULL`. A note bound to a task 
 (`notes`, `events`), so an agent may ask "since my last read" without keeping state itself
 (`since=cursor`). Updated only when the reader asks (`ack=true`).
 
-### 4.9 Indexes (the hot queries)
+### 4.9 `api_keys`, `sessions`
+
+`api_keys(id, name unique, key_hash unique, display_prefix, created_at, created_by,
+last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key.
+
+`sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Expired rows
+are deleted by the same sweeper as leases.
+
+### 4.10 Indexes (the hot queries)
 
 - `events(id)` (PK) and `events(task_id, id)`, `events(initiative_id, id)`: since-T reads.
 - `notes(id)`, `notes(task_id, id)`, `notes(resource, id)`, partial/filtered index for broadcasts
@@ -332,9 +401,12 @@ and CLI can show badges without the lists.
   handler interfaces and the CLI client are generated from it (oapi-codegen); a CI check fails
   if generated code is stale. Served at `/api/openapi.yaml` and `/api/openapi.json`.
 - **Swagger UI** at `/api/docs` (assets embedded, no CDN).
-- Every mutating request names its actor: header `Board-Actor: <handle>` (required), optional
+- Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
+  The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is
+  unauthenticated (`/readyz` and `/metrics` too require a key or session).
+- Every key-authenticated request names its actor: header `Board-Actor: <handle>` (required), optional
   `Board-Actor-Way-Back`, `Board-Actor-Meta` (JSON), `Board-On-Behalf-Of`. The actor is
-  upserted on use. The UI sends the operator handle.
+  upserted on use. Session requests always act as the operator.
 - Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
   original response. Agents retry safely.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid>` cursor. Lists are ordered by id.
@@ -369,7 +441,10 @@ and CLI can show badges without the lists.
 | GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
 | GET | `/stream` | SSE live feed (§7.1) |
-| GET | `/healthz`, `/readyz` | liveness / DB reachable and migrated |
+| GET | `/healthz` | liveness, **unauthenticated** |
+| GET | `/readyz` | DB reachable and migrated |
+| GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
+| GET | `/auth/login`, `/auth/oidc/callback`; GET `/auth/session`; POST `/auth/logout` | OIDC (§3.2); outside `/api/v1` |
 | GET | `/metrics` | Prometheus text |
 
 **Note filters**: `since=<ulid|RFC3339|cursor>`, `task=<ref>`, `initiative=<slug>`,
@@ -403,8 +478,9 @@ One binary, same Go module: `board serve` runs the server, every other subcomman
 Static builds for linux/darwin × amd64/arm64.
 
 Configuration: `BOARD_URL`, `BOARD_ACTOR` (handle; if unset, the CLI derives one with the
-built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_TOKEN` (reserved for §17 ACL, ignored by
-v1 servers).
+built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_API_KEY` (the environment's key, §3.3;
+never accepted as a flag, so it does not land in shell history or process lists).
+`board admin …` subcommands talk to the database directly (`BOARD_DB_URL`) and need no key.
 
 Output is **compact plain text by default** (designed for agent context: one line per item,
 refs not ids, relative times), `--json` for machines.
@@ -456,7 +532,8 @@ Template for the operator's instructions (first matching rule wins; adapt to you
 
 ```markdown
 ## board identity
-Before using `board`, export BOARD_ACTOR and BOARD_WAY_BACK:
+Before using `board`, export BOARD_URL, BOARD_API_KEY (this environment's key,
+from your secret store), BOARD_ACTOR and BOARD_WAY_BACK:
 1. Autonomous run (e.g. RALPHD_RUN_ID set):   ralph:<run-id>
    way back: `ralphctl status <run-id>`
 2. Session manager (e.g. DECK_SESSION_NAME set): deck:<DECK_PROFILE>/<DECK_SESSION_NAME>
@@ -517,6 +594,7 @@ operator. Live via SSE (§7.1).
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
 | **Actors** | who is alive now (live leases, last seen), with way back. |
 | **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
+| **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
 Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
 network requests (all assets embedded).
@@ -577,9 +655,18 @@ All configuration is by environment variable:
 | `BOARD_SWEEP_INTERVAL` | `15s` | lease expiry sweep |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
+| `BOARD_PUBLIC_URL` | (required) | external base URL; used for the OIDC redirect URI and the CSRF origin check |
+| `BOARD_OIDC_ISSUER` | (required) | issuer URL (discovery) |
+| `BOARD_OIDC_CLIENT_ID` | (required) | |
+| `BOARD_OIDC_CLIENT_SECRET` | (required) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
+| `BOARD_OIDC_ALLOWED_EMAILS` | (required) | comma-separated; these log in as the operator |
+| `BOARD_SESSION_TTL` | `168h` | absolute session lifetime |
+| `BOARD_SESSION_IDLE` | `24h` | idle timeout |
 
-The board itself does no TLS and no authentication (§3): put it behind a private network or a
-TLS-terminating, authenticating proxy. Backups: the SQLite file (use the online backup command
+The app refuses to start without the OIDC settings (there is no unauthenticated mode; tests use a
+mock provider, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
+proxy, since the session cookie is `Secure`. Register the redirect URI
+`<BOARD_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
 `board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
 
 The operator's own deployment (host, network, image registry, backup schedule) is described
@@ -646,6 +733,15 @@ Headline scenarios that define the product (must exist from the first iteration)
    `notes --since last` → sees exactly the relevant summaries, `--ack` advances its cursor.
 5. Task marked done by an agent appears in attention; the operator closes it → leaves the
    timeline, appears in the archive within the chosen window.
+6. Auth, against a **mock OIDC provider** started by the test harness (no external identity
+   provider in CI), on both database legs: allowed email logs in and acts as operator;
+   disallowed or unverified email gets 403; bad `state`, reused `nonce`, missing PKCE verifier
+   and a tampered ID token are rejected; a cookie write without CSRF token or with a foreign
+   `Origin` is rejected; logout invalidates the session; idle and absolute expiry. Keys:
+   `board admin keys create` → key works; revoke (UI, API and admin CLI) → 401; expired key →
+   401; the key is never retrievable after creation; events record `principal` and actor
+   separately; `/healthz` answers without credentials and nothing else does (every OpenAPI
+   operation is probed unauthenticated and must return 401).
 
 ### 15.3 Pipeline
 
@@ -712,6 +808,9 @@ Everything below exists and the gates measure real code before any product featu
   `Jenkinsfile`, `Jenkinsfile.release`.
 - **One binary** `board`: `board serve` and CLI subcommands, version stamped from build info.
 - `/healthz`, `/readyz`.
+- **Authentication** (§3) complete: OIDC login with the mock provider in tests, sessions, CSRF,
+  API keys with `board admin keys` and the UI page. The vertical slice is authenticated from the
+  start.
 - **OpenAPI** spec checked in, server and TS client generated, drift check; Swagger UI at
   `/api/docs`.
 - **goose migrations + dialect layer** running on SQLite and Postgres.
@@ -744,8 +843,8 @@ Each phase ends on a green `main` build with all gates still enforced.
 
 - **Task queue**: tasks marked `queueable`, agents claim via lease with a `claim` flag, ready =
   open + no open deps + no live lease. Designed separately.
-- **ACL**: per-actor tokens (`BOARD_TOKEN`), scopes (read / write / operator-only actions such
-  as close and answer), maybe OIDC for the UI.
+- **Roles / ACL** on top of v1 authentication: key scopes (read / write / operator-only actions
+  such as close and answer), per-key allowed actor handles.
 - **MCP endpoint** exposing the same operations as tools.
 - **Asks and autonomous runners**: how a runner's own "operator input required" review relates
   to board asks (poll vs defer vs stop). Discussed separately.
