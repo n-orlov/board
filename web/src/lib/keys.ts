@@ -20,7 +20,7 @@ export class KeysError extends Error {
 }
 
 /** The text of a problem document's detail (or title), else a line naming the HTTP status. */
-async function problemText(response: Response, what: string): Promise<string> {
+export async function problemText(response: Response, what: string): Promise<string> {
   try {
     const problem = (await response.json()) as { detail?: string; title?: string };
     const text = problem.detail ?? problem.title;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import ApiKeys from './ApiKeys.svelte';
+  import Initiatives from './Initiatives.svelte';
   import { KEYS_HASH, viewFromHash, type View } from './lib/route';
   import { currentBrowser, loadSession, type SessionState } from './lib/session';
 
@@ -28,8 +29,7 @@
     {#if view === 'keys'}
       <ApiKeys csrf={auth.session.csrf_token} />
     {:else}
-      <h2>Initiatives</h2>
-      <p>No initiatives yet.</p>
+      <Initiatives csrf={auth.session.csrf_token} />
     {/if}
   {/if}
 </main>

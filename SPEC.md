@@ -1033,6 +1033,16 @@ document's detail. The page calls the API with the session cookie, and its write
 session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from its next request
 (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
+**Phase 0 pages.** The app has two views, chosen by the URL fragment: **Initiatives** (`#/`, the
+default, where a login lands) and **Settings → API keys** (`#/settings/keys`); the other views in
+the table are later phases. The Initiatives view lists every initiative from `GET /api/v1/initiatives`
+(slug, title, status, tags, created), following `next_after` through the pages, and has a form with
+a slug, a title, an optional description and optional comma-separated tags that posts
+`POST /api/v1/initiatives`. On success the list reloads and the form is cleared. A refusal (a bad or
+taken slug, a bad tag) shows the problem document's detail on the form and keeps what was typed so
+it can be corrected. The page calls the API with the session cookie, and its write sends the
+session's `X-CSRF-Token` (§3.2) (`e2e/initiatives.spec.ts`).
+
 Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
 network requests (all assets embedded).
 
