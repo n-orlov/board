@@ -175,9 +175,12 @@ The server records **who** did everything (§4.6), so misuse is visible after th
 
 ## 4. Data model
 
-All timestamps are UTC, stored with millisecond precision. IDs are ULIDs (sortable by
-creation time, text in every dialect). Every table except the join tables also has an integer
-identity column `n` (unique, never reused) from which the **short ref** is formed (§8.2):
+All timestamps are UTC, stored with millisecond precision as a `BIGINT` of milliseconds since the Unix epoch
+in every dialect (`store.EncodeTime` / `store.DecodeTime`); dates (`target_start`, `target_end`) are
+`YYYY-MM-DD` text; JSON columns are text. IDs are ULIDs (sortable by creation time, text in every dialect).
+Every table except the join tables and `sessions` also has an integer identity column `n` (unique, never
+reused: SQLite `AUTOINCREMENT`, Postgres `GENERATED ALWAYS AS IDENTITY`) from which the **short ref** is
+formed (§8.2):
 initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e.g.
 `phone-onboard-3`), lease `L<n>`, ask `A<n>`, note `N<n>`, event `E<n>`.
 
@@ -195,7 +198,8 @@ initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e
 | first_seen_at, last_seen_at | ts | `last_seen_at` bumps on any API call with this handle (coalesced, §14) |
 | protocol_seen | int, nullable | highest agent protocol version this actor has read (`board help agent`, §8.6) |
 
-An actor row is created on first use of a handle (upsert). Actors are never deleted.
+An actor row is created on first use of a handle (upsert). Actors are never deleted. A unique partial index
+on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 
 ### 4.2 `initiatives`, `initiative_tags`
 
@@ -334,11 +338,17 @@ Broadcast = `task_id IS NULL AND initiative_id IS NULL`. A note bound to a task 
 
 ### 4.9 `api_keys`, `sessions`
 
-`api_keys(id, name unique, key_hash unique, display_prefix, created_at, created_by,
+`api_keys(n, id, name unique, key_hash unique, display_prefix, created_at, created_by,
 last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key.
 
 `sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Expired rows
-are deleted by the same sweeper as leases.
+are deleted by the same sweeper as leases. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
+and is indexed on `expires_at` for that sweep.
+
+Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; the other
+tables of this section arrive with the phases that use them. `events.task_id` is a plain nullable column until
+`tasks` exists. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
+`initiative_tags(tag)`.
 
 ### 4.10 Indexes (the hot queries)
 
@@ -496,7 +506,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version>`.
+`usage: board <serve|version|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -504,6 +514,17 @@ subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly 
 whenever the process is up, whatever the database state. `GET /readyz` answers 200 only when the database is
 reachable and carries every embedded migration, and 503 otherwise (unmigrated, behind the embedded migrations,
 or unreachable); it never writes. A value of `BOARD_MIGRATE` other than `auto` or `off` exits 1.
+
+`board serve` refuses a database whose recorded goose version is newer than the highest migration the binary
+embeds (a newer board migrated it): whatever `BOARD_MIGRATE` says, it exits 1 before it listens, printing exactly
+one stderr line that names both versions (`board: database schema is newer than this binary: database is at
+version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also answers 503 for such a database.
+
+`board admin migrate` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
+that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
+no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
+and any other failure is one stderr line and exit 1. `board admin` with any other subcommand or extra arguments
+is the exit-2 usage error.
 
 ### 8.1 Output rules
 
@@ -795,14 +816,22 @@ network requests (all assets embedded).
 - `database/sql` with drivers: **SQLite** via `modernc.org/sqlite` (pure Go), **Postgres** via
   `jackc/pgx/v5/stdlib`.
 - `BOARD_DB_URL` selects the driver: `sqlite:///data/board.db`, `postgres://…`.
-- **Dialect layer**: one small Go interface for the differences that matter (placeholder style,
-  `RETURNING`, upsert syntax, JSON columns stored as text, boolean/time encoding, partial index
-  creation, `LISTEN/NOTIFY` availability). Queries are hand-written portable SQL; no ORM.
-- **Migrations**: `pressly/goose` v3 with Go-embedded SQL files, one directory per dialect only
-  where the DDL must differ; applied on start (`BOARD_MIGRATE=auto`, default) or by
-  `board admin migrate`.
-- SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, one
-  writer connection plus a read pool. SQLite is single-replica.
+- **Dialect layer**: one small Go interface, `store.Dialect`, with a `SQLite` and a `Postgres`
+  implementation, for the differences that matter: placeholder style and `Rebind`, `INSERT ... RETURNING`,
+  upsert (`ON CONFLICT ... DO UPDATE`), partial index creation, boolean encoding, `LISTEN/NOTIFY`
+  availability, and recognising a missing-table or unique-violation error. Timestamps are `BIGINT`
+  milliseconds and JSON is text in both, so neither needs per-dialect handling. Queries are hand-written
+  portable SQL with `?` markers; no ORM.
+- **Migrations**: `pressly/goose` v3 with Go-embedded SQL files in `internal/store/migrations/common`
+  (DDL identical in both databases) plus `sqlite` and `postgres` (only where the DDL must differ: today
+  the identity column `n` and the primary key of the tables that have one). A dialect applies its own
+  directory merged with `common`, one version sequence across both. Applied on start
+  (`BOARD_MIGRATE=auto`, default) or by `board admin migrate`. A database whose goose version is above the
+  highest embedded one is refused (§8).
+- SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, applied to every
+  connection through the DSN, with one writer connection (`MaxOpenConns=1`, `BEGIN IMMEDIATE`) plus a read
+  pool whose connections are `query_only`. `Store.Writer()` and `Store.Reader()` return the two pools; on
+  Postgres both are one pool. SQLite is single-replica.
 - **Supported = in the CI matrix.** v1 supports SQLite and Postgres (16+). MySQL/MariaDB or
   others become supported only when the whole e2e suite runs against them in CI.
 

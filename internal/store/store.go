@@ -10,66 +10,214 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // the Postgres database/sql driver
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite" // the pure-Go SQLite driver
 )
 
-//go:embed migrations/sqlite/*.sql
-var sqliteMigrations embed.FS
+// The `common` directory holds DDL that is identical in both dialects. A
+// dialect directory holds only the migrations whose DDL must differ. Versions
+// are unique across the directories a dialect applies.
+//
+//go:embed migrations/common/*.sql migrations/sqlite/*.sql migrations/postgres/*.sql
+var migrationFiles embed.FS
 
 // ErrNotMigrated is returned by Ready when the database does not carry every
 // embedded migration.
 var ErrNotMigrated = errors.New("database is not migrated")
 
-// Store is one open database.
+// ErrSchemaNewer is wrapped by the error Migrate, CheckSchema and Ready return
+// when the database records a goose version this binary does not embed.
+var ErrSchemaNewer = errors.New("database schema is newer than this binary")
+
+// SQLite settings (SPEC 12.2). Each is applied to every connection the driver
+// opens, and a unit test reads all four back.
+var sqlitePragmas = []string{
+	"busy_timeout(5000)",
+	"journal_mode(WAL)",
+	"foreign_keys(1)",
+	"synchronous(NORMAL)",
+}
+
+// Store is one open database. On SQLite it holds one writer connection and a
+// read pool, and on Postgres both are the same pool.
 type Store struct {
-	db         *sql.DB
+	dialect    Dialect
+	writer     *sql.DB
+	reader     *sql.DB
 	migrations fs.FS
 }
 
 // Open opens the database named by a BOARD_DB_URL value. It does not migrate.
-// Only sqlite:// URLs are supported (sqlite:///data/board.db).
+// Supported: sqlite:///data/board.db and postgres://... (or postgresql://...).
 func Open(rawURL string) (*Store, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse BOARD_DB_URL: %w", err)
 	}
-	if u.Scheme != "sqlite" {
-		return nil, fmt.Errorf("BOARD_DB_URL scheme %q is not supported (want sqlite://<path>)", u.Scheme)
+	switch u.Scheme {
+	case "sqlite":
+		return openSQLite(u)
+	case "postgres", "postgresql":
+		return openPostgres(rawURL)
+	default:
+		return nil, fmt.Errorf("BOARD_DB_URL scheme %q is not supported (want sqlite://<path> or postgres://...)", u.Scheme)
 	}
-	path := u.Host + u.Path
-	if path == "" {
-		return nil, errors.New("BOARD_DB_URL names no database file")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return nil, fmt.Errorf("create database directory: %w", err)
-	}
-	q := url.Values{}
-	for _, p := range []string{"busy_timeout(5000)", "journal_mode(WAL)", "foreign_keys(1)", "synchronous(NORMAL)"} {
-		q.Add("_pragma", p)
-	}
-	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-	sub, err := fs.Sub(sqliteMigrations, "migrations/sqlite")
+}
+
+func dialectMigrations(name string) (fs.FS, error) {
+	common, err := fs.Sub(migrationFiles, "migrations/common")
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, migrations: sub}, nil
+	own, err := fs.Sub(migrationFiles, "migrations/"+name)
+	if err != nil {
+		return nil, err
+	}
+	return layered{common, own}, nil
 }
+
+func sqliteDSN(path string, readOnly bool) string {
+	q := url.Values{}
+	for _, p := range sqlitePragmas {
+		q.Add("_pragma", p)
+	}
+	if readOnly {
+		q.Add("_pragma", "query_only(1)")
+	} else {
+		q.Add("_txlock", "immediate")
+	}
+	return "file:" + path + "?" + q.Encode()
+}
+
+func openSQLite(u *url.URL) (*Store, error) {
+	path := filepath.Clean(u.Host + u.Path)
+	if path == "." {
+		return nil, errors.New("BOARD_DB_URL names no database file")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // the path is the operator's own BOARD_DB_URL, not request input
+		return nil, fmt.Errorf("create database directory: %w", err)
+	}
+	writer, err := sql.Open("sqlite", sqliteDSN(path, false))
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	writer.SetMaxOpenConns(1)
+	// Opening the writer first creates the file and switches it to WAL before
+	// any reader connection looks at it.
+	if err := writer.Ping(); err != nil {
+		_ = writer.Close()
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	reader, err := sql.Open("sqlite", sqliteDSN(path, true))
+	if err != nil {
+		_ = writer.Close()
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	reader.SetMaxOpenConns(max(4, runtime.NumCPU()))
+	mig, err := dialectMigrations("sqlite")
+	if err != nil {
+		_ = writer.Close()
+		_ = reader.Close()
+		return nil, err
+	}
+	return &Store{dialect: SQLite{}, writer: writer, reader: reader, migrations: mig}, nil
+}
+
+func openPostgres(rawURL string) (*Store, error) {
+	db, err := sql.Open("pgx", rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	mig, err := dialectMigrations("postgres")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{dialect: Postgres{}, writer: db, reader: db, migrations: mig}, nil
+}
+
+// Dialect returns the database's SQL dialect.
+func (s *Store) Dialect() Dialect { return s.dialect }
+
+// Writer is the pool for statements that write: on SQLite one connection.
+func (s *Store) Writer() *sql.DB { return s.writer }
+
+// Reader is the pool for statements that only read.
+func (s *Store) Reader() *sql.DB { return s.reader }
 
 // Close releases the database.
-func (s *Store) Close() error { return s.db.Close() }
-
-func (s *Store) provider() (*goose.Provider, error) {
-	return goose.NewProvider(goose.DialectSQLite3, s.db, s.migrations)
+func (s *Store) Close() error {
+	err := s.writer.Close()
+	if s.reader != s.writer {
+		err = errors.Join(err, s.reader.Close())
+	}
+	return err
 }
 
-// Migrate applies every embedded migration that is not applied yet.
+func (s *Store) provider() (*goose.Provider, error) {
+	return goose.NewProvider(s.dialect.GooseDialect(), s.writer, s.migrations)
+}
+
+// latest is the highest migration version this binary embeds.
+func (s *Store) latest() (int64, error) {
+	p, err := s.provider()
+	if err != nil {
+		return 0, fmt.Errorf("prepare migrations: %w", err)
+	}
+	sources := p.ListSources()
+	if len(sources) == 0 {
+		return 0, errors.New("no embedded migrations")
+	}
+	return sources[len(sources)-1].Version, nil
+}
+
+// applied is the highest applied goose version, 0 when the database has none.
+// It never writes.
+func (s *Store) applied(ctx context.Context) (int64, error) {
+	var v sql.NullInt64
+	err := s.reader.QueryRowContext(ctx, s.dialect.Rebind(
+		`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = ?`), s.dialect.EncodeBool(true)).Scan(&v)
+	if err != nil {
+		if s.dialect.IsMissingTable(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read migration version: %w", err)
+	}
+	return v.Int64, nil
+}
+
+// SchemaVersion is the highest applied goose version, 0 for a database that
+// has never been migrated. It never writes.
+func (s *Store) SchemaVersion(ctx context.Context) (int64, error) { return s.applied(ctx) }
+
+// CheckSchema returns an error wrapping ErrSchemaNewer when the database
+// records a goose version above the highest one this binary embeds. It never
+// writes, and a database with no migrations at all passes.
+func (s *Store) CheckSchema(ctx context.Context) error {
+	latest, err := s.latest()
+	if err != nil {
+		return err
+	}
+	applied, err := s.applied(ctx)
+	if err != nil {
+		return err
+	}
+	if applied > latest {
+		return fmt.Errorf("%w: database is at version %d, this binary embeds up to %d: upgrade board",
+			ErrSchemaNewer, applied, latest)
+	}
+	return nil
+}
+
+// Migrate applies every embedded migration that is not applied yet. It refuses
+// a database whose schema is newer than the binary.
 func (s *Store) Migrate(ctx context.Context) error {
+	if err := s.CheckSchema(ctx); err != nil {
+		return err
+	}
 	p, err := s.provider()
 	if err != nil {
 		return fmt.Errorf("prepare migrations: %w", err)
@@ -83,29 +231,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 // Ready reports nil when the database is reachable and carries every embedded
 // migration, and an error otherwise. It never writes.
 func (s *Store) Ready(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
+	if err := s.reader.PingContext(ctx); err != nil {
 		return fmt.Errorf("database unreachable: %w", err)
 	}
-	p, err := s.provider()
+	latest, err := s.latest()
 	if err != nil {
-		return fmt.Errorf("prepare migrations: %w", err)
+		return err
 	}
-	sources := p.ListSources()
-	if len(sources) == 0 {
-		return errors.New("no embedded migrations")
-	}
-	latest := sources[len(sources)-1].Version
-
-	var applied sql.NullInt64
-	err = s.db.QueryRowContext(ctx,
-		`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied`).Scan(&applied)
+	applied, err := s.applied(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
-			return ErrNotMigrated
-		}
-		return fmt.Errorf("read migration version: %w", err)
+		return err
 	}
-	if !applied.Valid || applied.Int64 < latest {
+	switch {
+	case applied > latest:
+		return fmt.Errorf("%w: database is at version %d, this binary embeds up to %d", ErrSchemaNewer, applied, latest)
+	case applied < latest:
 		return ErrNotMigrated
 	}
 	return nil

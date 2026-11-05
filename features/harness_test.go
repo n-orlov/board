@@ -3,6 +3,7 @@ package features
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -17,9 +18,10 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version>"
+const usageLine = "usage: board <serve|version|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -60,6 +62,7 @@ type harness struct {
 	server *exec.Cmd
 	addr   string
 	dir    string
+	dbURL  string
 }
 
 func (h *harness) env(extra ...string) []string {
@@ -73,13 +76,24 @@ func (h *harness) env(extra ...string) []string {
 }
 
 func (h *harness) run(ctx context.Context, line string) error {
+	return h.runWith(ctx, line)
+}
+
+func (h *harness) runWithVar(ctx context.Context, line, name, value string) error {
+	return h.runWith(ctx, line, name+"="+value)
+}
+
+func (h *harness) runWith(ctx context.Context, line string, extra ...string) error {
 	fields := strings.Fields(line)
 	if len(fields) == 0 || fields[0] != "board" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
 	var out, errb bytes.Buffer
 	cmd := exec.CommandContext(ctx, h.binary, fields[1:]...)
-	cmd.Env = h.env()
+	if h.dbURL != "" {
+		extra = append([]string{"BOARD_DB_URL=" + h.dbURL}, extra...)
+	}
+	cmd.Env = h.env(extra...)
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	h.stdout, h.stderr = out.String(), errb.String()
@@ -112,12 +126,11 @@ func (h *harness) startServerWith(ctx context.Context, extra ...string) (context
 	}
 	h.addr = "127.0.0.1:" + strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
 	_ = ln.Close()
-	h.dir, err = os.MkdirTemp("", "board-godog-")
-	if err != nil {
+	if err := h.freshDatabase(); err != nil {
 		return ctx, err
 	}
 	h.server = exec.Command(h.binary, "serve")
-	h.server.Env = h.env(append([]string{"BOARD_LISTEN=" + h.addr, "BOARD_DB_URL=sqlite://" + filepath.Join(h.dir, "board.db")}, extra...)...)
+	h.server.Env = h.env(append([]string{"BOARD_LISTEN=" + h.addr, "BOARD_DB_URL=" + h.dbURL}, extra...)...)
 	var logs bytes.Buffer
 	h.server.Stdout, h.server.Stderr = &logs, &logs
 	if err := h.server.Start(); err != nil {
@@ -132,6 +145,36 @@ func (h *harness) startServerWith(ctx context.Context, extra ...string) (context
 		time.Sleep(25 * time.Millisecond)
 	}
 	return ctx, fmt.Errorf("server never listened on %s: %s", h.addr, logs.String())
+}
+
+// freshDatabase names a database file in the scenario's temp directory, once.
+// A scenario that already prepared one (a migrated or too-new store) keeps it.
+func (h *harness) freshDatabase() error {
+	if h.dbURL != "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "board-godog-")
+	if err != nil {
+		return err
+	}
+	h.dir = dir
+	h.dbURL = "sqlite://" + filepath.Join(dir, "board.db")
+	return nil
+}
+
+// recordSchemaVersion makes the scenario's database claim goose version v as
+// applied, the way a newer binary's migration would have.
+func (h *harness) recordSchemaVersion(ctx context.Context, v int) error {
+	if err := h.freshDatabase(); err != nil {
+		return err
+	}
+	db, err := sql.Open("sqlite", strings.TrimPrefix(h.dbURL, "sqlite://"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, "INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v)
+	return err
 }
 
 // get sends a credential-less GET to the running server and records the status.
@@ -157,6 +200,7 @@ func (h *harness) stopServer() {
 	if h.dir != "" {
 		_ = os.RemoveAll(h.dir)
 	}
+	h.dir, h.dbURL = "", ""
 }
 
 var versionPattern = regexp.MustCompile(`^(v[0-9][^\s]*|devel(\+[0-9a-f]+)?)(-dirty)?$`)
@@ -167,6 +211,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		return ctx, nil
 	})
 	sc.Step(`^I run "([^"]*)"$`, h.run)
+	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {
 		if h.exit != want {
 			return fmt.Errorf("exit code %d, want %d (stderr %q)", h.exit, want, h.stderr)
@@ -195,6 +240,20 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^stderr is exactly the usage line$`, func() error {
 		if h.stderr != usageLine+"\n" {
 			return fmt.Errorf("stderr %q, want exactly %q", h.stderr, usageLine+"\n")
+		}
+		return nil
+	})
+	sc.Step(`^a new SQLite database for the board commands$`, h.freshDatabase)
+	sc.Step(`^the database records schema version (\d+) as applied$`, h.recordSchemaVersion)
+	sc.Step(`^stderr is exactly one line containing "([^"]*)"$`, func(want string) error {
+		if strings.Count(h.stderr, "\n") != 1 || !strings.HasSuffix(h.stderr, "\n") || !strings.Contains(h.stderr, want) {
+			return fmt.Errorf("stderr %q is not exactly one line containing %q", h.stderr, want)
+		}
+		return nil
+	})
+	sc.Step(`^stdout is exactly "([^"]*)"$`, func(want string) error {
+		if h.stdout != want+"\n" {
+			return fmt.Errorf("stdout %q, want %q", h.stdout, want+"\n")
 		}
 		return nil
 	})

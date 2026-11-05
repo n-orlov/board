@@ -24,7 +24,7 @@ const (
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
-const Usage = "usage: board <serve|version>"
+const Usage = "usage: board <serve|version|admin>"
 
 // Env looks up an environment variable.
 type Env func(string) string
@@ -46,9 +46,47 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 			return usage(stderr)
 		}
 		return serve(stderr, env)
+	case "admin":
+		return admin(args[1:], stdout, stderr, env)
 	default:
 		return usage(stderr)
 	}
+}
+
+// admin runs `board admin ...`, which talks to the database directly.
+func admin(args []string, stdout, stderr io.Writer, env Env) int {
+	if len(args) != 1 || args[0] != "migrate" {
+		return usage(stderr)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(dbURL(env))
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.Migrate(ctx); err != nil {
+		return fail(stderr, err)
+	}
+	v, err := st.SchemaVersion(ctx)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	_, _ = fmt.Fprintf(stdout, "ok migrated, schema version %d\n", v)
+	return ExitOK
+}
+
+// fail prints one error line and returns the error exit code.
+func fail(stderr io.Writer, err error) int {
+	_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
+	return ExitError
+}
+
+func dbURL(env Env) string {
+	if v := env("BOARD_DB_URL"); v != "" {
+		return v
+	}
+	return DefaultDBURL
 }
 
 func usage(stderr io.Writer) int {
@@ -61,10 +99,6 @@ func serve(stderr io.Writer, env Env) int {
 	if addr == "" {
 		addr = server.DefaultListen
 	}
-	dbURL := env("BOARD_DB_URL")
-	if dbURL == "" {
-		dbURL = DefaultDBURL
-	}
 	migrate := env("BOARD_MIGRATE")
 	if migrate != "" && migrate != "auto" && migrate != "off" {
 		_, _ = fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
@@ -72,12 +106,15 @@ func serve(stderr io.Writer, env Env) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	st, err := store.Open(dbURL)
+	st, err := store.Open(dbURL(env))
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
-		return ExitError
+		return fail(stderr, err)
 	}
 	defer func() { _ = st.Close() }()
+	// A database ahead of this binary is refused whatever BOARD_MIGRATE says.
+	if err := st.CheckSchema(ctx); err != nil {
+		return fail(stderr, err)
+	}
 	if migrate != "off" {
 		if err := st.Migrate(ctx); err != nil {
 			_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
@@ -85,8 +122,7 @@ func serve(stderr io.Writer, env Env) int {
 		}
 	}
 	if err := server.Serve(ctx, addr, st.Ready); err != nil {
-		_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
-		return ExitError
+		return fail(stderr, err)
 	}
 	return ExitOK
 }

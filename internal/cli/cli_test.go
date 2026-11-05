@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,5 +41,36 @@ func TestServeRejectsUnknownMigrateMode(t *testing.T) {
 	}
 	if code := Run([]string{"serve"}, &out, &errb, env); code != ExitError || !strings.Contains(errb.String(), "BOARD_MIGRATE") {
 		t.Fatalf("got code=%d err=%q", code, errb.String())
+	}
+}
+
+func envWith(kv map[string]string) Env { return func(k string) string { return kv[k] } }
+
+func TestAdminUsageErrors(t *testing.T) {
+	for _, args := range [][]string{{"admin"}, {"admin", "bogus"}, {"admin", "migrate", "extra"}} {
+		code, out, errs := run(args...)
+		if code != ExitUsage || out != "" || errs != Usage+"\n" {
+			t.Fatalf("%v: got code=%d out=%q err=%q", args, code, out, errs)
+		}
+	}
+}
+
+func TestAdminMigrateAppliesAndReportsTheVersion(t *testing.T) {
+	env := envWith(map[string]string{"BOARD_DB_URL": "sqlite://" + filepath.Join(t.TempDir(), "b.db")})
+	for i := 0; i < 2; i++ { // the second run is a no-op
+		var out, errb bytes.Buffer
+		if code := Run([]string{"admin", "migrate"}, &out, &errb, env); code != ExitOK ||
+			out.String() != "ok migrated, schema version 2\n" || errb.Len() != 0 {
+			t.Fatalf("run %d: code=%d out=%q err=%q", i, code, out.String(), errb.String())
+		}
+	}
+}
+
+func TestAdminMigrateFailsOnAnUnsupportedURL(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := envWith(map[string]string{"BOARD_DB_URL": "mysql://x/y"})
+	if code := Run([]string{"admin", "migrate"}, &out, &errb, env); code != ExitError ||
+		out.Len() != 0 || strings.Count(errb.String(), "\n") != 1 {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errb.String())
 	}
 }
