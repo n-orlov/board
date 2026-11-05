@@ -968,6 +968,18 @@ frontend's coverage/CRAP/mutation gates.
 | Frontend unit | Vitest + `@vitest/coverage-v8` | stores, API client wrappers, timeline data shaping. |
 | Benchmarks | `go test -bench` | §14, extended lane only. |
 
+The Playwright layer lives in `e2e/` (own `package.json`, exact pins). `e2e/playwright.config.ts`
+sets `retries: 0` and the five reporters, picks a free port, and starts the real binary through
+`e2e/serve.sh`: it builds the checkout's `board`, migrates a fresh temporary SQLite store, seeds
+it with an API key, and serves on that port with the embedded UI. `E2E_OUT` moves every
+reporter's output (default `e2e/out/`). One spec runs: `smoke.spec.ts` loads `/` and asserts the
+shell rendered (the placeholder page fails it). Run one spec with
+`ci/run.sh sh -c 'cd e2e && npx playwright test smoke.spec.ts'` (after `npm ci` in `e2e/`).
+`ci/suite.sh` runs the whole Playwright suite after the web build under the suite-level policy:
+a failed run is repeated once, a pass on the repeat is written to `flaky-playwright.txt`, a
+second failure fails the suite; the JUnit file is `junit-playwright.xml`.
+`ci/suitecheck` fails if the config's `retries` is not 0.
+
 Headline scenarios that define the product (must exist from the first iteration):
 
 1. Two agents start leases on different tasks declaring the same `host:` resource → both see

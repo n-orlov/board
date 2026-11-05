@@ -6,3 +6,5 @@ web/coverage/
 web/junit/
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
+e2e/node_modules/
+e2e/out/

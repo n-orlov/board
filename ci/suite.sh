@@ -129,6 +129,53 @@ if [ -f web/package.json ]; then
     fi
 fi
 
+# --- 0b. Playwright: the real binary on a free port, one smoke spec (task 010, R11) ---
+# e2e/playwright.config.ts starts the binary built from this checkout (with the
+# UI step 0 just built embedded) against a seeded SQLite store, and writes every
+# reporter's output under $E2E_OUT. Playwright itself never retries (retries: 0);
+# the one retry lives here, at the suite level: a failed run is kept as
+# junit-playwright-run1.xml / playwright-run1.log and repeated once, a pass on
+# the repeat is recorded in flaky-playwright.txt and exits 0, a second failure
+# fails the suite. The JUnit file lands at <outdir>/junit-playwright.xml and the
+# HTML, Allure, JSON and trace output in <outdir>/playwright/. A checkout with
+# no e2e/ (the suitecheck fixtures) skips this step.
+playwright_junit="$outdir/junit-playwright.xml"
+playwright_flaky="$outdir/flaky-playwright.txt"
+: > "$playwright_flaky"
+if [ -f e2e/package.json ]; then
+    playwright_log="$outdir/playwright.log"
+    if ! (cd e2e && npm ci --no-audit --no-fund) > "$outdir/e2e-install.log" 2>&1; then
+        echo "ci/suite.sh: e2e npm ci failed (see $outdir/e2e-install.log)" >&2
+        overall_status=1
+    fi
+    run_playwright() {
+        rm -rf "$outdir/playwright"
+        rc=0
+        (cd e2e && E2E_OUT="$outdir/playwright" npx playwright test) > "$playwright_log" 2>&1 || rc=$?
+        if [ -f "$outdir/playwright/junit.xml" ]; then
+            cp "$outdir/playwright/junit.xml" "$playwright_junit"
+        fi
+        return "$rc"
+    }
+    if ! run_playwright; then
+        echo "ci/suite.sh: Playwright failed; repeating it once (see $playwright_log)" >&2
+        if [ -f "$playwright_junit" ]; then
+            cp "$playwright_junit" "$outdir/junit-playwright-run1.xml"
+        fi
+        cp "$playwright_log" "$outdir/playwright-run1.log"
+        if run_playwright; then
+            echo "playwright: failed once, then passed on the repeat (see playwright-run1.log)" >> "$playwright_flaky"
+        else
+            echo "ci/suite.sh: Playwright failed twice (see $playwright_log)" >&2
+            overall_status=1
+        fi
+    fi
+    if [ ! -s "$playwright_junit" ]; then
+        echo "ci/suite.sh: Playwright wrote no JUnit file at $playwright_junit" >&2
+        overall_status=1
+    fi
+fi
+
 # --- 1. every Go test except TestFeatures, via gotestsum ---
 # BOARD_CI_GO_PACKAGES lets a caller narrow the package list (used by this
 # task's own local demonstration, so a scratch worktree's throwaway package

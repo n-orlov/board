@@ -213,6 +213,16 @@ Scripts, each run through `ci/run.sh` unless noted:
   `flaky-vitest.txt` into the results directory. A failed Vitest run is
   repeated once: a pass on the repeat is recorded in `flaky-vitest.txt`, a
   second failure fails the suite. `ci/suitecheck/vitest_test.go` pins this.
+  It then runs Playwright (`e2e/`, after `npm ci` there): the config starts the
+  real binary on a free port against a freshly migrated, seeded SQLite store
+  (`e2e/serve.sh`) and never retries (`retries: 0`). The retry-once is the
+  suite's: a failed run is kept as `junit-playwright-run1.xml` and
+  `playwright-run1.log`, repeated once, and a pass on the repeat is recorded in
+  `flaky-playwright.txt`; a second failure fails the suite. `junit-playwright.xml`
+  and the HTML, Allure and JSON output (`playwright/`) land in the results
+  directory, and `ci/summary.sh` counts the JUnit and flaky files.
+  `ci/suitecheck/playwright_test.go` pins this and fails if `retries` is not 0.
+  One spec: `ci/run.sh sh -c 'cd e2e && npx playwright test smoke.spec.ts'`.
 - `ci/quality.sh`: scrubs `BOARD_*` and runs `ci/qualitycheck` over
   `ci/quality.json` and the suite's merged coverage profile.
   **CRAP ceiling 8**, for product code and for fixtures alike; coverage floors
