@@ -62,7 +62,7 @@ if [ -n "${RALPHD_HOST_WORKSPACE:-}" ]; then
             host_mount=$RALPHD_HOST_WORKSPACE
             ;;
     esac
-    export RALPHD_HOST_WORKSPACE=$host_mount
+    export RALPHD_HOST_WORKSPACE="$host_mount"
 fi
 clone_dir="$mount_dir/.review-clone"
 
@@ -77,6 +77,7 @@ printf '%s\n' "$nonce" > "$clone_dir/.git/review-identity"
 echo "review.sh: cloned $repo_root -> $clone_dir"
 
 # --- identity assertion: Go analogue of the reviewer's Python import-location check ---
+# shellcheck disable=SC2016 # the body expands inside the sibling, not here
 "$repo_root/ci/run.sh" sh -c '
 set -eu
 nonce=$1
