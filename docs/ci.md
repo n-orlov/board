@@ -91,6 +91,36 @@ never the original checkout. With no argument (or `--smoke`) it stops there and
 exits 0; any other arguments are passed to `go test` inside the same clone.
 The clone is of the committed HEAD, so commit before running it.
 
+## The Jenkinsfile
+
+`Jenkinsfile` is the multibranch job `board/ci` (agent label
+`linux && amd64 && docker`, `@Library('homelab')`, `disableConcurrentBuilds`, a
+`git clean -ffdxq` workspace). Stages, in order:
+
+| stage | command | runs |
+|---|---|---|
+| CI image | `ci/jenkins-image.sh` (cache volume `board-go-cache-jenkins`) | every build |
+| Lint | `ci/run.sh ci/lint.sh` | every build |
+| Suite | `ci/run.sh ci/suite.sh` | every build |
+| Quality | `ci/run.sh ci/quality.sh ci-results` | every build |
+| Stability | `ci/stability.sh 3` on the agent | extended lane only |
+| Mutation | `ci/run.sh ci/mutation.sh` | every `main` build and the extended lane; other branches skip it |
+
+The extended lane is the nightly `main` build (03:17) or a build with the
+`EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
+Mutation. A red Suite, Quality, Stability or Mutation stage fails the build
+and the later stages still run. `post` publishes the JUnit, Allure and CI
+summary reports, archives `ci-results/` (the gremlins reports in
+`ci-results/mutation/` included), archives `ci-results/release-candidate.json`
+on a fully green `main` build and sends `notifyTelegram` last.
+`ci/repocheck/jenkinsfile_test.go` pins the Mutation stage: last, after
+Quality and Stability, on `main` and in the extended lane, running
+`ci/run.sh ci/mutation.sh`. The Allure smoke stage, the README badges,
+`Jenkinsfile.release` and deck's other Jenkinsfile probes land with task 011.
+Quality's `mutation-go` row reads `ci-results/mutation/`, which the Mutation
+stage writes after Quality, so on Jenkins that row fails until task 011
+reconciles the two.
+
 ## Quality gates
 
 Every SPEC section 15.4 gate is in `ci/quality.json` with `enabled: true` at
@@ -137,8 +167,8 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   `--timeout-coefficient 60`: with a warm build cache gremlins' default bound
   timed out every `internal/store` mutant. `ci/quality.sh` evaluates the same
   reports as its `mutation-go` gate and fails when `ci-results/mutation/` is
-  absent. Run it with `ci/run.sh ci/mutation.sh`; the Jenkinsfile stage lands
-  with task 011.
+  absent. Run it with `ci/run.sh ci/mutation.sh`, which is also the Jenkinsfile
+  Mutation stage's command (see "The Jenkinsfile").
 - `ci/covgate`: coverage floors from `ci/quality.json` (total, per package,
   fixture) over the merged profile. A package with no statements is named by
   exact path in `zeroStatementPackages`; a stale or missing entry fails.
