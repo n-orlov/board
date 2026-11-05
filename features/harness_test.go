@@ -371,6 +371,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerAPIKeySteps(sc, h)
 	registerOpenAPISteps(sc, h)
 	registerOIDCSteps(sc, h)
+	registerUIKeySteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

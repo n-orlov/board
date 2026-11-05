@@ -928,6 +928,17 @@ operator. Live via SSE (§7.1).
 | **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
 | **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
+**Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
+from `GET /api/v1/keys` (name, display prefix, status, created, last used, expiry) and has a form
+with a name and an optional expiry (`90d`, `12h`; blank for none) that posts `POST /api/v1/keys`.
+The response's key appears once, in a box with a Done button, and is on the page nowhere else:
+dismissing it, creating or revoking another key, or reloading drops it. Each key that is not
+revoked has a Revoke button that posts `POST /api/v1/keys/{name}/revoke`; the list then reloads
+and shows the key as `revoked`. A refusal (a taken name, a bad expiry) shows the problem
+document's detail. The page calls the API with the session cookie, and its writes send the
+session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from its next request
+(`e2e/keys.spec.ts`, `features/ui_keys.feature`).
+
 Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
 network requests (all assets embedded).
 
