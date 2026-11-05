@@ -342,9 +342,9 @@ func TestJenkinsfilePublishesReports(t *testing.T) {
 // TestJenkinsfileDeclaresTheReadmeBadges: every badge the README shows from
 // the public badge proxy is the plugin's "build" or declared by the
 // Jenkinsfile, so none of them renders as "not run" forever, and each is an
-// image served from the public badge path. The README shows all four. The
-// badges carry no link: the Jenkins host is the operator's, and the commit
-// hook refuses a diff that contains it.
+// image served from the public badge path. The README shows all four, each
+// linked to the board/ci/main job as deck's are (see
+// TestReadmeBadgesLinkToTheMainJob).
 func TestJenkinsfileDeclaresTheReadmeBadges(t *testing.T) {
 	const prefix = "https://int21h.mooo.com/jenkins-static/board/ci/main/"
 	readme := readRepoFile(t, "README.md")
@@ -355,6 +355,9 @@ func TestJenkinsfileDeclaresTheReadmeBadges(t *testing.T) {
 		if !ok {
 			continue
 		}
+		// The image is wrapped in a link, checked by TestReadmeBadgesLinkToTheMainJob.
+		l, _, _ = strings.Cut(strings.TrimPrefix(l, "["), ")](")
+		l = strings.TrimSuffix(l, ")") + ")"
 		id, _, ok := strings.Cut(rest, ".svg)")
 		if !ok {
 			t.Errorf("README badge line %q is not <prefix><id>.svg", l)
@@ -454,5 +457,81 @@ func TestJenkinsStageHelpers(t *testing.T) {
 	}
 	if !stageBefore(jf, "A", "B") || stageBefore(jf, "B", "A") || stageBefore(jf, "A", "C") {
 		t.Fatal("stageBefore misorders A and B, or accepts a missing stage")
+	}
+}
+
+var badgeLinkRE = regexp.MustCompile(`^\[!\[(\w+)\]\(https://[^)]*/board/ci/main/(\w+)\.svg\)\]\((https://[^)\s]+)\)$`)
+
+// TestReadmeBadgesLinkToTheMainJob: each of the four README badges is an image
+// wrapped in a link to the board/ci/main job's last completed build, the way
+// deck's are: build to the build, tests to Allure, coverage and quality to the
+// CI summary. A badge that loses its link, or whose link stops pointing at
+// /job/board/job/ci/job/main/, fails.
+func TestReadmeBadgesLinkToTheMainJob(t *testing.T) {
+	want := map[string]string{
+		"build":    "/job/board/job/ci/job/main/lastCompletedBuild/",
+		"tests":    "/job/board/job/ci/job/main/lastCompletedBuild/Allure/",
+		"coverage": "/job/board/job/ci/job/main/lastCompletedBuild/CI_20summary/",
+		"quality":  "/job/board/job/ci/job/main/lastCompletedBuild/CI_20summary/",
+	}
+	for id, problem := range badgeLinkProblems(readRepoFile(t, "README.md"), want) {
+		t.Errorf("README badge %s: %s", id, problem)
+	}
+}
+
+// badgeLinkProblems maps a badge id to what is wrong with its README line:
+// missing, unlinked, or linked somewhere other than the expected job path.
+func badgeLinkProblems(readme string, want map[string]string) map[string]string {
+	problems := map[string]string{}
+	seen := map[string]bool{}
+	for _, l := range strings.Split(readme, "\n") {
+		l = strings.TrimSpace(l)
+		if !strings.HasPrefix(l, "[![") && !strings.HasPrefix(l, "![") {
+			continue
+		}
+		m := badgeLinkRE.FindStringSubmatch(l)
+		if m == nil {
+			for id := range want {
+				if strings.Contains(l, "/board/ci/main/"+id+".svg") {
+					seen[id] = true
+					problems[id] = "has no link around its image: " + l
+				}
+			}
+			continue
+		}
+		id, img, link := m[1], m[2], m[3]
+		seen[id] = true
+		path, ok := want[id]
+		switch {
+		case !ok:
+		case img != id:
+			problems[id] = "image is " + img + ".svg"
+		case !strings.HasSuffix(link, path) || len(link) == len("https://")+len(path):
+			problems[id] = "links to " + link + ", want a host followed by " + path
+		}
+	}
+	for id := range want {
+		if !seen[id] {
+			problems[id] = "missing"
+		}
+	}
+	return problems
+}
+
+func TestBadgeLinkProbeCatchesAnUnlinkedOrMisdirectedBadge(t *testing.T) {
+	want := map[string]string{"build": "/job/board/job/ci/job/main/lastCompletedBuild/"}
+	const img = "https://b.example/jenkins-static/board/ci/main/build.svg"
+	good := "[![build](" + img + ")](https://j.example/job/board/job/ci/job/main/lastCompletedBuild/)"
+	if p := badgeLinkProblems(good, want); len(p) != 0 {
+		t.Errorf("good line flagged: %v", p)
+	}
+	for name, line := range map[string]string{
+		"unlinked":  "![build](" + img + ")",
+		"wrong job": "[![build](" + img + ")](https://j.example/job/deck/job/ci/job/main/lastCompletedBuild/)",
+		"absent":    "",
+	} {
+		if p := badgeLinkProblems(line, want); p["build"] == "" {
+			t.Errorf("%s: not flagged", name)
+		}
 	}
 }

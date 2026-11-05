@@ -94,7 +94,7 @@ The clone is of the committed HEAD, so commit before running it.
 ## The Jenkinsfile
 
 `Jenkinsfile` is the multibranch job `board/ci`
-(`$JENKINS_URL/job/board/job/ci/`; agent label
+(`https://jenkins.wisent-owl.ts.net/job/board/job/ci/`; agent label
 `linux && amd64 && docker`, `@Library('homelab')`, `disableConcurrentBuilds`, a
 `git clean -ffdxq` workspace). Stages, in order:
 
@@ -156,8 +156,10 @@ last, in `post { cleanup }`.
   `tests`, `coverage` and `quality`, which the Jenkinsfile declares on every
   build ("not run" until the build fills them in), served from
   `https://int21h.mooo.com/jenkins-static/board/ci/main/<id>.svg`. The README
-  shows `main`'s as plain images: deck links each to its report on the Jenkins
-  host, but the commit hook treats that host as a secret, so board's carry no link.
+  links each to the `main` job the way deck's do: `build` to `lastCompletedBuild/`,
+  `tests` to `lastCompletedBuild/Allure/`, `coverage` and `quality` to
+  `lastCompletedBuild/CI_20summary/` (the CI summary report), all under
+  `https://jenkins.wisent-owl.ts.net/job/board/job/ci/job/main/`.
 
 `ci/repocheck/jenkinsfile_test.go` pins all of it: the seven stages in order (a
 test fails if one is removed), the job shape, the nightly lane, the Quality and
