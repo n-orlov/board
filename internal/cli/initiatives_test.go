@@ -122,6 +122,45 @@ func TestInitAddRefusals(t *testing.T) {
 	}
 }
 
+// TestInitCommandsKeepPhaseZeroExitCodes holds every init subcommand to the
+// Phase 0 exit-code set (0, 1, 2, 4, 5) for the error statuses a server can
+// answer with, a taken slug (409) included, with one actionable stderr line.
+func TestInitCommandsKeepPhaseZeroExitCodes(t *testing.T) {
+	allowed := map[int]bool{ExitOK: true, ExitError: true, ExitUsage: true, ExitAuth: true, ExitNotFound: true}
+	commands := [][]string{{"init", "add", "xx", "T"}, {"init", "ls"}, {"init", "ls", "--all"}, {"init", "show", "xx"}, {"init", "show", "xx", "--json"}}
+	for _, status := range []int{400, 401, 403, 404, 409, 410, 422, 429, 500, 503} {
+		for _, args := range commands {
+			f := &fakeBoard{handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"title":"Err","detail":"it failed","next":"read it"}`))
+			}}
+			srv := httptest.NewServer(f)
+			code, out, errs := runEnv(f.env(srv), args...)
+			srv.Close()
+			if !allowed[code] || code == ExitOK || out != "" || strings.Count(errs, "\n") != 1 || !strings.HasSuffix(errs, "\n") {
+				t.Errorf("%v on %d: exit %d out %q err %q", args, status, code, out, errs)
+			}
+		}
+	}
+}
+
+// TestInitAddTakenSlugNamesTheSlugItWasGiven checks the 409 error stays
+// actionable for any slug: it points at 'board init show <that slug>'.
+func TestInitAddTakenSlugNamesTheSlugItWasGiven(t *testing.T) {
+	for _, slug := range []string{"a", "phone-app", "x9"} {
+		f := &fakeBoard{handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"title":"Conflict","detail":"initiative taken","next":"read it"}`))
+		}}
+		srv := httptest.NewServer(f)
+		code, out, errs := runEnv(f.env(srv), "init", "add", slug, "T")
+		srv.Close()
+		if code != ExitError || out != "" || errs != "initiative taken → board init show "+slug+"\n" {
+			t.Errorf("%s: got %d %q %q", slug, code, out, errs)
+		}
+	}
+}
+
 func TestInitLsPagesAndCaps(t *testing.T) {
 	f := &fakeBoard{total: 25}
 	srv := httptest.NewServer(f)
