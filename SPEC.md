@@ -202,7 +202,7 @@ An actor row is created on first use of a handle (upsert). Actors are never dele
 | column | type | notes |
 |---|---|---|
 | id | ulid | |
-| slug | text, unique | `[a-z0-9-]{2,40}` |
+| slug | text, unique | `[a-z0-9-]{2,40}` (`domain.ValidateSlug`) |
 | title | text | |
 | description | text | Markdown |
 | status | `open` \| `closed` | closing an initiative requires all its tasks closed (or `force=true`, which closes them `dropped`) |
@@ -451,7 +451,7 @@ and CLI can show badges without the lists.
 | GET | `/meta` | server version, agent protocol version (§8.6), the caller's principal and actor |
 | PUT | `/actors/me/protocol-seen` | record that the calling actor has read protocol version N (§8.6) |
 | GET | `/healthz` | liveness, **unauthenticated** |
-| GET | `/readyz` | DB reachable and migrated |
+| GET | `/readyz` | 200 when the DB is reachable and migrated, 503 otherwise |
 | GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
 | GET | `/auth/login`, `/auth/oidc/callback`; GET `/auth/session`; POST `/auth/logout` | OIDC (§3.2); outside `/api/v1` |
 | GET | `/metrics` | Prometheus text |
@@ -497,6 +497,13 @@ embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
 `usage: board <serve|version>`.
+
+`board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
+`BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
+`BOARD_MIGRATE=off` starts the server on the database as it is, migrated or not. `GET /healthz` answers 200
+whenever the process is up, whatever the database state. `GET /readyz` answers 200 only when the database is
+reachable and carries every embedded migration, and 503 otherwise (unmigrated, behind the embedded migrations,
+or unreachable); it never writes. A value of `BOARD_MIGRATE` other than `auto` or `off` exits 1.
 
 ### 8.1 Output rules
 

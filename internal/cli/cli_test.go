@@ -29,3 +29,16 @@ func TestUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestServeRejectsUnknownMigrateMode(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := func(k string) string {
+		if k == "BOARD_MIGRATE" {
+			return "sometimes"
+		}
+		return ""
+	}
+	if code := Run([]string{"serve"}, &out, &errb, env); code != ExitError || !strings.Contains(errb.String(), "BOARD_MIGRATE") {
+		t.Fatalf("got code=%d err=%q", code, errb.String())
+	}
+}

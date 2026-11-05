@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +55,8 @@ type harness struct {
 	stdout string
 	stderr string
 
+	status int
+
 	server *exec.Cmd
 	addr   string
 	dir    string
@@ -94,6 +97,15 @@ func (h *harness) run(ctx context.Context, line string) error {
 
 // startServer starts `board serve` on a free port and waits until it accepts.
 func (h *harness) startServer(ctx context.Context) (context.Context, error) {
+	return h.startServerWith(ctx)
+}
+
+// startServerWithVar starts the server with one extra BOARD_* variable set.
+func (h *harness) startServerWithVar(ctx context.Context, name, value string) (context.Context, error) {
+	return h.startServerWith(ctx, name+"="+value)
+}
+
+func (h *harness) startServerWith(ctx context.Context, extra ...string) (context.Context, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return ctx, err
@@ -105,7 +117,7 @@ func (h *harness) startServer(ctx context.Context) (context.Context, error) {
 		return ctx, err
 	}
 	h.server = exec.Command(h.binary, "serve")
-	h.server.Env = h.env("BOARD_LISTEN="+h.addr, "BOARD_DB_URL=sqlite://"+filepath.Join(h.dir, "board.db"))
+	h.server.Env = h.env(append([]string{"BOARD_LISTEN=" + h.addr, "BOARD_DB_URL=sqlite://" + filepath.Join(h.dir, "board.db")}, extra...)...)
 	var logs bytes.Buffer
 	h.server.Stdout, h.server.Stderr = &logs, &logs
 	if err := h.server.Start(); err != nil {
@@ -120,6 +132,21 @@ func (h *harness) startServer(ctx context.Context) (context.Context, error) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return ctx, fmt.Errorf("server never listened on %s: %s", h.addr, logs.String())
+}
+
+// get sends a credential-less GET to the running server and records the status.
+func (h *harness) get(ctx context.Context, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+h.addr+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	h.status = resp.StatusCode
+	return nil
 }
 
 func (h *harness) stopServer() {
@@ -172,6 +199,14 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		return nil
 	})
 	sc.Step(`^the board server is running on a free port$`, h.startServer)
+	sc.Step(`^the board server is running on a free port with (BOARD_[A-Z_]+)=(\w+)$`, h.startServerWithVar)
+	sc.Step(`^I request GET "([^"]*)" without credentials$`, h.get)
+	sc.Step(`^the response status is (\d+)$`, func(want int) error {
+		if h.status != want {
+			return fmt.Errorf("response status %d, want %d", h.status, want)
+		}
+		return nil
+	})
 	sc.Step(`^the server accepts connections on its listen address$`, func() error {
 		conn, err := net.DialTimeout("tcp", h.addr, 2*time.Second)
 		if err != nil {

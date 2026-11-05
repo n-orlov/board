@@ -2,10 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func ok(context.Context) error { return nil }
 
 func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
@@ -17,7 +22,7 @@ func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, addr) }()
+	go func() { done <- Serve(ctx, addr, ok) }()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -48,7 +53,30 @@ func TestServeReportsBusyAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	if err := Serve(context.Background(), ln.Addr().String()); err == nil {
+	if err := Serve(context.Background(), ln.Addr().String(), ok); err == nil {
 		t.Fatal("expected an error for an address already in use")
+	}
+}
+
+func TestHealthzIsAlwaysOKAndReadyzFollowsReadiness(t *testing.T) {
+	notReady := func(context.Context) error { return errors.New("down") }
+	cases := []struct {
+		name  string
+		ready Readiness
+		path  string
+		want  int
+	}{
+		{"healthz ignores a failing readiness", notReady, "/healthz", http.StatusOK},
+		{"readyz is 200 when ready", ok, "/readyz", http.StatusOK},
+		{"readyz is 503 when not ready", notReady, "/readyz", http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			Handler(tc.ready).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != tc.want {
+				t.Fatalf("GET %s = %d, want %d", tc.path, rec.Code, tc.want)
+			}
+		})
 	}
 }
