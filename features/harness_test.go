@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -74,6 +75,7 @@ type harness struct {
 
 	// key is the API key a scenario remembered from stdout.
 	key string
+	api apiState
 
 	server *exec.Cmd
 	addr   string
@@ -284,7 +286,8 @@ func (h *harness) get(ctx context.Context, path string, headers map[string]strin
 	}
 	defer resp.Body.Close()
 	h.status = resp.StatusCode
-	return nil
+	h.api.body, err = io.ReadAll(resp.Body)
+	return err
 }
 
 func (h *harness) getWithoutCredentials(ctx context.Context, path string) error {
@@ -345,7 +348,7 @@ func (h *harness) stopServer() {
 		h.idp.Close()
 	}
 	h.web, h.idp, h.idpSecret = browser{}, nil, ""
-	h.dir, h.dbURL, h.own, h.dedicated, h.key = "", "", nil, false, ""
+	h.dir, h.dbURL, h.own, h.dedicated, h.key, h.api = "", "", nil, false, "", apiState{}
 }
 
 var versionPattern = regexp.MustCompile(`^(v[0-9][^\s]*|devel(\+[0-9a-f]+)?)(-dirty)?$`)
@@ -365,6 +368,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		return ctx, nil
 	})
 	registerKeySteps(sc, h)
+	registerAPIKeySteps(sc, h)
 	registerOpenAPISteps(sc, h)
 	registerOIDCSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)

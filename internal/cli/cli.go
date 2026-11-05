@@ -133,7 +133,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

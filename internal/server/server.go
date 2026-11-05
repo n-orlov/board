@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/webui"
 )
 
@@ -28,25 +29,27 @@ type Readiness func(ctx context.Context) error
 // login, when not nil, turns on browser login (SPEC 3.2): a request with a valid
 // session cookie is authenticated as the operator, and a request with no
 // credential that is a browser navigation is sent to /auth/login.
-func NewHandler(ready Readiness, verify KeyVerifier, login *Login) http.Handler {
+//
+// keys is the store behind /api/v1/keys; nil answers those operations with 503.
+func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) http.Handler {
 	mux := http.NewServeMux()
-	HandlerFromMux(strictOperations(operations{ready: ready, loginOps: loginOps{login: login}}), mux)
+	HandlerFromMux(strictOperations(operations{ready: ready, loginOps: loginOps{login: login}, keyOps: keyOps{keys: keys}}), mux)
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
 	return authenticated(mux, verify, login)
 }
 
-// Serve listens on addr and serves NewHandler(ready, verify, login) until ctx is cancelled, then shuts
+// Serve listens on addr and serves NewHandler(ready, verify, login, keys) until ctx is cancelled, then shuts
 // down gracefully. It returns nil on a clean shutdown.
-func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login) error {
+func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	return serveOn(ctx, ln, ready, verify, login)
+	return serveOn(ctx, ln, ready, verify, login, keys)
 }
 
-func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login) error {
-	srv := &http.Server{Handler: NewHandler(ready, verify, login), ReadHeaderTimeout: 10 * time.Second}
+func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) error {
+	srv := &http.Server{Handler: NewHandler(ready, verify, login, keys), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

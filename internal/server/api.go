@@ -35,6 +35,7 @@ func responseFailed(w http.ResponseWriter, _ *http.Request, _ error) {
 // operations implements the generated strict server interface.
 type operations struct {
 	loginOps
+	keyOps
 	ready Readiness
 }
 

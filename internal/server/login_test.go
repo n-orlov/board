@@ -99,7 +99,7 @@ func startLogin(t *testing.T, h http.Handler) (string, *http.Cookie) {
 }
 
 func handler(l *Login) http.Handler {
-	return NewHandler(ok, func(context.Context, string) (string, error) { return "k", nil }, l)
+	return NewHandler(ok, func(context.Context, string) (string, error) { return "k", nil }, l, nil)
 }
 
 var alice = oidc.Claims{Email: "Alice@Example.com", EmailVerified: true}

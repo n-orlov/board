@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    The document declares the probe, documentation and browser-login operations.
+    The document declares the probe, documentation, browser-login and API-key operations.
     Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
@@ -19,6 +19,8 @@ tags:
     description: This document and the interactive API documentation.
   - name: auth
     description: Browser login through OpenID Connect, and the browser session.
+  - name: keys
+    description: API keys for agents, created, listed and revoked by any authenticated principal.
 paths:
   /healthz:
     get:
@@ -159,6 +161,97 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      tags: [keys]
+      summary: List the API keys
+      description: >-
+        Every key, oldest first. A key is described by its name and display prefix
+        only: the key itself is shown once, by the response that created it, and is
+        stored nowhere.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      operationId: createKey
+      tags: [keys]
+      summary: Create an API key
+      description: >-
+        Makes a key called `name`, with an optional expiry, and returns the key in
+        `key` exactly once. Appends a `key_created` event that records the
+        caller's principal and `Board-Actor` handle in separate columns.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeyCreate"
+      responses:
+        "201":
+          description: The key was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/keys/{name}/revoke:
+    post:
+      operationId: revokeKey
+      tags: [keys]
+      summary: Revoke an API key
+      description: >-
+        Sets `revoked_at`, so the key gets 401 from its next request on. Revoking a
+        revoked key changes nothing and answers 200 with the first revocation time.
+        A revocation that happens appends a `key_revoked` event.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The key's name.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The key, revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /auth/login:
     get:
       operationId: getAuthLogin
@@ -303,7 +396,9 @@ components:
       description: The operator's browser session.
   responses:
     BadRequest:
-      description: A valid key was presented without a `Board-Actor` header.
+      description: >-
+        A valid key was presented without a `Board-Actor` header, or the request
+        body or a parameter is not acceptable.
       content:
         application/problem+json:
           schema:
@@ -316,6 +411,12 @@ components:
             $ref: "#/components/schemas/Problem"
     NotFound:
       description: There is no such resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: The request conflicts with what exists, such as a name already taken.
       content:
         application/problem+json:
           schema:
@@ -339,6 +440,74 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    Key:
+      type: object
+      description: An API key as the board stores it. It never holds the key itself.
+      required: [id, name, display_prefix, status, created_at, created_by]
+      properties:
+        id:
+          type: string
+          description: The key's ULID.
+        name:
+          type: string
+          description: The key's unique name, such as `workstation`.
+        display_prefix:
+          type: string
+          description: The 8 characters after `brd_`, which tell keys apart.
+        status:
+          type: string
+          enum: [active, expired, revoked]
+          description: The key's state now.
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          description: The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`.
+        last_used_at:
+          type: string
+          format: date-time
+          description: When the key was last used, to within 30 seconds. Absent when it never was.
+        expires_at:
+          type: string
+          format: date-time
+          description: When the key stops working. Absent for a key that does not expire.
+        revoked_at:
+          type: string
+          format: date-time
+          description: When the key was revoked. Absent for a key that was not.
+    KeyList:
+      type: object
+      description: The API keys.
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Every key, oldest first.
+          items:
+            $ref: "#/components/schemas/Key"
+    KeyCreate:
+      type: object
+      description: A new API key.
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 1-64 characters of a-z, A-Z, 0-9, `.`, `_` or `-`, starting with a letter or digit. Unique.
+        expires_in:
+          type: string
+          description: A positive count of days or hours, like `90d` or `12h`, at most 36500 days. Omitted, the key does not expire.
+          examples: [90d]
+    CreatedKey:
+      description: A key just created. `key` is shown this once.
+      allOf:
+        - $ref: "#/components/schemas/Key"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: The API key, `brd_` and 52 characters. Never returned again.
     Session:
       type: object
       description: A browser session.

@@ -216,7 +216,23 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
     list`, `board admin keys revoke <name>`, run inside the container against `BOARD_DB_URL`
     directly. This is how the first key is made, and the recovery path if SSO is broken. The
     commands are described in §8.
-  - API: `GET/POST /api/v1/keys`, `POST /api/v1/keys/{name}/revoke` (any principal, v1 has no ACL).
+  - API (any authenticated principal, v1 has no ACL; all three are in `api/openapi.yaml`):
+    - `GET /api/v1/keys` answers 200 `{"items": [Key, ...]}`, every key oldest first (not paginated: keys are few).
+    - `POST /api/v1/keys` takes `{"name": "...", "expires_in": "90d"}`. `name` follows the CLI's rule and
+      `expires_in` is optional, in the CLI's `--expires` form (a positive count of days `90d` or hours `12h`, at most
+      36500 days). It answers 201 with the Key plus `key`, the `brd_` key, which is returned by this response only and
+      never again. A bad name or expiry, or an unreadable body, is 400. A name already taken is 409.
+    - `POST /api/v1/keys/{name}/revoke` sets `revoked_at` and answers 200 with the Key. An unknown name is 404. Revoking
+      a revoked key changes nothing and answers 200 with the first `revoked_at`.
+    - A **Key** is `{id, name, display_prefix, status, created_at, created_by, last_used_at?, expires_at?, revoked_at?}`:
+      `status` is `active`, `expired` or `revoked`, timestamps are RFC 3339, an absent date is omitted, `created_by`
+      is the creating principal (`key:<name>`, `oidc:<email>`, or `admin-cli` for the command line). A Key never holds the
+      key: not in `GET /api/v1/keys`, not in `board admin keys list`, not in the `api_keys` row.
+    - A creation and a revocation that happens each append an event in the same transaction as the row, `key_created` and
+      `key_revoked` (§4.6), with `ref_id` the key's id, `principal` the caller's principal (`key:<name>` or
+      `oidc:<email>`) and `actor_id` the actor it acted as (the `Board-Actor` handle, or the operator for a session), in
+      separate columns. Their `data` holds the key's `name` (and `expires_at` for a creation), never the key. The actor
+      is upserted on first use. `board admin keys` has no actor and records no event.
 - **Swagger UI** declares a `bearerAuth` security scheme, so "Authorize" accepts a key; inside a
   logged-in browser session it also works with the session cookie and CSRF header.
 
@@ -371,6 +387,8 @@ Event types (closed set in v1, extended by migration):
 `lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`,
 `ask_raised`, `ask_answered`, `ask_withdrawn`,
 `check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
+`key_created` and `key_revoked` record an API key being made or revoked over HTTP (§3.3); they have no
+`initiative_id` or `task_id`.
 
 Timeline markers: `lease_started`/`lease_ended`/`lease_expired` bound lease bars;
 `milestone`, `ask_raised`, `ask_answered`, `check_recorded`, `task_done`, `task_closed`
@@ -402,7 +420,9 @@ Broadcast = `task_id IS NULL AND initiative_id IS NULL`. A note bound to a task 
 ### 4.9 `api_keys`, `sessions`
 
 `api_keys(n, id, name unique, key_hash unique, display_prefix, created_at, created_by,
-last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key.
+last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key. `created_by` is the creating principal, `key:<name>` or `oidc:<email>` for a key made over
+HTTP and `admin-cli` for one made by `board admin keys create`. `expires_at` is when the key stops working; the
+verifier answers 401 `key expired` from that instant on.
 
 `sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Expired rows
 are deleted by the same sweeper as leases. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
@@ -482,7 +502,7 @@ and CLI can show badges without the lists.
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
-  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}` and the
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3) and the
   RFC 9457 `Problem` schema. The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key

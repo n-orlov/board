@@ -70,11 +70,13 @@ func authenticated(next http.Handler, verify KeyVerifier, login *Login) http.Han
 
 // serveKeyed serves r when key is valid and the request names its actor.
 func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.ResponseWriter, r *http.Request) {
-	if status, detail := checkKey(r, verify, key); status != 0 {
+	name, status, detail := checkKey(r, verify, key)
+	if status != 0 {
 		writeProblem(w, status, detail)
 		return
 	}
-	next.ServeHTTP(w, r)
+	who := auth.Identity{Principal: "key:" + name, Actor: strings.TrimSpace(r.Header.Get(ActorHeader))}
+	next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), who)))
 }
 
 // serveBrowser serves r on the strength of its session cookie, or answers a
@@ -96,7 +98,9 @@ func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *htt
 			writeProblem(w, http.StatusForbidden, detail)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sessionIdentity{id: id, session: sess})))
+		ctx := withSession(r.Context(), sessionIdentity{id: id, session: sess})
+		who := auth.Identity{Principal: "oidc:" + sess.Email, Actor: login.Operator, Operator: true}
+		next.ServeHTTP(w, r.WithContext(withIdentity(ctx, who)))
 	}
 }
 
@@ -114,17 +118,17 @@ func serveAnonymous(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// checkKey returns 0 when key is valid and the request names its actor, and
-// otherwise the status and problem detail to answer with.
-func checkKey(r *http.Request, verify KeyVerifier, key string) (int, string) {
-	_, err := verify(r.Context(), key)
+// checkKey returns the key's name and 0 when key is valid and the request
+// names its actor, and otherwise the status and problem detail to answer with.
+func checkKey(r *http.Request, verify KeyVerifier, key string) (string, int, string) {
+	name, err := verify(r.Context(), key)
 	switch {
 	case errors.Is(err, auth.ErrKeyRevoked), errors.Is(err, auth.ErrKeyExpired), errors.Is(err, auth.ErrKeyUnknown):
-		return http.StatusUnauthorized, err.Error()
+		return "", http.StatusUnauthorized, err.Error()
 	case err != nil:
-		return http.StatusServiceUnavailable, "the key could not be checked"
+		return "", http.StatusServiceUnavailable, "the key could not be checked"
 	case strings.TrimSpace(r.Header.Get(ActorHeader)) == "":
-		return http.StatusBadRequest, ActorHeader + " header is required"
+		return "", http.StatusBadRequest, ActorHeader + " header is required"
 	}
-	return 0, ""
+	return name, 0, ""
 }

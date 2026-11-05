@@ -124,6 +124,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the API keys
+         * @description Every key, oldest first. A key is described by its name and display prefix only: the key itself is shown once, by the response that created it, and is stored nowhere.
+         */
+        get: operations["listKeys"];
+        put?: never;
+        /**
+         * Create an API key
+         * @description Makes a key called `name`, with an optional expiry, and returns the key in `key` exactly once. Appends a `key_created` event that records the caller's principal and `Board-Actor` handle in separate columns.
+         */
+        post: operations["createKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/keys/{name}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an API key
+         * @description Sets `revoked_at`, so the key gets 401 from its next request on. Revoking a revoked key changes nothing and answers 200 with the first revocation time. A revocation that happens appends a `key_revoked` event.
+         */
+        post: operations["revokeKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -208,6 +252,59 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description An API key as the board stores it. It never holds the key itself. */
+        Key: {
+            /** @description The key's ULID. */
+            id: string;
+            /** @description The key's unique name, such as `workstation`. */
+            name: string;
+            /** @description The 8 characters after `brd_`, which tell keys apart. */
+            display_prefix: string;
+            /**
+             * @description The key's state now.
+             * @enum {string}
+             */
+            status: "active" | "expired" | "revoked";
+            /** Format: date-time */
+            created_at: string;
+            /** @description The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`. */
+            created_by: string;
+            /**
+             * Format: date-time
+             * @description When the key was last used, to within 30 seconds. Absent when it never was.
+             */
+            last_used_at?: string;
+            /**
+             * Format: date-time
+             * @description When the key stops working. Absent for a key that does not expire.
+             */
+            expires_at?: string;
+            /**
+             * Format: date-time
+             * @description When the key was revoked. Absent for a key that was not.
+             */
+            revoked_at?: string;
+        };
+        /** @description The API keys. */
+        KeyList: {
+            /** @description Every key, oldest first. */
+            items: components["schemas"]["Key"][];
+        };
+        /** @description A new API key. */
+        KeyCreate: {
+            /** @description 1-64 characters of a-z, A-Z, 0-9, `.`, `_` or `-`, starting with a letter or digit. Unique. */
+            name: string;
+            /**
+             * @description A positive count of days or hours, like `90d` or `12h`, at most 36500 days. Omitted, the key does not expire.
+             * @example 90d
+             */
+            expires_in?: string;
+        };
+        /** @description A key just created. `key` is shown this once. */
+        CreatedKey: components["schemas"]["Key"] & {
+            /** @description The API key, `brd_` and 52 characters. Never returned again. */
+            key: string;
+        };
         /** @description A browser session. */
         Session: {
             /** @description The verified email the session belongs to. */
@@ -234,7 +331,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description A valid key was presented without a `Board-Actor` header. */
+        /** @description A valid key was presented without a `Board-Actor` header, or the request body or a parameter is not acceptable. */
         BadRequest: {
             headers: {
                 [name: string]: unknown;
@@ -254,6 +351,15 @@ export interface components {
         };
         /** @description There is no such resource. */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The request conflicts with what exists, such as a name already taken. */
+        Conflict: {
             headers: {
                 [name: string]: unknown;
             };
@@ -438,6 +544,84 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyCreate"];
+            };
+        };
+        responses: {
+            /** @description The key was created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedKey"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    revokeKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The key's name. */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key, revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Key"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
         };
     };
     getAuthLogin: {

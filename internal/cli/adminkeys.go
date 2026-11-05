@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,29 +25,15 @@ const ExitNotFound = 4
 // adminCreatedBy is the created_by of a key made from the command line.
 const adminCreatedBy = "admin-cli"
 
-const (
-	maxExpiryDays = 36500
-	dateLayout    = "2006-01-02"
-)
+const dateLayout = "2006-01-02"
 
-var expiryPattern = regexp.MustCompile(`^([1-9][0-9]*)([dh])$`)
-
-// ParseExpiry reads an --expires value: a positive count of days (`90d`) or
-// hours (`12h`), at most 100 years.
+// ParseExpiry reads an --expires value (see auth.ParseExpiry).
 func ParseExpiry(s string) (time.Duration, error) {
-	m := expiryPattern.FindStringSubmatch(s)
-	if m == nil || len(m[1]) > 5 {
-		return 0, fmt.Errorf("--expires %q: want a number of days or hours, like 90d or 12h", s)
+	d, err := auth.ParseExpiry(s)
+	if err != nil {
+		return 0, fmt.Errorf("--expires %w", err)
 	}
-	n, _ := strconv.Atoi(m[1])
-	unit := 24 * time.Hour
-	if m[2] == "h" {
-		unit = time.Hour
-	}
-	if d := time.Duration(n) * unit; d <= maxExpiryDays*24*time.Hour {
-		return d, nil
-	}
-	return 0, fmt.Errorf("--expires %q is longer than %d days", s, maxExpiryDays)
+	return d, nil
 }
 
 // parseCreate reads `<name> [--expires D]` in either order.

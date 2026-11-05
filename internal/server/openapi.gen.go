@@ -12,9 +12,136 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for CreatedKeyStatus.
+const (
+	CreatedKeyStatusActive  CreatedKeyStatus = "active"
+	CreatedKeyStatusExpired CreatedKeyStatus = "expired"
+	CreatedKeyStatusRevoked CreatedKeyStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the CreatedKeyStatus enum.
+func (e CreatedKeyStatus) Valid() bool {
+	switch e {
+	case CreatedKeyStatusActive:
+		return true
+	case CreatedKeyStatusExpired:
+		return true
+	case CreatedKeyStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyStatus.
+const (
+	KeyStatusActive  KeyStatus = "active"
+	KeyStatusExpired KeyStatus = "expired"
+	KeyStatusRevoked KeyStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the KeyStatus enum.
+func (e KeyStatus) Valid() bool {
+	switch e {
+	case KeyStatusActive:
+		return true
+	case KeyStatusExpired:
+		return true
+	case KeyStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// CreatedKey A key just created. `key` is shown this once.
+type CreatedKey struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`.
+	CreatedBy string `json:"created_by"`
+
+	// DisplayPrefix The 8 characters after `brd_`, which tell keys apart.
+	DisplayPrefix string `json:"display_prefix"`
+
+	// ExpiresAt When the key stops working. Absent for a key that does not expire.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Id The key's ULID.
+	Id string `json:"id"`
+
+	// Key The API key, `brd_` and 52 characters. Never returned again.
+	Key string `json:"key"`
+
+	// LastUsedAt When the key was last used, to within 30 seconds. Absent when it never was.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+
+	// Name The key's unique name, such as `workstation`.
+	Name string `json:"name"`
+
+	// RevokedAt When the key was revoked. Absent for a key that was not.
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+
+	// Status The key's state now.
+	Status CreatedKeyStatus `json:"status"`
+}
+
+// CreatedKeyStatus The key's state now.
+type CreatedKeyStatus string
+
+// Key An API key as the board stores it. It never holds the key itself.
+type Key struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`.
+	CreatedBy string `json:"created_by"`
+
+	// DisplayPrefix The 8 characters after `brd_`, which tell keys apart.
+	DisplayPrefix string `json:"display_prefix"`
+
+	// ExpiresAt When the key stops working. Absent for a key that does not expire.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Id The key's ULID.
+	Id string `json:"id"`
+
+	// LastUsedAt When the key was last used, to within 30 seconds. Absent when it never was.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+
+	// Name The key's unique name, such as `workstation`.
+	Name string `json:"name"`
+
+	// RevokedAt When the key was revoked. Absent for a key that was not.
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+
+	// Status The key's state now.
+	Status KeyStatus `json:"status"`
+}
+
+// KeyStatus The key's state now.
+type KeyStatus string
+
+// KeyCreate A new API key.
+type KeyCreate struct {
+	// ExpiresIn A positive count of days or hours, like `90d` or `12h`, at most 36500 days. Omitted, the key does not expire.
+	//
+	// Examples: 90d
+	ExpiresIn *string `json:"expires_in,omitempty"`
+
+	// Name 1-64 characters of a-z, A-Z, 0-9, `.`, `_` or `-`, starting with a letter or digit. Unique.
+	Name string `json:"name"`
+}
+
+// KeyList The API keys.
+type KeyList struct {
+	// Items Every key, oldest first.
+	Items []Key `json:"items"`
+}
 
 // Problem An RFC 9457 problem document.
 type Problem struct {
@@ -55,6 +182,9 @@ type BadGateway = Problem
 // BadRequest An RFC 9457 problem document.
 type BadRequest = Problem
 
+// Conflict An RFC 9457 problem document.
+type Conflict = Problem
+
 // Forbidden An RFC 9457 problem document.
 type Forbidden = Problem
 
@@ -66,6 +196,9 @@ type Unauthorized = Problem
 
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
+
+// CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
+type CreateKeyJSONRequestBody = KeyCreate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -81,6 +214,15 @@ type ServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(w http.ResponseWriter, r *http.Request)
+	// ListKeys List the API keys
+	// (GET /api/v1/keys)
+	ListKeys(w http.ResponseWriter, r *http.Request)
+	// CreateKey Create an API key
+	// (POST /api/v1/keys)
+	CreateKey(w http.ResponseWriter, r *http.Request)
+	// RevokeKey Revoke an API key
+	// (POST /api/v1/keys/{name}/revoke)
+	RevokeKey(w http.ResponseWriter, r *http.Request, name string)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(w http.ResponseWriter, r *http.Request)
@@ -169,6 +311,60 @@ func (siw *ServerInterfaceWrapper) GetOpenapiYAML(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOpenapiYAML(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKeys(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeKey(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -388,6 +584,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/openapi.json", wrapper.GetOpenapiJSON)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs", wrapper.GetDocs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs/assets/{name}", wrapper.GetDocsAsset)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/keys", wrapper.CreateKey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/keys/{name}/revoke", wrapper.RevokeKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/oidc/callback", wrapper.GetAuthOidcCallback)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetAuthSession)
@@ -399,6 +598,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 type BadGatewayApplicationProblemPlusJSONResponse Problem
 
 type BadRequestApplicationProblemPlusJSONResponse Problem
+
+type ConflictApplicationProblemPlusJSONResponse Problem
 
 type ForbiddenApplicationProblemPlusJSONResponse Problem
 
@@ -671,6 +872,247 @@ func (response GetOpenapiYAML401ApplicationProblemPlusJSONResponse) VisitGetOpen
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeysRequestObject struct {
+}
+
+type ListKeysResponseObject interface {
+	VisitListKeysResponse(w http.ResponseWriter) error
+}
+
+type ListKeys200JSONResponse KeyList
+
+func (response ListKeys200JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListKeys400ApplicationProblemPlusJSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListKeys401ApplicationProblemPlusJSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListKeys503ApplicationProblemPlusJSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyRequestObject struct {
+	Body *CreateKeyJSONRequestBody
+}
+
+type CreateKeyResponseObject interface {
+	VisitCreateKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateKey201JSONResponse CreatedKey
+
+func (response CreateKey201JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey400ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey401ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey409ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey503ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKeyRequestObject struct {
+	Name string `json:"name"`
+}
+
+type RevokeKeyResponseObject interface {
+	VisitRevokeKeyResponse(w http.ResponseWriter) error
+}
+
+type RevokeKey200JSONResponse Key
+
+func (response RevokeKey200JSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey400ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey401ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey404ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey503ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1106,6 +1548,15 @@ type StrictServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(ctx context.Context, request GetOpenapiYAMLRequestObject) (GetOpenapiYAMLResponseObject, error)
+	// ListKeys List the API keys
+	// (GET /api/v1/keys)
+	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
+	// CreateKey Create an API key
+	// (POST /api/v1/keys)
+	CreateKey(ctx context.Context, request CreateKeyRequestObject) (CreateKeyResponseObject, error)
+	// RevokeKey Revoke an API key
+	// (POST /api/v1/keys/{name}/revoke)
+	RevokeKey(ctx context.Context, request RevokeKeyRequestObject) (RevokeKeyResponseObject, error)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
@@ -1256,6 +1707,87 @@ func (sh *strictHandler) GetOpenapiYAML(w http.ResponseWriter, r *http.Request) 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOpenapiYAMLResponseObject); ok {
 		if err := validResponse.VisitGetOpenapiYAMLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeys operation middleware
+func (sh *strictHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
+	var request ListKeysRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeysResponseObject); ok {
+		if err := validResponse.VisitListKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKey operation middleware
+func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request) {
+	var request CreateKeyRequestObject
+
+	var body CreateKeyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKey(ctx, request.(CreateKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyResponseObject); ok {
+		if err := validResponse.VisitCreateKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeKey operation middleware
+func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, name string) {
+	var request RevokeKeyRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeKey(ctx, request.(RevokeKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeKeyResponseObject); ok {
+		if err := validResponse.VisitRevokeKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
