@@ -92,3 +92,29 @@ Scripts, each run through `ci/run.sh` unless noted:
   (pinned, checksum-verified Allure CLI), `ci/allure-smoke.sh`,
   `ci/jenkins-report.sh` and `ci/summary.sh` (the Allure report and CI summary
   pages).
+
+## Known differences from deck
+
+The `ci/` tools and scripts are carried from deck (`DECK_*` renamed to
+`BOARD_*`, deck's module, image, volume and label names renamed to board's).
+Every test in deck's copies of `ci/covgate`, `ci/crapgate`, `ci/qualitycheck`,
+`ci/junit2allure`, `ci/junitflaky`, `ci/allureverify`, `ci/suitecheck`,
+`ci/lintcheck` and `ci/repocheck` is carried, adapted to board's tree (CRAP
+ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
+
+- **tmux-only tests.** Board has no TUI: `ci/tmuxguard/`, `ci/tmux-guard.sh`
+  and the `tmux.version` assertion in deck's `ci/suitecheck/allure_test.go`
+  are not carried.
+- **install.sh tests, deferred to Phase 4.** deck's
+  `ci/repocheck/installcheck_test.go` and
+  `TestInstallScriptCurlIsHTTPSOnlyAndStatesItsChecksumLimit` (deck's
+  `ci/allureverify/allureverify_test.go`) are not carried. `install.sh` is
+  Phase 4 (SPEC §16), and its tests are rewritten then against SPEC §8.5's
+  immutability check, not deck's checksum-only one.
+- **Jenkinsfile tests, carried by task 011.** deck's
+  `ci/repocheck/jenkinsfile_test.go` and
+  `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
+  `ci/repocheck/lintgate_test.go`) arrive with the Jenkinsfile itself, in the
+  task that lands it (task 011), with the release assertion adapted to the
+  placeholder `Jenkinsfile.release`. Until then `ci/repocheck/lintgate_test.go`
+  carries deck's other two lint-gate probes.
