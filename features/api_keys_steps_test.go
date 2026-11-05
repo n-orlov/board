@@ -22,6 +22,8 @@ type apiState struct {
 	// body.
 	created string
 	body    []byte
+	// ids maps the slug of each initiative a scenario created to its ULID.
+	ids map[string]string
 }
 
 // sendKeyed sends one request to the running server with the given key and actor

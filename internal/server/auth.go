@@ -20,8 +20,33 @@ const ActorHeader = "Board-Actor"
 
 const problemType = "about:blank"
 
-// writeProblem writes an RFC 9457 problem document.
+// defaultNext is the suggested next action of an error that names none of its own.
+func defaultNext(status int) string {
+	switch {
+	case status == http.StatusUnauthorized:
+		return "Send an API key as 'Authorization: Bearer <key>' and your handle as 'Board-Actor' (create a key with 'board admin keys create <name>')."
+	case status == http.StatusNotFound:
+		return "Check the path and the ref, then try again."
+	case status == http.StatusConflict:
+		return "Read what exists, or choose another name."
+	case status >= http.StatusInternalServerError:
+		return "Try again shortly. If it keeps failing, check the server's log."
+	}
+	return "Fix the request and send it again."
+}
+
+// writeProblem writes an RFC 9457 problem document with the default next action
+// of its status.
 func writeProblem(w http.ResponseWriter, status int, detail string) {
+	writeProblemNext(w, status, detail, "")
+}
+
+// writeProblemNext writes an RFC 9457 problem document whose `next` field is
+// next, or the default for the status when next is empty.
+func writeProblemNext(w http.ResponseWriter, status int, detail, next string) {
+	if next == "" {
+		next = defaultNext(status)
+	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	if status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", "Bearer")
@@ -32,6 +57,7 @@ func writeProblem(w http.ResponseWriter, status int, detail string) {
 		"title":  http.StatusText(status),
 		"status": status,
 		"detail": detail,
+		"next":   next,
 	})
 }
 

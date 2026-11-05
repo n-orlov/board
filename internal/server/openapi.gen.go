@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for CreatedKeyStatus.
@@ -32,6 +33,24 @@ func (e CreatedKeyStatus) Valid() bool {
 	case CreatedKeyStatusExpired:
 		return true
 	case CreatedKeyStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InitiativeStatus.
+const (
+	Closed InitiativeStatus = "closed"
+	Open   InitiativeStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the InitiativeStatus enum.
+func (e InitiativeStatus) Valid() bool {
+	switch e {
+	case Closed:
+		return true
+	case Open:
 		return true
 	default:
 		return false
@@ -94,6 +113,77 @@ type CreatedKey struct {
 // CreatedKeyStatus The key's state now.
 type CreatedKeyStatus string
 
+// Initiative An initiative with its tags.
+type Initiative struct {
+	// ClosedAt When it was closed. Absent while it is open.
+	ClosedAt *time.Time `json:"closed_at,omitempty"`
+
+	// ClosedBy The handle of the actor that closed it. Absent while it is open.
+	ClosedBy  *string   `json:"closed_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Description Markdown. Empty when none was given.
+	Description string `json:"description"`
+
+	// Id The initiative's ULID.
+	Id string `json:"id"`
+
+	// Ref The short ref, which is the slug.
+	Ref string `json:"ref"`
+
+	// Slug The unique slug, 2 to 40 characters of `a-z`, `0-9` and `-`.
+	//
+	// Examples: phone-onboard
+	Slug   string           `json:"slug"`
+	Status InitiativeStatus `json:"status"`
+
+	// Tags The tags, sorted.
+	Tags []string `json:"tags"`
+
+	// TargetEnd The planned end. Absent when none was given.
+	TargetEnd *openapi_types.Date `json:"target_end,omitempty"`
+
+	// TargetStart The planned start. Absent when none was given.
+	TargetStart *openapi_types.Date `json:"target_start,omitempty"`
+	Title       string              `json:"title"`
+}
+
+// InitiativeStatus defines model for Initiative.Status.
+type InitiativeStatus string
+
+// InitiativeCreate A new initiative.
+type InitiativeCreate struct {
+	// Description Markdown, at most 20000 characters.
+	Description *string `json:"description,omitempty"`
+
+	// Slug 2 to 40 characters of `a-z`, `0-9` and `-`. Unique.
+	//
+	// Examples: phone-onboard
+	Slug string `json:"slug"`
+
+	// Tags At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated.
+	Tags *[]string `json:"tags,omitempty"`
+
+	// TargetEnd Not before `target_start`.
+	TargetEnd   *openapi_types.Date `json:"target_end,omitempty"`
+	TargetStart *openapi_types.Date `json:"target_start,omitempty"`
+
+	// Title 1 to 200 characters.
+	Title string `json:"title"`
+}
+
+// InitiativeList A page of initiatives.
+type InitiativeList struct {
+	// Items The initiatives of the page, ordered by id.
+	Items []Initiative `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
 // Key An API key as the board stores it. It never holds the key itself.
 type Key struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -151,6 +241,9 @@ type Problem struct {
 	// Instance A URI reference that identifies this occurrence.
 	Instance *string `json:"instance,omitempty"`
 
+	// Next The suggested next action, a sentence the CLI prints.
+	Next *string `json:"next,omitempty"`
+
 	// Status The HTTP status code.
 	Status int `json:"status"`
 
@@ -197,6 +290,21 @@ type Unauthorized = Problem
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
 
+// ListInitiativesParams defines parameters for ListInitiatives.
+type ListInitiativesParams struct {
+	// Tag Keep initiatives that carry this tag. Repeatable.
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After An initiative ULID or slug. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
+type CreateInitiativeJSONRequestBody = InitiativeCreate
+
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = KeyCreate
 
@@ -214,6 +322,15 @@ type ServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(w http.ResponseWriter, r *http.Request)
+	// ListInitiatives List the initiatives
+	// (GET /api/v1/initiatives)
+	ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams)
+	// CreateInitiative Create an initiative
+	// (POST /api/v1/initiatives)
+	CreateInitiative(w http.ResponseWriter, r *http.Request)
+	// GetInitiative Read an initiative
+	// (GET /api/v1/initiatives/{slug})
+	GetInitiative(w http.ResponseWriter, r *http.Request, slug string)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(w http.ResponseWriter, r *http.Request)
@@ -311,6 +428,90 @@ func (siw *ServerInterfaceWrapper) GetOpenapiYAML(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOpenapiYAML(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListInitiatives operation middleware
+func (siw *ServerInterfaceWrapper) ListInitiatives(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInitiativesParams
+
+	// ------------- Optional query parameter "tag" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "tag", err)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "limit", err)
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "after", err)
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInitiatives(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInitiative operation middleware
+func (siw *ServerInterfaceWrapper) CreateInitiative(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInitiative(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetInitiative operation middleware
+func (siw *ServerInterfaceWrapper) GetInitiative(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetInitiative(w, r, slug)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -587,6 +788,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/keys", wrapper.CreateKey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/keys/{name}/revoke", wrapper.RevokeKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives", wrapper.ListInitiatives)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/oidc/callback", wrapper.GetAuthOidcCallback)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetAuthSession)
@@ -872,6 +1076,248 @@ func (response GetOpenapiYAML401ApplicationProblemPlusJSONResponse) VisitGetOpen
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInitiativesRequestObject struct {
+	Params ListInitiativesParams
+}
+
+type ListInitiativesResponseObject interface {
+	VisitListInitiativesResponse(w http.ResponseWriter) error
+}
+
+type ListInitiatives200JSONResponse InitiativeList
+
+func (response ListInitiatives200JSONResponse) VisitListInitiativesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInitiatives400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListInitiatives400ApplicationProblemPlusJSONResponse) VisitListInitiativesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInitiatives401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListInitiatives401ApplicationProblemPlusJSONResponse) VisitListInitiativesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInitiatives503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListInitiatives503ApplicationProblemPlusJSONResponse) VisitListInitiativesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiativeRequestObject struct {
+	Body *CreateInitiativeJSONRequestBody
+}
+
+type CreateInitiativeResponseObject interface {
+	VisitCreateInitiativeResponse(w http.ResponseWriter) error
+}
+
+type CreateInitiative201JSONResponse Initiative
+
+func (response CreateInitiative201JSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiative400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInitiative400ApplicationProblemPlusJSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiative401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInitiative401ApplicationProblemPlusJSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiative409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInitiative409ApplicationProblemPlusJSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiative503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInitiative503ApplicationProblemPlusJSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInitiativeRequestObject struct {
+	Slug string `json:"slug"`
+}
+
+type GetInitiativeResponseObject interface {
+	VisitGetInitiativeResponse(w http.ResponseWriter) error
+}
+
+type GetInitiative200JSONResponse Initiative
+
+func (response GetInitiative200JSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInitiative400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetInitiative400ApplicationProblemPlusJSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInitiative401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetInitiative401ApplicationProblemPlusJSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInitiative404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetInitiative404ApplicationProblemPlusJSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInitiative503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetInitiative503ApplicationProblemPlusJSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1548,6 +1994,15 @@ type StrictServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(ctx context.Context, request GetOpenapiYAMLRequestObject) (GetOpenapiYAMLResponseObject, error)
+	// ListInitiatives List the initiatives
+	// (GET /api/v1/initiatives)
+	ListInitiatives(ctx context.Context, request ListInitiativesRequestObject) (ListInitiativesResponseObject, error)
+	// CreateInitiative Create an initiative
+	// (POST /api/v1/initiatives)
+	CreateInitiative(ctx context.Context, request CreateInitiativeRequestObject) (CreateInitiativeResponseObject, error)
+	// GetInitiative Read an initiative
+	// (GET /api/v1/initiatives/{slug})
+	GetInitiative(ctx context.Context, request GetInitiativeRequestObject) (GetInitiativeResponseObject, error)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
@@ -1707,6 +2162,89 @@ func (sh *strictHandler) GetOpenapiYAML(w http.ResponseWriter, r *http.Request) 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOpenapiYAMLResponseObject); ok {
 		if err := validResponse.VisitGetOpenapiYAMLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInitiatives operation middleware
+func (sh *strictHandler) ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams) {
+	var request ListInitiativesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInitiatives(ctx, request.(ListInitiativesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInitiatives")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInitiativesResponseObject); ok {
+		if err := validResponse.VisitListInitiativesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateInitiative operation middleware
+func (sh *strictHandler) CreateInitiative(w http.ResponseWriter, r *http.Request) {
+	var request CreateInitiativeRequestObject
+
+	var body CreateInitiativeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInitiative(ctx, request.(CreateInitiativeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInitiative")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInitiativeResponseObject); ok {
+		if err := validResponse.VisitCreateInitiativeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetInitiative operation middleware
+func (sh *strictHandler) GetInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+	var request GetInitiativeRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInitiative(ctx, request.(GetInitiativeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInitiative")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetInitiativeResponseObject); ok {
+		if err := validResponse.VisitGetInitiativeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -28,6 +28,12 @@ func requestUnreadable(w http.ResponseWriter, _ *http.Request, _ error) {
 	writeProblem(w, http.StatusBadRequest, "the request could not be read")
 }
 
+// parameterUnreadable answers a path or query parameter the generated binder
+// could not read, such as limit=abc.
+func parameterUnreadable(w http.ResponseWriter, _ *http.Request, err error) {
+	writeProblem(w, http.StatusBadRequest, err.Error())
+}
+
 func responseFailed(w http.ResponseWriter, _ *http.Request, _ error) {
 	writeProblem(w, http.StatusInternalServerError, "the request could not be answered")
 }
@@ -36,6 +42,7 @@ func responseFailed(w http.ResponseWriter, _ *http.Request, _ error) {
 type operations struct {
 	loginOps
 	keyOps
+	initiativeOps
 	ready Readiness
 }
 

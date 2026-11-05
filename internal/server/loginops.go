@@ -16,10 +16,12 @@ import (
 type problemResponse struct {
 	status int
 	detail string
+	// next is the suggested next action; empty means the status's default.
+	next string
 }
 
 func (p problemResponse) write(w http.ResponseWriter) error {
-	writeProblem(w, p.status, p.detail)
+	writeProblemNext(w, p.status, p.detail, p.next)
 	return nil
 }
 

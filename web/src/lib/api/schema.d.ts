@@ -168,6 +168,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/initiatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the initiatives
+         * @description A page of initiatives ordered by id (creation order). `tag` may repeat and keeps the initiatives that carry every tag given. `limit` is 1 to 1000, default 100. `after` is the id or slug of the last initiative of the previous page; the response's `next_after` is the value to send, and is absent on the last page.
+         */
+        get: operations["listInitiatives"];
+        put?: never;
+        /**
+         * Create an initiative
+         * @description Makes an initiative with a slug of 2 to 40 characters of `a-z`, `0-9` and `-`. A slug already taken is 409 with a `next` that says how to read it. Appends an `initiative_created` event that records the caller's principal and `Board-Actor` handle in separate columns, and upserts the actor.
+         */
+        post: operations["createInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/initiatives/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an initiative
+         * @description The initiative whose slug (its ref) or ULID is given.
+         */
+        get: operations["getInitiative"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -305,6 +349,74 @@ export interface components {
             /** @description The API key, `brd_` and 52 characters. Never returned again. */
             key: string;
         };
+        /** @description An initiative with its tags. */
+        Initiative: {
+            /** @description The initiative's ULID. */
+            id: string;
+            /** @description The short ref, which is the slug. */
+            ref: string;
+            /**
+             * @description The unique slug, 2 to 40 characters of `a-z`, `0-9` and `-`.
+             * @example phone-onboard
+             */
+            slug: string;
+            title: string;
+            /** @description Markdown. Empty when none was given. */
+            description: string;
+            /** @enum {string} */
+            status: "open" | "closed";
+            /** @description The tags, sorted. */
+            tags: string[];
+            /**
+             * Format: date
+             * @description The planned start. Absent when none was given.
+             */
+            target_start?: string;
+            /**
+             * Format: date
+             * @description The planned end. Absent when none was given.
+             */
+            target_end?: string;
+            /** @description The handle of the actor that created it. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When it was closed. Absent while it is open.
+             */
+            closed_at?: string;
+            /** @description The handle of the actor that closed it. Absent while it is open. */
+            closed_by?: string;
+        };
+        /** @description A page of initiatives. */
+        InitiativeList: {
+            /** @description The initiatives of the page, ordered by id. */
+            items: components["schemas"]["Initiative"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
+        /** @description A new initiative. */
+        InitiativeCreate: {
+            /**
+             * @description 2 to 40 characters of `a-z`, `0-9` and `-`. Unique.
+             * @example phone-onboard
+             */
+            slug: string;
+            /** @description 1 to 200 characters. */
+            title: string;
+            /** @description Markdown, at most 20000 characters. */
+            description?: string;
+            /** @description At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated. */
+            tags?: string[];
+            /** Format: date */
+            target_start?: string;
+            /**
+             * Format: date
+             * @description Not before `target_start`.
+             */
+            target_end?: string;
+        };
         /** @description A browser session. */
         Session: {
             /** @description The verified email the session belongs to. */
@@ -328,6 +440,8 @@ export interface components {
             detail?: string;
             /** @description A URI reference that identifies this occurrence. */
             instance?: string;
+            /** @description The suggested next action, a sentence the CLI prints. */
+            next?: string;
         };
     };
     responses: {
@@ -616,6 +730,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Key"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listInitiatives: {
+        parameters: {
+            query?: {
+                /** @description Keep initiatives that carry this tag. Repeatable. */
+                tag?: string[];
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: number;
+                /** @description An initiative ULID or slug. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InitiativeList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitiativeCreate"];
+            };
+        };
+        responses: {
+            /** @description The initiative was created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Initiative"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The initiative's slug or ULID. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The initiative. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Initiative"];
                 };
             };
             400: components["responses"]["BadRequest"];

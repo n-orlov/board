@@ -51,5 +51,25 @@ if ! grep -qF 'w.Write([]byte(fmt.Sprint(response)))' "$go_out"; then
 fi
 sed -i 's|w\.Write(\[\]byte(fmt\.Sprint(response)))$|fmt.Fprint(w, response) //nolint:gosec // G705: the body is a typed string the handler chose, not request input|' "$go_out"
 
+# A query parameter that cannot be bound is answered by a six-line block that oapi-codegen repeats
+# for every parameter, which makes an operation with a few filters exceed the CRAP ceiling no test
+# can lower (its required-parameter branch is unreachable for an optional one). Each block is
+# rewritten to one call of the hand-written (*ServerInterfaceWrapper).bindFailed in
+# internal/server/params.go, which makes the same two answers.
+if ! grep -q 'var requiredError \*runtime.RequiredParameterError' "$go_out"; then
+    echo "ci/openapi-gen.sh: oapi-codegen no longer emits the required-parameter block; update the post-processing" >&2
+    exit 1
+fi
+perl -0pi -e 's/\t\tvar requiredError \*runtime\.RequiredParameterError\n\t\tif errors\.As\(err, &requiredError\) \{\n\t\t\tsiw\.ErrorHandlerFunc\(w, r, &RequiredParamError\{ParamName: ("[^"]*")\}\)\n\t\t\} else \{\n\t\t\tsiw\.ErrorHandlerFunc\(w, r, &InvalidParamFormatError\{ParamName: "[^"]*", Err: err\}\)\n\t\t\}\n/\t\tsiw.bindFailed(w, r, $1, err)\n/g' "$go_out"
+if grep -q 'var requiredError \*runtime.RequiredParameterError' "$go_out"; then
+    echo "ci/openapi-gen.sh: the required-parameter block changed shape; update the post-processing" >&2
+    exit 1
+fi
+
+# The rewrite can leave "errors" unused; drop the import then, and only then.
+if ! grep -q 'errors\.' "$go_out"; then
+    sed -i '/^\t"errors"$/d' "$go_out"
+fi
+
 echo "ci/openapi-gen.sh: openapi-typescript -> $ts_out"
 (cd web && npx --no-install openapi-typescript "$spec" -o "$ts_out")

@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    The document declares the probe, documentation, browser-login and API-key operations.
+    The document declares the probe, documentation, browser-login, API-key and initiative operations.
     Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
@@ -21,6 +21,8 @@ tags:
     description: Browser login through OpenID Connect, and the browser session.
   - name: keys
     description: API keys for agents, created, listed and revoked by any authenticated principal.
+  - name: initiatives
+    description: Initiatives, the groups of tasks, with tags.
 paths:
   /healthz:
     get:
@@ -244,6 +246,119 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/initiatives:
+    get:
+      operationId: listInitiatives
+      tags: [initiatives]
+      summary: List the initiatives
+      description: >-
+        A page of initiatives ordered by id (creation order). `tag` may repeat and keeps
+        the initiatives that carry every tag given. `limit` is 1 to 1000, default 100.
+        `after` is the id or slug of the last initiative of the previous page; the
+        response's `next_after` is the value to send, and is absent on the last page.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: tag
+          in: query
+          required: false
+          description: Keep initiatives that carry this tag. Repeatable.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: limit
+          in: query
+          required: false
+          description: The page size, 1 to 1000. Default 100.
+          schema:
+            type: integer
+        - name: after
+          in: query
+          required: false
+          description: An initiative ULID or slug. The page starts after it.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitiativeList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      operationId: createInitiative
+      tags: [initiatives]
+      summary: Create an initiative
+      description: >-
+        Makes an initiative with a slug of 2 to 40 characters of `a-z`, `0-9` and `-`.
+        A slug already taken is 409 with a `next` that says how to read it. Appends an
+        `initiative_created` event that records the caller's principal and `Board-Actor`
+        handle in separate columns, and upserts the actor.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitiativeCreate"
+      responses:
+        "201":
+          description: The initiative was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/initiatives/{slug}:
+    get:
+      operationId: getInitiative
+      tags: [initiatives]
+      summary: Read an initiative
+      description: The initiative whose slug (its ref) or ULID is given.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The initiative's slug or ULID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The initiative.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -508,6 +623,97 @@ components:
             key:
               type: string
               description: The API key, `brd_` and 52 characters. Never returned again.
+    Initiative:
+      type: object
+      description: An initiative with its tags.
+      required: [id, ref, slug, title, description, status, tags, created_by, created_at]
+      properties:
+        id:
+          type: string
+          description: The initiative's ULID.
+        ref:
+          type: string
+          description: The short ref, which is the slug.
+        slug:
+          type: string
+          description: The unique slug, 2 to 40 characters of `a-z`, `0-9` and `-`.
+          examples: [phone-onboard]
+        title:
+          type: string
+        description:
+          type: string
+          description: Markdown. Empty when none was given.
+        status:
+          type: string
+          enum: [open, closed]
+        tags:
+          type: array
+          description: The tags, sorted.
+          items:
+            type: string
+        target_start:
+          type: string
+          format: date
+          description: The planned start. Absent when none was given.
+        target_end:
+          type: string
+          format: date
+          description: The planned end. Absent when none was given.
+        created_by:
+          type: string
+          description: The handle of the actor that created it.
+        created_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: string
+          format: date-time
+          description: When it was closed. Absent while it is open.
+        closed_by:
+          type: string
+          description: The handle of the actor that closed it. Absent while it is open.
+    InitiativeList:
+      type: object
+      description: A page of initiatives.
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: The initiatives of the page, ordered by id.
+          items:
+            $ref: "#/components/schemas/Initiative"
+        next_after:
+          type: string
+          description: The `after` value that fetches the following page. Absent on the last page.
+    InitiativeCreate:
+      type: object
+      description: A new initiative.
+      required: [slug, title]
+      properties:
+        slug:
+          type: string
+          description: 2 to 40 characters of `a-z`, `0-9` and `-`. Unique.
+          examples: [phone-onboard]
+        title:
+          type: string
+          description: 1 to 200 characters.
+        description:
+          type: string
+          description: Markdown, at most 20000 characters.
+        tags:
+          type: array
+          description: >-
+            At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or
+            digit, at most 40 characters. Trimmed, lowercased and deduplicated.
+          items:
+            type: string
+        target_start:
+          type: string
+          format: date
+        target_end:
+          type: string
+          format: date
+          description: Not before `target_start`.
     Session:
       type: object
       description: A browser session.
@@ -545,3 +751,6 @@ components:
         instance:
           type: string
           description: A URI reference that identifies this occurrence.
+        next:
+          type: string
+          description: The suggested next action, a sentence the CLI prints.

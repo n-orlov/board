@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/store"
 )
 
@@ -38,7 +39,7 @@ func newKeyServer(t *testing.T) *keyServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys)
+	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token}
 }
 

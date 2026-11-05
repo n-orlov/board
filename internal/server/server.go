@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/webui"
 )
 
@@ -31,25 +32,40 @@ type Readiness func(ctx context.Context) error
 // credential that is a browser navigation is sent to /auth/login.
 //
 // keys is the store behind /api/v1/keys; nil answers those operations with 503.
-func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) http.Handler {
+//
+// WithInitiatives gives the /api/v1/initiatives operations their store; without
+// it they answer 503.
+func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) http.Handler {
+	ops := operations{ready: ready, loginOps: loginOps{login: login}, keyOps: keyOps{keys: keys}}
+	for _, opt := range opts {
+		opt(&ops)
+	}
 	mux := http.NewServeMux()
-	HandlerFromMux(strictOperations(operations{ready: ready, loginOps: loginOps{login: login}, keyOps: keyOps{keys: keys}}), mux)
+	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
 	return authenticated(mux, verify, login)
 }
 
+// Option adds an optional part to the handler NewHandler returns.
+type Option func(*operations)
+
+// WithInitiatives serves /api/v1/initiatives from st.
+func WithInitiatives(st *initiatives.Store) Option {
+	return func(o *operations) { o.inits = st }
+}
+
 // Serve listens on addr and serves NewHandler(ready, verify, login, keys) until ctx is cancelled, then shuts
 // down gracefully. It returns nil on a clean shutdown.
-func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) error {
+func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	return serveOn(ctx, ln, ready, verify, login, keys)
+	return serveOn(ctx, ln, ready, verify, login, keys, opts...)
 }
 
-func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys) error {
-	srv := &http.Server{Handler: NewHandler(ready, verify, login, keys), ReadHeaderTimeout: 10 * time.Second}
+func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) error {
+	srv := &http.Server{Handler: NewHandler(ready, verify, login, keys, opts...), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

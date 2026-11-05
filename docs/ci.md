@@ -348,7 +348,13 @@ Scripts, each run through `ci/run.sh` unless noted:
   rewrites the two kinds of line oapi-codegen emits that errcheck,
   staticcheck and gosec reject (an unchecked `Close`, a
   `Write([]byte(fmt.Sprint(...)))`) and fails when the generator stops emitting
-  one, so a generator upgrade cannot leave a stale rewrite behind.
+  one, so a generator upgrade cannot leave a stale rewrite behind. It makes a
+  third rewrite for the CRAP gate (ceiling 8, generated code scored like any
+  other): the six-line block oapi-codegen repeats for every query parameter
+  that cannot be bound becomes one call of `bindFailed` in
+  `internal/server/params.go` (the same two answers), and the now unused
+  `errors` import is dropped, so an operation with several filters stays
+  under the ceiling.
   `ci/openapi-drift.sh` regenerates both into a scratch directory and fails when
   either checked-in file differs or is missing. Run
   `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the

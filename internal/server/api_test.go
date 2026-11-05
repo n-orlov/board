@@ -166,6 +166,13 @@ func (brokenResponse) VisitPostAuthLogoutResponse(http.ResponseWriter) error { r
 func (brokenResponse) VisitListKeysResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitCreateKeyResponse(http.ResponseWriter) error      { return errBroken }
 func (brokenResponse) VisitRevokeKeyResponse(http.ResponseWriter) error      { return errBroken }
+func (brokenResponse) VisitListInitiativesResponse(http.ResponseWriter) error {
+	return errBroken
+}
+func (brokenResponse) VisitCreateInitiativeResponse(http.ResponseWriter) error {
+	return errBroken
+}
+func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error { return errBroken }
 
 // outcome is what every stub operation returns: an error or a response that
 // fails to write.
@@ -248,6 +255,24 @@ func (s stubOperations) RevokeKey(context.Context, RevokeKeyRequestObject) (Revo
 	return resp, err
 }
 
+func (s stubOperations) ListInitiatives(context.Context, ListInitiativesRequestObject) (ListInitiativesResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListInitiativesResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) CreateInitiative(context.Context, CreateInitiativeRequestObject) (CreateInitiativeResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(CreateInitiativeResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetInitiative(context.Context, GetInitiativeRequestObject) (GetInitiativeResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetInitiativeResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetDocsResponseObject)
@@ -263,6 +288,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js",
 		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
 		"/api/v1/keys", "POST /api/v1/keys", "POST /api/v1/keys/workstation/revoke",
+		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		var seen []string
@@ -344,6 +370,17 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"revoke key 401", 401, RevokeKey401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRevokeKeyResponse},
 		{"revoke key 404", 404, RevokeKey404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRevokeKeyResponse},
 		{"revoke key 503", 503, RevokeKey503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRevokeKeyResponse},
+		{"list initiatives 400", 400, ListInitiatives400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListInitiativesResponse},
+		{"list initiatives 401", 401, ListInitiatives401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListInitiativesResponse},
+		{"list initiatives 503", 503, ListInitiatives503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListInitiativesResponse},
+		{"create initiative 400", 400, CreateInitiative400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitCreateInitiativeResponse},
+		{"create initiative 401", 401, CreateInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitCreateInitiativeResponse},
+		{"create initiative 409", 409, CreateInitiative409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitCreateInitiativeResponse},
+		{"create initiative 503", 503, CreateInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitCreateInitiativeResponse},
+		{"get initiative 400", 400, GetInitiative400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
+		{"get initiative 401", 401, GetInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
+		{"get initiative 404", 404, GetInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
+		{"get initiative 503", 503, GetInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
 		{"logout 404", 404, PostAuthLogout404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPostAuthLogoutResponse},
 	}
 	for _, tc := range cases {

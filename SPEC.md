@@ -502,7 +502,7 @@ and CLI can show badges without the lists.
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
-  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3) and the
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the three `/api/v1/initiatives` operations (§6.3) and the
   RFC 9457 `Problem` schema. The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
@@ -535,7 +535,11 @@ and CLI can show badges without the lists.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
 - Path and query parameters accept the short ref (§8.2) or the ULID of an object; responses
   carry both (`id`, `ref`).
-- Errors carry a `next` field (the suggested next action) that the CLI prints (§8.1).
+- Errors carry a `next` field (the suggested next action) that the CLI prints (§8.1). Every problem
+  document the server writes has `type`, `title`, `status`, `detail` and `next`; an error with no
+  operation-specific advice carries a default `next` for its status (401: how to send a key and an
+  actor, 404, 409, 5xx, and 400 "Fix the request and send it again."). A path or query parameter the
+  generated router cannot read (`limit=abc`) is a 400 problem document too.
 - Compact mode: `?view=compact` returns the minimal fields agents need (ids, refs, one-line
   text, times), to keep agent context small.
 
@@ -579,6 +583,35 @@ and CLI can show badges without the lists.
 **Note filters**: `since=<ulid|RFC3339|cursor>`, `task=<ref>`, `initiative=<slug>`,
 `resource=<r>` (repeatable), `broadcast=only|exclude`, `mention=<handle>`, `author=<handle>`,
 `fields=summary` (default for lists; bodies via `/notes/{id}` or `fields=full`).
+
+### 6.3 Initiatives
+
+`GET/POST /api/v1/initiatives` and `GET /api/v1/initiatives/{slug}` are in `api/openapi.yaml`. The
+list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come with later phases.
+
+- **`POST /api/v1/initiatives`**, body `{slug, title, description?, tags?, target_start?, target_end?}`.
+  `slug` matches `[a-z0-9-]{2,40}` (`domain.ValidateSlug`). `title` is 1 to 200 characters,
+  `description` Markdown of at most 20000, `tags` at most 20, each trimmed, lowercased, matching
+  `[a-z0-9][a-z0-9._:-]{0,39}`, repeats dropped (`domain.NormalizeTags`). `target_start` and
+  `target_end` are `YYYY-MM-DD` dates, the end not before the start. Answers **201** with the
+  initiative. A bad field is **400**; a slug already taken is **409** whose `next` is
+  `Read it with GET /api/v1/initiatives/<slug>, or send another slug.` A refusal changes nothing: no
+  row, event or actor. In one transaction the server inserts the row and its tags, upserts the actor
+  (`Board-Actor`; a session acts as the operator) and appends an `initiative_created` event whose
+  `principal` is `key:<name>` or `oidc:<email>`, whose actor is that handle, whose `initiative_id`
+  and `ref_id` are the new id and whose `data` is `{slug, title, tags}`.
+- **`GET /api/v1/initiatives/{slug}`** reads one by slug or ULID; 404 with a `next` otherwise.
+- **`GET /api/v1/initiatives`** answers `{items, next_after?}`, items ordered by id (creation order).
+  `tag` (repeatable) keeps initiatives carrying every tag given. `limit` is 1 to 1000 (default 100; 0
+  is a 400). `after` is a ULID or a slug (`domain.ParseCursor`): the page starts after that
+  initiative, and a slug that names none is a 400. `next_after`, the id to send as `after`, is
+  present exactly when more initiatives follow the page, so a `limit` equal to the number left is the
+  last page and has none.
+- An initiative is `{id, ref, slug, title, description, status, tags, target_start?, target_end?,
+  created_by, created_at, closed_at?, closed_by?}`: `ref` is the slug, `tags` are sorted, `created_by`
+  is the creating actor's handle, absent fields are omitted.
+- Not yet served: `?view=compact` and `Idempotency-Key` replays (§6.1) for these operations. The
+  server answers 503 problem documents when it runs without a store.
 
 ---
 
