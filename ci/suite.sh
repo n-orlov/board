@@ -1,0 +1,670 @@
+#!/bin/sh
+# ci/suite.sh — the CI suite runner (R145): drives the whole test matrix
+# (`go test -p=1 -count=1 ./...`: pass 1 is every test function in every
+# package except features/TestFeatures, pass 2 is TestFeatures) through
+# gotestsum, fetched at a
+# pinned version rather than vendored or added to go.mod (`go run
+# gotest.tools/gotestsum@$GOTESTSUM_VERSION`), so this file is the only
+# place the version is bumped and ci/Dockerfile never needs to know
+# gotestsum exists. It writes standard JUnit for the ordinary Go package
+# matrix and Godog's own JUnit for features/, and applies a
+# fail-once-retry-once policy throughout: a test (or scenario) that fails
+# once and then passes is recorded to a flaky list and the run exits 0; one
+# that fails twice makes this script exit non-zero.
+#
+#   ci/run.sh ci/suite.sh                  # from a sandbox without local Go
+#   ci/suite.sh                            # on a runner with Go on PATH already
+#   BOARD_CI_OUT=/path/to/artifacts ci/suite.sh   # keep the JUnit/flaky files
+#   ci/suite.sh /path/to/artifacts               # same, as a positional argument
+#
+# Coverage: the unit pass runs with -coverpkg=./... (every package in the
+# module, not just the ones a given test imports), and the per-pass
+# covdata this script already collects is merged into one
+# <outdir>/coverage-merged.out legacy profile (task 002, R187) in addition
+# to the two separate per-pass profiles below. This script also unsets
+# every BOARD_* variable from its own environment, right after reading the
+# handful of BOARD_CI_* settings it honours itself, so a leaked
+# BOARD_GODOG_PATHS/BOARD_HOME from the caller's shell cannot reach `go
+# test` or the board binaries it spawns.
+#
+# Why features/ gets a second, different retry path
+# ---------------------------------------------------
+# The ordinary Go package matrix is driven with gotestsum's own
+# `--rerun-fails=1`: on a failure it reruns exactly the failed test
+# (`go test -run '^Name$' <pkg>`), which is precise because in an ordinary Go
+# package one test function is one unit of work.
+#
+# features/ is different in exactly one test: TestFeatures, the single Go
+# test function that fans out into 300+ Godog scenarios via
+# godog.TestSuite. Handing it to gotestsum's rerun-fails would rerun
+# `-run '^TestFeatures$'` on a failure, which re-executes every scenario in
+# the package again — exactly the "whole package" rerun task 015's
+# criterion (3) forbids. So the gotestsum pass covers EVERY package,
+# features/ included, with `-skip '^TestFeatures$'`: features/'s ordinary
+# Go test functions (probes, harness self-tests, ...) run and are retried
+# there like any other test. TestFeatures alone is then run once, also
+# through gotestsum but without --rerun-fails, in a second pass; on
+# failure this script parses the pretty formatter's own "--- Failed
+# steps:" summary (always emitted, in both the terminal and the
+# JUnit-carrying "pretty,junit:<path>" format — see
+# godogFormat() in features/godog_test.go, task 014) for each failed
+# scenario's own "<file>:<line>" location, and reruns ONLY that scenario via
+# BOARD_GODOG_PATHS=<file>:<line> (features/godog_test.go's existing
+# godogPaths() selector, task 014) — never the package's default `.` path.
+set -eu
+
+GOTESTSUM_VERSION=${GOTESTSUM_VERSION:-v1.13.0}
+gotestsum_pkg="gotest.tools/gotestsum@${GOTESTSUM_VERSION}"
+
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$repo_root"
+
+# outdir (task 002, R187): an optional first positional argument, so a
+# caller that already knows its own result directory does not have to go
+# through the environment at all; BOARD_CI_OUT is still honoured when no
+# argument is given, and the mktemp fallback below still applies when
+# neither is set. `${1:-}` rather than `$1` because `set -u` would otherwise
+# treat a plain no-argument invocation (every existing caller) as an
+# unbound-variable error.
+outdir=${1:-}
+if [ -z "$outdir" ]; then
+    outdir=${BOARD_CI_OUT:-}
+fi
+if [ -z "$outdir" ]; then
+    outdir=$(mktemp -d "${TMPDIR:-/tmp}/board-ci-suite.XXXXXX")
+fi
+mkdir -p "$outdir"
+# Canonicalize to an absolute path now, once. features/TestFeatures's own
+# test binary runs with its CWD set to the features/ package directory (an
+# ordinary `go test` behaviour, not something this script controls), which
+# is NOT $repo_root -- so a relative BOARD_CI_OUT (e.g. the CI workflow's
+# "ci-results", chosen so the *host* steps outside the sibling container can
+# use it relative to their own checkout) would make that binary's own
+# BOARD_GODOG_JUNIT open fail with "no such file or directory" even though
+# the exact same relative path is valid from repo_root. Every use of
+# $outdir below (unit_coverprofile, go_junit, features_junit, covdir, ...)
+# is now absolute, so it resolves the same regardless of which process's
+# CWD interprets it.
+outdir=$(cd "$outdir" && pwd)
+echo "ci/suite.sh: writing JUnit/flaky/log files to $outdir"
+
+overall_status=0
+
+# --- 1. every Go test except TestFeatures, via gotestsum ---
+# BOARD_CI_GO_PACKAGES lets a caller narrow the package list (used by this
+# task's own local demonstration, so a scratch worktree's throwaway package
+# can be exercised without also re-running the whole real suite); unset,
+# the default is every package (./...), features/ included. The
+# `-skip '^TestFeatures$'` below removes only the Godog entry point, which
+# pass 2 owns; every other test function in features/ runs here.
+pkgs=${BOARD_CI_GO_PACKAGES:-$(go list ./...)}
+
+# BOARD_CI_GO_EXTRA_FLAGS (task 017, R145 nightly): extra `go test` flags
+# appended, unquoted on purpose, to BOTH the unit pass below and the
+# features/TestFeatures pass further down -- the nightly-only `-race` flag
+# is the reason this exists, but it is a generic pass-through, not a
+# race-specific hook. Unset (the default, every PR/push/dispatch run),
+# this expands to nothing and both passes run exactly as before.
+#
+# `-covermode=atomic` is mandatory once `-race` is enabled (`go test`
+# refuses `set`/`count` alongside it), so the unit pass's covermode tracks
+# whether the extra flags mention -race rather than hardcoding `set`; every
+# other caller (extra flags unset) keeps the original `set` mode.
+#
+# go_extra_flags captures the value NOW, before the BOARD_* scrub below
+# unsets BOARD_CI_GO_EXTRA_FLAGS itself: both `go test` invocations expand
+# this shell variable, never the (by then unset) environment variable, so
+# the nightly lane's -race still reaches both passes (task 002 cure).
+go_extra_flags=${BOARD_CI_GO_EXTRA_FLAGS:-}
+
+# ci_sha / ci_run_url (task 005, R195): what the Allure results' own
+# environment.properties and executor.json (step 3b) name. ci/run.sh forwards
+# only BOARD_* variables into its container, so the workflow hands them in as
+# BOARD_CI_SHA, BOARD_CI_RUN_URL (the Jenkins build link, BUILD_URL) and
+# BOARD_CI_BUILD_NAME (e.g. "board/main #42"); all are captured here, before
+# the BOARD_* scrub below, and all are optional -- a local run just records an
+# unknown sha and no run link.
+ci_sha=${BOARD_CI_SHA:-}
+ci_run_url=${BOARD_CI_RUN_URL:-}
+ci_build_name=${BOARD_CI_BUILD_NAME:-board CI}
+covermode=set
+case " $go_extra_flags " in
+    *' -race '*) covermode=atomic ;;
+esac
+
+# go_test_timeout / features_test_timeout (cure-01-07, R145 nightly
+# completion): `go test`'s own default per-binary budget is 10 minutes
+# (testing.(*M).startAlarm), applied independently to EACH package's test
+# binary. That default is not one of this repo's own scenario deadlines --
+# every individual scenario/step assertion in features/ carries its own
+# much shorter context timeout (see features/assertions_test.go and
+# friends) -- it is a harness-level aggregate budget nobody here ever set
+# explicitly. features/TestFeatures fans out into 300+ Godog scenarios in
+# one process, and as the suite has grown its wall time has crept up to
+# within seconds of that unset 10m default: nightly run 36222292303's own
+# suite step (the -race lane below) and its third ci/stability.sh
+# repetition both hit `panic: test timed out after 10m0s` at 600.033s/
+# 600.065s -- the harness's own execution budget, not any scenario's
+# assertion, was too tight for the work it was asking that one process to
+# finish (artifacts/review/nightly-timeout-stack.log,
+# nightly-features-original.log). `-race` alone roughly doubles CPU cost,
+# which is why the nightly-only lane hit it first, but the same panic also
+# fired on a plain (non-race) ci/stability.sh run under ordinary CI
+# contention -- so the fix widens the budget for every caller, not just
+# the race lane. 25 minutes is a little over double the ~10m observed
+# worst case, without touching a single scenario's own deadline.
+features_test_timeout=${BOARD_CI_FEATURES_TEST_TIMEOUT:-25m}
+unit_test_timeout=${BOARD_CI_UNIT_TEST_TIMEOUT:-15m}
+
+# Scrub leaked BOARD_* environment (task 002, R187): every BOARD_CI_* setting
+# this script itself reads has already been captured into a shell variable
+# above (outdir, pkgs, go_extra_flags, covermode, features_test_timeout,
+# unit_test_timeout) -- so any BOARD_* variable still present in the
+# environment at this point came from the CALLER's own shell (a stray
+# BOARD_GODOG_PATHS left over from a manual `BOARD_GODOG_PATHS=... go test
+# ./features/` run, a BOARD_HOME pointed at a throwaway profile, ...) and
+# must not be allowed to reach `go test`/the board binaries it spawns,
+# which otherwise inherit it exactly like any other ordinary environment
+# variable. run_test_features's own BOARD_GODOG_JUNIT/BOARD_GODOG_PATHS
+# below are set per invocation through `env NAME=value ...`, which adds a
+# variable to that one child's environment regardless of what this
+# process has unset, so this scrub cannot remove the few BOARD_GODOG_*
+# values the script sets on purpose.
+for board_var in $(env | sed -n 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+    unset "$board_var"
+done
+
+go_junit="$outdir/junit-go.xml"
+go_rerun_report="$outdir/rerun-report-go.txt"
+go_flaky="$outdir/flaky-go.txt"
+: > "$go_flaky"
+
+# unit_coverprofile (R146/task 016 criterion 1, R146 cure-01-05): a
+# legacy-format coverage profile covering every package this pass tests.
+# task 016 originally produced this with the *ordinary* `go test
+# -coverprofile` flag, fed straight into gotestsum's --packages/-- args --
+# but gotestsum's own --rerun-fails=1 reruns a failed test with a SECOND,
+# separate `go test -run '^Name$' <pkg> ... -coverprofile=<same path>`
+# invocation, and each `go test` invocation, retry included, WRITES that
+# path from scratch rather than merging into whatever is already there. So
+# the moment any test anywhere in the pass needed a retry, that retry's own
+# `go test` call clobbered the whole profile with only its own (one
+# package, one test) coverage -- deleting every other tested package
+# outright and zeroing every block the retried package's OTHER, passing
+# tests had covered on the first attempt (cure-01-05, reviewer probe
+# coverage-retention-probe.log: StableCovered count 0, RetryCovered count
+# 1, the then ci/releasegate package's whole profile gone).
+#
+# The fix is to stop asking `go test` to write the legacy format directly at
+# all, and instead use the same retry-safe, per-process-counter-file
+# mechanism already proven correct for features/'s black-box coverage
+# below -- but reached through `-test.gocoverdir`, the internal test-binary
+# flag `-coverprofile` itself sets under the hood (Go 1.20+; see `go help
+# testflag`'s -cover/-coverprofile entries and cmd/internal/test2json), not
+# through the GOCOVERDIR *environment variable*: that env var only steers
+# coverage for a separately built+run binary (go build -cover, as
+# features/ does with the board binary itself); an ordinary `go test`
+# invocation ignores it and, absent -coverprofile, writes no profile at
+# all -- confirmed empirically before settling on -args -test.gocoverdir.
+# Passed via `-args` (everything
+# after -args goes to the test binary, not to `go test` itself), every `go
+# test -cover` invocation (the initial full pass AND each gotestsum retry)
+# writes its OWN uniquely-named counter file set into unit_covdir rather
+# than overwriting a shared path, so counters from every attempt --
+# including packages/tests that were never retried at all -- coexist and
+# accumulate instead of clobbering each other. `go tool covdata textfmt`
+# below then bridges that whole directory into the one legacy-format
+# unit_coverprofile file the rest of this script (and coverage_table)
+# already expects, so no downstream consumer needs to know the collection
+# mechanism changed.
+unit_covdir="$outdir/covdata-unit"
+mkdir -p "$unit_covdir"
+unit_coverprofile="$outdir/coverage-unit.out"
+
+if [ -n "$pkgs" ]; then
+    go_status=0
+    go run "$gotestsum_pkg" \
+        --format testname \
+        --junitfile "$go_junit" \
+        --rerun-fails=1 \
+        --rerun-fails-report "$go_rerun_report" \
+        --packages "$pkgs" \
+        -- -p=1 -count=1 -skip '^TestFeatures$' "-timeout=$unit_test_timeout" "-covermode=$covermode" -cover -coverpkg=./... $go_extra_flags -args "-test.gocoverdir=$unit_covdir" \
+        || go_status=$?
+
+    # gotestsum's own rerun report lists every test it reran, whether or not
+    # it eventually passed ("<test>: N runs, M failures"). Criterion (2)
+    # wants a *flaky* list restricted to tests that failed once and then
+    # passed on the rerun (failures < runs); a test where failures == runs
+    # never passed at all and is reflected in go_status instead.
+    if [ -f "$go_rerun_report" ]; then
+        while IFS= read -r line; do
+            runs=$(printf '%s\n' "$line" | grep -oE '[0-9]+ runs' | grep -oE '[0-9]+' || true)
+            fails=$(printf '%s\n' "$line" | grep -oE '[0-9]+ failures' | grep -oE '[0-9]+' || true)
+            if [ -n "$runs" ] && [ -n "$fails" ] && [ "$fails" -lt "$runs" ]; then
+                printf '%s\n' "$line" >> "$go_flaky"
+            fi
+        done < "$go_rerun_report"
+    fi
+
+    if [ "$go_status" -ne 0 ]; then
+        echo "ci/suite.sh: Go package matrix failed after retry (exit $go_status)" >&2
+        overall_status=1
+    fi
+else
+    echo "ci/suite.sh: no Go packages found (go list ./... returned nothing)" >&2
+    overall_status=1
+fi
+
+# --- 2. features/TestFeatures: one run, then a per-scenario rerun of anything failed ---
+features_junit="$outdir/junit-features.xml"
+# allure_dir (task 005, R195/R196): the one Allure results directory of this
+# run. Every features/ invocation below -- the initial run and each solo
+# rerun -- gets BOARD_GODOG_ALLURE=<this dir>, so features/'s own formatter
+# writes native results into it, and a scenario rerun alone carries the same
+# historyId as its failed first attempt: Allure reads them as retries of one
+# test (and flaky when the last one passed). Step 3b adds the unit results,
+# environment.properties and executor.json to the same directory.
+allure_dir="$outdir/allure-results"
+mkdir -p "$allure_dir"
+features_log="$outdir/features-run1.log"
+features_flaky="$outdir/flaky-features.txt"
+: > "$features_flaky"
+
+# covdir (R146/task 016, criterion 2): a GOCOVERDIR passed to every
+# features/TestFeatures invocation below (the initial run and every solo
+# scenario rerun). features/lifecycle_test.go's registerScenarioLifecycle
+# Before hook reads this same env var from its own process's environment
+# (inherited automatically by the board binaries it spawns, since
+# StartScreenDriverInDir's cmd.Env starts from os.Environ()) and adds
+# `go build -cover` only when it is non-empty, so every scenario's board
+# process writes black-box coverage counters here. Each rebuilt binary and
+# each spawned process gets its own uniquely-named counter file, so reusing
+# one directory across the whole pass (including reruns) just accumulates
+# more data rather than clobbering it.
+covdir="$outdir/covdata-features"
+mkdir -p "$covdir"
+
+# run_test_features <gotestsum-junit-path> <NAME=value>...: one gotestsum-driven
+# run of features/TestFeatures and nothing else. No --rerun-fails here on purpose
+# (see the header); --format standard-verbose keeps Godog's pretty output,
+# including its "--- Failed steps:" summary, verbatim in the log. Every
+# NAME=value goes through env(1) rather than a prefix assignment on the
+# function call, whose export to child processes POSIX leaves unspecified.
+# BOARD_FEATURES_COVERMODE carries the unit pass's covermode to the features
+# harness: it builds the black-box board binary with `-cover`, and with -race
+# on the unit pass (atomic counters) a `set`-mode binary leaves covdata that
+# `go tool covdata textfmt` refuses to merge ("counter mode clash"), which
+# emptied the nightly's merged profile and failed its quality gate.
+run_test_features() {
+    junit=$1
+    shift
+    env "BOARD_FEATURES_COVERMODE=$covermode" "$@" go run "$gotestsum_pkg" \
+        --format standard-verbose \
+        --junitfile "$junit" \
+        --packages ./features/ \
+        -- -p=1 -count=1 -run '^TestFeatures$' "-timeout=$features_test_timeout" $go_extra_flags
+}
+
+features_status=0
+# features_aborted_without_locations (cure-01-08, R146): set only when the
+# initial run fails AND the pretty log never printed a parseable
+# "--- Failed steps:" summary at all -- the shape a whole-process abort
+# (go test's own -timeout alarm firing mid-scenario, or any other crash
+# that kills the binary before Godog reports anything) takes, as opposed
+# to an ordinary scenario assertion failure, which Godog always reports
+# before the process exits normally. This is exactly the case where
+# BOARD_GODOG_JUNIT's own file is left empty/truncated (godog's JUnit
+# formatter never got to flush), which is what step 3 below uses to decide
+# whether a synthetic failed/aborted TestFeatures marker is needed so the
+# report input never silently drops the pass.
+features_aborted_without_locations=0
+if ! run_test_features "$outdir/junit-features-gotestsum.xml" "BOARD_GODOG_JUNIT=$features_junit" "BOARD_GODOG_ALLURE=$allure_dir" "GOCOVERDIR=$covdir" > "$features_log" 2>&1; then
+    features_status=1
+    clean_log="$outdir/features-run1.clean.log"
+    sed -E 's/\x1b\[[0-9;]*m//g' "$features_log" > "$clean_log"
+
+    # Only Godog's own summary block ("--- Failed steps:" up to its
+    # "N scenarios (...)" tally) names failed scenarios; bounding the range
+    # keeps any later reprint of passing scenarios' headers (gotestsum's
+    # "=== Failed" recap) from being mistaken for a failure. The recap can
+    # repeat the summary block itself, hence sort -u.
+    locations=$(sed -n '/^--- Failed steps:/,/^[0-9][0-9]* scenarios (/p' "$clean_log" \
+        | grep -E '^[[:space:]]*Scenario' \
+        | grep -oE '# [^[:space:]]+\.feature:[0-9]+' \
+        | sed 's/^# //' \
+        | sort -u)
+
+    if [ -z "$locations" ]; then
+        echo "ci/suite.sh: features/ failed but no scenario location could be parsed from $features_log" >&2
+        features_aborted_without_locations=1
+    else
+        all_recovered=1
+        i=0
+        for loc in $locations; do
+            i=$((i + 1))
+            rerun_log="$outdir/features-rerun-$i.log"
+            echo "ci/suite.sh: features/ rerunning failed scenario alone: BOARD_GODOG_PATHS=$loc" >&2
+            if run_test_features "$outdir/junit-features-rerun-$i-gotestsum.xml" "BOARD_GODOG_PATHS=$loc" "BOARD_GODOG_JUNIT=$outdir/junit-features-rerun-$i.xml" "BOARD_GODOG_ALLURE=$allure_dir" "GOCOVERDIR=$covdir" > "$rerun_log" 2>&1; then
+                echo "$loc" >> "$features_flaky"
+            else
+                echo "ci/suite.sh: features/ scenario $loc failed again on its solo rerun" >&2
+                all_recovered=0
+            fi
+        done
+        if [ "$all_recovered" -eq 1 ]; then
+            features_status=0
+        fi
+    fi
+fi
+
+if [ "$features_status" -ne 0 ]; then
+    echo "ci/suite.sh: features/ failed after per-scenario retry" >&2
+    overall_status=1
+fi
+
+# --- 3. one merged JUnit file per pass, retries folded (R146/task 019) ---
+# The raw files above keep every attempt as its own <testcase>, and
+# Allure's junit-xml plugin, given those, can pick a test's failed attempt
+# as its result and report a test that passed on retry as failed and not
+# flaky. ci/junitflaky (see its own header) folds each test whose last
+# attempt passed into one passing <testcase> carrying its earlier failures
+# as <rerunFailure>/<rerunError>, the plugin's own flaky convention, and
+# recounts. junit-merged/ is what ci/allure-report.sh and ci/summary.sh
+# read. features/ contributes Godog's own per-scenario JUnit (the original
+# pass, then each solo rerun, in rerun order); gotestsum's view of the same
+# pass (TestFeatures/<scenario> subtests) is used instead when Godog's own
+# file is missing, empty or malformed -- e.g. when the process was killed
+# by go test's own -timeout alarm mid-scenario and Godog's JUnit formatter
+# never got to flush (cure-01-08, R146: final-sha nightly 36222292303 left
+# junit-features.xml empty this way, ci/junitflaky reported EOF on it, and
+# this step used to just delete the merged features file outright,
+# dropping every gotestsum scenario result the run DID produce and leaving
+# the report showing only junit-go.xml -- an all-passing subset for a run
+# that failed). merge_junit itself now reports success/failure to its
+# caller (it used to always return 0, the bug that hid the EOF failure
+# above from ever being noticed here) so this step can fall back instead of
+# silently accepting an empty result.
+merged_dir="$outdir/junit-merged"
+mkdir -p "$merged_dir"
+
+# merge_junit <output> <input>...: the inputs in chronological order; any
+# that does not exist is left out. Returns 1 (output removed) if there was
+# nothing to merge, or ci/junitflaky itself failed (e.g. malformed XML);
+# returns 0 only once <output> has actually been written.
+merge_junit() {
+    merged_out=$1
+    shift
+    merge_inputs=""
+    for f in "$@"; do
+        [ -f "$f" ] && merge_inputs="$merge_inputs $f"
+    done
+    if [ -z "$merge_inputs" ]; then
+        return 1
+    fi
+    # shellcheck disable=SC2086 # $outdir is canonical, one word per path
+    if ! go run ./ci/junitflaky -o "$merged_out" $merge_inputs; then
+        echo "ci/suite.sh: could not merge$merge_inputs into $merged_out" >&2
+        rm -f "$merged_out"
+        return 1
+    fi
+    return 0
+}
+
+# write_aborted_testfeatures_junit <path> <log> <gotestsum-merged 0|1>: a minimal, well-formed
+# JUnit file carrying exactly one failed <testcase name="TestFeatures">,
+# used (cure-01-08, R146) whenever the features/ pass aborted with no
+# per-scenario evidence at all surviving from either Godog's own JUnit or
+# gotestsum's view of the same run -- so the report input always states
+# the failure explicitly rather than a downstream reader (ci/summary.sh,
+# Allure) ever being able to mistake the absence of features/ data for an
+# all-passing subset.
+write_aborted_testfeatures_junit() {
+    out_path=$1
+    log_path=$2
+    survived=$3
+    if [ "$survived" -eq 1 ]; then
+        detail="features/TestFeatures aborted before Godog could report any per-scenario result (see $log_path); Godog's own JUnit was unusable, so this pass's scenario results come from gotestsum's view of the same run"
+    else
+        detail="features/TestFeatures aborted before Godog could report any per-scenario result (see $log_path); no usable Godog or gotestsum JUnit survived this pass"
+    fi
+    detail=$(printf '%s' "$detail" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
+    cat > "$out_path" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="1" failures="1" errors="0" time="0">
+	<testsuite name="features-aborted" tests="1" failures="1" errors="0" time="0">
+		<testcase classname="features" name="TestFeatures">
+			<failure message="$detail" type="aborted">$detail</failure>
+		</testcase>
+	</testsuite>
+</testsuites>
+EOF
+}
+
+merge_junit "$merged_dir/junit-go.xml" "$go_junit" || true
+# Rerun files are numbered 1..i in the order the reruns ran.
+features_reruns=""
+features_reruns_gotestsum=""
+n=1
+while [ -f "$outdir/junit-features-rerun-$n-gotestsum.xml" ] || [ -f "$outdir/junit-features-rerun-$n.xml" ]; do
+    features_reruns="$features_reruns $outdir/junit-features-rerun-$n.xml"
+    features_reruns_gotestsum="$features_reruns_gotestsum $outdir/junit-features-rerun-$n-gotestsum.xml"
+    n=$((n + 1))
+done
+
+features_merged="$merged_dir/junit-features.xml"
+features_merge_ok=0
+if [ -s "$features_junit" ]; then
+    # shellcheck disable=SC2086
+    if merge_junit "$features_merged" "$features_junit" $features_reruns; then
+        features_merge_ok=1
+    fi
+fi
+if [ "$features_merge_ok" -eq 0 ]; then
+    if [ -s "$features_junit" ]; then
+        echo "ci/suite.sh: godog JUnit for features/ ($features_junit) was malformed; falling back to gotestsum's own scenario results" >&2
+    else
+        echo "ci/suite.sh: godog JUnit for features/ ($features_junit) is missing or empty; falling back to gotestsum's own scenario results" >&2
+    fi
+    # shellcheck disable=SC2086
+    if merge_junit "$features_merged" "$outdir/junit-features-gotestsum.xml" $features_reruns_gotestsum; then
+        features_merge_ok=1
+    fi
+fi
+
+# cure-01-08 (R146): whenever the features/ pass itself failed, an explicit
+# failed/aborted TestFeatures outcome must be part of the report input --
+# either because nothing at all survived to merge above, or because this is
+# specifically the whole-process-abort shape (features_aborted_without_
+# locations, set in step 2) that leaves no scenario-level evidence of WHY it
+# failed even when gotestsum's own view merged successfully.
+if [ "$features_status" -ne 0 ] && { [ "$features_aborted_without_locations" -eq 1 ] || [ "$features_merge_ok" -eq 0 ]; }; then
+    synthetic="$outdir/junit-features-aborted.xml"
+    write_aborted_testfeatures_junit "$synthetic" "$features_log" "$features_merge_ok"
+    if [ "$features_merge_ok" -eq 1 ]; then
+        tmp_merged="$outdir/junit-features-with-abort.xml"
+        if merge_junit "$tmp_merged" "$features_merged" "$synthetic"; then
+            mv "$tmp_merged" "$features_merged"
+        fi
+    else
+        if merge_junit "$features_merged" "$synthetic"; then
+            features_merge_ok=1
+        fi
+    fi
+fi
+
+if [ "$features_merge_ok" -eq 0 ]; then
+    echo "ci/suite.sh: no features/ JUnit data survived to merge (godog JUnit, gotestsum JUnit and every rerun file were all missing, empty or malformed)" >&2
+fi
+
+# --- 3b. one Allure results directory: features native, unit converted, environment, executor (task 005, R195/R196) ---
+# $allure_dir already holds features/'s native results (written by the
+# formatter during step 2). The Go unit pass is converted from its merged
+# JUnit by ci/junit2allure into the same directory under parentSuite "unit"
+# (features/'s results carry parentSuite "features"), keeping the historyId
+# Allure's own JUnit plugin used, so unit trends survive. features/'s JUnit is
+# converted only where native results cannot speak for the pass: when none
+# were written at all (the process died before the formatter flushed), or
+# for the synthetic "aborted" marker, so a failed pass is never missing from
+# the report. ci/allure-report.sh reads this directory; ci/summary.sh keeps
+# reading the merged JUnit, which counts the same tests.
+features_native=0
+for f in "$allure_dir"/*-result.json; do
+    [ -e "$f" ] && features_native=1
+    break
+done
+if [ -s "$merged_dir/junit-go.xml" ]; then
+    go run ./ci/junit2allure -group unit -o "$allure_dir" "$merged_dir/junit-go.xml" || {
+        echo "ci/suite.sh: could not convert $merged_dir/junit-go.xml to Allure results" >&2
+        overall_status=1
+    }
+fi
+if [ "$features_native" -eq 0 ] && [ -s "$merged_dir/junit-features.xml" ]; then
+    echo "ci/suite.sh: no native features/ Allure results; converting $merged_dir/junit-features.xml instead" >&2
+    go run ./ci/junit2allure -group features -o "$allure_dir" "$merged_dir/junit-features.xml" || overall_status=1
+elif [ -s "$outdir/junit-features-aborted.xml" ]; then
+    go run ./ci/junit2allure -group features -o "$allure_dir" "$outdir/junit-features-aborted.xml" || overall_status=1
+fi
+
+# environment.properties: Allure's Environment widget. -race says whether the
+# nightly flag reached both passes.
+case " $go_extra_flags " in
+    *' -race '*) race_mode=yes ;;
+    *) race_mode=no ;;
+esac
+{
+    printf 'go.version=%s\n' "$(go env GOVERSION 2>/dev/null || echo unknown)"
+    printf 'git.sha=%s\n' "${ci_sha:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+    printf 'race=%s\n' "$race_mode"
+} > "$allure_dir/environment.properties"
+
+# executor.json: the Allure "Executor" widget, linking back to the Jenkins build.
+if [ -n "$ci_run_url" ]; then
+    printf '{"name":"Jenkins","type":"jenkins","buildName":"%s","buildUrl":"%s","reportName":"board CI"}\n' "$ci_build_name" "$ci_run_url" > "$allure_dir/executor.json"
+else
+    printf '{"name":"local run","type":"local","buildName":"local suite run","reportName":"board CI"}\n' > "$allure_dir/executor.json"
+fi
+
+# --- 4. coverage summary (R146/task 016, R146 cure-01-05) ---
+# `unit_coverprofile` and `features_coverprofile` are both bridged the same
+# way now: `unit_covdir`/`covdir` hold the GOCOVERDIR binary format, one
+# counter file per `go test`/board process invocation (every gotestsum
+# retry, and every features/ scenario's spawned board binary, gets its own
+# uniquely-named files rather than overwriting a shared one, which is
+# exactly what keeps a retry from deleting anything the earlier attempt
+# measured -- see the cure-01-05 comment above unit_covdir). `go tool
+# covdata textfmt` bridges each directory into the same legacy text format
+# `go tool cover` understands, so the one small awk aggregator below can
+# read both without needing two unrelated summarizers.
+#
+# A covdir with no data (every process killed before its coverage atexit
+# hook ran, or nothing ran at all) makes `textfmt` print a warning but
+# still EXIT 0, writing a completely empty (zero-byte, no "mode:" header)
+# file rather than failing -- so the fallback below cannot rely on the
+# command's own exit status; it checks the resulting file is actually
+# non-empty instead (cure-01-05: an empty section confuses the awk
+# aggregator's FNR==1 file-boundary detection just as much as a missing
+# one would, attributing the NEXT profile's own "mode:" header line to the
+# wrong section and silently swapping its data into the other column --
+# caught while proving this fix).
+ensure_legacy_profile() {
+    # ensure_legacy_profile <path>: guarantee <path> exists and has at
+    # least the "mode: <mode>" header line every legacy coverage profile
+    # needs, regardless of why it might otherwise be missing or empty.
+    profile_path=$1
+    if [ ! -s "$profile_path" ]; then
+        printf 'mode: set\n' > "$profile_path"
+    fi
+}
+
+features_coverprofile="$outdir/coverage-features.out"
+if ! go tool covdata textfmt -i="$covdir" -o="$features_coverprofile" 2>"$outdir/covdata-textfmt.log"; then
+    echo "ci/suite.sh: no features/ black-box coverage data in $covdir (see $outdir/covdata-textfmt.log)" >&2
+fi
+ensure_legacy_profile "$features_coverprofile"
+if ! go tool covdata textfmt -i="$unit_covdir" -o="$unit_coverprofile" 2>"$outdir/covdata-unit-textfmt.log"; then
+    echo "ci/suite.sh: no unit coverage data in $unit_covdir (see $outdir/covdata-unit-textfmt.log)" >&2
+fi
+ensure_legacy_profile "$unit_coverprofile"
+
+# merged_coverprofile (task 002, R187): one profile covering BOTH passes'
+# own covdata directories (unit_covdir, covdir), merged in a single
+# `covdata textfmt -i=dir1,dir2` call rather than concatenating the two
+# already-bridged legacy files above -- `covdata textfmt` itself does the
+# per-package/per-block de-duplication a naive `cat` of two legacy
+# profiles would not. The unit pass now also carries `-coverpkg=./...`
+# (above), so unit_covdir already holds counters for every package in the
+# module, not just the ones its own tests import directly, which is what
+# makes this merged profile meaningfully wider than either input alone.
+#
+# `covdata textfmt` on an input set with no counter data at all (both
+# directories empty, e.g. every tested package reporting "[no
+# statements]") exits 0 and writes a zero-byte file, exactly like the
+# per-pass case ensure_legacy_profile above already guards against -- so
+# merged_blocks (every line after the `mode:` header ensure_legacy_profile
+# guarantees) is what actually decides pass/fail here, not the command's
+# own exit status.
+merged_coverprofile="$outdir/coverage-merged.out"
+if ! go tool covdata textfmt -i="$unit_covdir,$covdir" -o="$merged_coverprofile" 2>"$outdir/covdata-merged-textfmt.log"; then
+    echo "ci/suite.sh: could not merge unit+features coverage into $merged_coverprofile (see $outdir/covdata-merged-textfmt.log)" >&2
+fi
+ensure_legacy_profile "$merged_coverprofile"
+merged_blocks=$(($(wc -l < "$merged_coverprofile") - 1))
+if [ "$merged_blocks" -le 0 ]; then
+    echo "ci/suite.sh: merged coverage profile $merged_coverprofile has no blocks (unit+features coverage data was empty)" >&2
+    overall_status=1
+fi
+
+# coverage_table <unit-profile> <features-profile>: prints one
+# package-by-package table (plus a TOTAL row) with a column for each
+# profile's statement coverage. Both profiles share the same legacy format
+# (`mode: <mode>` then `<import/path/file.go>:<pos> <numstmt> <count>` lines),
+# so a package name is just the line's file field with its own filename
+# dropped. A package present in only one profile prints "-" in the other
+# column rather than 0.0%, so "not exercised by this pass" stays visually
+# distinct from "exercised, zero coverage".
+coverage_table() {
+    awk '
+    function pkgof(f) {
+        sub(/:.*/, "", f)
+        n = split(f, parts, "/")
+        pkg = parts[1]
+        for (i = 2; i < n; i++) pkg = pkg "/" parts[i]
+        return pkg
+    }
+    FNR == 1 { section++; next }
+    {
+        pkg = pkgof($1)
+        numstmt = $2 + 0
+        count = $3 + 0
+        seen[pkg] = 1
+        if (section == 1) {
+            u_total[pkg] += numstmt
+            if (count > 0) u_cov[pkg] += numstmt
+            gu_total += numstmt
+            if (count > 0) gu_cov += numstmt
+        } else {
+            f_total[pkg] += numstmt
+            if (count > 0) f_cov[pkg] += numstmt
+            gf_total += numstmt
+            if (count > 0) gf_cov += numstmt
+        }
+    }
+    END {
+        printf "%-55s %10s %18s\n", "package", "unit", "features/ (black-box)"
+        for (p in seen) {
+            ustr = (p in u_total) ? sprintf("%.1f%%", (u_total[p] > 0 ? u_cov[p] * 100.0 / u_total[p] : 0)) : "-"
+            fstr = (p in f_total) ? sprintf("%.1f%%", (f_total[p] > 0 ? f_cov[p] * 100.0 / f_total[p] : 0)) : "-"
+            printf "%-55s %10s %18s\n", p, ustr, fstr
+        }
+        ut = (gu_total > 0) ? sprintf("%.1f%%", gu_cov * 100.0 / gu_total) : "0.0%"
+        ft = (gf_total > 0) ? sprintf("%.1f%%", gf_cov * 100.0 / gf_total) : "0.0%"
+        printf "%-55s %10s %18s\n", "TOTAL", ut, ft
+    }' "$1" "$2"
+}
+
+coverage_summary="$outdir/coverage-summary.txt"
+coverage_table "$unit_coverprofile" "$features_coverprofile" | tee "$coverage_summary"
+
+echo "ci/suite.sh: done (go_flaky=$go_flaky, features_flaky=$features_flaky, outdir=$outdir, coverage_summary=$coverage_summary, coverage_merged=$merged_coverprofile)"
+exit "$overall_status"

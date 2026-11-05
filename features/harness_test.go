@@ -111,7 +111,7 @@ func (h *harness) startServerWith(ctx context.Context, extra ...string) (context
 		return ctx, err
 	}
 	h.addr = "127.0.0.1:" + strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
-	ln.Close()
+	_ = ln.Close()
 	h.dir, err = os.MkdirTemp("", "board-godog-")
 	if err != nil {
 		return ctx, err
@@ -126,7 +126,7 @@ func (h *harness) startServerWith(ctx context.Context, extra ...string) (context
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if conn, err := net.Dial("tcp", h.addr); err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return ctx, nil
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -162,7 +162,7 @@ func (h *harness) stopServer() {
 var versionPattern = regexp.MustCompile(`^(v[0-9][^\s]*|devel(\+[0-9a-f]+)?)(-dirty)?$`)
 
 func registerSteps(sc *godog.ScenarioContext, h *harness) {
-	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		h.stopServer()
 		return ctx, nil
 	})

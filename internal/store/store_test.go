@@ -13,7 +13,7 @@ func open(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -36,7 +36,7 @@ func TestReadyOnlyAfterMigrate(t *testing.T) {
 
 func TestReadyFailsWhenClosed(t *testing.T) {
 	s := open(t)
-	s.Close()
+	_ = s.Close()
 	if err := s.Ready(context.Background()); err == nil {
 		t.Fatal("Ready on a closed database = nil")
 	}

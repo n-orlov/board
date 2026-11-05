@@ -18,7 +18,7 @@ func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := probe.Addr().String()
-	probe.Close()
+	_ = probe.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -28,7 +28,7 @@ func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 	for {
 		conn, err := net.Dial("tcp", addr)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			break
 		}
 		if time.Now().After(deadline) {

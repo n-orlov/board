@@ -43,7 +43,7 @@ func Open(rawURL string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("BOARD_DB_URL names no database file")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 	q := url.Values{}

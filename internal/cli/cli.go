@@ -39,7 +39,7 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 		if len(args) != 1 {
 			return usage(stderr)
 		}
-		fmt.Fprintln(stdout, version.Current())
+		_, _ = fmt.Fprintln(stdout, version.Current())
 		return ExitOK
 	case "serve":
 		if len(args) != 1 {
@@ -52,7 +52,7 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 }
 
 func usage(stderr io.Writer) int {
-	fmt.Fprintln(stderr, Usage)
+	_, _ = fmt.Fprintln(stderr, Usage)
 	return ExitUsage
 }
 
@@ -67,25 +67,25 @@ func serve(stderr io.Writer, env Env) int {
 	}
 	migrate := env("BOARD_MIGRATE")
 	if migrate != "" && migrate != "auto" && migrate != "off" {
-		fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
+		_, _ = fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
 		return ExitError
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st, err := store.Open(dbURL)
 	if err != nil {
-		fmt.Fprintf(stderr, "board: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
 		return ExitError
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if migrate != "off" {
 		if err := st.Migrate(ctx); err != nil {
-			fmt.Fprintf(stderr, "board: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
 			return ExitError
 		}
 	}
 	if err := server.Serve(ctx, addr, st.Ready); err != nil {
-		fmt.Fprintf(stderr, "board: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
 		return ExitError
 	}
 	return ExitOK

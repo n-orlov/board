@@ -1,0 +1,120 @@
+#!/bin/sh
+# Run the full test suite N times, from a clean state each run, and label
+# each run PASS/FAIL from the ACTUAL exit status of `go test` itself.
+#
+#   ci/stability.sh        # 10 runs (default)
+#   ci/stability.sh 5      # 5 runs
+#
+# Gotcha this script exists to avoid: piping `go test` into `tee` and then
+# checking `$?` observes tee's exit status, not go test's, so a real test
+# failure can be silently mislabelled PASS. This script
+# NEVER pipes the command whose exit status matters; it redirects to a file
+# and reads `$?` immediately after the command line that produced it, then
+# only afterwards echoes the captured file for display/logging.
+#
+# Each run is "clean state": -count=1 disables Go's test result cache, each
+# run gets its own fresh log file (no previous run's output is reused or
+# appended into the same buffer before the pass/fail decision), and
+# ci/run.sh's sibling container is --rm per invocation so any
+# run-scoped state inside it dies with the container at the end of
+# that one run and cannot leak into the next. -p=1 serializes Go packages:
+# the black-box package deliberately asserts sub-second SQLite deadlines,
+# so loading it beside the separate full Godog package would turn a stability
+# run into a host-scheduler benchmark rather than ten repetitions of the same
+# uncontended product contract. Tests and scenarios within each package remain
+# unchanged and fully executed.
+#
+# Self-test / demonstration hook: set BOARD_STABILITY_SELFTEST_FAIL=1 to make
+# every run a deliberate injected failure instead of invoking the real
+# suite, to prove the FAIL path (and non-zero script exit) actually fires.
+set -u
+
+runs=${1:-10}
+case "$runs" in
+    ''|*[!0-9]*)
+        echo "usage: ci/stability.sh [N]  (N must be a positive integer, got '$runs')" >&2
+        exit 2
+        ;;
+esac
+if [ "$runs" -lt 1 ]; then
+    echo "usage: ci/stability.sh [N]  (N must be >= 1, got '$runs')" >&2
+    exit 2
+fi
+
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+outdir=$(mktemp -d "${TMPDIR:-/tmp}/board-stability.XXXXXX")
+summary_log="$outdir/summary.log"
+: > "$summary_log"
+
+pass=0
+fail=0
+
+i=1
+while [ "$i" -le "$runs" ]; do
+    run_log="$outdir/run-$i.log"
+
+    echo "=== RUN $i ===" | tee -a "$summary_log"
+
+    if [ "${BOARD_STABILITY_SELFTEST_FAIL:-0}" = "1" ]; then
+        # Deliberate injected failure path: proves the FAIL label and
+        # non-zero script exit actually fire, without needing a real bug.
+        echo "BOARD_STABILITY_SELFTEST_FAIL=1: injected failure (self-test only, real suite not run)" > "$run_log"
+        status=1
+    else
+        # NOT piped: this is the real exit status of go test, captured
+        # immediately, before any tee/cat touches the output.
+        #
+        # -timeout (cure-01-07, R145 nightly completion): `go test`'s own
+        # unset default is a 10-minute-per-package-binary alarm
+        # (testing.(*M).startAlarm) -- a harness-level aggregate budget,
+        # never one of this repo's own scenario deadlines. features/
+        # TestFeatures fans into 300+ Godog scenarios in one process and,
+        # as the suite has grown, its wall time has crept to within
+        # seconds of that unset default: nightly run 36222292303's own
+        # third ci/stability.sh repetition hit `panic: test timed out
+        # after 10m0s` at 600.065s under ordinary (non-race) CI
+        # contention -- see artifacts/review/nightly-analysis.log and
+        # nightly-timeout-stack.log. 25m matches ci/suite.sh's own
+        # features_test_timeout (BOARD_CI_FEATURES_TEST_TIMEOUT there);
+        # this direct invocation never goes through that script, so the
+        # flag is repeated here rather than shared.
+        (cd "$repo_root" && "$repo_root/ci/run.sh" go test -p=1 -count=1 "-timeout=${BOARD_CI_FEATURES_TEST_TIMEOUT:-25m}" ./...) > "$run_log" 2>&1
+        status=$?
+    fi
+
+    cat "$run_log" | tee -a "$summary_log" >/dev/null
+
+    if [ "$status" -eq 0 ]; then
+        echo "=== RUN $i: PASS (exit $status) ===" | tee -a "$summary_log"
+        pass=$((pass + 1))
+    else
+        echo "=== RUN $i: FAIL (exit $status) ===" | tee -a "$summary_log"
+        # Name what failed in the console itself: the per-run log stays on the
+        # CI agent, and a verdict line alone cannot be root-caused. Only the
+        # go test verdict lines and the tail of the log are echoed, not the
+        # whole log.
+        {
+            echo "--- RUN $i failure excerpt ---"
+            grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|^\s+--- FAIL' "$run_log" | head -n 40
+            # godog prints the failing step and its error in a "--- Failed
+            # steps:" block (ANSI colours stripped here); the verdict lines
+            # above name only the scenario, never why it failed.
+            echo "--- RUN $i failed steps ---"
+            sed -e 's/\x1b\[[0-9;]*m//g' "$run_log" | awk '/^--- Failed steps:/{p=1} p{print} /^[0-9]+ scenarios \(/{p=0}' | head -n 60
+            echo "--- RUN $i log tail ---"
+            tail -n 40 "$run_log"
+            echo "--- end RUN $i excerpt ---"
+        } | tee -a "$summary_log"
+        fail=$((fail + 1))
+    fi
+
+    i=$((i + 1))
+done
+
+echo "full per-run logs and combined summary log kept in: $outdir" | tee -a "$summary_log"
+echo "$pass/$runs passed" | tee -a "$summary_log"
+
+if [ "$fail" -gt 0 ]; then
+    exit 1
+fi
+exit 0

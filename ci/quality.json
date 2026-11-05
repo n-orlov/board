@@ -1,0 +1,23 @@
+{
+    "coverage": {
+        "enabled": true,
+        "total_floor": 85,
+        "package_floor": 80,
+        "fixture_floor": 50
+    },
+    "crap": {
+        "enabled": true,
+        "ceiling": 8,
+        "fixture_ceiling": 8
+    },
+    "trivy": {
+        "enabled": true,
+        "severity": "HIGH,CRITICAL"
+    },
+    "govulncheck": {
+        "enabled": true
+    },
+    "golangci": {
+        "enabled": true
+    }
+}
