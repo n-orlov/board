@@ -91,6 +91,20 @@ func (e *apiError) exitCode() int {
 	}
 }
 
+// authNext is what an agent does about a key the server refused (SPEC §8.1).
+const authNext = "check BOARD_API_KEY (board admin keys list shows which keys are active)"
+
+// withNext replaces the suggested next action of an apiError with the given
+// status by a command the CLI knows to be the right one: the server's own
+// `next` names an HTTP call, the CLI names the command. Any other error stays.
+func withNext(err error, status int, next string) error {
+	var ae *apiError
+	if errors.As(err, &ae) && ae.Status == status {
+		return &apiError{Status: ae.Status, Detail: ae.Detail, Next: next}
+	}
+	return err
+}
+
 // problem is the part of an RFC 9457 document the CLI prints.
 type problem struct {
 	Title  string `json:"title"`
@@ -179,7 +193,7 @@ func (c *client) finish(req *http.Request, out any) error {
 		return fmt.Errorf("reading the server's answer: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return newAPIError(resp.StatusCode, raw)
+		return withNext(newAPIError(resp.StatusCode, raw), http.StatusUnauthorized, authNext)
 	}
 	if out == nil {
 		return nil

@@ -56,7 +56,7 @@ func TestWhoamiRefusals(t *testing.T) {
 	}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	if code, out, errs := runEnv(f.env(srv), "whoami"); code != ExitAuth || out != "" || errs != "key revoked → ask the operator for a new key\n" {
+	if code, out, errs := runEnv(f.env(srv), "whoami"); code != ExitAuth || out != "" || errs != "key revoked → "+authNext+"\n" {
 		t.Fatalf("got %d %q %q", code, out, errs)
 	}
 	for _, args := range [][]string{{"whoami", "extra"}, {"whoami", "--json"}} {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -92,7 +93,7 @@ func initAdd(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	var raw json.RawMessage
 	if err := c.do(ctx, "POST", "/api/v1/initiatives", nil, body, &raw); err != nil {
-		return report(stderr, err)
+		return report(stderr, withNext(err, http.StatusConflict, "board init show "+p.pos[0]))
 	}
 	if p.has("--json") {
 		_, _ = fmt.Fprintln(stdout, string(raw))
@@ -220,7 +221,7 @@ func initShow(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	var raw json.RawMessage
 	if err := c.do(ctx, "GET", "/api/v1/initiatives/"+url.PathEscape(p.pos[0]), nil, nil, &raw); err != nil {
-		return report(stderr, err)
+		return report(stderr, withNext(err, http.StatusNotFound, "board init ls"))
 	}
 	if p.has("--json") {
 		_, _ = fmt.Fprintln(stdout, string(raw))

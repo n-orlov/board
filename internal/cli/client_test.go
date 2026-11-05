@@ -204,3 +204,17 @@ func TestAgo(t *testing.T) {
 		}
 	}
 }
+
+func TestWithNextReplacesOnlyTheMatchingStatus(t *testing.T) {
+	err := error(&apiError{Status: 404, Detail: "gone", Next: "GET /x"})
+	if got := withNext(err, 404, "board init ls").Error(); got != "gone → board init ls" {
+		t.Fatalf("got %q", got)
+	}
+	if got := withNext(err, 409, "board init ls"); !errors.Is(got, err) {
+		t.Fatalf("a different status changed the error: %v", got)
+	}
+	plain := errors.New("boom")
+	if got := withNext(plain, 404, "x"); !errors.Is(got, plain) {
+		t.Fatalf("a plain error changed: %v", got)
+	}
+}

@@ -712,16 +712,24 @@ The CLI is written for agents first: every line costs context.
 
 Exit codes:
 
-| code | meaning |
-|---|---|
-| 0 | success |
-| 1 | error (server, network, unexpected) |
-| 2 | usage error (bad flags or arguments) |
-| 3 | timed out waiting (`--poll`); the ask stays open |
-| 4 | not found (unknown ref) |
-| 5 | authentication failed (missing, revoked or expired key) |
-| 6 | state conflict (expired lease, task closed, dependency cycle) |
-| 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap |
+| code | meaning | Phase 0 condition |
+|---|---|---|
+| 0 | success | a command did what was asked (a write printed its `ok` line, a list printed, possibly nothing) |
+| 1 | error (server, network, unexpected) | the server cannot be reached, `BOARD_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
+| 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
+| 3 | timed out waiting (`--poll`), the ask stays open | not yet reachable: arrives with `board ask` |
+| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board admin keys revoke` of an unknown name |
+| 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | in Phase 0 only a taken initiative slug (`board init add`) |
+| 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | not yet reachable: arrives with leases |
+
+`features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
+items print without a `more` line, 21 print 20 plus `+1 more → board init ls --all`.
+
+The CLI words the next action itself: the `→ <next>` of a client error is a command (`→ board init ls` for an
+unknown initiative, `→ board init show <slug>` for a taken slug, `→ check BOARD_API_KEY (board admin keys list
+shows which keys are active)` for a refused key), not the server's HTTP-flavoured `next`, which stays in the
+problem document for other clients. A status the CLI has no command for prints the server's own `next`.
 
 ### 8.2 Short refs
 

@@ -110,7 +110,7 @@ func TestInitAddRefusals(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "init", "add", "xx", "T")
-	if code != ExitConflict || out != "" || errs != "initiative \"x\" already exists → read it\n" {
+	if code != ExitConflict || out != "" || errs != "initiative \"x\" already exists → board init show xx\n" {
 		t.Fatalf("got %d %q %q", code, out, errs)
 	}
 	f.handler = func(w http.ResponseWriter, _ *http.Request) {
@@ -178,7 +178,7 @@ func TestInitLsFailures(t *testing.T) {
 		w.WriteHeader(401)
 		_, _ = w.Write([]byte(`{"detail":"key revoked","next":"ask for a new key"}`))
 	}
-	if code, _, errs := runEnv(f.env(srv), "init", "ls"); code != ExitAuth || errs != "key revoked → ask for a new key\n" {
+	if code, _, errs := runEnv(f.env(srv), "init", "ls"); code != ExitAuth || errs != "key revoked → "+authNext+"\n" {
 		t.Fatalf("401: %d %q", code, errs)
 	}
 	f.handler = func(w http.ResponseWriter, _ *http.Request) {
