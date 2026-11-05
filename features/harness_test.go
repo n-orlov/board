@@ -24,7 +24,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|admin>"
+const usageLine = "usage: board <serve|version|whoami|init|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -114,8 +114,13 @@ func (h *harness) runWith(ctx context.Context, line string, extra ...string) err
 	if len(fields) == 0 || fields[0] != "board" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
+	return h.runArgs(ctx, fields[1:], extra...)
+}
+
+// runArgs runs the board binary with args and records its exit code and output.
+func (h *harness) runArgs(ctx context.Context, args []string, extra ...string) error {
 	var out, errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, h.binary, fields[1:]...)
+	cmd := exec.CommandContext(ctx, h.binary, args...)
 	if h.dbURL != "" {
 		extra = append([]string{"BOARD_DB_URL=" + h.dbURL}, extra...)
 	}
@@ -373,6 +378,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerOIDCSteps(sc, h)
 	registerUIKeySteps(sc, h)
 	registerInitiativeAPISteps(sc, h)
+	registerCLIInitiativeSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

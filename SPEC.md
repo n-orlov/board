@@ -649,7 +649,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|admin>`.
+`usage: board <serve|version|whoami|init|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -667,7 +667,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|whoami|init|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -744,13 +744,42 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami` and `init add|ls|show`; the other lines
+below arrive with their phases. The client commands (`whoami`, `init …`) call the server at `BOARD_URL` with
+`Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
+$BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
+walks every registered flag and fails on a key-like name). With `BOARD_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
+and, unless `BOARD_WAY_BACK` is set, the way back is `pid <ppid> on <hostname>, cwd <cwd>` (§9). With
+no `BOARD_API_KEY` a client command exits 5 with `no BOARD_API_KEY → export BOARD_API_KEY (this environment's
+key)`, with no `BOARD_URL` it exits 1 with `no BOARD_URL → export BOARD_URL (the address of the board server)`, and
+an unreachable server exits 1 with `server unreachable at <url> → check BOARD_URL and that board serve is running`.
+A server problem document is printed as one line, `<detail> → <next>`, and exits by its status: 401 is 5, 404 is 4,
+409 is 6, anything else 1. The flags may come before or after the positional arguments, as `--flag value` or
+`--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
+
+- `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
+  created` (`--json`: the created object instead). A taken slug exits 6, a bad slug or tag exits 1 with the server's
+  message.
+- `board init ls [--tag t]... [--limit N|--all] [--json]` prints one line per initiative in creation order,
+  `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A tag
+  given more than once keeps the initiatives that carry every tag. It shows 20 by default, `--limit N` (N ≥ 1)
+  changes the cap and `--all` removes it (both together are a usage error); when more exist the last line is
+  `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array.
+- `board init show <slug> [--json]` prints the one-line form, then `targets: <start> → <end>` when it has either,
+  `created by <handle> <relative time>`, `closed by <handle> <relative time>` when closed, and the description. An
+  unknown slug exits 4 with the server's `next`.
+- `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
+  the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
+  server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
+- The usage line for an unknown subcommand is `usage: board <serve|version|whoami|init|admin>`.
+
 ```
 board version | update [--check] [--version vX.Y.Z]
 board help agent [--version]            # the agent protocol cheat sheet (§8.6)
 board whoami                            # handle, way back, key name, server reachability
 board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
 board attention
-board init add <slug> "<title>" [--tag t]... | ls [--tag t] | show <slug> | close <slug>
+board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--limit N|--all] | show <slug> | close <slug>
 board task add <initiative> "<title>" [--kind watch --cadence 24h] [--after <ref>]...
 board task ls [<initiative>] [--status …] | show|done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
 board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]

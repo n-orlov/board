@@ -1,0 +1,81 @@
+package cli
+
+import "strings"
+
+// flagSpec names one flag a client command accepts and whether it takes a value.
+// The tables below are the only flags the client commands register: the
+// parser accepts nothing else, and a test reads them to keep a key flag out.
+type flagSpec struct {
+	Name  string
+	Value bool
+}
+
+var (
+	initAddFlags  = []flagSpec{{"--tag", true}, {"--json", false}}
+	initLsFlags   = []flagSpec{{"--tag", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
+	initShowFlags = []flagSpec{{"--json", false}}
+	whoamiFlags   = []flagSpec{}
+)
+
+// parsedArgs is a command line split into positional arguments and flags.
+type parsedArgs struct {
+	pos    []string
+	values map[string][]string
+	set    map[string]bool
+}
+
+func (p parsedArgs) has(name string) bool { return p.set[name] }
+
+// parseArgs reads args against specs, flags and positionals in any order. A
+// flag the table does not name, or a value flag with no value, is not ok. After
+// a bare `--` everything is positional.
+func parseArgs(args []string, specs []flagSpec) (parsedArgs, bool) {
+	p := parsedArgs{values: map[string][]string{}, set: map[string]bool{}}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			p.pos = append(p.pos, args[i+1:]...)
+			return p, true
+		}
+		if !strings.HasPrefix(a, "-") {
+			p.pos = append(p.pos, a)
+			continue
+		}
+		var ok bool
+		if i, ok = p.flag(args, i, specs); !ok {
+			return p, false
+		}
+	}
+	return p, true
+}
+
+// flag reads the flag at args[i] and returns the index of its last argument.
+func (p parsedArgs) flag(args []string, i int, specs []flagSpec) (int, bool) {
+	name, val, hasVal := strings.Cut(args[i], "=")
+	spec, found := lookupFlag(specs, name)
+	if !found || (hasVal && !spec.Value) {
+		return i, false
+	}
+	p.set[name] = true
+	if !spec.Value {
+		return i, true
+	}
+	if !hasVal {
+		if i+1 >= len(args) {
+			return i, false
+		}
+		i++
+		val = args[i]
+	}
+	p.values[name] = append(p.values[name], val)
+	return i, true
+}
+
+func lookupFlag(specs []flagSpec, name string) (flagSpec, bool) {
+	for _, s := range specs {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return flagSpec{}, false
+}
