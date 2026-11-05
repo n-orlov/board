@@ -52,19 +52,81 @@ func TestSpecDocumentsAreServedToAnAuthenticatedCaller(t *testing.T) {
 	}
 }
 
-var externalURL = regexp.MustCompile(`https?://`)
+var (
+	externalURL = regexp.MustCompile(`https?://`)
+	assetRef    = regexp.MustCompile(`(?:src|href)="([^"]+)"`)
+)
 
-func TestDocsPageIsHTMLAndReferencesNoExternalHost(t *testing.T) {
+func TestDocsPageIsSwaggerUIFromEmbeddedAssetsAndReferencesNoExternalHost(t *testing.T) {
+	h := NewHandler(ok, acceptKey)
 	rec := httptest.NewRecorder()
-	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/docs"))
+	h.ServeHTTP(rec, authed("/api/docs"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/docs = %d, want 200", rec.Code)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "text/html" {
 		t.Errorf("GET /api/docs Content-Type = %q, want text/html", ct)
 	}
+	page := rec.Body.String()
+	if externalURL.MatchString(page) {
+		t.Errorf("GET /api/docs references an external host: %q", page)
+	}
+	refs := assetRef.FindAllStringSubmatch(page, -1)
+	if len(refs) == 0 {
+		t.Fatalf("GET /api/docs references no asset: %q", page)
+	}
+	served := ""
+	for _, ref := range refs {
+		url := ref[1]
+		if !strings.HasPrefix(url, "/") || strings.HasPrefix(url, "//") {
+			t.Errorf("asset URL %q is not a path on this host", url)
+			continue
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, authed(url))
+		if rec.Code != http.StatusOK || rec.Body.Len() == 0 {
+			t.Errorf("GET %s = %d with %d bytes, want 200 with a body", url, rec.Code, rec.Body.Len())
+		}
+		served += rec.Body.String()[:min(rec.Body.Len(), 1<<20)]
+		if want := map[string]string{".js": "text/javascript", ".css": "text/css"}[url[strings.LastIndex(url, "."):]]; rec.Header().Get("Content-Type") != want {
+			t.Errorf("GET %s Content-Type = %q, want %q", url, rec.Header().Get("Content-Type"), want)
+		}
+	}
+	if !strings.Contains(served, "SwaggerUIBundle") {
+		t.Error("the served assets do not contain Swagger UI")
+	}
+}
+
+func TestDocsInitScriptNamesNoExternalHostAndLoadsTheSpecFromThisOne(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/docs/assets/init.js"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET init.js = %d, want 200", rec.Code)
+	}
 	if externalURL.MatchString(rec.Body.String()) {
-		t.Errorf("GET /api/docs references an external host: %q", rec.Body.String())
+		t.Errorf("init.js references an external host: %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "'/api/openapi.json'") {
+		t.Errorf("init.js does not load /api/openapi.json: %q", rec.Body.String())
+	}
+}
+
+func TestUnknownDocsAssetIs404AProblem(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/docs/assets/nope.js"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/docs/assets/nope.js = %d, want 404", rec.Code)
+	}
+	if doc := problem(t, rec); doc["status"].(float64) != 404 {
+		t.Errorf("problem = %v", doc)
+	}
+}
+
+func TestDocsAssetsNeedACredential(t *testing.T) {
+	for _, path := range []string{"/api/docs", "/api/docs/assets/init.js", "/api/docs/assets/nope.js"} {
+		if rec := request(path, nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s with no credential = %d, want 401", path, rec.Code)
+		}
 	}
 }
 
@@ -94,6 +156,7 @@ func (brokenResponse) VisitGetReadyzResponse(http.ResponseWriter) error      { r
 func (brokenResponse) VisitGetOpenapiYAMLResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitGetOpenapiJSONResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitGetDocsResponse(http.ResponseWriter) error        { return errBroken }
+func (brokenResponse) VisitGetDocsAssetResponse(http.ResponseWriter) error   { return errBroken }
 
 // outcome is what every stub operation returns: an error or a response that
 // fails to write.
@@ -128,6 +191,12 @@ func (s stubOperations) GetOpenapiJSON(context.Context, GetOpenapiJSONRequestObj
 	return resp, err
 }
 
+func (s stubOperations) GetDocsAsset(context.Context, GetDocsAssetRequestObject) (GetDocsAssetResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetDocsAssetResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetDocsResponseObject)
@@ -139,7 +208,7 @@ func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsR
 // cannot be written, and a middleware that swaps in a foreign response: each answers 500 as a
 // problem document, and the strict middleware sees every call.
 func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
-	paths := []string{"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs"}
+	paths := []string{"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js"}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		var seen []string
 		record := func(next StrictHandlerFunc, operationID string) StrictHandlerFunc {
@@ -180,6 +249,9 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 	}{
 		{"docs 400", 400, GetDocs400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetDocsResponse},
 		{"docs 401", 401, GetDocs401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetDocsResponse},
+		{"asset 400", 400, GetDocsAsset400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetDocsAssetResponse},
+		{"asset 401", 401, GetDocsAsset401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetDocsAssetResponse},
+		{"asset 404", 404, GetDocsAsset404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetDocsAssetResponse},
 		{"json 400", 400, GetOpenapiJSON400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetOpenapiJSONResponse},
 		{"json 401", 401, GetOpenapiJSON401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetOpenapiJSONResponse},
 		{"yaml 400", 400, GetOpenapiYAML400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetOpenapiYAMLResponse},

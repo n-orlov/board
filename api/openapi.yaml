@@ -108,7 +108,9 @@ paths:
       operationId: getDocs
       tags: [docs]
       summary: Interactive API documentation
-      description: An HTML page that documents the API.
+      description: >-
+        Swagger UI, served from assets embedded in the binary, listing every
+        operation of this document. Its Authorize button takes a `bearerAuth` key.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -123,6 +125,38 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /api/docs/assets/{name}:
+    get:
+      operationId: getDocsAsset
+      tags: [docs]
+      summary: A Swagger UI asset
+      description: A script or stylesheet of the page at /api/docs, embedded in the binary.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The asset's file name.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The asset.
+          content:
+            text/javascript:
+              schema:
+                type: string
+            text/css:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     bearerAuth:
@@ -143,6 +177,12 @@ components:
             $ref: "#/components/schemas/Problem"
     Unauthorized:
       description: No credential, or an unknown, revoked or expired key.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: There is no such resource.
       content:
         application/problem+json:
           schema:

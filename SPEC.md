@@ -428,13 +428,21 @@ and CLI can show badges without the lists.
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
-  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs` and the
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}` and the
   RFC 9457 `Problem` schema. The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
   or session like any other route.
-- **Swagger UI** at `/api/docs` (assets embedded, no CDN). Until Swagger UI lands the route
-  serves a one-page HTML index of the two spec documents that references no external host.
+- **Swagger UI** at `/api/docs`: Swagger UI 5.34.1 (swagger-ui-dist, Apache-2.0), its script and
+  stylesheet embedded in the binary (`internal/swaggerui`) and served from
+  `GET /api/docs/assets/{name}` (`text/javascript` or `text/css`, 404 as a problem document for
+  any other name). The page loads the OpenAPI document from `/api/openapi.json` and lists every
+  operation in it, and its Authorize dialog offers the `bearerAuth` scheme, so a caller pastes
+  an API key and tries an operation from the page. The page and the assets reference no external
+  host (no CDN) and need a key or session like every route but `/healthz`. A Go test fails on an
+  `http(s)://` URL in the served page, and `e2e/swagger.spec.ts` opens `/api/docs` with a key
+  minted by `board admin keys create` and asserts the rendered operations are those of
+  `api/openapi.yaml`.
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is
   unauthenticated (`/readyz`, the spec documents, `/api/docs` and `/metrics` all require a key or

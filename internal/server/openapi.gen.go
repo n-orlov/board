@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 // Problem An RFC 9457 problem document.
@@ -35,6 +37,9 @@ type Problem struct {
 // BadRequest An RFC 9457 problem document.
 type BadRequest = Problem
 
+// NotFound An RFC 9457 problem document.
+type NotFound = Problem
+
 // Unauthorized An RFC 9457 problem document.
 type Unauthorized = Problem
 
@@ -43,6 +48,9 @@ type ServerInterface interface {
 	// GetDocs Interactive API documentation
 	// (GET /api/docs)
 	GetDocs(w http.ResponseWriter, r *http.Request)
+	// GetDocsAsset A Swagger UI asset
+	// (GET /api/docs/assets/{name})
+	GetDocsAsset(w http.ResponseWriter, r *http.Request, name string)
 	// GetOpenapiJSON This document as JSON
 	// (GET /api/openapi.json)
 	GetOpenapiJSON(w http.ResponseWriter, r *http.Request)
@@ -71,6 +79,32 @@ func (siw *ServerInterfaceWrapper) GetDocs(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDocsAsset operation middleware
+func (siw *ServerInterfaceWrapper) GetDocsAsset(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDocsAsset(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -261,11 +295,14 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/openapi.yaml", wrapper.GetOpenapiYAML)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/openapi.json", wrapper.GetOpenapiJSON)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs", wrapper.GetDocs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs/assets/{name}", wrapper.GetDocsAsset)
 
 	return m
 }
 
 type BadRequestApplicationProblemPlusJSONResponse Problem
+
+type NotFoundApplicationProblemPlusJSONResponse Problem
 
 type UnauthorizedApplicationProblemPlusJSONResponse Problem
 
@@ -324,6 +361,102 @@ func (response GetDocs401ApplicationProblemPlusJSONResponse) VisitGetDocsRespons
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDocsAssetRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetDocsAssetResponseObject interface {
+	VisitGetDocsAssetResponse(w http.ResponseWriter) error
+}
+
+type GetDocsAsset200TextcssResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetDocsAsset200TextcssResponse) VisitGetDocsAssetResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/css")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetDocsAsset200TextjavascriptResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetDocsAsset200TextjavascriptResponse) VisitGetDocsAssetResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/javascript")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetDocsAsset400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetDocsAsset400ApplicationProblemPlusJSONResponse) VisitGetDocsAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDocsAsset401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetDocsAsset401ApplicationProblemPlusJSONResponse) VisitGetDocsAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetDocsAsset404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetDocsAsset404ApplicationProblemPlusJSONResponse) VisitGetDocsAssetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -524,6 +657,9 @@ type StrictServerInterface interface {
 	// GetDocs Interactive API documentation
 	// (GET /api/docs)
 	GetDocs(ctx context.Context, request GetDocsRequestObject) (GetDocsResponseObject, error)
+	// GetDocsAsset A Swagger UI asset
+	// (GET /api/docs/assets/{name})
+	GetDocsAsset(ctx context.Context, request GetDocsAssetRequestObject) (GetDocsAssetResponseObject, error)
 	// GetOpenapiJSON This document as JSON
 	// (GET /api/openapi.json)
 	GetOpenapiJSON(ctx context.Context, request GetOpenapiJSONRequestObject) (GetOpenapiJSONResponseObject, error)
@@ -594,6 +730,32 @@ func (sh *strictHandler) GetDocs(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDocsResponseObject); ok {
 		if err := validResponse.VisitGetDocsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDocsAsset operation middleware
+func (sh *strictHandler) GetDocsAsset(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetDocsAssetRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDocsAsset(ctx, request.(GetDocsAssetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDocsAsset")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDocsAssetResponseObject); ok {
+		if err := validResponse.VisitGetDocsAssetResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -4,22 +4,12 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/n-orlov/board/api"
+	"github.com/n-orlov/board/internal/swaggerui"
 )
-
-// docsPage is the body of GET /api/docs. It references no external host.
-const docsPage = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Board API</title></head>
-<body>
-<h1>Board API</h1>
-<p>The OpenAPI 3.1 document is served as
-<a href="/api/openapi.yaml">YAML</a> and <a href="/api/openapi.json">JSON</a>.</p>
-</body>
-</html>
-`
 
 // readyTimeout bounds one readiness check.
 const readyTimeout = 3 * time.Second
@@ -76,5 +66,22 @@ func (operations) GetOpenapiJSON(context.Context, GetOpenapiJSONRequestObject) (
 }
 
 func (operations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsResponseObject, error) {
-	return GetDocs200TexthtmlResponse{Body: bytes.NewReader([]byte(docsPage)), ContentLength: int64(len(docsPage))}, nil
+	return GetDocs200TexthtmlResponse{Body: strings.NewReader(swaggerui.Page), ContentLength: int64(len(swaggerui.Page))}, nil
 }
+
+func (operations) GetDocsAsset(_ context.Context, req GetDocsAssetRequestObject) (GetDocsAssetResponseObject, error) {
+	body, contentType, ok := swaggerui.Asset(req.Name)
+	if !ok {
+		return GetDocsAsset404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse{
+			Type: problemType, Title: http.StatusText(http.StatusNotFound), Status: http.StatusNotFound,
+			Detail: ptr("there is no such documentation asset"),
+		}}, nil
+	}
+	r, n := bytes.NewReader(body), int64(len(body))
+	if contentType == "text/css" {
+		return GetDocsAsset200TextcssResponse{Body: r, ContentLength: n}, nil
+	}
+	return GetDocsAsset200TextjavascriptResponse{Body: r, ContentLength: n}, nil
+}
+
+func ptr[T any](v T) *T { return &v }

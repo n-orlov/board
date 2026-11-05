@@ -93,9 +93,29 @@ export interface paths {
         };
         /**
          * Interactive API documentation
-         * @description An HTML page that documents the API.
+         * @description Swagger UI, served from assets embedded in the binary, listing every operation of this document. Its Authorize button takes a `bearerAuth` key.
          */
         get: operations["getDocs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docs/assets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A Swagger UI asset
+         * @description A script or stylesheet of the page at /api/docs, embedded in the binary.
+         */
+        get: operations["getDocsAsset"];
         put?: never;
         post?: never;
         delete?: never;
@@ -134,6 +154,15 @@ export interface components {
         };
         /** @description No credential, or an unknown, revoked or expired key. */
         Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description There is no such resource. */
+        NotFound: {
             headers: {
                 [name: string]: unknown;
             };
@@ -264,6 +293,33 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getDocsAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The asset's file name. */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The asset. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/javascript": string;
+                    "text/css": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
 }
