@@ -262,7 +262,9 @@ func (h *harness) createdEventCount(ctx context.Context, want int) error {
 func registerInitiativeAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I create the initiative "([^"]*)" titled "([^"]*)" with tags "([^"]*)" as actor "([^"]*)"$`, h.createInitiative)
 	sc.Step(`^I create the initiative "([^"]*)" titled "([^"]*)" with no tags as actor "([^"]*)"$`,
-		func(ctx context.Context, slug, title, actor string) error { return h.createInitiative(ctx, slug, title, "", actor) })
+		func(ctx context.Context, slug, title, actor string) error {
+			return h.createInitiative(ctx, slug, title, "", actor)
+		})
 	sc.Step(`^I request the initiative "([^"]*)" as actor "([^"]*)"$`, h.getInitiative)
 	sc.Step(`^I request the initiative "([^"]*)" by its id as actor "([^"]*)"$`, h.getInitiativeByID)
 	sc.Step(`^I request the initiatives list "([^"]*)" as actor "([^"]*)"$`, h.listInitiatives)

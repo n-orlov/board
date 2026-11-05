@@ -46,12 +46,12 @@ func TestCreateInitiativeReturnsItAndAppendsAnEventWithPrincipalAndActor(t *test
 func TestCreateInitiativeRefusesBadFieldsWithAProblemAndNext(t *testing.T) {
 	s := newKeyServer(t)
 	cases := map[string]string{
-		"x":                                       "",
-		"Has-Upper":                               "",
-		strings.Repeat("a", 41):                   "",
-		"ok-slug":                                 `,"tags":["no way"]`,
-		"ok-slug2":                                `,"target_start":"2026-04-01","target_end":"2026-03-01"`,
-		"ok-slug3":                                `,"description":"` + strings.Repeat("x", 20001) + `"`,
+		"x":                     "",
+		"Has-Upper":             "",
+		strings.Repeat("a", 41): "",
+		"ok-slug":               `,"tags":["no way"]`,
+		"ok-slug2":              `,"target_start":"2026-04-01","target_end":"2026-03-01"`,
+		"ok-slug3":              `,"description":"` + strings.Repeat("x", 20001) + `"`,
 	}
 	for slug, extra := range cases {
 		rec := s.create(slug, extra)

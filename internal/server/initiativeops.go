@@ -12,9 +12,11 @@ import (
 	"github.com/n-orlov/board/internal/initiatives"
 )
 
-func (p problemResponse) VisitListInitiativesResponse(w http.ResponseWriter) error  { return p.write(w) }
-func (p problemResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error { return p.write(w) }
-func (p problemResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error    { return p.write(w) }
+func (p problemResponse) VisitListInitiativesResponse(w http.ResponseWriter) error { return p.write(w) }
+func (p problemResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
+func (p problemResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error { return p.write(w) }
 
 // initiativeOps is the /api/v1/initiatives operations (SPEC 6.2). Any
 // authenticated principal may use them: v1 has no ACL.
