@@ -118,23 +118,57 @@ used it.
 Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 
 - Configuration (§13): issuer URL, client ID, client secret, **allowed emails** list, public base
-  URL. Discovery via `<issuer>/.well-known/openid-configuration`; ID token signature checked
-  against the issuer's JWKS (cached, refreshed on unknown `kid`).
+  URL. Discovery via `<issuer>/.well-known/openid-configuration` (fetched on first use and cached, so
+  the board starts while the issuer is down); ID token signature (RS256) checked against the
+  issuer's JWKS (cached, refreshed on an unknown `kid`, at most once per 10 s). The ID token's
+  issuer, audience (the client ID), expiry and nonce are checked too.
 - Flow: authorization code with **PKCE (S256)**, plus `state` and `nonce`, both single-use,
-  bound to a short-lived (10 min) HttpOnly pre-login cookie. Scopes `openid email profile`.
-- Callback path is fixed: **`/auth/oidc/callback`** (under `BOARD_BASE_PATH`). Logout:
-  `POST /auth/logout`.
+  bound to a short-lived (10 min) HttpOnly pre-login cookie `board_login` (path `/auth`). The
+  server keeps the login's `state`, `nonce` and PKCE verifier in memory under the cookie's random
+  ID and spends them on the first callback, whatever its outcome. Scopes `openid email profile`.
+  The client authenticates to the token endpoint with `client_secret_basic`.
+  1. `GET /auth/login` redirects the browser to the provider's authorization endpoint and sets the
+     pre-login cookie.
+  2. The provider redirects back to **`/auth/oidc/callback`** with
+     `code` and `state`.
+  3. The callback answers **400** when no login is in progress (the pre-login cookie is missing,
+     used or expired, so there is no PKCE verifier), when `state` differs from the login's, when it
+     carries no code, or when the ID token carries another login's nonce (a reused nonce); **401**
+     when the ID token is not valid (bad or tampered signature, wrong issuer, audience or expiry);
+     **403** when the provider reports an error or admission fails (below); **502** when the provider
+     cannot be reached or refuses the code. Every one of these creates no session.
+  4. On success it starts the session and redirects to `/`. The pre-login cookie is left to expire:
+     its login is already spent server-side, so it opens nothing.
+- Session endpoints: `GET /auth/session` describes the caller's session (`email`,
+  `principal` = `oidc:<email>`, `actor` = the operator handle, `csrf_token`), and
+  `POST /auth/logout` deletes the session row and clears the cookie (204). Both need a session
+  and answer 401 to anything else, a key included.
 - Admission: `email_verified` must be true and the email must be in the allowed list
-  (case-insensitive, exact). Anything else gets 403 and no session.
-- Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie, path
-  `BOARD_BASE_PATH`; stored server-side as SHA-256 hash (§4.9) with expiry (default 7 days
-  absolute, 24 h idle), so logout and expiry are real.
+  (case-insensitive, exact). Anything else gets 403 and no session. An admitted email acts as
+  the **operator** actor (§3.1).
+- Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie `board_session`, path
+  `/`; stored server-side as SHA-256 hash (§4.9) with expiry (default 7 days
+  absolute, 24 h idle), so logout and expiry are real. The cookie value is never stored.
 - **CSRF**: every cookie-authenticated non-GET request must carry `X-CSRF-Token` matching the
   session's CSRF token (delivered to the UI by `GET /auth/session`), and an `Origin` (or
   `Referer`) equal to the public base URL. Bearer-authenticated requests are exempt (no ambient
   credential).
-- Unauthenticated browser navigation redirects to login; unauthenticated API calls get 401 with
-  a problem document.
+- **API call or browser navigation**: a browser navigation is a `GET` whose `Accept` header
+  contains `text/html`; every other request is an API call. A request with no credential (no
+  Bearer key, no live session cookie) is answered by that rule when login is on: an API call gets
+  401 with a problem document, including `/auth/login` and `/auth/oidc/callback`; a navigation to
+  `/auth/login` or `/auth/oidc/callback` is served; a navigation to anything else is redirected
+  (302) to `/auth/login`, which redirects to the provider. Only `GET /healthz` is answered with no
+  credential at all. When login is off (`BOARD_OIDC_ISSUER` unset) every credential-less request
+  gets 401, and the `/auth/*` operations answer 404 to an authenticated caller.
+- **The mock provider** (`internal/oidc/oidctest`) is a test-only OIDC issuer the test harness
+  starts in-process. It serves discovery, a JWKS, an authorization endpoint that signs in whoever
+  the test names (no login page) and refuses a request that lacks PKCE S256, a state or a nonce, and a token
+  endpoint that checks the client secret, the single-use code and that the `code_verifier` hashes to
+  the challenge. Its RSA key is generated when it starts and nothing is committed. Knobs let a
+  test sign in an unverified email, reuse an earlier login's nonce, or rewrite a signed token's
+  email. `cmd/board` never imports it, so the release image does not hold it
+  (`ci/repocheck` checks `go list -deps ./cmd/board`). CI contacts no external identity provider.
 
 ### 3.3 Agents: API keys
 
@@ -937,16 +971,19 @@ All configuration is by environment variable:
 | `BOARD_SWEEP_INTERVAL` | `15s` | lease expiry sweep |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
-| `BOARD_PUBLIC_URL` | (required) | external base URL; used for the OIDC redirect URI and the CSRF origin check |
-| `BOARD_OIDC_ISSUER` | (required) | issuer URL (discovery) |
-| `BOARD_OIDC_CLIENT_ID` | (required) | |
-| `BOARD_OIDC_CLIENT_SECRET` | (required) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
-| `BOARD_OIDC_ALLOWED_EMAILS` | (required) | comma-separated; these log in as the operator |
+| `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check |
+| `BOARD_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
+| `BOARD_OIDC_CLIENT_ID` | (required with the issuer) | |
+| `BOARD_OIDC_CLIENT_SECRET` | (required with the issuer) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
+| `BOARD_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as the operator |
 | `BOARD_SESSION_TTL` | `168h` | absolute session lifetime |
 | `BOARD_SESSION_IDLE` | `24h` | idle timeout |
 
-The app refuses to start without the OIDC settings (there is no unauthenticated mode; tests use a
-mock provider, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
+Browser login is on when `BOARD_OIDC_ISSUER` is set: the other four OIDC settings and
+`BOARD_PUBLIC_URL` are then required, a partial or malformed set refuses to start (one stderr line,
+exit 1), and `BOARD_OIDC_CLIENT_SECRET_FILE` may replace the secret variable. With the issuer unset
+browser login is off and only API keys authenticate (§3.3); there is no unauthenticated mode either way,
+and tests use a mock provider (§3.2, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
 proxy, since the session cookie is `Secure`. Register the redirect URI
 `<BOARD_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
 `board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.

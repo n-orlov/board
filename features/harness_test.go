@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+
+	"github.com/n-orlov/board/internal/oidc/oidctest"
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
@@ -63,6 +65,12 @@ type harness struct {
 	// status each answered to a request with no credential.
 	operations []operation
 	answers    map[string]int
+
+	// web is the browser of the OIDC scenarios, idp the mock provider they
+	// start (nil until a scenario asks for one) and idpSecret its client secret.
+	web       browser
+	idp       *oidctest.Provider
+	idpSecret string
 
 	// key is the API key a scenario remembered from stdout.
 	key string
@@ -144,6 +152,9 @@ func (h *harness) startServerWith(ctx context.Context, extra ...string) (context
 	_ = ln.Close()
 	if err := h.freshDatabase(); err != nil {
 		return ctx, err
+	}
+	for i, kv := range extra {
+		extra[i] = strings.ReplaceAll(kv, "{addr}", h.addr)
 	}
 	h.server = exec.Command(h.binary, "serve")
 	h.server.Env = h.env(append([]string{"BOARD_LISTEN=" + h.addr, "BOARD_DB_URL=" + h.dbURL}, extra...)...)
@@ -330,6 +341,10 @@ func (h *harness) stopServer() {
 	if h.own != nil {
 		h.own.terminate(context.Background())
 	}
+	if h.idp != nil {
+		h.idp.Close()
+	}
+	h.web, h.idp, h.idpSecret = browser{}, nil, ""
 	h.dir, h.dbURL, h.own, h.dedicated, h.key = "", "", nil, false, ""
 }
 
@@ -351,6 +366,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	})
 	registerKeySteps(sc, h)
 	registerOpenAPISteps(sc, h)
+	registerOIDCSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

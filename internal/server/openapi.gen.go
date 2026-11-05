@@ -34,14 +34,38 @@ type Problem struct {
 	Type string `json:"type"`
 }
 
+// Session A browser session.
+type Session struct {
+	// Actor The actor the session acts as, the operator handle.
+	Actor string `json:"actor"`
+
+	// CsrfToken The value cookie-authenticated writes send as `X-CSRF-Token`.
+	CsrfToken string `json:"csrf_token"`
+
+	// Email The verified email the session belongs to.
+	Email string `json:"email"`
+
+	// Principal Who authenticated, `oidc:<email>`.
+	Principal string `json:"principal"`
+}
+
+// BadGateway An RFC 9457 problem document.
+type BadGateway = Problem
+
 // BadRequest An RFC 9457 problem document.
 type BadRequest = Problem
+
+// Forbidden An RFC 9457 problem document.
+type Forbidden = Problem
 
 // NotFound An RFC 9457 problem document.
 type NotFound = Problem
 
 // Unauthorized An RFC 9457 problem document.
 type Unauthorized = Problem
+
+// Unavailable An RFC 9457 problem document.
+type Unavailable = Problem
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -57,6 +81,18 @@ type ServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(w http.ResponseWriter, r *http.Request)
+	// GetAuthLogin Start the browser login
+	// (GET /auth/login)
+	GetAuthLogin(w http.ResponseWriter, r *http.Request)
+	// PostAuthLogout End the browser session
+	// (POST /auth/logout)
+	PostAuthLogout(w http.ResponseWriter, r *http.Request)
+	// GetAuthOidcCallback Finish the browser login
+	// (GET /auth/oidc/callback)
+	GetAuthOidcCallback(w http.ResponseWriter, r *http.Request)
+	// GetAuthSession The caller's browser session
+	// (GET /auth/session)
+	GetAuthSession(w http.ResponseWriter, r *http.Request)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -133,6 +169,62 @@ func (siw *ServerInterfaceWrapper) GetOpenapiYAML(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOpenapiYAML(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthLogin operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostAuthLogout operation middleware
+func (siw *ServerInterfaceWrapper) PostAuthLogout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostAuthLogout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthOidcCallback operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthOidcCallback(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthOidcCallback(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthSession operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthSession(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthSession(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -296,15 +388,25 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/openapi.json", wrapper.GetOpenapiJSON)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs", wrapper.GetDocs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/docs/assets/{name}", wrapper.GetDocsAsset)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/oidc/callback", wrapper.GetAuthOidcCallback)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetAuthSession)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.PostAuthLogout)
 
 	return m
 }
 
+type BadGatewayApplicationProblemPlusJSONResponse Problem
+
 type BadRequestApplicationProblemPlusJSONResponse Problem
+
+type ForbiddenApplicationProblemPlusJSONResponse Problem
 
 type NotFoundApplicationProblemPlusJSONResponse Problem
 
 type UnauthorizedApplicationProblemPlusJSONResponse Problem
+
+type UnavailableApplicationProblemPlusJSONResponse Problem
 
 type GetDocsRequestObject struct {
 }
@@ -573,6 +675,344 @@ func (response GetOpenapiYAML401ApplicationProblemPlusJSONResponse) VisitGetOpen
 	return err
 }
 
+type GetAuthLoginRequestObject struct {
+}
+
+type GetAuthLoginResponseObject interface {
+	VisitGetAuthLoginResponse(w http.ResponseWriter) error
+}
+
+type GetAuthLogin302ResponseHeaders struct {
+	Location  *string
+	SetCookie *string
+}
+
+type GetAuthLogin302Response struct {
+	Headers GetAuthLogin302ResponseHeaders
+}
+
+func (response GetAuthLogin302Response) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(302)
+	return nil
+}
+
+type GetAuthLogin401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthLogin401ApplicationProblemPlusJSONResponse) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthLogin404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthLogin404ApplicationProblemPlusJSONResponse) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthLogin502ApplicationProblemPlusJSONResponse struct {
+	BadGatewayApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthLogin502ApplicationProblemPlusJSONResponse) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthLogin503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthLogin503ApplicationProblemPlusJSONResponse) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthLogindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetAuthLogindefaultApplicationProblemPlusJSONResponse) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostAuthLogoutRequestObject struct {
+}
+
+type PostAuthLogoutResponseObject interface {
+	VisitPostAuthLogoutResponse(w http.ResponseWriter) error
+}
+
+type PostAuthLogout204ResponseHeaders struct {
+	SetCookie *string
+}
+
+type PostAuthLogout204Response struct {
+	Headers PostAuthLogout204ResponseHeaders
+}
+
+func (response PostAuthLogout204Response) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(204)
+	return nil
+}
+
+type PostAuthLogout401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PostAuthLogout401ApplicationProblemPlusJSONResponse) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostAuthLogout404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PostAuthLogout404ApplicationProblemPlusJSONResponse) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallbackRequestObject struct {
+}
+
+type GetAuthOidcCallbackResponseObject interface {
+	VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error
+}
+
+type GetAuthOidcCallback302ResponseHeaders struct {
+	Location  *string
+	SetCookie *string
+}
+
+type GetAuthOidcCallback302Response struct {
+	Headers GetAuthOidcCallback302ResponseHeaders
+}
+
+func (response GetAuthOidcCallback302Response) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(302)
+	return nil
+}
+
+type GetAuthOidcCallback400ApplicationProblemPlusJSONResponse Problem
+
+func (response GetAuthOidcCallback400ApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallback401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthOidcCallback401ApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallback403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthOidcCallback403ApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallback404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthOidcCallback404ApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallback502ApplicationProblemPlusJSONResponse struct {
+	BadGatewayApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthOidcCallback502ApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthOidcCallbackdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetAuthOidcCallbackdefaultApplicationProblemPlusJSONResponse) VisitGetAuthOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthSessionRequestObject struct {
+}
+
+type GetAuthSessionResponseObject interface {
+	VisitGetAuthSessionResponse(w http.ResponseWriter) error
+}
+
+type GetAuthSession200JSONResponse Session
+
+func (response GetAuthSession200JSONResponse) VisitGetAuthSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthSession401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthSession401ApplicationProblemPlusJSONResponse) VisitGetAuthSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthSession404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAuthSession404ApplicationProblemPlusJSONResponse) VisitGetAuthSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetHealthzRequestObject struct {
 }
 
@@ -666,6 +1106,18 @@ type StrictServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(ctx context.Context, request GetOpenapiYAMLRequestObject) (GetOpenapiYAMLResponseObject, error)
+	// GetAuthLogin Start the browser login
+	// (GET /auth/login)
+	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
+	// PostAuthLogout End the browser session
+	// (POST /auth/logout)
+	PostAuthLogout(ctx context.Context, request PostAuthLogoutRequestObject) (PostAuthLogoutResponseObject, error)
+	// GetAuthOidcCallback Finish the browser login
+	// (GET /auth/oidc/callback)
+	GetAuthOidcCallback(ctx context.Context, request GetAuthOidcCallbackRequestObject) (GetAuthOidcCallbackResponseObject, error)
+	// GetAuthSession The caller's browser session
+	// (GET /auth/session)
+	GetAuthSession(ctx context.Context, request GetAuthSessionRequestObject) (GetAuthSessionResponseObject, error)
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -804,6 +1256,102 @@ func (sh *strictHandler) GetOpenapiYAML(w http.ResponseWriter, r *http.Request) 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOpenapiYAMLResponseObject); ok {
 		if err := validResponse.VisitGetOpenapiYAMLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthLogin operation middleware
+func (sh *strictHandler) GetAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var request GetAuthLoginRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthLogin(ctx, request.(GetAuthLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuthLoginResponseObject); ok {
+		if err := validResponse.VisitGetAuthLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PostAuthLogout operation middleware
+func (sh *strictHandler) PostAuthLogout(w http.ResponseWriter, r *http.Request) {
+	var request PostAuthLogoutRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PostAuthLogout(ctx, request.(PostAuthLogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostAuthLogout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PostAuthLogoutResponseObject); ok {
+		if err := validResponse.VisitPostAuthLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthOidcCallback operation middleware
+func (sh *strictHandler) GetAuthOidcCallback(w http.ResponseWriter, r *http.Request) {
+	var request GetAuthOidcCallbackRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthOidcCallback(ctx, request.(GetAuthOidcCallbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthOidcCallback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuthOidcCallbackResponseObject); ok {
+		if err := validResponse.VisitGetAuthOidcCallbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthSession operation middleware
+func (sh *strictHandler) GetAuthSession(w http.ResponseWriter, r *http.Request) {
+	var request GetAuthSessionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthSession(ctx, request.(GetAuthSessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthSession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuthSessionResponseObject); ok {
+		if err := validResponse.VisitGetAuthSessionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

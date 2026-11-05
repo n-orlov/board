@@ -24,25 +24,29 @@ type Readiness func(ctx context.Context) error
 // otherwise). GET /readyz answers 200 when ready returns nil and 503
 // otherwise. Every other GET is answered from the web UI embedded in the
 // binary, so GET / is its index.html.
-func NewHandler(ready Readiness, verify KeyVerifier) http.Handler {
+//
+// login, when not nil, turns on browser login (SPEC 3.2): a request with a valid
+// session cookie is authenticated as the operator, and a request with no
+// credential that is a browser navigation is sent to /auth/login.
+func NewHandler(ready Readiness, verify KeyVerifier, login *Login) http.Handler {
 	mux := http.NewServeMux()
-	HandlerFromMux(strictOperations(operations{ready: ready}), mux)
+	HandlerFromMux(strictOperations(operations{ready: ready, loginOps: loginOps{login: login}}), mux)
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
-	return authenticated(mux, verify)
+	return authenticated(mux, verify, login)
 }
 
-// Serve listens on addr and serves NewHandler(ready, verify) until ctx is cancelled, then shuts
+// Serve listens on addr and serves NewHandler(ready, verify, login) until ctx is cancelled, then shuts
 // down gracefully. It returns nil on a clean shutdown.
-func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier) error {
+func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	return serveOn(ctx, ln, ready, verify)
+	return serveOn(ctx, ln, ready, verify, login)
 }
 
-func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier) error {
-	srv := &http.Server{Handler: NewHandler(ready, verify), ReadHeaderTimeout: 10 * time.Second}
+func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login) error {
+	srv := &http.Server{Handler: NewHandler(ready, verify, login), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

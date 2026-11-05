@@ -4,8 +4,8 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    Phase 0 declares the two probe operations and the three documentation
-    operations. Every later operation is added here first; the Go server code and the TypeScript client are generated from
+    The document declares the probe, documentation and browser-login operations.
+    Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
     name: Apache-2.0
@@ -17,6 +17,8 @@ tags:
     description: Liveness and readiness.
   - name: docs
     description: This document and the interactive API documentation.
+  - name: auth
+    description: Browser login through OpenID Connect, and the browser session.
 paths:
   /healthz:
     get:
@@ -157,6 +159,137 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /auth/login:
+    get:
+      operationId: getAuthLogin
+      tags: [auth]
+      summary: Start the browser login
+      description: >-
+        A browser navigation (a GET that accepts `text/html`) is redirected to the
+        identity provider's authorization endpoint with PKCE (S256), `state` and
+        `nonce`, and gets a short-lived HttpOnly pre-login cookie. Any other
+        request with no credential is an API call and gets 401.
+      security: []
+      responses:
+        "302":
+          description: Redirect to the identity provider.
+          headers:
+            Location:
+              description: The provider's authorization endpoint with the login's parameters.
+              schema:
+                type: string
+            Set-Cookie:
+              description: The pre-login cookie `board_login`, HttpOnly, Secure, SameSite=Lax, valid 10 minutes.
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+        default:
+          description: >-
+            Any status not listed here is a problem document. A login never answers
+            2xx: it ends in a redirect.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /auth/oidc/callback:
+    get:
+      operationId: getAuthOidcCallback
+      tags: [auth]
+      summary: Finish the browser login
+      description: >-
+        The fixed redirect URI registered with the identity provider, called with the
+        query parameters `code`, `state` and, when the provider refused the login,
+        `error`, and the pre-login cookie `board_login`. It spends the
+        login's `state`, `nonce` and PKCE verifier, checks the ID token, admits only
+        a verified email on the allowed list, and starts the session. Like
+        `/auth/login` it answers a browser navigation, and any other request with
+        no credential gets 401.
+      security: []
+      responses:
+        "302":
+          description: The login succeeded. Redirects to `/` and sets the session cookie `board_session`.
+          headers:
+            Location:
+              description: Where the browser lands.
+              schema:
+                type: string
+            Set-Cookie:
+              description: The session cookie, HttpOnly, Secure, SameSite=Lax.
+              schema:
+                type: string
+        "400":
+          description: >-
+            The callback does not belong to a login in progress (no pre-login
+            cookie and so no PKCE verifier, `state` mismatch, no code) or the ID
+            token carries another login's `nonce`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        default:
+          description: >-
+            Any status not listed here is a problem document. A login never answers
+            2xx: it ends in a redirect.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: The caller's browser session
+      description: >-
+        Describes the session the cookie names: the principal, the actor it acts
+        as (the operator), and the session's CSRF token.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth/logout:
+    post:
+      operationId: postAuthLogout
+      tags: [auth]
+      summary: End the browser session
+      description: Deletes the session server-side and clears the cookie.
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: The session is ended.
+          headers:
+            Set-Cookie:
+              description: The session cookie, cleared.
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     bearerAuth:
@@ -187,7 +320,42 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: The account may not log in.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    BadGateway:
+      description: The identity provider could not be reached or refused the request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unavailable:
+      description: The service cannot take the request right now.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
   schemas:
+    Session:
+      type: object
+      description: A browser session.
+      required: [email, principal, actor, csrf_token]
+      properties:
+        email:
+          type: string
+          description: The verified email the session belongs to.
+        principal:
+          type: string
+          description: Who authenticated, `oidc:<email>`.
+        actor:
+          type: string
+          description: The actor the session acts as, the operator handle.
+        csrf_token:
+          type: string
+          description: The value cookie-authenticated writes send as `X-CSRF-Token`.
     Problem:
       type: object
       description: An RFC 9457 problem document.

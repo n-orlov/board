@@ -124,10 +124,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start the browser login
+         * @description A browser navigation (a GET that accepts `text/html`) is redirected to the identity provider's authorization endpoint with PKCE (S256), `state` and `nonce`, and gets a short-lived HttpOnly pre-login cookie. Any other request with no credential is an API call and gets 401.
+         */
+        get: operations["getAuthLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finish the browser login
+         * @description The fixed redirect URI registered with the identity provider, called with the query parameters `code`, `state` and, when the provider refused the login, `error`, and the pre-login cookie `board_login`. It spends the login's `state`, `nonce` and PKCE verifier, checks the ID token, admits only a verified email on the allowed list, and starts the session. Like `/auth/login` it answers a browser navigation, and any other request with no credential gets 401.
+         */
+        get: operations["getAuthOidcCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's browser session
+         * @description Describes the session the cookie names: the principal, the actor it acts as (the operator), and the session's CSRF token.
+         */
+        get: operations["getAuthSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the browser session
+         * @description Deletes the session server-side and clears the cookie.
+         */
+        post: operations["postAuthLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A browser session. */
+        Session: {
+            /** @description The verified email the session belongs to. */
+            email: string;
+            /** @description Who authenticated, `oidc:<email>`. */
+            principal: string;
+            /** @description The actor the session acts as, the operator handle. */
+            actor: string;
+            /** @description The value cookie-authenticated writes send as `X-CSRF-Token`. */
+            csrf_token: string;
+        };
         /** @description An RFC 9457 problem document. */
         Problem: {
             /** @description A URI reference that identifies the problem type. */
@@ -163,6 +254,33 @@ export interface components {
         };
         /** @description There is no such resource. */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The account may not log in. */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The identity provider could not be reached or refused the request. */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The service cannot take the request right now. */
+        Unavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -318,6 +436,129 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAuthLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the identity provider. */
+            302: {
+                headers: {
+                    /** @description The provider's authorization endpoint with the login's parameters. */
+                    Location?: string;
+                    /** @description The pre-login cookie `board_login`, HttpOnly, Secure, SameSite=Lax, valid 10 minutes. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["Unavailable"];
+            /** @description Any status not listed here is a problem document. A login never answers 2xx: it ends in a redirect. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getAuthOidcCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The login succeeded. Redirects to `/` and sets the session cookie `board_session`. */
+            302: {
+                headers: {
+                    /** @description Where the browser lands. */
+                    Location?: string;
+                    /** @description The session cookie, HttpOnly, Secure, SameSite=Lax. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The callback does not belong to a login in progress (no pre-login cookie and so no PKCE verifier, `state` mismatch, no code) or the ID token carries another login's `nonce`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            /** @description Any status not listed here is a problem document. A login never answers 2xx: it ends in a redirect. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getAuthSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAuthLogout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session is ended. */
+            204: {
+                headers: {
+                    /** @description The session cookie, cleared. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };

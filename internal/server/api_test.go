@@ -16,7 +16,7 @@ import (
 
 func TestSpecDocumentsAreServedToAnAuthenticatedCaller(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/openapi.yaml"))
+	NewHandler(ok, acceptKey, nil).ServeHTTP(rec, authed("/api/openapi.yaml"))
 	if rec.Code != http.StatusOK || rec.Body.String() != string(api.YAML()) {
 		t.Fatalf("GET /api/openapi.yaml = %d, body is not the checked-in document", rec.Code)
 	}
@@ -29,7 +29,7 @@ func TestSpecDocumentsAreServedToAnAuthenticatedCaller(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/openapi.json"))
+	NewHandler(ok, acceptKey, nil).ServeHTTP(rec, authed("/api/openapi.json"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/openapi.json = %d, want 200", rec.Code)
 	}
@@ -58,7 +58,7 @@ var (
 )
 
 func TestDocsPageIsSwaggerUIFromEmbeddedAssetsAndReferencesNoExternalHost(t *testing.T) {
-	h := NewHandler(ok, acceptKey)
+	h := NewHandler(ok, acceptKey, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, authed("/api/docs"))
 	if rec.Code != http.StatusOK {
@@ -99,7 +99,7 @@ func TestDocsPageIsSwaggerUIFromEmbeddedAssetsAndReferencesNoExternalHost(t *tes
 
 func TestDocsInitScriptNamesNoExternalHostAndLoadsTheSpecFromThisOne(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/docs/assets/init.js"))
+	NewHandler(ok, acceptKey, nil).ServeHTTP(rec, authed("/api/docs/assets/init.js"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET init.js = %d, want 200", rec.Code)
 	}
@@ -113,7 +113,7 @@ func TestDocsInitScriptNamesNoExternalHostAndLoadsTheSpecFromThisOne(t *testing.
 
 func TestUnknownDocsAssetIs404AProblem(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/api/docs/assets/nope.js"))
+	NewHandler(ok, acceptKey, nil).ServeHTTP(rec, authed("/api/docs/assets/nope.js"))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("GET /api/docs/assets/nope.js = %d, want 404", rec.Code)
 	}
@@ -133,7 +133,7 @@ func TestDocsAssetsNeedACredential(t *testing.T) {
 func TestSpecDocumentsRefuseACallerWithoutCredentials(t *testing.T) {
 	for _, path := range []string{"/api/openapi.yaml", "/api/openapi.json", "/api/docs"} {
 		rec := httptest.NewRecorder()
-		NewHandler(ok, acceptKey).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		NewHandler(ok, acceptKey, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s without credentials = %d, want 401", path, rec.Code)
 		}
@@ -157,6 +157,12 @@ func (brokenResponse) VisitGetOpenapiYAMLResponse(http.ResponseWriter) error { r
 func (brokenResponse) VisitGetOpenapiJSONResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitGetDocsResponse(http.ResponseWriter) error        { return errBroken }
 func (brokenResponse) VisitGetDocsAssetResponse(http.ResponseWriter) error   { return errBroken }
+func (brokenResponse) VisitGetAuthLoginResponse(http.ResponseWriter) error   { return errBroken }
+func (brokenResponse) VisitGetAuthOidcCallbackResponse(http.ResponseWriter) error {
+	return errBroken
+}
+func (brokenResponse) VisitGetAuthSessionResponse(http.ResponseWriter) error { return errBroken }
+func (brokenResponse) VisitPostAuthLogoutResponse(http.ResponseWriter) error { return errBroken }
 
 // outcome is what every stub operation returns: an error or a response that
 // fails to write.
@@ -197,6 +203,30 @@ func (s stubOperations) GetDocsAsset(context.Context, GetDocsAssetRequestObject)
 	return resp, err
 }
 
+func (s stubOperations) GetAuthLogin(context.Context, GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAuthLoginResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetAuthOidcCallback(context.Context, GetAuthOidcCallbackRequestObject) (GetAuthOidcCallbackResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAuthOidcCallbackResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetAuthSession(context.Context, GetAuthSessionRequestObject) (GetAuthSessionResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAuthSessionResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) PostAuthLogout(context.Context, PostAuthLogoutRequestObject) (PostAuthLogoutResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PostAuthLogoutResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetDocsResponseObject)
@@ -208,7 +238,10 @@ func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsR
 // cannot be written, and a middleware that swaps in a foreign response: each answers 500 as a
 // problem document, and the strict middleware sees every call.
 func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
-	paths := []string{"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js"}
+	paths := []string{
+		"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js",
+		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
+	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		var seen []string
 		record := func(next StrictHandlerFunc, operationID string) StrictHandlerFunc {
@@ -224,7 +257,11 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		HandlerFromMux(strictOperations(stubOperations{mode: mode}, record), mux)
 		for _, path := range paths {
 			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			method, target := http.MethodGet, path
+			if m, p, ok := strings.Cut(path, " "); ok {
+				method, target = m, p
+			}
+			mux.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
 			if rec.Code != http.StatusInternalServerError {
 				t.Errorf("%s: GET %s = %d, want 500", mode, path, rec.Code)
 			}
@@ -238,7 +275,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 	}
 }
 
-// TestDeclaredProblemResponsesWriteAProblemDocument writes every 400 and 401
+// TestDeclaredProblemResponsesWriteAProblemDocument writes every problem
 // response the document declares and checks status, content type and body.
 func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 	problem := Problem{Type: "about:blank", Title: "t", Status: 1}
@@ -258,6 +295,21 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"yaml 401", 401, GetOpenapiYAML401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetOpenapiYAMLResponse},
 		{"readyz 400", 400, GetReadyz400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetReadyzResponse},
 		{"readyz 401", 401, GetReadyz401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetReadyzResponse},
+		{"login 401", 401, GetAuthLogin401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthLoginResponse},
+		{"login 404", 404, GetAuthLogin404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthLoginResponse},
+		{"login 502", 502, GetAuthLogin502ApplicationProblemPlusJSONResponse{BadGatewayApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthLoginResponse},
+		{"login 503", 503, GetAuthLogin503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthLoginResponse},
+		{"login default", 418, GetAuthLogindefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: 418}.VisitGetAuthLoginResponse},
+		{"callback 400", 400, GetAuthOidcCallback400ApplicationProblemPlusJSONResponse(problem).VisitGetAuthOidcCallbackResponse},
+		{"callback 401", 401, GetAuthOidcCallback401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthOidcCallbackResponse},
+		{"callback 403", 403, GetAuthOidcCallback403ApplicationProblemPlusJSONResponse{ForbiddenApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthOidcCallbackResponse},
+		{"callback 404", 404, GetAuthOidcCallback404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthOidcCallbackResponse},
+		{"callback 502", 502, GetAuthOidcCallback502ApplicationProblemPlusJSONResponse{BadGatewayApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthOidcCallbackResponse},
+		{"callback default", 418, GetAuthOidcCallbackdefaultApplicationProblemPlusJSONResponse{Body: problem, StatusCode: 418}.VisitGetAuthOidcCallbackResponse},
+		{"session 401", 401, GetAuthSession401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthSessionResponse},
+		{"session 404", 404, GetAuthSession404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAuthSessionResponse},
+		{"logout 401", 401, PostAuthLogout401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPostAuthLogoutResponse},
+		{"logout 404", 404, PostAuthLogout404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPostAuthLogoutResponse},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

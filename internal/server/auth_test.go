@@ -33,7 +33,7 @@ func do(c *countingVerifier, path string, headers map[string]string) *httptest.R
 		r.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
-	NewHandler(ok, c.verify).ServeHTTP(rec, r)
+	NewHandler(ok, c.verify, nil).ServeHTTP(rec, r)
 	return rec
 }
 
@@ -77,7 +77,7 @@ func TestHealthzNeedsNoCredentialButOtherMethodsDo(t *testing.T) {
 		t.Fatalf("GET /healthz = %d, want 200", rec.Code)
 	}
 	rec := httptest.NewRecorder()
-	NewHandler(ok, (&countingVerifier{}).verify).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/healthz", nil))
+	NewHandler(ok, (&countingVerifier{}).verify, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/healthz", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /healthz = %d, want 401", rec.Code)
 	}

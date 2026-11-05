@@ -92,7 +92,7 @@ func serveFor(t *testing.T, url, addr string, migrate bool, d time.Duration) (in
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	var errb bytes.Buffer
-	code := serveUntil(ctx, &errb, url, addr, migrate)
+	code := serveUntil(ctx, &errb, func(string) string { return "" }, url, addr, migrate)
 	return code, errb.String()
 }
 

@@ -115,12 +115,12 @@ func serve(stderr io.Writer, env Env) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serveUntil(ctx, stderr, dbURL(env), addr, migrate != "off")
+	return serveUntil(ctx, stderr, env, dbURL(env), addr, migrate != "off")
 }
 
 // serveUntil opens the database, migrates it when migrate is set, and serves
 // on addr until ctx ends.
-func serveUntil(ctx context.Context, stderr io.Writer, url, addr string, migrate bool) int {
+func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string, migrate bool) int {
 	st, err := store.Open(url)
 	if err != nil {
 		return fail(stderr, err)
@@ -129,7 +129,11 @@ func serveUntil(ctx context.Context, stderr io.Writer, url, addr string, migrate
 	if err := prepareSchema(ctx, st, migrate); err != nil {
 		return fail(stderr, err)
 	}
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify); err != nil {
+	login, err := loginFromEnv(env, st)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

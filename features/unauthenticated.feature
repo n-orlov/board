@@ -10,6 +10,10 @@ Feature: Only /healthz needs no credential
     And api/openapi.yaml declares "GET /api/openapi.yaml"
     And api/openapi.yaml declares "GET /api/openapi.json"
     And api/openapi.yaml declares "GET /api/docs"
+    And api/openapi.yaml declares "GET /auth/login"
+    And api/openapi.yaml declares "GET /auth/oidc/callback"
+    And api/openapi.yaml declares "GET /auth/session"
+    And api/openapi.yaml declares "POST /auth/logout"
 
   Scenario: every declared operation but GET /healthz answers 401 without credentials
     Given the board server is running on a free port

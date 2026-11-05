@@ -44,26 +44,70 @@ func bearerKey(r *http.Request) (string, bool) {
 	return strings.TrimSpace(key), true
 }
 
-// authenticated wraps next so that every request other than GET /healthz must
-// carry a valid Bearer key and a Board-Actor header. A request with no
-// credential is refused before verify, and so before the store, is called.
-func authenticated(next http.Handler, verify KeyVerifier) http.Handler {
+// authenticated wraps next so that every request other than GET /healthz is
+// authenticated: by a Bearer key that verify accepts plus a Board-Actor header,
+// or, when login is on, by a live session cookie. A request with no credential
+// is refused before verify, and so before the store, is called: with 401, or,
+// when login is on and the request is a browser navigation, by a redirect to
+// /auth/login (which, like the callback, then answers the navigation).
+func authenticated(next http.Handler, verify KeyVerifier, login *Login) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key, ok := bearerKey(r)
-		if !ok {
+		if key, ok := bearerKey(r); ok {
+			serveKeyed(next, verify, key, w, r)
+			return
+		}
+		if login == nil {
 			writeProblem(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		if status, detail := checkKey(r, verify, key); status != 0 {
-			writeProblem(w, status, detail)
-			return
-		}
-		next.ServeHTTP(w, r)
+		serveBrowser(next, login, w, r)
 	})
+}
+
+// serveKeyed serves r when key is valid and the request names its actor.
+func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.ResponseWriter, r *http.Request) {
+	if status, detail := checkKey(r, verify, key); status != 0 {
+		writeProblem(w, status, detail)
+		return
+	}
+	next.ServeHTTP(w, r)
+}
+
+// serveBrowser serves r on the strength of its session cookie, or answers a
+// request that has none.
+func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *http.Request) {
+	id, ok := sessionCookie(r)
+	if !ok {
+		serveAnonymous(next, w, r)
+		return
+	}
+	sess, err := login.Sessions.Lookup(r.Context(), id)
+	switch {
+	case errors.Is(err, auth.ErrNoSession):
+		serveAnonymous(next, w, r)
+	case err != nil:
+		writeProblem(w, http.StatusServiceUnavailable, "the session could not be checked")
+	default:
+		next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sessionIdentity{id: id, session: sess})))
+	}
+}
+
+// serveAnonymous answers a request that carries no credential. Only a browser
+// navigation gets past 401: the login and callback pages are served, and any
+// other page is a redirect to /auth/login.
+func serveAnonymous(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	switch {
+	case !isNavigation(r):
+		writeProblem(w, http.StatusUnauthorized, "authentication required")
+	case r.URL.Path == loginPath || r.URL.Path == callbackPath:
+		next.ServeHTTP(w, r)
+	default:
+		http.Redirect(w, r, loginPath, http.StatusFound)
+	}
 }
 
 // checkKey returns 0 when key is valid and the request names its actor, and
