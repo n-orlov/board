@@ -55,9 +55,17 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 
 // admin runs `board admin ...`, which talks to the database directly.
 func admin(args []string, stdout, stderr io.Writer, env Env) int {
+	if len(args) > 0 && args[0] == "keys" {
+		return adminKeys(args[1:], stdout, stderr, env)
+	}
 	if len(args) != 1 || args[0] != "migrate" {
 		return usage(stderr)
 	}
+	return adminMigrate(stdout, stderr, env)
+}
+
+// adminMigrate runs `board admin migrate`.
+func adminMigrate(stdout, stderr io.Writer, env Env) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st, err := store.Open(dbURL(env))

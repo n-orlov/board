@@ -59,6 +59,9 @@ type harness struct {
 
 	status int
 
+	// key is the API key a scenario remembered from stdout.
+	key string
+
 	server *exec.Cmd
 	addr   string
 	dir    string
@@ -275,7 +278,7 @@ func (h *harness) stopServer() {
 	if h.own != nil {
 		h.own.terminate(context.Background())
 	}
-	h.dir, h.dbURL, h.own, h.dedicated = "", "", nil, false
+	h.dir, h.dbURL, h.own, h.dedicated, h.key = "", "", nil, false, ""
 }
 
 var versionPattern = regexp.MustCompile(`^(v[0-9][^\s]*|devel(\+[0-9a-f]+)?)(-dirty)?$`)
@@ -294,6 +297,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		h.stopServer()
 		return ctx, nil
 	})
+	registerKeySteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

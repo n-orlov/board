@@ -139,9 +139,10 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 ### 3.3 Agents: API keys
 
 - Sent as `Authorization: Bearer <key>`.
-- Format: `brd_` + 32 random bytes from the OS CSPRNG, base32 (Crockford, lowercase), so keys
-  are recognisable to secret scanners. The key is shown **once** at creation and never stored:
-  the DB keeps only its SHA-256 hash, a display prefix (first 8 characters after `brd_`), name,
+- Format: `brd_` + 32 random bytes from the OS CSPRNG, base32 (Crockford, lowercase, no padding:
+  52 characters), so keys are recognisable to secret scanners. The key is shown **once** at
+  creation and never stored: the DB keeps only its SHA-256 hash (lowercase hex of the whole key
+  text), a display prefix (the 8 characters after `brd_`, stored without `brd_`), name,
   `created_at`, `created_by`, `last_used_at` (coalesced, §14), `expires_at` (optional),
   `revoked_at`.
 - Lookup is by hash (indexed, unique); comparison cost does not depend on the key.
@@ -152,7 +153,8 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
   - **Bootstrap, no HTTP**: `board admin keys create <name> [--expires 90d]`, `board admin keys
     list`, `board admin keys revoke <name>`, run inside the container against `BOARD_DB_URL`
-    directly. This is how the first key is made, and the recovery path if SSO is broken.
+    directly. This is how the first key is made, and the recovery path if SSO is broken. The
+    commands are described in §8.
   - API: `GET/POST /api/v1/keys`, `POST /api/v1/keys/{name}/revoke` (any principal, v1 has no ACL).
 - **Swagger UI** declares a `bearerAuth` security scheme, so "Authorize" accepts a key; inside a
   logged-in browser session it also works with the session cookie and CSRF header.
@@ -523,8 +525,29 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 `board admin migrate` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
-and any other failure is one stderr line and exit 1. `board admin` with any other subcommand or extra arguments
-is the exit-2 usage error.
+and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|admin>`).
+
+`board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
+refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
+1 to 64 characters of `a-z A-Z 0-9 . _ -`, starting with a letter or digit.
+
+- `board admin keys create <name> [--expires 90d]` makes a key and prints exactly one stdout line, with the
+  key as its last field and nowhere else: `ok key <name> created brd_…`, or `ok key <name> created exp
+  <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
+  positive count of days (`90d`) or hours (`12h`), at most 36500 days, and the flag may come before or
+  after the name; without it the key never expires. `created_by` is `admin-cli`. A name that already exists
+  exits 1 with the single stderr line `board: key "<name>" already exists → board admin keys list`, and
+  stores nothing.
+- `board admin keys list` prints one line per key, oldest first, and never the key:
+  `<name> brd_<display prefix> <active|expired|revoked> created <YYYY-MM-DD>`, followed by ` exp <date>`,
+  ` used <date>` and ` revoked <date>` for the dates the key has. No keys prints nothing (exit 0).
+- `board admin keys revoke <name>` sets `revoked_at` and prints `ok key <name> revoked`. Revoking a
+  revoked key prints `ok key <name> already revoked` (exit 0) and keeps the first `revoked_at`. An unknown
+  name exits 4 with `board: key "<name>" not found → board admin keys list`.
+- A malformed command line (missing or extra arguments, an unknown flag) exits 2 with the single stderr line
+  `usage: board admin keys create <name> [--expires 90d] | list | revoke <name>`. An invalid name or
+  `--expires` value exits 2 with one `board: …` stderr line.
 
 ### 8.1 Output rules
 
