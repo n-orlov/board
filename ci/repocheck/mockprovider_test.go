@@ -57,3 +57,19 @@ func TestMockProviderProbeSeesATestImport(t *testing.T) {
 		t.Fatal("importsMockProvider does not match exactly the mock provider's import path")
 	}
 }
+
+const fakeOIDCCommand = "github.com/n-orlov/board/cmd/fake-oidc"
+
+// TestFakeOIDCCommandIsTestOnly keeps the process that wraps the mock provider for the
+// Playwright specs (cmd/fake-oidc) out of the release binary, and proves the probe can
+// see it: the command itself does import the mock provider.
+func TestFakeOIDCCommandIsTestOnly(t *testing.T) {
+	for _, d := range goListDeps(t, "./cmd/board") {
+		if d == fakeOIDCCommand {
+			t.Fatalf("cmd/board depends on %s: the mock provider's process must stay test-only", fakeOIDCCommand)
+		}
+	}
+	if !importsMockProvider(goListDeps(t, "./cmd/fake-oidc")) {
+		t.Fatalf("go list -deps ./cmd/fake-oidc does not list %s: the probe cannot see the mock provider", mockProviderPackage)
+	}
+}

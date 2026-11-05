@@ -178,6 +178,17 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   test sign in an unverified email, reuse an earlier login's nonce, or rewrite a signed token's
   email. `cmd/board` never imports it, so the release image does not hold it
   (`ci/repocheck` checks `go list -deps ./cmd/board`). CI contacts no external identity provider.
+  `cmd/fake-oidc` runs it as a process for the Playwright specs (`e2e/serve.sh` starts it beside the
+  real binary with a client secret made up for the run and passed through the environment, and
+  points `BOARD_OIDC_ISSUER` at it); it is a test fixture like `cmd/fake-*`, and `cmd/board` never
+  imports it either.
+- **The UI's login**: the UI has no login form of its own. A navigation without a session never
+  reaches the app: it is redirected to `/auth/login`, which starts the flow above and ends on `/`
+  with a session. At load the app calls `GET /auth/session` (`web/src/lib/session.ts`): 200 shows
+  the signed-in page (the initiatives page) with the session's email, 401 (the session ended while
+  the page was open) sends the page to `/auth/login` under the app's mount prefix, and any other
+  failure is shown as an error without a redirect, so a down server cannot cause a login loop.
+  `e2e/login.spec.ts` logs in through the mock provider and lands on the initiatives page.
 
 ### 3.3 Agents: API keys
 

@@ -313,6 +313,13 @@ Scripts, each run through `ci/run.sh` unless noted:
   and the HTML, Allure and JSON output (`playwright/`) land in the results
   directory, and `ci/summary.sh` counts the JUnit and flaky files.
   `ci/suitecheck/playwright_test.go` pins this and fails if `retries` is not 0.
+  `e2e/serve.sh` also builds and starts `cmd/fake-oidc` (the mock OIDC provider,
+  test-only, signing in `operator@example.test`) and starts the binary with browser
+  login against it (`BOARD_OIDC_*`, `BOARD_PUBLIC_URL`; the client secret is made
+  up per run). `e2e/login.spec.ts` imports Playwright's own `test` rather than
+  fixtures.ts: it sends no key, the session cookie is its only credential.
+  `serve.sh` builds the UI only when `internal/webui/dist` is missing, so after
+  changing `web/` locally run `npm run build` there first (the suite always does).
   One spec: `ci/run.sh sh -c 'cd e2e && npx playwright test smoke.spec.ts'`.
 - `ci/quality.sh`: scrubs `BOARD_*` and runs `ci/qualitycheck` over
   `ci/quality.json` and the suite's merged coverage profile.
