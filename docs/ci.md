@@ -104,7 +104,7 @@ The clone is of the committed HEAD, so commit before running it.
 | Lint | `ci/run.sh ci/lint.sh` | every build |
 | Suite | `ci/run.sh ci/suite.sh` | every build |
 | Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |
-| Quality | `ci/image-build.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
+| Quality | `ci/image-build.sh`, `ci/image-check.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
 | Stability | `ci/stability.sh 3` on the agent | extended lane only |
 | Mutation | `ci/run.sh ci/mutation.sh` | every `main` build and the extended lane; other branches skip it |
 
@@ -135,13 +135,29 @@ Quality stage on every build.
 
 **The image.** The root `Dockerfile` is multi-stage (the Svelte build, a static
 `CGO_ENABLED=0` Go build, then `FROM scratch` with the binary, the CA
-certificates, the time zone database embedded in the binary, `/data` and uid
-65532), every `FROM` pinned by digest. It builds natively with the classic
-builder, which is all the agent has; the cross-compiled multi-arch build comes
-with the image task. `ci/image-build.sh` (on the agent, outside `ci/run.sh`: it
-needs the docker CLI) builds it as `board:ci` and saves
-`ci-results/board-image.tar`, which the `trivy-image` and `sbom-image` gates scan.
-Nothing is pushed.
+certificates, the time zone database embedded in the binary with
+`-tags timetzdata`, `/data` and uid 65532), every `FROM` pinned by digest. Both
+builder stages are `FROM --platform=$BUILDPLATFORM` and the Go build takes
+`GOOS=$TARGETOS GOARCH=$TARGETARCH`, so linux/amd64 and linux/arm64 are built by
+cross-compiling on the agent, without emulation: the final stage only `COPY`s.
+`ci/image-build.sh` (on the agent, outside `ci/run.sh`: it needs the docker CLI)
+does the build. The agent's docker has no buildx, so the script copies the buildx
+plugin out of a digest-pinned `docker/buildx-bin` image into a throwaway docker
+config, starts a digest-pinned `moby/buildkit` container as a `docker-container`
+builder (removed on exit), builds both platforms into one OCI layout
+(`ci-results/board-image-oci.tar`), builds amd64 again from the builder's cache and
+loads it as `board:ci`, and saves it as `ci-results/board-image.tar`, which the
+`trivy-image` and `sbom-image` gates scan. `ci/image-check.sh` then inspects what
+was built: `go run ./ci/imagecheck` (through `ci/run.sh`) requires a manifest for
+each platform, a non-root user, `/board` as the entrypoint, and an ELF `/board`
+whose machine is that platform's (so an arm64 manifest holding the build host's
+binary fails); `docker run board:ci version` runs the loaded image; a container of
+it must answer `GET /healthz` with 200. Both run in the Quality stage, before
+`ci/quality.sh`. `ci/repocheck` fails when the final stage is not scratch or
+distroless static, has a `RUN`, runs as root or sets no user, lacks the CA
+certificates or tzdata, when a builder `FROM` lacks `--platform=$BUILDPLATFORM`, or
+when the Go build does not cross-compile. Nothing is pushed: the registry push
+belongs to the release job (Phase 4).
 
 **Reports.** `post { always }` publishes the JUnit, Allure and CI summary reports,
 declares the README badges, adds the build page summary line, and archives
@@ -360,8 +376,14 @@ Scripts, each run through `ci/run.sh` unless noted:
   `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the
   result. `web/src/lib/api` is excluded from Vitest coverage and Stryker: it is
   generated type declarations with no statements.
-- `ci/image-build.sh [tar]`: builds the root `Dockerfile` as `board:ci` and saves
-  it to `ci-results/board-image.tar` (the Jenkins Quality stage; on the agent).
+- `ci/image-build.sh [tar]`: builds the root `Dockerfile` for linux/amd64 and
+  linux/arm64 (cross-compiled, no emulation, nothing pushed), loads amd64 as
+  `board:ci` and writes `ci-results/board-image.tar` and
+  `ci-results/board-image-oci.tar` (the Jenkins Quality stage; on the agent).
+- `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `board version`
+  and a `/healthz` probe against `board:ci`.
+- `ci/imagecheck`: the Go tool that reads the OCI layout (both manifests, user,
+  entrypoint, the ELF machine of `/board`).
 - `ci/stability.sh`: the suite N times, each run labelled by the exit status of
   `go test` itself.
 - On the Jenkins agent, outside `ci/run.sh`: `ci/jenkins-image.sh` (builds

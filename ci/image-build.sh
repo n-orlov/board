@@ -1,22 +1,67 @@
 #!/bin/sh
-# ci/image-build.sh -- builds the container image from the root Dockerfile and
-# saves it as a tar, which ci/quality.sh's trivy-image and sbom-image gates
-# scan. On the Jenkins agent, outside ci/run.sh (the build needs the docker
-# CLI, which the CI image does not carry), in the Quality stage. The image is
-# built for the agent's own platform and is never pushed.
+# ci/image-build.sh -- builds the container image from the root Dockerfile for
+# linux/amd64 and linux/arm64 and keeps three things, none of them pushed:
 #
-#   ci/image-build.sh [tar]    # default ci-results/board-image.tar
+#   <dir>/board-image-oci.tar  both platforms as one OCI layout, which
+#                              ci/image-check.sh inspects
+#   <dir>/board-image.tar      the amd64 image as `docker save`, which
+#                              ci/quality.sh's trivy-image and sbom-image gates scan
+#   board:ci                   the amd64 image, loaded into the docker daemon
+#
+# Both platforms are built on the agent's own platform, without emulation: the
+# Dockerfile's builder stages are pinned to --platform=$BUILDPLATFORM and
+# cross-compile, and its final stage only COPYs (ci/repocheck enforces both).
+# The Jenkins agent's docker has no buildx and no multi-platform builder, so
+# this fetches the buildx plugin from a digest-pinned image and runs a
+# digest-pinned BuildKit container for the duration of the build. On the
+# Jenkins agent, outside ci/run.sh (it needs the docker CLI), in the Quality
+# stage.
+#
+#   ci/image-build.sh [amd64-tar]    # default ci-results/board-image.tar
 set -eu
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo_root"
 
+# Pinned by digest, like every image here. Bumping either is this file's only edit.
+buildx_image='docker/buildx-bin:0.27.0@sha256:d989e4378c270b8ae1b05ee52c99b9be6a75f1aa06fd5564beac05cddbedb86b'
+buildkit_image='moby/buildkit:v0.26.0@sha256:93da6a53287490dd3b35952f73a109654ed9f260f2e6434db925125fa3ac6b2a'
+
 tar_path=${1:-ci-results/board-image.tar}
+oci_path="$(dirname "$tar_path")/board-image-oci.tar"
 tag=board:ci
+builder="board-image-$$"
+work=$(mktemp -d)
+cleanup() {
+	docker buildx rm --force "$builder" >/dev/null 2>&1 || true
+	rm -rf "$work"
+}
+trap cleanup EXIT INT TERM
+
+# The buildx CLI plugin, from the pinned image, in a docker config of its own.
+# $DOCKER_CONFIG's other contents are not needed: every image here is public.
+mkdir -p "$work/config/cli-plugins"
+holder=$(docker create "$buildx_image" /buildx)
+docker cp "$holder:/buildx" "$work/config/cli-plugins/docker-buildx"
+docker rm "$holder" >/dev/null
+export DOCKER_CONFIG="$work/config"
+
+docker buildx create --name "$builder" --driver docker-container \
+	--driver-opt "image=$buildkit_image" >/dev/null
 
 mkdir -p "$(dirname "$tar_path")"
-rm -f "$tar_path"
-docker build -t "$tag" -f Dockerfile .
+rm -f "$tar_path" "$oci_path"
+
+# Both platforms in one build: the OCI layout holds an image index with both.
+docker buildx build --builder "$builder" -f Dockerfile \
+	--platform linux/amd64,linux/arm64 --provenance=false --sbom=false \
+	--output "type=oci,dest=$oci_path" .
+# The amd64 image again, from the builder's cache: loaded and saved.
+docker buildx build --builder "$builder" -f Dockerfile \
+	--platform linux/amd64 --provenance=false --sbom=false \
+	--tag "$tag" --load .
 docker save -o "$tar_path" "$tag"
+
+[ -s "$oci_path" ] || { echo "ci/image-build.sh: $oci_path is empty" >&2; exit 1; }
 [ -s "$tar_path" ] || { echo "ci/image-build.sh: $tar_path is empty" >&2; exit 1; }
-echo "ci/image-build.sh: $tag saved to $tar_path"
+echo "ci/image-build.sh: linux/amd64 and linux/arm64 built into $oci_path ($tag loaded, saved to $tar_path)"

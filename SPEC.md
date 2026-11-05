@@ -1100,7 +1100,16 @@ network requests (all assets embedded).
 ### 12.4 Container
 
 - Multi-stage build; final image `FROM scratch` (or distroless static) with the binary, CA
-  certificates and tzdata. Runs as a non-root uid. Multi-arch: linux/amd64, linux/arm64.
+  certificates and tzdata (embedded in the binary with `-tags timetzdata`). Runs as a non-root
+  uid (65532). Multi-arch: linux/amd64, linux/arm64.
+- Built by cross-compiling: every builder stage is `FROM --platform=$BUILDPLATFORM` and the Go
+  build takes `GOOS=$TARGETOS GOARCH=$TARGETARCH`; the final stage only `COPY`s, so no platform is
+  built under emulation. Every `FROM` is pinned by digest. CI (`ci/image-build.sh`,
+  `ci/image-check.sh`, docs/ci.md) builds both platforms on every build, loads and runs the amd64
+  image (`board version`, `GET /healthz`) and inspects both platforms' manifests; it pushes
+  nothing (the registry push is the release job's, Phase 4). `ci/repocheck` fails a final stage
+  that is not scratch or distroless static, a root user, or a builder stage without
+  `--platform=$BUILDPLATFORM`.
 - One volume (`/data`) for the SQLite file when SQLite is used.
 
 ### 12.5 Release artifacts
@@ -1240,7 +1249,7 @@ Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent
 | Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
 | Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, merged coverage, JUnit | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
 | Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
-| Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. The stage first builds the root `Dockerfile` image (`ci/image-build.sh`, not pushed) for the image gates. The two mutation rows are reported as judged by the Mutation stage (`--mutation-deferred`), whose reports exist only after it and not on a branch build |
+| Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. The stage first builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, not pushed); the amd64 image feeds the image gates. The two mutation rows are reported as judged by the Mutation stage (`--mutation-deferred`), whose reports exist only after it and not on a branch build |
 | Stability | extended lane only, `ci/stability.sh 3` | same |
 | Mutation | — (not in deck) | every `main` build and the extended lane (branches skip it), §15.4; `ci/mutation.sh` judges efficacy and break against the same `ci/quality.json` thresholds and fails the build below them |
 

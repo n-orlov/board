@@ -121,7 +121,10 @@ pipeline {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
           script {
             env.QUALITY_RESULT = 'failing'
+            // linux/amd64 and linux/arm64, cross-compiled and never pushed; the
+            // amd64 image is loaded, run and probed, both manifests inspected.
             sh 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar"'
+            sh 'ci/image-check.sh "$BOARD_CI_OUT"'
             sh 'ci/run.sh ci/quality.sh "$BOARD_CI_OUT" ci/quality.json --mutation-deferred'
             env.QUALITY_RESULT = 'passing'
           }

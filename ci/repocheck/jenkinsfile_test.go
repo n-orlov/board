@@ -155,6 +155,7 @@ func TestJenkinsfileRunsTheQualityGates(t *testing.T) {
 	}
 	for _, want := range []string{
 		`sh 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar"'`,
+		`sh 'ci/image-check.sh "$BOARD_CI_OUT"'`,
 		`ci/run.sh ci/quality.sh "$BOARD_CI_OUT" ci/quality.json --mutation-deferred`,
 		"catchError(buildResult: 'FAILURE'",
 	} {
@@ -162,7 +163,7 @@ func TestJenkinsfileRunsTheQualityGates(t *testing.T) {
 			t.Errorf("the Quality stage lacks %q", want)
 		}
 	}
-	if !strings.Contains(readRepoFile(t, "ci", "image-build.sh"), "docker build") {
+	if !strings.Contains(readRepoFile(t, "ci", "image-build.sh"), "docker buildx build") {
 		t.Error("ci/image-build.sh does not build the image")
 	}
 	if !strings.Contains(readRepoFile(t, "ci", "image-build.sh"), "docker save") {
