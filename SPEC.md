@@ -159,7 +159,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 
 ### 3.4 Rules of use
 
-Conventions are carried by the skill (§10), not enforced by the server:
+Conventions are carried by the agent protocol (`board help agent`, §8.6), not enforced by the server:
 
 - Agents mark tasks **done**; they **close** a task only when the operator explicitly asked
   them to. A close event records the acting actor and an optional `on_behalf_of` actor
@@ -193,6 +193,7 @@ initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e
 | way_back | text | optional: command/URL to reach this actor |
 | meta | json text | free-form environment facts the agent chose to send |
 | first_seen_at, last_seen_at | ts | `last_seen_at` bumps on any API call with this handle (coalesced, §14) |
+| protocol_seen | int, nullable | highest agent protocol version this actor has read (`board help agent`, §8.6) |
 
 An actor row is created on first use of a handle (upsert). Actors are never deleted.
 
@@ -447,6 +448,8 @@ and CLI can show badges without the lists.
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
 | GET | `/stream` | SSE live feed (§7.1) |
 | POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
+| GET | `/meta` | server version, agent protocol version (§8.6), the caller's principal and actor |
+| PUT | `/actors/me/protocol-seen` | record that the calling actor has read protocol version N (§8.6) |
 | GET | `/healthz` | liveness, **unauthenticated** |
 | GET | `/readyz` | DB reachable and migrated |
 | GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
@@ -544,6 +547,7 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ```
 board version | update [--check] [--version vX.Y.Z]
+board help agent [--version]            # the agent protocol cheat sheet (§8.6)
 board whoami                            # handle, way back, key name, server reachability
 board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
 board attention
@@ -642,6 +646,54 @@ the asset name pattern, supported OS/arch list, checksum file name, default inst
 the environment variable names. Where releases come from while the repository is private is the
 operator's deployment concern, not part of this spec.
 
+### 8.6 Agent protocol: `board help agent`
+
+The rules an agent follows live **in the binary**, not in a skill file each operator copies and
+lets drift. `board help agent` prints a cheat sheet of about 40 lines, headed
+`board protocol vN`, that is the whole working protocol:
+
+- **identity**: export `BOARD_URL`, `BOARD_API_KEY`, `BOARD_ACTOR`, `BOARD_WAY_BACK` per the
+  operator's instructions (§9); check with `board whoami`; subagents use the parent's handle;
+- **start**: `board start <task> "<intent>" --res …` (or `board new`) once the task is
+  understood; search before creating, never duplicate an open task;
+- **ping**: `board ping` at each milestone and at least every half TTL; once per iteration in
+  autonomous loops;
+- **shared-resource check**: `board now --resources …` before any risky shared action
+  (reboot, deploy, force-push, migration);
+- **conflict handling**: exit code 7 / a `CONFLICT` line means read the other lease and its
+  notes, leave a note on the resource, then wait, coordinate or ask; never proceed silently
+  through a conflict on a destructive action;
+- **block**: `board block <task> "<question>" --stop | --poll D`; record answers given in
+  conversation with `board answer <A…> "<answer>" --relay`;
+- **finish**: `board finish "<outcome>" [--done]`;
+- **catchup**: `board catchup` at check-in and after long waits; open note bodies only when
+  the summary concerns you;
+- **close only when asked**: any actor may close, but agents do so only on the operator's
+  explicit instruction, with `--for operator`.
+
+The text is a Go `embed`ded file (`internal/cli/protocol.txt`) with its version number `N`, a
+small integer bumped whenever an agent would have to behave differently (wording fixes don't
+bump it). `board help agent --version` prints just `N`. Running `board help agent` records the
+version as read for the actor (`PUT /actors/me/protocol-seen`; offline it still prints).
+
+**Staleness hint.** `GET /meta` returns the server's protocol version (the one its own binary
+embeds). `board start` (and `board new`) prints at most one extra line when either is newer:
+
+```
+hint: board protocol v4 on the server, you have v3 → board update, then board help agent
+hint: board protocol v4 changed since you last read it → board help agent
+```
+
+The hint never changes the exit code and never blocks the command.
+
+**Tests.**
+- Golden file: the exact text (`testdata/help-agent.golden`), updated deliberately with
+  `go test -update`. A changed golden file shows up in review, where the version bump is decided.
+- E2E (Godog): every `board …` command and every `--flag` the text mentions is parsed and
+  resolved against the CLI's command tree; an unknown command or flag fails the build. The text
+  never mentions a command that does not exist in that build.
+- Line budget: the test fails above 45 lines or 100 columns.
+
 ---
 
 ## 9. Agent identity (template)
@@ -673,33 +725,24 @@ back `pid <ppid> on <hostname>, cwd <cwd>`. It never reads tool-specific variabl
 
 ---
 
-## 10. Agent skill (outline)
+## 10. Agent skill
 
-Shipped in `skill/SKILL.md` (generic; operators copy and adapt). Outline:
+The skill is a thin pointer; the protocol itself is `board help agent` (§8.6), so it updates
+with the binary instead of with every operator's copy. `skill/SKILL.md` (generic; operators copy
+it once):
 
-1. **Identify** (§9). Run `board whoami` once.
-2. **Check in** once the task is understood: `board now --resources <what you'll touch>`.
-   Read conflicts and new notes. Find or create the task (`board task add`); never create a
-   duplicate of an open task, search first.
-3. **Start a lease** with an honest one-line intent, a TTL matching the expected stretch of
-   work (default 2 h, max 12 h), and the resources you will touch.
-4. **While working**: renew at each milestone and at least every half TTL
-   (`board lease renew`); post `board milestone` for notable progress; a long autonomous loop
-   renews once per iteration.
-5. **Before risky shared actions** (reboot, deploy, force-push, migration, anything touching a
-   host or service others may use): `board now --resources …` again. On conflict: read the
-   other lease and its notes, leave a note on the resource, and decide (wait, coordinate via
-   note, or ask the operator). Never silently proceed through a conflict on a destructive action.
-6. **Needing the operator**: `board ask`. Choose `--stop` (end your turn, tell the operator) or
-   `--poll <timeout>` (keep waiting; on timeout either defer the task or stop). If the operator
-   answers you directly in conversation, record it: `board answer <id> "<answer>" --relay`.
-7. **Notes**: tell others what they need to know (`board note`), bound to a task, a resource, or
-   broadcast. Read new notes at check-in (`board notes --since last --ack`); open bodies only
-   when the summary concerns you.
-8. **Finishing**: `board lease end "<outcome>"`, then `board task done <ref>` if the task's work
-   is complete. **Close only when the operator explicitly tells you to**, with
-   `--for operator`.
-9. **Watch tasks**: record each check with `board check <ref> "<what you saw>"`.
+```markdown
+---
+name: board
+description: Shared work board. Use at the start of any task, before risky shared actions,
+  when you need the operator, and when you finish.
+---
+Run `board help agent` once per session and follow it.
+Set your identity per the operator's AGENTS.md ("board identity") before the first command.
+If `board` is missing, install it following <repo URL>/INSTALL-AGENT.md.
+```
+
+The previous long outline is now the content of `board help agent`.
 
 ---
 
@@ -948,6 +991,10 @@ Everything below exists and the gates measure real code before any product featu
   creating initiatives. Enough real code for every gate to measure. The slice already follows the
   CLI output rules (§8.1): `ok` confirmation lines, one-line errors with `→ next`, the exit codes,
   list caps.
+- **`board help agent`** (§8.6) with protocol **v0**: only what Phase 0 has (identity,
+  `board whoami`, initiatives), plus `GET /meta`, the `protocol_seen` column, the golden test and
+  the command/flag existence e2e. Each later phase extends the text with its commands and bumps
+  the version, so the cheat sheet never describes commands that do not exist yet.
 - Svelte/Vite shell embedded via `go:embed`.
 - **Multi-arch container image** (amd64 + arm64), built in CI.
 - **deck-equivalent `Jenkinsfile` + `ci/`**: lint (Go + TS), unit, coverage gates, CRAP 8 for Go
@@ -966,7 +1013,7 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 | 1 | Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
 | 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page). |
 | 3 | Timeline UI (`vis-timeline`, archive window, filters), SSE live feed, remaining UI views. |
-| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); skill (`skill/SKILL.md`), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
+| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 
 Each phase ends on a green `main` build with all gates still enforced.
 

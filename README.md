@@ -13,7 +13,7 @@ Status: **design**. Nothing is implemented yet. Read [SPEC.md](SPEC.md):
 
 - glossary and rules of use (§2, §3)
 - data model and API (§4 to §7), with OpenAPI and Swagger UI at `/api/docs`
-- CLI, agent identity template and skill outline (§8 to §10)
+- CLI, agent protocol (`board help agent`), identity template and skill (§8 to §10)
 - stack: Go, `database/sql` over SQLite or Postgres, Svelte UI embedded in one binary (§12)
 - testing, CI and quality gates (§15), delivery phases (§16)
 
