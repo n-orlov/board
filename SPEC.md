@@ -491,6 +491,13 @@ built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_API_KEY` (the environment
 never accepted as a flag, so it does not land in shell history or process lists).
 `board admin …` subcommands talk to the database directly (`BOARD_DB_URL`) and need no key.
 
+`board serve` starts the HTTP server on `BOARD_LISTEN` (default `:8080`) and shuts down gracefully on
+SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read from the Go build info
+embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
+`-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
+subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
+`usage: board <serve|version>`.
+
 ### 8.1 Output rules
 
 The CLI is written for agents first: every line costs context.
