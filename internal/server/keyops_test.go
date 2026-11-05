@@ -135,6 +135,16 @@ func TestACreatedKeyWithoutExpiryHasNoExpiresAt(t *testing.T) {
 	}
 }
 
+func TestCreateKeyTakesTheLongestExpiryInDaysOrHours(t *testing.T) {
+	s := newKeyServer(t)
+	for name, in := range map[string]string{"days": "36500d", "hours": "876000h", "six-digit hours": "100000h"} {
+		rec := s.send(http.MethodPost, "/api/v1/keys", `{"name":"`+strings.ReplaceAll(name, " ", "-")+`","expires_in":"`+in+`"}`, "a")
+		if rec.Code != http.StatusCreated {
+			t.Errorf("%s (%s): %d %s, want 201", name, in, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestCreateKeyRefusesWhatItCannotMake(t *testing.T) {
 	s := newKeyServer(t)
 	for name, tc := range map[string]struct {
@@ -144,6 +154,7 @@ func TestCreateKeyRefusesWhatItCannotMake(t *testing.T) {
 		"bad name":      {`{"name":"bad name"}`, 400},
 		"bad expiry":    {`{"name":"x","expires_in":"soon"}`, 400},
 		"long expiry":   {`{"name":"x","expires_in":"99999d"}`, 400},
+		"long hours":    {`{"name":"x","expires_in":"876001h"}`, 400},
 		"taken name":    {`{"name":"caller"}`, 409},
 		"unreadable":    {`{`, 400},
 		"missing name":  {`{}`, 400},

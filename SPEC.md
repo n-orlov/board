@@ -220,7 +220,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
     - `GET /api/v1/keys` answers 200 `{"items": [Key, ...]}`, every key oldest first (not paginated: keys are few).
     - `POST /api/v1/keys` takes `{"name": "...", "expires_in": "90d"}`. `name` follows the CLI's rule and
       `expires_in` is optional, in the CLI's `--expires` form (a positive count of days `90d` or hours `12h`, at most
-      36500 days). It answers 201 with the Key plus `key`, the `brd_` key, which is returned by this response only and
+      36500 days in either unit, so up to `36500d` or `876000h`). It answers 201 with the Key plus `key`, the `brd_` key, which is returned by this response only and
       never again. A bad name or expiry, or an unreadable body, is 400. A name already taken is 409.
     - `POST /api/v1/keys/{name}/revoke` sets `revoked_at` and answers 200 with the Key. An unknown name is 404. Revoking
       a revoked key changes nothing and answers 200 with the first `revoked_at`.
@@ -643,7 +643,7 @@ refuses a database that is not migrated (one stderr line ending `→ board admin
 - `board admin keys create <name> [--expires 90d]` makes a key and prints exactly one stdout line, with the
   key as its last field and nowhere else: `ok key <name> created brd_…`, or `ok key <name> created exp
   <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
-  positive count of days (`90d`) or hours (`12h`), at most 36500 days, and the flag may come before or
+  positive count of days (`90d`) or hours (`12h`), at most 36500 days in either unit (`36500d`, `876000h`), and the flag may come before or
   after the name; without it the key never expires. `created_by` is `admin-cli`. A name that already exists
   exits 1 with the single stderr line `board: key "<name>" already exists → board admin keys list`, and
   stores nothing.

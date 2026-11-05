@@ -90,12 +90,15 @@ func TestRevokeAsRecordsOnlyARevocationThatHappened(t *testing.T) {
 }
 
 func TestParseExpiry(t *testing.T) {
-	for in, want := range map[string]time.Duration{"1d": 24 * time.Hour, "12h": 12 * time.Hour, "36500d": 36500 * 24 * time.Hour} {
+	for in, want := range map[string]time.Duration{"1d": 24 * time.Hour, "12h": 12 * time.Hour, "36500d": 36500 * 24 * time.Hour,
+		"99999h": 99999 * time.Hour, "100000h": 100000 * time.Hour, "876000h": 876000 * time.Hour,
+	} {
 		if got, err := ParseExpiry(in); err != nil || got != want {
 			t.Errorf("%s = %v %v", in, got, err)
 		}
 	}
-	for _, in := range []string{"", "0d", "90", "1w", "36501d", "100000d", "-1d", " 1d"} {
+	for _, in := range []string{"", "0d", "90", "1w", "36501d", "100000d", "876001h",
+		"99999999999999999999h", "99999999999999999999d", "-1d", " 1d"} {
 		if _, err := ParseExpiry(in); err == nil || !strings.Contains(err.Error(), in) {
 			t.Errorf("%q = %v, want an error naming it", in, err)
 		}
