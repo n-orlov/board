@@ -1,0 +1,764 @@
+# board — product spec
+
+A shared work board for one operator and the coding agents working for them.
+Initiatives, tasks, live leases, asks and notes, in one service with a web UI for
+the human, and an HTTP API plus a CLI for agents.
+
+This document is the design. Nothing here is implemented yet. Requirement IDs
+(`B1`, `B2`, …) are stable: code, tests and PRDs cite them.
+
+Contents
+
+1. Why
+2. Glossary
+3. Rules of use (no ACL in v1)
+4. Data model
+5. Derived state: leases, conflicts, attention
+6. HTTP API
+7. Live feed and long-poll
+8. CLI
+9. Agent identity (template)
+10. Agent skill (outline)
+11. Web UI
+12. Stack
+13. Configuration and deployment
+14. Performance targets
+15. Testing, CI and quality gates
+16. Delivery phases
+17. Out of scope / later
+18. Open questions
+
+---
+
+## 1. Why
+
+One person runs many agent sessions at once: interactive Claude Code / pi / Codex
+sessions, autonomous runs, sessions on several machines. Each one knows only its own
+context. Nobody (human or agent) can see at a glance:
+
+- which longer efforts are in flight, and how they progress over time;
+- which agent is working on what **right now**, and which ones died without saying so;
+- what is waiting for the operator (a question, a finished task to accept, an overdue check);
+- whether two agents are about to touch the same thing (a host, a repo, a service);
+- what other agents wanted everyone to know.
+
+`board` is that shared surface. It is **tool-agnostic**: it has no integration with any
+session manager or job runner. Agents take part because a skill tells them to, and identify
+themselves from what their environment exposes (§9).
+
+### Hard requirements
+
+| ID | Requirement |
+|---|---|
+| **B1** | Human UI and agent API see the same data. Every UI action has an API call. |
+| **B2** | Live work is a **lease** with a TTL. Work that stops renewing **expires** and is shown as such, without anyone cleaning up. |
+| **B3** | The operator's **attention view** answers "what needs me now" in one screen (§5.3). |
+| **B4** | Agents can read "what's new since T" cheaply: summaries first, bodies on demand. |
+| **B5** | Conflicts are **warnings**, never locks. The board never blocks an action. |
+| **B6** | Generic SQL: SQLite and Postgres supported from v1, same behaviour, same test suite (§12.2). |
+| **B7** | Small and fast: one static binary, one container, tens of MB of RAM (§14). |
+| **B8** | The API is self-describing: OpenAPI document and Swagger UI served by the app (§6.1). |
+| **B9** | No integration code for any specific agent tool. Tool specifics live in the operator's agent instructions (§9), never in the server. |
+
+### Non-goals (v1)
+
+- Access control, users, teams (§3). One operator, any number of agents.
+- A task queue or automatic pickup (§17).
+- Replacing an external issue tracker. Tasks may link to external tickets; they do not mirror them.
+- Rich text editing, attachments, comments threads. Notes are text (Markdown rendered).
+
+---
+
+## 2. Glossary
+
+These names are fixed. Code, API, UI and skill text use exactly these words.
+
+| Term | Meaning |
+|---|---|
+| **Board** | The service, its CLI (`board`) and its UI. |
+| **Initiative** | A group of tasks: a bounded effort ("onboard the new phone") or an ongoing area ("vulnerability hygiene"). Flat, never nested. Carries free-form **tags** (`work`, `personal`, `homelab`, …) used for filtering. |
+| **Task** | A unit of work inside exactly one initiative. Status is **open → done → closed** (§4.3). May depend on other tasks ("blocked by"). Kind is `work` (default) or `watch`. |
+| **Watch task** | A task of kind `watch`: an ongoing duty with a check-in **cadence** and a `next_check_at`. Recording a check moves `next_check_at` forward. Overdue checks appear in the attention view. |
+| **Done** | An actor says the task's work is finished. The task stays visible and appears in the attention view until closed. |
+| **Closed** | The task is accepted and finished. Its timeline bar ends, and it moves to the **archive**. Carries a **resolution**: `completed`, `dropped`, `superseded`, `duplicate`. |
+| **Archive** | Closed tasks (and closed initiatives). Hidden by default; the UI and API filter "closed within the last N days". |
+| **Lease** | An actor's live, time-bounded claim that it is working on a task. Started, **renewed**, **ended** by the actor, or **expired** by the server when its TTL passes without renewal. Default TTL 2 h, maximum 12 h. Declares the **resources** it touches. |
+| **Resource** | A typed string naming something a lease touches: `repo:<name>`, `host:<name>`, `service:<name>`, `run:<id>`, `path:<…>`, or any `<type>:<name>`. Used only for conflict detection and note addressing. |
+| **Conflict** | Two or more live leases declaring the same resource. A warning returned to the actor starting/renewing the lease and shown to everyone. Never a block. |
+| **Actor** | Whoever acts on the board. `kind` is `operator` (the human) or `agent`. Identified by a **handle** (e.g. `deck:work/fix-ci`, `ralph:run-42`, `claude:laptop:3f2a`) and carries a **way back**: how the operator reaches that actor (a command, a URL, a session name). |
+| **Event** | An append-only entry on a task's timeline (§4.6): lease started/renewed/ended/expired, ask raised/answered/withdrawn, check recorded, done, reopened, closed, note, field changes. Some types are drawn as markers on the timeline. |
+| **Ask** | A question from an actor that needs the operator. Open until **answered** (or **withdrawn**). The asking actor picks a **mode**: `stop` (it ends its turn; the operator comes back later) or `poll` (it long-polls for the answer with a timeout, §7.2). The answer can be given in the UI, or by the operator replying to the waiting agent directly, in which case the agent records the answer via the API. May be marked `blocking` (the task cannot proceed without it). |
+| **Note** | A message from an actor: a one-line **summary** and an optional longer **body** (Markdown). Optionally bound to a **task**, an **initiative** and/or a **resource**. A note with no task and no initiative is a **broadcast**. Readers list summaries since a timestamp and fetch bodies when relevant. |
+| **Attention view** | The operator's default view (§5.3): open asks, done-not-closed tasks, expired leases, overdue watches, live conflicts, each with the actors involved. |
+
+---
+
+## 3. Rules of use (no ACL in v1)
+
+**B10.** v1 has no authorization. Every actor can do everything the API offers, including
+closing tasks and answering asks. The deployment is expected to sit on a trusted private
+network (or behind an authenticating proxy). Access control is a later addition (§17).
+
+Conventions are carried by the skill (§10), not enforced by the server:
+
+- Agents mark tasks **done**; they **close** a task only when the operator explicitly asked
+  them to. A close event records the acting actor and an optional `on_behalf_of` actor
+  (`operator` when the agent closes on instruction).
+- Agents answer an ask only to record an answer the operator gave them directly
+  (`answered_by` = the agent, `on_behalf_of` = operator, `channel = "relay"`).
+- Agents never end or expire another actor's lease. The operator may end any lease from the UI
+  (recorded as `lease_ended` with `ended_by`).
+
+The server records **who** did everything (§4.6), so misuse is visible after the fact.
+
+---
+
+## 4. Data model
+
+All timestamps are UTC, stored with millisecond precision. IDs are ULIDs (sortable by
+creation time, text in every dialect). Short human references are derived: initiative
+`slug`, task `ref` = `<initiative-slug>-<n>` (per-initiative counter, e.g. `phone-onboard-3`).
+
+### 4.1 `actors`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | |
+| handle | text, unique | stable identity string (§9) |
+| kind | `operator` \| `agent` | exactly one `operator` row is seeded |
+| display_name | text | optional |
+| host | text | optional, from the handle |
+| way_back | text | optional: command/URL to reach this actor |
+| meta | json text | free-form environment facts the agent chose to send |
+| first_seen_at, last_seen_at | ts | `last_seen_at` bumps on any API call with this handle (coalesced, §14) |
+
+An actor row is created on first use of a handle (upsert). Actors are never deleted.
+
+### 4.2 `initiatives`, `initiative_tags`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | |
+| slug | text, unique | `[a-z0-9-]{2,40}` |
+| title | text | |
+| description | text | Markdown |
+| status | `open` \| `closed` | closing an initiative requires all its tasks closed (or `force=true`, which closes them `dropped`) |
+| target_start, target_end | date, nullable | planning window for the timeline |
+| created_by, created_at, closed_at, closed_by | | |
+
+`initiative_tags(initiative_id, tag)`, PK both columns, index on `tag`.
+
+### 4.3 `tasks`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | |
+| initiative_id | fk | |
+| seq | int | per-initiative counter → `ref` |
+| title | text | |
+| description | text | Markdown |
+| kind | `work` \| `watch` | |
+| status | `open` \| `done` \| `closed` | |
+| resolution | `completed` \| `dropped` \| `superseded` \| `duplicate`, nullable | set on close |
+| planned_start, planned_end | ts, nullable | planned bar on the timeline |
+| cadence_seconds | int, nullable | watch tasks only |
+| next_check_at | ts, nullable | watch tasks only |
+| external_refs | json text | list of `{label, url}` (tickets, PRs, builds) |
+| created_by, created_at, updated_at, done_at, done_by, closed_at, closed_by | | |
+
+Transitions: `open → done`, `done → open` (reopen), `open|done → closed`, `closed → open`
+(reopen from archive). Every transition writes an event.
+
+Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
+open blocking ask), **overdue** (watch with `next_check_at < now`).
+
+`task_deps(task_id, blocked_by_task_id)`: PK both, no self-reference, cycles rejected on insert.
+A dependency is **open** while the blocking task is not `closed` (done-not-closed still blocks).
+
+### 4.4 `leases`, `lease_resources`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | |
+| task_id | fk | |
+| actor_id | fk | |
+| intent | text | one line: what this actor is doing |
+| ttl_seconds | int | as requested, clamped to [60, 43200]; default 7200 |
+| started_at | ts | |
+| renewed_at | ts | last renewal (= started_at initially) |
+| expires_at | ts | renewed_at + ttl |
+| state | `live` \| `ended` \| `expired` | |
+| ended_at, ended_by | | `ended_by` set when someone other than the holder ends it |
+| outcome | text, nullable | short summary written at end |
+
+`lease_resources(lease_id, resource)`: PK both, index on `resource`.
+
+An actor may hold several live leases (different tasks). Starting a lease on a task where the
+same actor already has a live lease **renews** that lease instead (idempotent start).
+
+### 4.5 `asks`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | |
+| task_id | fk, nullable | an ask may be initiative-level or global |
+| initiative_id | fk, nullable | |
+| actor_id | fk | asker |
+| question | text | one line |
+| details | text | Markdown, optional |
+| options | json text | optional list of suggested answers |
+| mode | `stop` \| `poll` | |
+| blocking | bool | |
+| state | `open` \| `answered` \| `withdrawn` | |
+| answer | text | |
+| answered_by, on_behalf_of | fk actor | |
+| channel | `ui` \| `api` \| `relay` | relay = recorded by the agent from a direct reply |
+| created_at, answered_at | | |
+
+### 4.6 `events`
+
+The task timeline and the global change log. Append-only; never updated or deleted.
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | ordering key for "since" reads |
+| at | ts | |
+| actor_id | fk | who did it |
+| on_behalf_of | fk, nullable | |
+| initiative_id | fk, nullable | denormalised for filtering |
+| task_id | fk, nullable | |
+| type | text | see below |
+| ref_id | text, nullable | the lease / ask / note id the event is about |
+| summary | text | one line, rendered for humans and agents |
+| data | json text | type-specific fields |
+
+Event types (closed set in v1, extended by migration):
+
+`initiative_created`, `initiative_updated`, `initiative_closed`, `initiative_reopened`,
+`task_created`, `task_updated`, `task_done`, `task_reopened`, `task_closed`,
+`dep_added`, `dep_removed`,
+`lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`,
+`ask_raised`, `ask_answered`, `ask_withdrawn`,
+`check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
+
+Timeline markers: `lease_started`/`lease_ended`/`lease_expired` bound lease bars;
+`milestone`, `ask_raised`, `ask_answered`, `check_recorded`, `task_done`, `task_closed`
+draw as point markers. `lease_renewed` is stored but not drawn (it is the heartbeat).
+
+### 4.7 `notes`
+
+| column | type | notes |
+|---|---|---|
+| id | ulid | ordering key for "since" reads |
+| actor_id | fk | author |
+| summary | text | ≤ 200 chars |
+| body | text, nullable | Markdown |
+| task_id | fk, nullable | |
+| initiative_id | fk, nullable | set automatically from the task when task_id is given |
+| resource | text, nullable | e.g. `host:build-1` |
+| mentions | json text | list of actor handles |
+| created_at | ts | |
+
+Broadcast = `task_id IS NULL AND initiative_id IS NULL`. A note bound to a task also writes a
+`note_posted` event on that task.
+
+### 4.8 `cursors`
+
+`cursors(actor_id, stream, position)`: optional server-side read cursor per actor and stream
+(`notes`, `events`), so an agent may ask "since my last read" without keeping state itself
+(`since=cursor`). Updated only when the reader asks (`ack=true`).
+
+### 4.9 Indexes (the hot queries)
+
+- `events(id)` (PK) and `events(task_id, id)`, `events(initiative_id, id)`: since-T reads.
+- `notes(id)`, `notes(task_id, id)`, `notes(resource, id)`, partial/filtered index for broadcasts
+  where the dialect supports it (`WHERE task_id IS NULL AND initiative_id IS NULL`), plain
+  composite otherwise.
+- `leases(state, expires_at)`: expiry sweep and the live set.
+- `lease_resources(resource)`: conflicts.
+- `asks(state, created_at)`: open asks.
+- `tasks(status, initiative_id)`, `tasks(kind, next_check_at)`, `tasks(closed_at)`: attention and archive.
+- `initiative_tags(tag)`.
+
+---
+
+## 5. Derived state
+
+### 5.1 Lease lifecycle
+
+- **Start** `POST /api/v1/leases {task, intent, ttl, resources[]}` → lease + conflicts.
+- **Renew** `POST /api/v1/leases/{id}/renew {ttl?, intent?, resources?}`: pushes `expires_at`.
+  Agents renew at milestones and at least every `ttl/2`. Renewing an `expired` lease is an
+  error (`410 Gone`) carrying the expiry time; the agent starts a new lease, and the gap is
+  visible on the timeline.
+- **End** `POST /api/v1/leases/{id}/end {outcome?}`.
+- **Expire**: a sweeper marks `live` leases with `expires_at < now` as `expired` and writes
+  `lease_expired`. It runs every 15 s and also lazily on every read that returns leases, so a
+  read never shows a lease as live past its expiry. Expiry is idempotent and safe with several
+  replicas (conditional update `WHERE state='live' AND expires_at < ?`).
+
+### 5.2 Conflicts
+
+Computed on read: resources held by more than one live lease. Starting or renewing a lease
+returns the conflicting live leases (holder handle, task ref, intent, expires_at) in the
+response body, and the CLI prints them prominently. Optional resource prefixes
+(`host:` vs `repo:`) carry no special meaning to the server.
+
+### 5.3 Attention view
+
+`GET /api/v1/attention` returns, each list newest-relevant first, each item with the
+**actors involved** (handle + way back):
+
+1. **Open asks**: question, asker, mode (and, for `poll`, whether the asker is still polling:
+   a poll is in flight or ended within the last 60 s), blocking flag, age.
+2. **Done, not closed** tasks: who marked done, when, last outcome text.
+3. **Expired leases** not yet acknowledged: holder, task, intent, last renewal. The operator
+   acknowledges (`POST /api/v1/leases/{id}/ack`) after looking; a later lease by anyone on the
+   same task also clears it.
+4. **Overdue watches**: task, `next_check_at`, last check event.
+5. **Live conflicts**: resource, holders, tasks.
+
+Filters: `tag`, `initiative`. Counts per section are in the response header object so the UI
+and CLI can show badges without the lists.
+
+---
+
+## 6. HTTP API
+
+### 6.1 Shape
+
+- Base path `/api/v1`. JSON in and out. Errors are RFC 9457 problem documents.
+- **The OpenAPI 3.1 document is the source of truth**, checked in (`api/openapi.yaml`). Server
+  handler interfaces and the CLI client are generated from it (oapi-codegen); a CI check fails
+  if generated code is stale. Served at `/api/openapi.yaml` and `/api/openapi.json`.
+- **Swagger UI** at `/api/docs` (assets embedded, no CDN).
+- Every mutating request names its actor: header `Board-Actor: <handle>` (required), optional
+  `Board-Actor-Way-Back`, `Board-Actor-Meta` (JSON), `Board-On-Behalf-Of`. The actor is
+  upserted on use. The UI sends the operator handle.
+- Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
+  original response. Agents retry safely.
+- Pagination: `limit` (default 100, max 1000) + `after=<ulid>` cursor. Lists are ordered by id.
+- Compact mode: `?view=compact` returns the minimal fields agents need (ids, refs, one-line
+  text, times), to keep agent context small.
+
+### 6.2 Endpoints (v1)
+
+| method | path | purpose |
+|---|---|---|
+| GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. |
+| GET | `/attention` | §5.3 |
+| GET/POST | `/initiatives` | list (filters: tag, status, closed_within) / create |
+| GET/PATCH | `/initiatives/{slug}` | read / update (title, description, tags, targets) |
+| POST | `/initiatives/{slug}/close`, `/reopen` | |
+| GET/POST | `/tasks` | list (filters: initiative, tag, status, kind, active, blocked, overdue, closed_within, q) / create |
+| GET/PATCH | `/tasks/{ref}` | read (with deps, live leases, open asks) / update |
+| POST | `/tasks/{ref}/done`, `/reopen`, `/close` | close takes `resolution` |
+| POST/DELETE | `/tasks/{ref}/deps/{blockedByRef}` | |
+| POST | `/tasks/{ref}/checks` | watch: record a check `{summary, next_check_at?}` |
+| POST | `/tasks/{ref}/milestones` | `{summary, data?}` |
+| GET | `/tasks/{ref}/events` | timeline |
+| GET/POST | `/leases` | list (filters: state, actor, task, resource) / start |
+| POST | `/leases/{id}/renew`, `/end`, `/ack` | |
+| GET/POST | `/asks` | list (state, actor, task) / raise |
+| GET | `/asks/{id}` | read; `?wait=<seconds>` long-poll (§7.2) |
+| POST | `/asks/{id}/answer`, `/withdraw` | |
+| GET/POST | `/notes` | list (filters below) / post |
+| GET | `/notes/{id}` | full body |
+| GET | `/events` | global change log (filters: since, initiative, task, type, actor) |
+| PUT | `/cursors/{stream}` | ack read position |
+| GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
+| GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
+| GET | `/stream` | SSE live feed (§7.1) |
+| GET | `/healthz`, `/readyz` | liveness / DB reachable and migrated |
+| GET | `/metrics` | Prometheus text |
+
+**Note filters**: `since=<ulid|RFC3339|cursor>`, `task=<ref>`, `initiative=<slug>`,
+`resource=<r>` (repeatable), `broadcast=only|exclude`, `mention=<handle>`, `author=<handle>`,
+`fields=summary` (default for lists; bodies via `/notes/{id}` or `fields=full`).
+
+---
+
+## 7. Live feed and long-poll
+
+### 7.1 SSE
+
+`GET /api/v1/stream?topics=events,attention`: Server-Sent Events. Each event carries the
+`events.id` as the SSE `id`, so `Last-Event-ID` resumes without gaps (replayed from the table).
+`attention` pushes updated counts when they change. Heartbeat comment every 25 s. The UI uses
+this; nothing in the UI polls.
+
+### 7.2 Ask long-poll
+
+`GET /api/v1/asks/{id}?wait=N` (N ≤ 300) returns immediately if the ask is not `open`,
+otherwise holds the request until it is answered/withdrawn or N seconds pass. Implemented by an
+in-process notifier; with several replicas on Postgres, `LISTEN/NOTIFY` wakes the other
+replicas, and on SQLite (single replica) the in-process notifier suffices. A poll in flight
+marks the ask as "asker waiting" in the attention view.
+
+---
+
+## 8. CLI
+
+One binary, same Go module: `board serve` runs the server, every other subcommand is a client.
+Static builds for linux/darwin × amd64/arm64.
+
+Configuration: `BOARD_URL`, `BOARD_ACTOR` (handle; if unset, the CLI derives one with the
+built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_TOKEN` (reserved for §17 ACL, ignored by
+v1 servers).
+
+Output is **compact plain text by default** (designed for agent context: one line per item,
+refs not ids, relative times), `--json` for machines.
+
+```
+board now [--resources r1,r2]          # check-in: what's live, conflicts, asks, new notes
+board attention
+board init add <slug> "<title>" [--tag t]...
+board task add <initiative> "<title>" [--kind watch --cadence 24h] [--after <ref>]...
+board task show|done|reopen|close <ref> [--resolution dropped] [--for operator]
+board lease start <ref> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
+board lease renew [<lease-id>|<ref>] [--ttl 4h] [--intent ...]
+board lease end   [<lease-id>|<ref>] ["<outcome>"]
+board ask <ref> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
+board answer <ask-id> "<answer>" [--relay]
+board note "<summary>" [--body file|-] [--task <ref>] [--res r] [--mention h]
+board notes [--since last|<time>] [--task <ref>] [--broadcast] [--res r] [--ack]
+board note show <id>
+board milestone <ref> "<summary>"
+board check <ref> "<summary>" [--next 24h]
+board whoami                           # resolved handle, way back, server reachability
+```
+
+`board ask --poll D` exits 0 printing the answer, or exit code 3 on timeout (the ask stays
+open). `board lease renew` with no argument renews every live lease held by the current actor.
+
+Example `board now` output:
+
+```
+you: claude:ws1:3f2a  leases: phone-onboard-3 (exp 1h52m)
+live: deck:personal/vpn-debug  homelab-7 "rotate wstunnel prefix" res host:gw1 (exp 41m)
+      ralph:trip-m6            trip-12   "attachments e2e"         res repo:trip (exp 3h10m)
+CONFLICT host:gw1 — you (phone-onboard-3) and deck:personal/vpn-debug (homelab-7)
+asks: #01J…Q answered: "use the rack AP"
+notes since 10:42 (3): [broadcast] ralph:trip-m6 "registry slow, builds may time out" …
+attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1
+```
+
+---
+
+## 9. Agent identity (template)
+
+The server does not know any agent tool. Each actor sends a **handle** and a **way back**.
+How an agent derives them is the operator's policy, kept in their own agent instructions
+(e.g. a global `AGENTS.md` / `CLAUDE.md`), not in this repository's code. The CLI ships only a
+generic fallback.
+
+Template for the operator's instructions (first matching rule wins; adapt to your tools):
+
+```markdown
+## board identity
+Before using `board`, export BOARD_ACTOR and BOARD_WAY_BACK:
+1. Autonomous run (e.g. RALPHD_RUN_ID set):   ralph:<run-id>
+   way back: `ralphctl status <run-id>`
+2. Session manager (e.g. DECK_SESSION_NAME set): deck:<DECK_PROFILE>/<DECK_SESSION_NAME>
+   way back: `deck` → profile <DECK_PROFILE>, session <DECK_SESSION_NAME>
+3. Claude Code (CLAUDE_CODE_SESSION_ID set):  claude:<host>:<first 8 of session id>
+   way back: `claude --resume <session id>` on <host>, cwd <cwd>
+4. Fallback (CLI built-in):                    <tool|agent>:<host>:<pid>
+Always include the host when the identifier is not globally unique.
+Subagents never register: they act under their parent's handle.
+```
+
+The CLI's built-in fallback: `BOARD_ACTOR` if set, else `agent:<hostname>:<ppid>`, with way
+back `pid <ppid> on <hostname>, cwd <cwd>`. It never reads tool-specific variables.
+
+---
+
+## 10. Agent skill (outline)
+
+Shipped in `skill/SKILL.md` (generic; operators copy and adapt). Outline:
+
+1. **Identify** (§9). Run `board whoami` once.
+2. **Check in** once the task is understood: `board now --resources <what you'll touch>`.
+   Read conflicts and new notes. Find or create the task (`board task add`); never create a
+   duplicate of an open task, search first.
+3. **Start a lease** with an honest one-line intent, a TTL matching the expected stretch of
+   work (default 2 h, max 12 h), and the resources you will touch.
+4. **While working**: renew at each milestone and at least every half TTL
+   (`board lease renew`); post `board milestone` for notable progress; a long autonomous loop
+   renews once per iteration.
+5. **Before risky shared actions** (reboot, deploy, force-push, migration, anything touching a
+   host or service others may use): `board now --resources …` again. On conflict: read the
+   other lease and its notes, leave a note on the resource, and decide (wait, coordinate via
+   note, or ask the operator). Never silently proceed through a conflict on a destructive action.
+6. **Needing the operator**: `board ask`. Choose `--stop` (end your turn, tell the operator) or
+   `--poll <timeout>` (keep waiting; on timeout either defer the task or stop). If the operator
+   answers you directly in conversation, record it: `board answer <id> "<answer>" --relay`.
+7. **Notes**: tell others what they need to know (`board note`), bound to a task, a resource, or
+   broadcast. Read new notes at check-in (`board notes --since last --ack`); open bodies only
+   when the summary concerns you.
+8. **Finishing**: `board lease end "<outcome>"`, then `board task done <ref>` if the task's work
+   is complete. **Close only when the operator explicitly tells you to**, with
+   `--for operator`.
+9. **Watch tasks**: record each check with `board check <ref> "<what you saw>"`.
+
+---
+
+## 11. Web UI
+
+Single-page app served by the same binary. Read-mostly for agents' output, full editing for the
+operator. Live via SSE (§7.1).
+
+| view | content |
+|---|---|
+| **Attention** (default) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
+| **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters: tags, initiatives, actor, "show archived closed within N days". |
+| **Initiatives** | list with tags, open/done/closed counts, live-lease count; initiative page with tasks table and its own timeline. |
+| **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
+| **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
+| **Actors** | who is alive now (live leases, last seen), with way back. |
+| **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
+
+Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
+network requests (all assets embedded).
+
+---
+
+## 12. Stack
+
+### 12.1 Server and CLI
+
+- Go 1.25+, one module, one static binary (`CGO_ENABLED=0`).
+- HTTP: standard library `net/http` (1.22+ routing), handlers generated from OpenAPI
+  (`oapi-codegen`, strict server). No web framework.
+- Logging: `log/slog` JSON. Metrics: Prometheus text exposition (minimal dependency).
+
+### 12.2 Database
+
+- `database/sql` with drivers: **SQLite** via `modernc.org/sqlite` (pure Go), **Postgres** via
+  `jackc/pgx/v5/stdlib`.
+- `BOARD_DB_URL` selects the driver: `sqlite:///data/board.db`, `postgres://…`.
+- **Dialect layer**: one small Go interface for the differences that matter (placeholder style,
+  `RETURNING`, upsert syntax, JSON columns stored as text, boolean/time encoding, partial index
+  creation, `LISTEN/NOTIFY` availability). Queries are hand-written portable SQL; no ORM.
+- **Migrations**: `pressly/goose` v3 with Go-embedded SQL files, one directory per dialect only
+  where the DDL must differ; applied on start (`BOARD_MIGRATE=auto`, default) or by
+  `board migrate`.
+- SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, one
+  writer connection plus a read pool. SQLite is single-replica.
+- **Supported = in the CI matrix.** v1 supports SQLite and Postgres (16+). MySQL/MariaDB or
+  others become supported only when the whole e2e suite runs against them in CI.
+
+### 12.3 Web UI
+
+- Vite + TypeScript + Svelte 5, `vis-timeline` for the timeline.
+- Built to static assets, embedded in the Go binary with `go:embed`. The binary serves it at `/`.
+- API client generated from the same OpenAPI document (`openapi-typescript`).
+
+### 12.4 Container
+
+- Multi-stage build; final image `FROM scratch` (or distroless static) with the binary, CA
+  certificates and tzdata. Runs as a non-root uid. Multi-arch: linux/amd64, linux/arm64.
+- One volume (`/data`) for the SQLite file when SQLite is used.
+
+---
+
+## 13. Configuration and deployment
+
+All configuration is by environment variable:
+
+| var | default | meaning |
+|---|---|---|
+| `BOARD_LISTEN` | `:8080` | listen address |
+| `BOARD_DB_URL` | `sqlite:///data/board.db` | §12.2 |
+| `BOARD_MIGRATE` | `auto` | `auto` \| `off` |
+| `BOARD_OPERATOR_HANDLE` | `operator` | the seeded operator actor; the UI acts as this actor |
+| `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
+| `BOARD_LEASE_MAX_TTL` | `12h` | |
+| `BOARD_SWEEP_INTERVAL` | `15s` | lease expiry sweep |
+| `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
+| `BOARD_LOG_LEVEL` | `info` | |
+
+The board itself does no TLS and no authentication (§3): put it behind a private network or a
+TLS-terminating, authenticating proxy. Backups: the SQLite file (use the online backup command
+`board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
+
+The operator's own deployment (host, network, image registry, backup schedule) is described
+outside this repository.
+
+---
+
+## 14. Performance targets
+
+Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
+
+| target | value |
+|---|---|
+| idle RSS | ≤ 40 MB |
+| image size | ≤ 30 MB |
+| cold start to `/readyz` | ≤ 1 s with an empty DB, ≤ 3 s with 1 M events |
+| `GET /now`, `GET /attention` p99 | ≤ 20 ms at 1 M events, 50 k notes, 200 live leases |
+| lease renew p99 | ≤ 10 ms |
+| sustained load | 200 req/s mixed (80 % reads) without errors; 500 concurrent SSE clients |
+| CLI | `board now` round trip ≤ 100 ms on a LAN; binary start ≤ 20 ms |
+
+Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s);
+attention counts are cached and invalidated by the writes that change them; reads never take
+the SQLite writer connection. A benchmark suite (`go test -bench`) with a seeded large dataset
+runs in the extended lane and fails on a regression > 20 % against the committed baseline.
+
+---
+
+## 15. Testing, CI and quality gates
+
+### 15.1 Principle
+
+**board follows deck's CI/CD and quality gating exactly.** The reference is the deck
+repository: its `Jenkinsfile`, `Jenkinsfile.release`, `ci/` scripts (`run.sh`, `Dockerfile`,
+`jenkins-image.sh`, `lint.sh`, `golangci.sh`, `suite.sh`, `quality.sh`, `quality.json`,
+`qualitycheck/`, `crapgate/`, `covgate/`, `allure-report.sh`, `allure-smoke.sh`,
+`jenkins-report.sh`, `summary.sh`, `stability.sh`, `release-build.sh`) and its `docs/ci.md`.
+board copies those mechanisms (renaming `DECK_*` to `BOARD_*`) rather than inventing new ones.
+The only additions are what a web UI and a second database need: the Playwright UI e2e layer
+(patterned on s3-browser's `playwright.config.ts` and `e2e/`), the database matrix, and the
+frontend's coverage/CRAP/mutation gates.
+
+### 15.2 Test layers
+
+| layer | tool | what |
+|---|---|---|
+| Unit | `go test` | domain logic (lease state machine, conflicts, attention, dialect SQL builders, ULIDs/refs, identity fallback), with coverage. |
+| API + CLI e2e (behaviour) | Godog feature files (Gherkin), as deck's `features/` | the real binary started on a free port against each database; steps drive the HTTP API and the CLI binary. Scenarios are the product's acceptance tests. |
+| Database matrix | testcontainers-go | every e2e scenario runs against **SQLite and Postgres**; a scenario that passes on one and fails on the other fails the build. |
+| UI e2e | Playwright (TypeScript), s3-browser's reporter set (html, list, allure-playwright, json, junit) and its rule of **no retries in Playwright** (flakiness is handled by the suite's retry-once policy and recorded) | the embedded UI against a seeded server: attention actions, timeline rendering and filters, notes board, archive window, SSE live updates, Swagger UI reachable. Screenshots on failure. |
+| Frontend unit | Vitest + `@vitest/coverage-v8` | stores, API client wrappers, timeline data shaping. |
+| Benchmarks | `go test -bench` | §14, extended lane only. |
+
+Headline scenarios that define the product (must exist from the first iteration):
+
+1. Two agents start leases on different tasks declaring the same `host:` resource → both see
+   the conflict in `board now`, the operator sees it in attention; one ends → conflict clears.
+2. An agent starts a lease with TTL 1 min and stops renewing → after expiry the lease is
+   `expired`, appears in attention with holder and way back, and renewing returns 410.
+3. An agent raises a polling ask; the operator answers in the UI → the agent's
+   `board ask --poll` returns the answer; a second ask answered via `--relay` records
+   `on_behalf_of=operator`, `channel=relay`.
+4. Agent posts notes (task-bound, resource-bound, broadcast); another agent reads
+   `notes --since last` → sees exactly the relevant summaries, `--ack` advances its cursor.
+5. Task marked done by an agent appears in attention; the operator closes it → leaves the
+   timeline, appears in the archive within the chosen window.
+
+### 15.3 Pipeline
+
+Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent label
+`linux && amd64 && docker`, `disableConcurrentBuilds`, clean workspace):
+
+| stage | as in deck | board specifics |
+|---|---|---|
+| CI image | `ci/jenkins-image.sh`, Go cache volume | image also carries Node (frontend build, Vitest, Playwright browsers) |
+| Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check |
+| Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, merged coverage, JUnit | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
+| Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
+| Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4 |
+| Stability | extended lane only, `ci/stability.sh 3` | same |
+| Mutation | — (not in deck) | every `main` build and the extended lane (branches skip it), §15.4 |
+
+Extended lane (nightly on `main` + `EXTENDED` parameter): `-race`, fresh vulnerability
+databases, three clean-state stability runs, benchmarks, mutation. SBOM: CycloneDX for the
+module, the frontend and the image (`syft`/Trivy), generated on every build and archived;
+attached to releases. Reports exactly as deck:
+JUnit, Allure with per-branch history, CI summary, build summary line, README badges (`build`,
+`tests`, `coverage`, `quality`), one Telegram message per build (sound only on red `main` or
+nightly). A fully green `main` build archives `ci-results/release-candidate.json`.
+
+Release: `Jenkinsfile.release` as deck's (manual job, `VERSION` + optional `CI_BUILD`, releases
+exactly the candidate commit, draft-then-publish GitHub release with checksums, immutable
+releases required). board's release additionally builds and pushes the multi-arch container
+image (tagged `VERSION` and digest-pinned in the release notes); the registry is a job
+parameter, not hard-coded.
+
+### 15.4 Quality gates
+
+All gates are **on from the first commit**. Thresholds live in `ci/quality.json`, read by
+`ci/qualitycheck`, as in deck.
+
+| gate | threshold |
+|---|---|
+| Go coverage | total ≥ 85 %, every package ≥ 80 %, fixture floor 50 % (deck's values) |
+| **CRAP (Go)** | deck's `ci/crapgate`, **ceiling 8**, **fixture ceiling 8** (deck uses 10). **No baseline or exemption file**: greenfield, every function must pass. |
+| **CRAP (TS/Svelte)** | scored like s3-browser's `scripts/crap` (ESLint complexity × Vitest coverage), **ceiling 8**, **no baseline file** (s3-browser's `crap-baseline.json` mechanism is not used). |
+| Frontend coverage | statements/lines ≥ 85 %, per file ≥ 80 % (aligned with the Go floors) |
+| golangci-lint | on (deck's config as the starting point) |
+| govulncheck | on |
+| Trivy | HIGH, CRITICAL fail the gate (source and the built image) |
+| Mutation | Go: gremlins over `internal/` domain packages; frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
+| SBOM | CycloneDX generated for module, frontend and image; a missing or empty SBOM fails the build |
+| OpenAPI | spec lints clean; generated server/client code has no drift |
+
+A gate is never weakened to make a build pass; a threshold change is a reviewed commit to
+`ci/quality.json` with its reason.
+
+---
+
+## 16. Delivery phases
+
+### Phase 0: skeleton and full CI/CD (no features)
+
+Everything below exists and the gates measure real code before any product feature is built.
+
+- **Module layout**: `cmd/board/` (main), `internal/server/` (HTTP, generated handlers),
+  `internal/store/` (dialect layer, queries), `internal/store/migrations/{common,sqlite,postgres}/`,
+  `internal/domain/`, `internal/cli/`, `api/openapi.yaml`, `web/` (Vite + Svelte + TS),
+  `features/` (Godog), `e2e/` (Playwright), `ci/` (deck-equivalent scripts), `Dockerfile`,
+  `Jenkinsfile`, `Jenkinsfile.release`.
+- **One binary** `board`: `board serve` and CLI subcommands, version stamped from build info.
+- `/healthz`, `/readyz`.
+- **OpenAPI** spec checked in, server and TS client generated, drift check; Swagger UI at
+  `/api/docs`.
+- **goose migrations + dialect layer** running on SQLite and Postgres.
+- **One thin vertical slice**: initiatives create / list / get, via API, via CLI
+  (`board init add`, `board init ls`, `board init show`), and a minimal Svelte page listing and
+  creating initiatives. Enough real code for every gate to measure.
+- Svelte/Vite shell embedded via `go:embed`.
+- **Multi-arch container image** (amd64 + arm64), built in CI.
+- **deck-equivalent `Jenkinsfile` + `ci/`**: lint (Go + TS), unit, coverage gates, CRAP 8 for Go
+  and TS, mutation, Allure, API e2e matrix SQLite + Postgres, CLI e2e, Playwright UI e2e, Trivy
+  HIGH/CRITICAL, SBOM, badges, Telegram notification, release candidate file.
+- `Jenkinsfile.release`: placeholder that validates parameters and the candidate and stops
+  (`DRY_RUN` behaviour only).
+
+**Exit criteria**: a green multibranch build on `main` with **every gate enforced**: no gate
+disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
+
+### Later phases
+
+| phase | scope |
+|---|---|
+| 1 | Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts; `board now` (lease/conflict parts), task and lease CLI. |
+| 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page). |
+| 3 | Timeline UI (`vis-timeline`, archive window, filters), SSE live feed, remaining UI views. |
+| 4 | Skill (`skill/SKILL.md`), identity template, CLI polish (compact output, idempotency), performance targets verified (§14), operator's own deployment. |
+
+Each phase ends on a green `main` build with all gates still enforced.
+
+## 17. Out of scope / later
+
+- **Task queue**: tasks marked `queueable`, agents claim via lease with a `claim` flag, ready =
+  open + no open deps + no live lease. Designed separately.
+- **ACL**: per-actor tokens (`BOARD_TOKEN`), scopes (read / write / operator-only actions such
+  as close and answer), maybe OIDC for the UI.
+- **MCP endpoint** exposing the same operations as tools.
+- **Asks and autonomous runners**: how a runner's own "operator input required" review relates
+  to board asks (poll vs defer vs stop). Discussed separately.
+- Notifications out of the board (webhooks on attention changes).
+- MySQL/MariaDB support (only with CI coverage, §12.2).
+
+---
+
+## 18. Open questions
+
+1. Should `done` require the actor to hold (or have held) a lease on the task, or may any actor
+   mark any task done? (v1: anyone, recorded.)
+2. Should an initiative have an owner actor, or only tags?
+3. Retention: events and notes are kept forever in v1. Do we need an archive/compaction policy
+   once the table is large?
+4. Should expired-lease acknowledgement be automatic after N days?
