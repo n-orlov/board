@@ -42,6 +42,30 @@ never the original checkout. With no argument (or `--smoke`) it stops there and
 exits 0; any other arguments are passed to `go test` inside the same clone.
 The clone is of the committed HEAD, so commit before running it.
 
+## Quality gates
+
+Every SPEC section 15.4 gate is in `ci/quality.json` with `enabled: true` at
+its threshold. A gate whose input does not exist yet fails; it never passes.
+
+| key | threshold | state |
+|---|---|---|
+| `coverage` | 85 total, 80 per package, 50 fixture | runs |
+| `crap` | ceiling 8, fixture ceiling 8 | runs |
+| `crap_ts` | ceiling 8 | fails until the web gates land (task 008) |
+| `frontend_coverage` | 85 total, 80 per file | fails until task 008 |
+| `golangci` | zero findings | runs |
+| `govulncheck` | zero reachable | runs |
+| `trivy` | HIGH, CRITICAL on the source | runs |
+| `trivy_image` | HIGH, CRITICAL on the image | fails until the image tar exists (task 011) |
+| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | fails until task 006 |
+| `stryker` | break 80, per module 80, `web/src/lib` | fails until task 008 |
+| `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
+| `sbom_frontend`, `sbom_image` | CycloneDX, non-empty | fail until `web/package-lock.json` and the image tar exist |
+| `openapi_lint`, `openapi_drift` | lint clean, no drift | fail until `api/openapi.yaml` and the generated code exist |
+
+`ci/quality.sh` exits non-zero until every row runs. Each row that fails for
+a missing input names the input in the report.
+
 ## Pipeline tools and scripts
 
 The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
@@ -54,8 +78,11 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   function against the ceiling in `ci/quality.json`. There is no baseline file.
 - `ci/qualitycheck`: the single quality-gate runner behind `ci/quality.sh`. It
   runs whichever gates `ci/quality.json` switches on (coverage, CRAP,
-  golangci-lint, govulncheck, Trivy) and fails if a threshold is loosened
-  against the merge-base copy of the file.
+  golangci-lint, govulncheck, Trivy and the module SBOM run today; see the
+  table below for the rest) and fails if a threshold is loosened against the
+  merge-base copy of the file. A table-driven test (`completeness_test.go`)
+  holds the real file to SPEC section 15.4 and proves that removing,
+  disabling or loosening any gate is noticed.
 - `ci/junit2allure`, `ci/junitflaky`, `ci/allureverify`: JUnit to Allure
   conversion, the flaky-test list, and the check that the Allure report keeps
   the Godog steps and issue links.
@@ -75,13 +102,17 @@ Scripts, each run through `ci/run.sh` unless noted:
 - `ci/suite.sh`: `go test -p=1 -count=1 ./...` through gotestsum in two passes
   (every package but `features/TestFeatures`, then `TestFeatures`), with
   fail-once-retry-once and a `flaky-*.txt` record. It unsets every `BOARD_*`
-  variable after reading its own `BOARD_CI_*` settings. `BOARD_CI_OUT` or a
+  variable after reading its own `BOARD_CI_*` settings. It empties the unit and
+  feature coverage-data directories first, so a rerun into the same results
+  directory never merges stale counters. `BOARD_CI_OUT` or a
   positional argument names the results directory.
 - `ci/quality.sh`: scrubs `BOARD_*` and runs `ci/qualitycheck` over
   `ci/quality.json` and the suite's merged coverage profile.
   **CRAP ceiling 8**, for product code and for fixtures alike; coverage floors
   are 85 % total, 80 % per package and 50 % per fixture. No gate may be
   switched off or loosened: `ci/qualitycheck` fails on a change that does.
+  There is no baseline or exemption file. The CycloneDX files the SBOM gates
+  write go into the results directory.
 - `ci/lint.sh`: gofmt, `go vet`, `go mod tidy` drift, then `ci/golangci.sh`
   (the golangci-lint invocation `ci/quality.sh` shares, configured by
   `.golangci.yml`; a `//nolint` must name its linter and give a reason).

@@ -218,6 +218,9 @@ go_flaky="$outdir/flaky-go.txt"
 # already expects, so no downstream consumer needs to know the collection
 # mechanism changed.
 unit_covdir="$outdir/covdata-unit"
+# A directory left by an earlier run would be merged into this run's profile
+# (counters keyed to source that has since changed), so start from empty.
+rm -rf "$unit_covdir"
 mkdir -p "$unit_covdir"
 unit_coverprofile="$outdir/coverage-unit.out"
 
@@ -283,6 +286,7 @@ features_flaky="$outdir/flaky-features.txt"
 # one directory across the whole pass (including reruns) just accumulates
 # more data rather than clobbering it.
 covdir="$outdir/covdata-features"
+rm -rf "$covdir"
 mkdir -p "$covdir"
 
 # run_test_features <gotestsum-junit-path> <NAME=value>...: one gotestsum-driven

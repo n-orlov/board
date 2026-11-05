@@ -13,11 +13,13 @@
 #   ci/run.sh ci/quality.sh ci-results        # same, explicit
 #   ci/run.sh ci/quality.sh /tmp/out my.json  # a test's own outdir + config
 #
-# Every gate in ci/quality.json is flipped on only after the product passes
-# it locally; the golangci gate (R188) runs ci/golangci.sh, the same single
-# invocation ci/lint.sh runs. With every gate off this script still runs, prints that
-# nothing is enabled, and exits 0 -- so it was safe to wire into CI
-# (task 086) before any gate was live.
+# Every SPEC 15.4 gate is on in ci/quality.json from the first commit. A
+# gate whose input does not exist yet (the frontend, the image, the OpenAPI
+# document) fails instead of passing, so this script exits non-zero until
+# those inputs land; the golangci gate runs ci/golangci.sh, the same single
+# invocation ci/lint.sh runs. The SBOM gates write CycloneDX files into
+# "$outdir". With every gate off this script still runs, prints that
+# nothing is enabled, and exits 0.
 set -eu
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -78,6 +80,7 @@ exit_code=0
 go run ./ci/qualitycheck -config "$config" -profile "$profile" \
     -trivy-target . -trivy-cache "$trivy_cache" -trivy-ignore .trivyignore \
     -govulncheck-target . -govulncheck-cache "$govuln_cache" \
+    -sbom-outdir "$outdir" \
     > "$report_file" || exit_code=$?
 
 # A run that died before printing any gate section (bad config, build

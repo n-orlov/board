@@ -223,3 +223,36 @@ func TestRunOutputsReportOverMinimalModule(t *testing.T) {
 		t.Errorf("run over a module with no functions = (%d, %v), want exit 2 'zero scored functions'", code, err)
 	}
 }
+
+func TestFindModuleWalksUpAndReadsTheModulePath(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "// c\nmodule   example.com/walk\n\ngo 1.25\n")
+	deep := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(deep, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
+	gotRoot, gotMod, err := findModule()
+	if err != nil || gotMod != "example.com/walk" {
+		t.Fatalf("findModule = %q, %q, %v", gotRoot, gotMod, err)
+	}
+	if want, _ := filepath.EvalSymlinks(root); gotRoot != want && gotRoot != root {
+		t.Errorf("module root = %q, want %q", gotRoot, root)
+	}
+}
+
+func TestFindModuleFailsWhenNoGoModExistsAbove(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if _, _, err := findModule(); err == nil || !strings.Contains(err.Error(), "no go.mod found") {
+		t.Errorf("findModule with no go.mod above: err = %v", err)
+	}
+}
+
+func TestModuleLine(t *testing.T) {
+	if got, ok := moduleLine("go 1.25\n  module x/y \n"); !ok || got != "x/y" {
+		t.Errorf("moduleLine = %q, %v", got, ok)
+	}
+	if _, ok := moduleLine("go 1.25\n"); ok {
+		t.Error("moduleLine found a module line in a file with none")
+	}
+}

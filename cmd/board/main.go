@@ -7,4 +7,7 @@ import (
 	"github.com/n-orlov/board/internal/cli"
 )
 
-func main() { os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv)) }
+// exit ends the process; a test replaces it.
+var exit = os.Exit
+
+func main() { exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv)) }

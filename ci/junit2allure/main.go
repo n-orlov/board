@@ -215,7 +215,7 @@ func caseOutcome(tc testCase) (status string, d *details) {
 
 // rootElementIs reports whether the document's first element is named name.
 func rootElementIs(raw []byte, name string) bool {
-	dec := xml.NewDecoder(bytes.NewReader(raw))
+	dec := xml.NewDecoder(bytes.NewReader(raw)) //nolint:gosec // G709: raw is the JUnit report this tool was asked to convert, never a network input
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -225,6 +225,21 @@ func rootElementIs(raw []byte, name string) bool {
 			return start.Name.Local == name
 		}
 	}
+}
+
+// parseSuites decodes a JUnit document. A file whose root is one <testsuite>
+// (not <testsuites>) has its own cases and nested suites all belong to it.
+func parseSuites(raw []byte) (testSuites, error) {
+	var root testSuites
+	if !rootElementIs(raw, "testsuite") {
+		return root, xml.Unmarshal(raw, &root) //nolint:gosec // G709: raw is the JUnit report this tool was asked to convert, never a network input
+	}
+	var single testSuite
+	if err := xml.Unmarshal(raw, &single); err != nil { //nolint:gosec // G709: raw is the JUnit report this tool was asked to convert, never a network input
+		return root, err
+	}
+	root.Suites = []testSuite{single}
+	return root, nil
 }
 
 func convert(path string, w *writer) error {
@@ -237,16 +252,8 @@ func convert(path string, w *writer) error {
 	if err != nil {
 		return err
 	}
-	var root testSuites
-	if rootElementIs(raw, "testsuite") {
-		// A file whose root is one <testsuite> (not <testsuites>): its own
-		// cases and nested suites all belong to it.
-		var single testSuite
-		if err := xml.Unmarshal(raw, &single); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-		root.Suites = []testSuite{single}
-	} else if err := xml.Unmarshal(raw, &root); err != nil {
+	root, err := parseSuites(raw)
+	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	for _, s := range root.Suites {
@@ -258,21 +265,15 @@ func convert(path string, w *writer) error {
 }
 
 func run(args []string, stderr io.Writer) error {
-	fs := flag.NewFlagSet("junit2allure", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	out := fs.String("o", "", "directory the *-result.json files are written to (created if missing)")
-	group := fs.String("group", "", "the parentSuite label every result carries (e.g. unit)")
-	if err := fs.Parse(args); err != nil {
+	out, group, inputs, err := parseArgs(args, stderr)
+	if err != nil {
 		return err
 	}
-	if *out == "" || *group == "" || fs.NArg() == 0 {
-		return errors.New("usage: junit2allure -group <name> -o <results dir> <junit.xml> [<junit.xml> ...]")
-	}
-	if err := os.MkdirAll(*out, 0o755); err != nil { //nolint:gosec // report input
+	if err := os.MkdirAll(out, 0o755); err != nil { //nolint:gosec // report input
 		return err
 	}
-	w := &writer{dir: *out, group: *group, base: time.Now().UnixMilli()}
-	for _, path := range fs.Args() {
+	w := &writer{dir: out, group: group, base: time.Now().UnixMilli()}
+	for _, path := range inputs {
 		if err := convert(path, w); err != nil {
 			return err
 		}
@@ -280,10 +281,26 @@ func run(args []string, stderr io.Writer) error {
 	if w.count == 0 {
 		return errors.New("no <testcase> in any input: nothing to write")
 	}
-	if _, err := fmt.Fprintf(stderr, "junit2allure: wrote %d results (group %s) to %s\n", w.count, *group, *out); err != nil {
+	if _, err := fmt.Fprintf(stderr, "junit2allure: wrote %d results (group %s) to %s\n", w.count, group, out); err != nil {
 		return fmt.Errorf("report result count: %w", err)
 	}
 	return nil
+}
+
+// parseArgs reads the command line: the output directory, the group label
+// and the JUnit files to convert.
+func parseArgs(args []string, stderr io.Writer) (out, group string, inputs []string, err error) {
+	fs := flag.NewFlagSet("junit2allure", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&out, "o", "", "directory the *-result.json files are written to (created if missing)")
+	fs.StringVar(&group, "group", "", "the parentSuite label every result carries (e.g. unit)")
+	if err := fs.Parse(args); err != nil {
+		return "", "", nil, err
+	}
+	if out == "" || group == "" || fs.NArg() == 0 {
+		return "", "", nil, errors.New("usage: junit2allure -group <name> -o <results dir> <junit.xml> [<junit.xml> ...]")
+	}
+	return out, group, fs.Args(), nil
 }
 
 func main() {

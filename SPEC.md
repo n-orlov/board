@@ -1006,7 +1006,9 @@ All gates are **on from the first commit**. Thresholds live in `ci/quality.json`
 | OpenAPI | spec lints clean; generated server/client code has no drift |
 
 A gate is never weakened to make a build pass; a threshold change is a reviewed commit to
-`ci/quality.json` with its reason.
+`ci/quality.json` with its reason. A gate whose input does not exist (no frontend, no image,
+no OpenAPI document) fails; it never passes. `ci/qualitycheck` tests that every gate above is
+present, enabled and at its threshold.
 
 ---
 

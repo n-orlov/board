@@ -41,6 +41,21 @@ func skipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 }
 
+// skipsTree reports whether the directory p (named name) is outside the
+// package set: a skipped name, or the root of a nested module.
+func skipsTree(p, name string) bool {
+	if skipDir(name) {
+		return true
+	}
+	_, statErr := os.Stat(filepath.Join(p, "go.mod"))
+	return statErr == nil
+}
+
+// isSourceFile reports whether name is a non-test Go file.
+func isSourceFile(name string) bool {
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+}
+
 // sourcePackages returns every directory (slash-separated, relative to the
 // module root, "." for the root) holding at least one non-test .go file.
 // Nested modules are not part of this module's package set.
@@ -51,18 +66,12 @@ func sourcePackages(root string) (map[string]bool, error) {
 			return walkErr
 		}
 		if d.IsDir() {
-			if p != root {
-				if skipDir(d.Name()) {
-					return filepath.SkipDir
-				}
-				if _, statErr := os.Stat(filepath.Join(p, "go.mod")); statErr == nil {
-					return filepath.SkipDir
-				}
+			if p != root && skipsTree(p, d.Name()) {
+				return filepath.SkipDir
 			}
 			return nil
 		}
-		name := d.Name()
-		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+		if isSourceFile(d.Name()) {
 			rel, relErr := filepath.Rel(root, filepath.Dir(p))
 			if relErr != nil {
 				return relErr

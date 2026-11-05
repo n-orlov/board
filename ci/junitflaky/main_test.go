@@ -295,3 +295,22 @@ func TestRerunNodeNamesAndCarriesEachKindOfEarlierAttempt(t *testing.T) {
 		t.Errorf("failed status without a child: %+v", p)
 	}
 }
+
+// A suite that only the rerun input holds is created in the merged output
+// with the source suite's attributes and its <properties>, and the
+// testcase is appended to it.
+func TestAppendAttemptsCreatesASuiteOnlyTheRerunHolds(t *testing.T) {
+	first := mustParse(t, "a.xml", `<testsuites><testsuite name="A" tests="1"><testcase classname="c" name="x"/></testsuite></testsuites>`)
+	rerun := mustParse(t, "b.xml", `<testsuites><testsuite name="B" tests="1" hostname="h"><properties><property name="k" value="v"/></properties><testcase classname="c" name="y"/></testsuite></testsuites>`)
+	merged := merge([]*node{first, rerun})
+	got := testcases(merged, "B")
+	if len(got) != 1 || got[0].attr("name") != "y" {
+		t.Fatalf("suite B testcases = %v, want y", got)
+	}
+	out := render(t, merged)
+	for _, want := range []string{`hostname="h"`, `<property name="k" value="v"`, `tests="1"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("merged output lacks %q:\n%s", want, out)
+		}
+	}
+}

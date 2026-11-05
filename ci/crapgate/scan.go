@@ -71,11 +71,8 @@ func findModule() (root string, modulePath string, err error) {
 	for {
 		gomod := filepath.Join(dir, "go.mod")
 		if data, readErr := os.ReadFile(gomod); readErr == nil { //nolint:gosec // G304: go.mod is looked up in the directories above the directory the tool was pointed at
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "module ") {
-					return dir, strings.TrimSpace(strings.TrimPrefix(line, "module")), nil
-				}
+			if mod, ok := moduleLine(string(data)); ok {
+				return dir, mod, nil
 			}
 			return dir, "", fmt.Errorf("%s has no module line", gomod)
 		}
@@ -85,6 +82,18 @@ func findModule() (root string, modulePath string, err error) {
 		}
 		dir = parent
 	}
+}
+
+// moduleLine returns the module path declared by the first "module " line of
+// a go.mod's text.
+func moduleLine(gomod string) (string, bool) {
+	for _, line := range strings.Split(gomod, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module")), true
+		}
+	}
+	return "", false
 }
 
 // skipDirName reports whether a directory name is never descended into

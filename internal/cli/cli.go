@@ -106,23 +106,34 @@ func serve(stderr io.Writer, env Env) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	st, err := store.Open(dbURL(env))
+	return serveUntil(ctx, stderr, dbURL(env), addr, migrate != "off")
+}
+
+// serveUntil opens the database, migrates it when migrate is set, and serves
+// on addr until ctx ends.
+func serveUntil(ctx context.Context, stderr io.Writer, url, addr string, migrate bool) int {
+	st, err := store.Open(url)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	defer func() { _ = st.Close() }()
-	// A database ahead of this binary is refused whatever BOARD_MIGRATE says.
-	if err := st.CheckSchema(ctx); err != nil {
+	if err := prepareSchema(ctx, st, migrate); err != nil {
 		return fail(stderr, err)
-	}
-	if migrate != "off" {
-		if err := st.Migrate(ctx); err != nil {
-			_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
-			return ExitError
-		}
 	}
 	if err := server.Serve(ctx, addr, st.Ready); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK
+}
+
+// prepareSchema refuses a database ahead of this binary whatever
+// BOARD_MIGRATE says, then migrates when asked to.
+func prepareSchema(ctx context.Context, st *store.Store, migrate bool) error {
+	if err := st.CheckSchema(ctx); err != nil {
+		return err
+	}
+	if migrate {
+		return st.Migrate(ctx)
+	}
+	return nil
 }

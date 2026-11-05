@@ -92,24 +92,43 @@ func sqliteDSN(path string, readOnly bool) string {
 	return "file:" + path + "?" + q.Encode()
 }
 
-func openSQLite(u *url.URL) (*Store, error) {
+// sqliteFilePath is the database file a sqlite:// URL names, with its
+// directory created.
+func sqliteFilePath(u *url.URL) (string, error) {
 	path := filepath.Clean(u.Host + u.Path)
 	if path == "." {
-		return nil, errors.New("BOARD_DB_URL names no database file")
+		return "", errors.New("BOARD_DB_URL names no database file")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // the path is the operator's own BOARD_DB_URL, not request input
-		return nil, fmt.Errorf("create database directory: %w", err)
+		return "", fmt.Errorf("create database directory: %w", err)
 	}
+	return path, nil
+}
+
+// openSQLiteWriter opens the single writer connection. Opening the writer
+// first creates the file and switches it to WAL before any reader
+// connection looks at it.
+func openSQLiteWriter(path string) (*sql.DB, error) {
 	writer, err := sql.Open("sqlite", sqliteDSN(path, false))
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	writer.SetMaxOpenConns(1)
-	// Opening the writer first creates the file and switches it to WAL before
-	// any reader connection looks at it.
 	if err := writer.Ping(); err != nil {
 		_ = writer.Close()
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+	return writer, nil
+}
+
+func openSQLite(u *url.URL) (*Store, error) {
+	path, err := sqliteFilePath(u)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := openSQLiteWriter(path)
+	if err != nil {
+		return nil, err
 	}
 	reader, err := sql.Open("sqlite", sqliteDSN(path, true))
 	if err != nil {

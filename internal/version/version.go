@@ -40,32 +40,35 @@ func Stamp(info *debug.BuildInfo) string {
 	if info == nil {
 		return develVersion
 	}
-	setting := func(key string) string {
-		for _, s := range info.Settings {
-			if s.Key == key {
-				return s.Value
-			}
-		}
-		return ""
-	}
-
-	base := info.Main.Version
-	dirty := setting("vcs.modified") == "true"
+	base, dirty := info.Main.Version, setting(info, "vcs.modified") == "true"
 	if strings.HasSuffix(base, "+dirty") {
 		dirty = true
 		base = strings.TrimSuffix(base, "+dirty")
 	}
 	if base == "" || base == "(devel)" {
-		base = develVersion
-		if rev := setting("vcs.revision"); rev != "" {
-			if len(rev) > 12 {
-				rev = rev[:12]
-			}
-			base += "+" + rev
-		}
+		base = develBase(setting(info, "vcs.revision"))
 	}
 	if dirty {
 		base += DirtySuffix
 	}
 	return base
+}
+
+// setting returns the named build setting, or "" when the build did not record it.
+func setting(info *debug.BuildInfo, key string) string {
+	for _, s := range info.Settings {
+		if s.Key == key {
+			return s.Value
+		}
+	}
+	return ""
+}
+
+// develBase is "devel", followed by "+<first 12 characters of rev>" when a
+// commit was recorded.
+func develBase(rev string) string {
+	if rev == "" {
+		return develVersion
+	}
+	return develVersion + "+" + rev[:min(len(rev), 12)]
 }

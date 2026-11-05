@@ -175,29 +175,7 @@ func merge(inputs []*node) *node {
 	drop := map[*node]bool{}
 	var appendLater []attempt
 	for _, k := range order {
-		as := attempts[k]
-		last := as[len(as)-1]
-		earlierFails := failedAttempts(as[:len(as)-1])
-		if outcomeOf(last.tc) == passed && len(earlierFails) > 0 {
-			folded := fold(last.tc, earlierFails)
-			first := as[0]
-			if first.file == 0 {
-				*first.tc = *folded
-				for _, a := range as[1:] {
-					if a.file == 0 {
-						drop[a.tc] = true
-					}
-				}
-			} else {
-				appendLater = append(appendLater, attempt{suite: first.suite, tc: folded})
-			}
-			continue
-		}
-		for _, a := range as {
-			if a.file != 0 {
-				appendLater = append(appendLater, a)
-			}
-		}
+		appendLater = append(appendLater, mergeKey(attempts[k], drop)...)
 	}
 
 	dropTestcases(out, drop)
@@ -205,6 +183,42 @@ func merge(inputs []*node) *node {
 
 	recount(out)
 	return out
+}
+
+// mergeKey folds one test's attempts: a pass after earlier failures becomes
+// one testcase carrying the failures as reruns (in place when the first
+// attempt is in the first input, the other first-input attempts dropped),
+// and every other attempt from a later input is appended as it is. It
+// returns the attempts to append and records the testcases to drop.
+func mergeKey(as []attempt, drop map[*node]bool) []attempt {
+	last := as[len(as)-1]
+	earlierFails := failedAttempts(as[:len(as)-1])
+	if outcomeOf(last.tc) != passed || len(earlierFails) == 0 {
+		return laterAttempts(as)
+	}
+	folded := fold(last.tc, earlierFails)
+	first := as[0]
+	if first.file != 0 {
+		return []attempt{{suite: first.suite, tc: folded}}
+	}
+	*first.tc = *folded
+	for _, a := range as[1:] {
+		if a.file == 0 {
+			drop[a.tc] = true
+		}
+	}
+	return nil
+}
+
+// laterAttempts returns the attempts that came from a rerun input.
+func laterAttempts(as []attempt) []attempt {
+	var later []attempt
+	for _, a := range as {
+		if a.file != 0 {
+			later = append(later, a)
+		}
+	}
+	return later
 }
 
 // collectAttempts groups every testcase of every input by its key, in the
@@ -268,16 +282,22 @@ func appendAttempts(out *node, appendLater []attempt) {
 	for _, a := range appendLater {
 		target := findSuite(out, a.suite.attr("name"))
 		if target == nil {
-			target = &node{XMLName: a.suite.XMLName, Attrs: append([]xml.Attr(nil), a.suite.Attrs...)}
-			for _, c := range a.suite.Nodes {
-				if c.XMLName.Local == "properties" {
-					target.Nodes = append(target.Nodes, c)
-				}
-			}
+			target = suiteLike(a.suite)
 			out.Nodes = append(out.Nodes, target)
 		}
 		target.Nodes = append(target.Nodes, a.tc)
 	}
+}
+
+// suiteLike is an empty testsuite with src's attributes and properties.
+func suiteLike(src *node) *node {
+	target := &node{XMLName: src.XMLName, Attrs: append([]xml.Attr(nil), src.Attrs...)}
+	for _, c := range src.Nodes {
+		if c.XMLName.Local == "properties" {
+			target.Nodes = append(target.Nodes, c)
+		}
+	}
+	return target
 }
 
 func findSuite(root *node, name string) *node {
@@ -305,15 +325,7 @@ func fold(pass *node, fails []*node) *node {
 // failure's (or error's) message, type and text, and when the attempt has
 // neither child, only a status-derived message.
 func rerunNode(f *node) *node {
-	name, src := "rerunFailure", f.child("failure")
-	if src == nil {
-		if e := f.child("error"); e != nil {
-			name, src = "rerunError", e
-		}
-	}
-	if src == nil && outcomeOf(f) == errored {
-		name = "rerunError"
-	}
+	name, src := rerunSource(f)
 	r := &node{XMLName: xml.Name{Local: name}}
 	if src != nil {
 		for _, a := range src.Attrs {
@@ -328,6 +340,21 @@ func rerunNode(f *node) *node {
 	return r
 }
 
+// rerunSource names the rerun element for the failed attempt f and picks
+// the child (failure, else error) it copies from; src is nil when f has neither.
+func rerunSource(f *node) (name string, src *node) {
+	if src = f.child("failure"); src != nil {
+		return "rerunFailure", src
+	}
+	if src = f.child("error"); src != nil {
+		return "rerunError", src
+	}
+	if outcomeOf(f) == errored {
+		return "rerunError", nil
+	}
+	return "rerunFailure", nil
+}
+
 // recount rewrites every tests/failures/errors (and skipped, where the
 // writer used it) count from the merged testcases themselves.
 func recount(root *node) {
@@ -336,25 +363,30 @@ func recount(root *node) {
 		if suite.XMLName.Local != "testsuite" {
 			continue
 		}
-		var t, f, e, s int
-		for _, tc := range suite.Nodes {
-			if tc.XMLName.Local != "testcase" {
-				continue
-			}
-			t++
-			switch outcomeOf(tc) {
-			case failed:
-				f++
-			case errored:
-				e++
-			case skipped:
-				s++
-			}
-		}
+		t, f, e, s := countSuite(suite)
 		setCounts(suite, t, f, e, s)
 		tt, tf, te, ts = tt+t, tf+f, te+e, ts+s
 	}
 	setCounts(root, tt, tf, te, ts)
+}
+
+// countSuite counts a suite's testcases: all, failed, errored, skipped.
+func countSuite(suite *node) (t, f, e, s int) {
+	for _, tc := range suite.Nodes {
+		if tc.XMLName.Local != "testcase" {
+			continue
+		}
+		t++
+		switch outcomeOf(tc) {
+		case failed:
+			f++
+		case errored:
+			e++
+		case skipped:
+			s++
+		}
+	}
+	return t, f, e, s
 }
 
 func setCounts(n *node, t, f, e, s int) {
@@ -379,6 +411,19 @@ func write(w io.Writer, root *node) error {
 	return err
 }
 
+// parseAll parses every JUnit file, in order.
+func parseAll(paths []string) ([]*node, error) {
+	var inputs []*node
+	for _, p := range paths {
+		root, err := parse(p)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, root)
+	}
+	return inputs, nil
+}
+
 func run(args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("junitflaky", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -389,13 +434,9 @@ func run(args []string, stderr io.Writer) error {
 	if *outPath == "" || fs.NArg() == 0 {
 		return errors.New("usage: junitflaky -o <merged.xml> <first.xml> [<rerun.xml>...]")
 	}
-	var inputs []*node
-	for _, p := range fs.Args() {
-		root, err := parse(p)
-		if err != nil {
-			return err
-		}
-		inputs = append(inputs, root)
+	inputs, err := parseAll(fs.Args())
+	if err != nil {
+		return err
 	}
 	merged := merge(inputs)
 	f, err := os.Create(*outPath)

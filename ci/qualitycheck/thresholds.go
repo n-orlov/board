@@ -87,6 +87,7 @@ func looserThresholds(base, current config) []string {
 	problems = append(problems, looserTrivy(base.Trivy, current.Trivy)...)
 	problems = append(problems, switchedOff("govulncheck", base.Govulncheck.Enabled, current.Govulncheck.Enabled)...)
 	problems = append(problems, switchedOff("golangci", base.Golangci.Enabled, current.Golangci.Enabled)...)
+	problems = append(problems, looserNew(base, current)...)
 	return problems
 }
 

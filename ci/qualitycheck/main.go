@@ -62,6 +62,17 @@ type config struct {
 
 	Govulncheck govulncheckConfig `json:"govulncheck"`
 	Golangci    golangciConfig    `json:"golangci"`
+
+	CrapTS           crapTSConfig           `json:"crap_ts"`
+	FrontendCoverage frontendCoverageConfig `json:"frontend_coverage"`
+	TrivyImage       trivyImageConfig       `json:"trivy_image"`
+	MutationGo       mutationGoConfig       `json:"mutation_go"`
+	Stryker          strykerConfig          `json:"stryker"`
+	SBOMModule       switchConfig           `json:"sbom_module"`
+	SBOMFrontend     switchConfig           `json:"sbom_frontend"`
+	SBOMImage        switchConfig           `json:"sbom_image"`
+	OpenAPILint      switchConfig           `json:"openapi_lint"`
+	OpenAPIDrift     switchConfig           `json:"openapi_drift"`
 }
 
 // trivyBase carries the trivy gate's flag-supplied options (binary,
@@ -88,7 +99,9 @@ func main() {
 	flag.StringVar(&govulncheckBase.CacheDir, "govulncheck-cache", "", "XDG_CACHE_HOME for govulncheck (its vuln DB cache); empty inherits")
 	flag.StringVar(&golangciBase.Script, "golangci-script", "", "the shared golangci-lint invocation (default ci/golangci.sh under -golangci-target)")
 	flag.StringVar(&golangciBase.Target, "golangci-target", ".", "repository root the golangci gate runs from")
+	flag.StringVar(&sbomBase.OutDir, "sbom-outdir", "ci-results", "directory the SBOM gates write their CycloneDX files into")
 	flag.Parse()
+	sbomBase.Binary, sbomBase.CacheDir = trivyBase.Binary, trivyBase.CacheDir
 
 	report, exitCode, err := run(*configPath, *profilePath)
 	if err != nil {
@@ -172,6 +185,47 @@ func enabledGates(cfg config, configPath, profilePath string) []gateRunner {
 			return runGolangciGate(golangciBase)
 		}})
 	}
+	return append(gates, newGates(cfg)...)
+}
+
+// newGates lists the section 15.4 gates beyond deck's five, in report order.
+func newGates(cfg config) []gateRunner {
+	var gates []gateRunner
+	add := func(on bool, name string, run func() (bool, string, error)) {
+		if on {
+			gates = append(gates, gateRunner{name, run})
+		}
+	}
+	add(cfg.CrapTS.Enabled, "crap-ts", func() (bool, string, error) {
+		return pendingGate("crap-ts", "task 008 (the TS CRAP gate)", crapTSInput)
+	})
+	add(cfg.FrontendCoverage.Enabled, "frontend-coverage", func() (bool, string, error) {
+		return pendingGate("frontend-coverage", "task 008 (the frontend coverage gate)", frontendCoverageInput)
+	})
+	add(cfg.TrivyImage.Enabled, "trivy-image", func() (bool, string, error) {
+		return pendingGate("trivy-image", "task 011 (the image gates)", imageTarInput)
+	})
+	add(cfg.MutationGo.Enabled, "mutation-go", func() (bool, string, error) {
+		return pendingGate("mutation-go", "task 006 (the gremlins gate)", cfg.MutationGo.Packages...)
+	})
+	add(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
+		return pendingGate("stryker", "task 008 (the Stryker gate)", cfg.Stryker.Path)
+	})
+	add(cfg.SBOMModule.Enabled, "sbom-module", func() (bool, string, error) {
+		return runSBOMGate(sbomModule(sbomBase))
+	})
+	add(cfg.SBOMFrontend.Enabled, "sbom-frontend", func() (bool, string, error) {
+		return runSBOMGate(sbomFrontend(sbomBase))
+	})
+	add(cfg.SBOMImage.Enabled, "sbom-image", func() (bool, string, error) {
+		return runSBOMGate(sbomImage(sbomBase))
+	})
+	add(cfg.OpenAPILint.Enabled, "openapi-lint", func() (bool, string, error) {
+		return pendingGate("openapi-lint", "task 009 (OpenAPI lint)", openapiInput)
+	})
+	add(cfg.OpenAPIDrift.Enabled, "openapi-drift", func() (bool, string, error) {
+		return pendingGate("openapi-drift", "task 016 (the generated code)", openapiInput)
+	})
 	return gates
 }
 

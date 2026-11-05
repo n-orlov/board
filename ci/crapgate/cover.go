@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -38,20 +39,9 @@ func parseProfile(path string) (*profile, error) {
 	defer func() { _ = f.Close() }() // read-only handle: Close cannot lose data
 
 	p := &profile{blocks: make(map[string][]coverBlock)}
-	scanner := bufio.NewScanner(f)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if err := p.addLine(path, lineNo, line); err != nil {
-			return nil, err
-		}
-	}
-	if scanErr := scanner.Err(); scanErr != nil {
-		return nil, fmt.Errorf("coverprofile %q: %w", path, scanErr)
+	lineNo, err := p.readLines(path, f)
+	if err != nil {
+		return nil, err
 	}
 	if lineNo == 0 {
 		return nil, fmt.Errorf("coverprofile %q is empty", path)
@@ -60,6 +50,27 @@ func parseProfile(path string) (*profile, error) {
 		return nil, fmt.Errorf("coverprofile %q has a mode line but zero coverage blocks", path)
 	}
 	return p, nil
+}
+
+// readLines folds every non-blank line of r into p and returns how many
+// lines (blank ones included) it read.
+func (p *profile) readLines(path string, r io.Reader) (int, error) {
+	scanner := bufio.NewScanner(r)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if err := p.addLine(path, lineNo, line); err != nil {
+			return lineNo, err
+		}
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		return lineNo, fmt.Errorf("coverprofile %q: %w", path, scanErr)
+	}
+	return lineNo, nil
 }
 
 // addLine folds one non-blank profile line into p: line 1 must be the mode

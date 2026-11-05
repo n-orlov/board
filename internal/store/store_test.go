@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,24 @@ func TestOpenRejectsOtherSchemes(t *testing.T) {
 	}
 	if _, err := Open("sqlite://"); err == nil {
 		t.Fatal("expected an error for an empty path")
+	}
+}
+
+func TestOpenSQLiteFailsWhenTheDirectoryCannotBeCreated(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The database's directory would have to live under a regular file.
+	_, err := Open("sqlite://" + filepath.Join(file, "sub", "board.db"))
+	if err == nil || !strings.Contains(err.Error(), "create database directory") {
+		t.Fatalf("Open = %v, want a create-directory error", err)
+	}
+}
+
+func TestOpenSQLiteFailsWhenThePathIsADirectory(t *testing.T) {
+	if _, err := Open("sqlite://" + t.TempDir()); err == nil {
+		t.Fatal("Open on a directory path succeeded")
 	}
 }
 

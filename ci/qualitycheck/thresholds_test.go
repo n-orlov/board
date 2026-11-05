@@ -209,3 +209,56 @@ func TestThresholdsNotLoosened_CrapTenToFifteenFails(t *testing.T) {
 		t.Fatal("loosening the CRAP ceiling 10 -> 15 must fail, got nil")
 	}
 }
+
+// TestLooserThresholdsCatchesTheSection154Gates: each gate beyond deck's
+// five, loosened against a base that has it, is reported; a base without
+// the gate (the commit that adds it) and a tighter file are not.
+func TestLooserThresholdsCatchesTheSection154Gates(t *testing.T) {
+	on := config{
+		CrapTS:           crapTSConfig{Enabled: true, Ceiling: 8},
+		FrontendCoverage: frontendCoverageConfig{Enabled: true, TotalFloor: 85, FileFloor: 80},
+		TrivyImage:       trivyImageConfig{Enabled: true, Severity: "HIGH,CRITICAL"},
+		MutationGo:       mutationGoConfig{Enabled: true, Efficacy: 80, Packages: []string{"a", "b"}, FailOnNoMutants: true},
+		Stryker:          strykerConfig{Enabled: true, Break: 80, ModuleBreak: 80, Path: "web/src/lib"},
+		SBOMModule:       switchConfig{Enabled: true}, SBOMFrontend: switchConfig{Enabled: true}, SBOMImage: switchConfig{Enabled: true},
+		OpenAPILint: switchConfig{Enabled: true}, OpenAPIDrift: switchConfig{Enabled: true},
+	}
+	loosen := map[string]func(c *config){
+		"crap_ts off":          func(c *config) { c.CrapTS.Enabled = false },
+		"crap_ts ceiling":      func(c *config) { c.CrapTS.Ceiling = 9 },
+		"frontend off":         func(c *config) { c.FrontendCoverage.Enabled = false },
+		"frontend total":       func(c *config) { c.FrontendCoverage.TotalFloor = 84 },
+		"frontend file":        func(c *config) { c.FrontendCoverage.FileFloor = 79 },
+		"image severity":       func(c *config) { c.TrivyImage.Severity = "CRITICAL" },
+		"image off":            func(c *config) { c.TrivyImage.Enabled = false },
+		"mutation off":         func(c *config) { c.MutationGo.Enabled = false },
+		"mutation efficacy":    func(c *config) { c.MutationGo.Efficacy = 79 },
+		"mutation package":     func(c *config) { c.MutationGo.Packages = []string{"a"} },
+		"mutation zero":        func(c *config) { c.MutationGo.FailOnNoMutants = false },
+		"stryker off":          func(c *config) { c.Stryker.Enabled = false },
+		"stryker break":        func(c *config) { c.Stryker.Break = 79 },
+		"stryker module break": func(c *config) { c.Stryker.ModuleBreak = 79 },
+		"stryker path":         func(c *config) { c.Stryker.Path = "web/src" },
+		"sbom module":          func(c *config) { c.SBOMModule.Enabled = false },
+		"sbom frontend":        func(c *config) { c.SBOMFrontend.Enabled = false },
+		"sbom image":           func(c *config) { c.SBOMImage.Enabled = false },
+		"openapi lint":         func(c *config) { c.OpenAPILint.Enabled = false },
+		"openapi drift":        func(c *config) { c.OpenAPIDrift.Enabled = false },
+	}
+	for name, edit := range loosen {
+		t.Run(name, func(t *testing.T) {
+			cur := on
+			cur.MutationGo.Packages = append([]string(nil), on.MutationGo.Packages...)
+			edit(&cur)
+			if len(looserThresholds(on, cur)) == 0 {
+				t.Errorf("loosening %q was not reported", name)
+			}
+			if p := looserThresholds(config{}, cur); len(p) != 0 {
+				t.Errorf("a gate the base lacks is not a loosening, got %v", p)
+			}
+		})
+	}
+	if p := looserThresholds(on, on); len(p) != 0 {
+		t.Errorf("an unchanged file reported %v", p)
+	}
+}
