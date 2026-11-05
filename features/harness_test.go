@@ -59,6 +59,11 @@ type harness struct {
 
 	status int
 
+	// operations is the operation list read from api/openapi.yaml and the
+	// status each answered to a request with no credential.
+	operations []operation
+	answers    map[string]int
+
 	// key is the API key a scenario remembered from stdout.
 	key string
 
@@ -345,6 +350,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		return ctx, nil
 	})
 	registerKeySteps(sc, h)
+	registerOpenAPISteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

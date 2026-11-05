@@ -96,7 +96,7 @@ func TestHealthzIsAlwaysOKAndReadyzFollowsReadiness(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			Handler(tc.ready, acceptKey).ServeHTTP(rec, authed(tc.path))
+			NewHandler(tc.ready, acceptKey).ServeHTTP(rec, authed(tc.path))
 			if rec.Code != tc.want {
 				t.Fatalf("GET %s = %d, want %d", tc.path, rec.Code, tc.want)
 			}
@@ -110,7 +110,7 @@ func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
 		t.Fatalf("the embedded UI has no index.html: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	Handler(ok, acceptKey).ServeHTTP(rec, authed("/"))
+	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", rec.Code)
 	}
@@ -128,7 +128,7 @@ func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
 func TestProbesAreNotShadowedByTheUI(t *testing.T) {
 	for _, path := range []string{"/healthz", "/readyz"} {
 		rec := httptest.NewRecorder()
-		Handler(ok, acceptKey).ServeHTTP(rec, authed(path))
+		NewHandler(ok, acceptKey).ServeHTTP(rec, authed(path))
 		if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 			t.Errorf("GET %s = %d %q, want 200 \"ok\\n\"", path, rec.Code, rec.Body.String())
 		}
@@ -137,7 +137,7 @@ func TestProbesAreNotShadowedByTheUI(t *testing.T) {
 
 func TestUnknownPathIs404NotTheIndex(t *testing.T) {
 	rec := httptest.NewRecorder()
-	Handler(ok, acceptKey).ServeHTTP(rec, authed("/no-such-asset.js"))
+	NewHandler(ok, acceptKey).ServeHTTP(rec, authed("/no-such-asset.js"))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET /no-such-asset.js = %d, want 404", rec.Code)
 	}

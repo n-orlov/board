@@ -4,8 +4,8 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    Phase 0 declares the two probe operations. Every later operation is added
-    here first; the Go server code and the TypeScript client are generated from
+    Phase 0 declares the two probe operations and the three documentation
+    operations. Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
     name: Apache-2.0
@@ -15,6 +15,8 @@ servers:
 tags:
   - name: probes
     description: Liveness and readiness.
+  - name: docs
+    description: This document and the interactive API documentation.
 paths:
   /healthz:
     get:
@@ -61,6 +63,66 @@ paths:
               schema:
                 type: string
                 examples: [not ready]
+  /api/openapi.yaml:
+    get:
+      operationId: getOpenapiYAML
+      tags: [docs]
+      summary: This document as YAML
+      description: Serves api/openapi.yaml, the source of truth for the API.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The OpenAPI 3.1 document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/openapi.json:
+    get:
+      operationId: getOpenapiJSON
+      tags: [docs]
+      summary: This document as JSON
+      description: The same document as /api/openapi.yaml, converted to JSON.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The OpenAPI 3.1 document.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/docs:
+    get:
+      operationId: getDocs
+      tags: [docs]
+      summary: Interactive API documentation
+      description: An HTML page that documents the API.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The documentation page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 components:
   securitySchemes:
     bearerAuth:

@@ -274,10 +274,15 @@ Scripts, each run through `ci/run.sh` unless noted:
   one rule left off is `operation-4xx-response`, because `GET /healthz` has no
   failing client path) and `ci/openapi-drift.sh`.
 - `ci/openapi-gen.sh` writes the generated code from `api/openapi.yaml`:
-  `internal/server/openapi.gen.go` (oapi-codegen, pinned by go.mod's `tool`
-  directive, so no image change) and `web/src/lib/api/schema.d.ts`
+  `internal/server/openapi.gen.go` (oapi-codegen in `std-http,strict-server,models`
+  mode, pinned by go.mod's `tool` directive, so no image change) and `web/src/lib/api/schema.d.ts`
   (openapi-typescript, pinned by `web/package-lock.json`; its `typescript` peer
   range is overridden in `web/package.json` because it predates TypeScript 6).
+  `.golangci.yml` lints generated Go like any other file, so the script
+  rewrites the two kinds of line oapi-codegen emits that errcheck,
+  staticcheck and gosec reject (an unchecked `Close`, a
+  `Write([]byte(fmt.Sprint(...)))`) and fails when the generator stops emitting
+  one, so a generator upgrade cannot leave a stale rewrite behind.
   `ci/openapi-drift.sh` regenerates both into a scratch directory and fails when
   either checked-in file differs or is missing. Run
   `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the

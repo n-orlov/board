@@ -6,7 +6,7 @@
 #
 #   ci/openapi-gen.sh [SPEC [GO_OUT [TS_OUT]]]
 #
-# Defaults: api/openapi.yaml -> internal/server/openapi.gen.go (oapi-codegen,
+# Defaults: api/openapi.yaml -> internal/server/openapi.gen.go (oapi-codegen strict-server,
 # pinned by go.mod's tool directive) and web/src/lib/api/schema.d.ts
 # (openapi-typescript, pinned by web/package-lock.json). Relative paths are
 # relative to the repository root. Run it under ci/run.sh, or anywhere Go and
@@ -29,7 +29,27 @@ GOTOOLCHAIN=${GOTOOLCHAIN:-local}
 export GOTOOLCHAIN
 
 echo "ci/openapi-gen.sh: oapi-codegen -> $go_out"
-go tool oapi-codegen -package server -generate models -o "$go_out" "$spec"
+go tool oapi-codegen -package server -generate std-http,strict-server,models -o "$go_out" "$spec"
+
+# The generated file is linted like any other (.golangci.yml disables the
+# generated-code skip), so two kinds of line the generator emits are rewritten here to
+# satisfy errcheck, staticcheck and gosec. Each rewrite must find its line, or the
+# generator changed and this script needs to follow.
+patch_go() {
+    pattern=$1
+    replacement=$2
+    if ! grep -q "$pattern" "$go_out"; then
+        echo "ci/openapi-gen.sh: oapi-codegen no longer emits '$pattern'; update the post-processing" >&2
+        exit 1
+    fi
+    sed -i "s|$pattern|$replacement|" "$go_out"
+}
+patch_go 'defer closer.Close()' 'defer func() { _ = closer.Close() }()'
+if ! grep -qF 'w.Write([]byte(fmt.Sprint(response)))' "$go_out"; then
+    echo "ci/openapi-gen.sh: oapi-codegen no longer emits the text response Write; update the post-processing" >&2
+    exit 1
+fi
+sed -i 's|w\.Write(\[\]byte(fmt\.Sprint(response)))$|fmt.Fprint(w, response) //nolint:gosec // G705: the body is a typed string the handler chose, not request input|' "$go_out"
 
 echo "ci/openapi-gen.sh: openapi-typescript -> $ts_out"
 (cd web && npx --no-install openapi-typescript "$spec" -o "$ts_out")

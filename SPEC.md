@@ -419,18 +419,27 @@ and CLI can show badges without the lists.
 ### 6.1 Shape
 
 - Base path `/api/v1`. JSON in and out. Errors are RFC 9457 problem documents.
-- **The OpenAPI 3.1 document is the source of truth**, checked in (`api/openapi.yaml`). Server
-  handler interfaces and the CLI client are generated from it (oapi-codegen); a CI check fails
-  if generated code is stale. `ci/openapi-gen.sh` writes `internal/server/openapi.gen.go`
-  (oapi-codegen) and `web/src/lib/api/schema.d.ts` (openapi-typescript); `ci/openapi-drift.sh`
-  regenerates both into a scratch directory and exits non-zero when either checked-in file
+- **The OpenAPI 3.1 document is the source of truth**, checked in (`api/openapi.yaml`). The
+  server's handler interface is generated from it by oapi-codegen's strict-server mode
+  (`internal/server/openapi.gen.go`: `StrictServerInterface`, typed request and response
+  objects, `std-http` routing on Go's `ServeMux`) and the TypeScript types by openapi-typescript
+  (`web/src/lib/api/schema.d.ts`); the CLI client is generated from it too. A CI check fails if
+  generated code is stale: `ci/openapi-gen.sh` writes both files, `ci/openapi-drift.sh`
+  regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
-  any finding fails) and runs the drift check. The document declares `GET /healthz` and
-  `GET /readyz` and the RFC 9457 `Problem` schema. Served at `/api/openapi.yaml` and `/api/openapi.json`.
-- **Swagger UI** at `/api/docs` (assets embedded, no CDN).
+  any finding fails) and runs the drift check. The document declares `GET /healthz`,
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs` and the
+  RFC 9457 `Problem` schema. The binary embeds the document and serves it at
+  `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
+  `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
+  or session like any other route.
+- **Swagger UI** at `/api/docs` (assets embedded, no CDN). Until Swagger UI lands the route
+  serves a one-page HTML index of the two spec documents that references no external host.
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is
-  unauthenticated (`/readyz` and `/metrics` too require a key or session). Every other route,
+  unauthenticated (`/readyz`, the spec documents, `/api/docs` and `/metrics` all require a key or
+  session; `features/unauthenticated.feature` reads the operation list from `api/openapi.yaml` and
+  expects 401 from each operation but `GET /healthz`). Every other route,
   including the embedded UI at `/` and an unknown path, answers a request with no credential
   with 401 and a problem document (`application/problem+json`, `WWW-Authenticate: Bearer`)
   without touching the store. A Bearer key that is unknown, revoked (`key revoked`) or expired
