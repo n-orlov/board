@@ -147,12 +147,21 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   (case-insensitive, exact). Anything else gets 403 and no session. An admitted email acts as
   the **operator** actor (§3.1).
 - Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie `board_session`, path
-  `/`; stored server-side as SHA-256 hash (§4.9) with expiry (default 7 days
-  absolute, 24 h idle), so logout and expiry are real. The cookie value is never stored.
-- **CSRF**: every cookie-authenticated non-GET request must carry `X-CSRF-Token` matching the
-  session's CSRF token (delivered to the UI by `GET /auth/session`), and an `Origin` (or
-  `Referer`) equal to the public base URL. Bearer-authenticated requests are exempt (no ambient
-  credential).
+  `/`, `Max-Age` = the absolute lifetime; stored server-side as SHA-256 hash (§4.9), so logout and
+  expiry are real. The cookie value is never stored. Two expiries end a session, both enforced
+  on the server whatever the cookie says, and both delete its row:
+  - **absolute**: `BOARD_SESSION_TTL` (default `168h`, 7 days) after login; activity does not extend it;
+  - **idle**: `BOARD_SESSION_IDLE` (default `24h`) since the session was last used (a request
+    refreshes its last-seen time, written at most once per tenth of the idle timeout).
+  After either, and after logout, the old cookie is as good as none: an API call gets 401, a
+  navigation is redirected to `/auth/login`. The expiry scenarios (`features/oidc_session.feature`)
+  start the server with lifetimes of a few seconds, so no step sleeps longer than 5 s.
+- **CSRF**: every cookie-authenticated request whose method is not GET, HEAD or OPTIONS (so
+  `POST /auth/logout` and every write) must carry `X-CSRF-Token` equal to the session's CSRF token
+  (delivered to the UI by `GET /auth/session`) **and** an `Origin` header, or failing that a
+  `Referer`, whose scheme, host and port equal those of `BOARD_PUBLIC_URL`. A missing or wrong
+  token, a missing or foreign origin (including `null`) gets **403** with a problem document, and
+  the request does not run. Bearer-authenticated requests are exempt (no ambient credential).
 - **API call or browser navigation**: a browser navigation is a `GET` whose `Accept` header
   contains `text/html`; every other request is an API call. A request with no credential (no
   Bearer key, no live session cookie) is answered by that rule when login is on: an API call gets
@@ -976,8 +985,8 @@ All configuration is by environment variable:
 | `BOARD_OIDC_CLIENT_ID` | (required with the issuer) | |
 | `BOARD_OIDC_CLIENT_SECRET` | (required with the issuer) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
 | `BOARD_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as the operator |
-| `BOARD_SESSION_TTL` | `168h` | absolute session lifetime |
-| `BOARD_SESSION_IDLE` | `24h` | idle timeout |
+| `BOARD_SESSION_TTL` | `168h` | absolute session lifetime (§3.2) |
+| `BOARD_SESSION_IDLE` | `24h` | idle timeout (§3.2) |
 
 Browser login is on when `BOARD_OIDC_ISSUER` is set: the other four OIDC settings and
 `BOARD_PUBLIC_URL` are then required, a partial or malformed set refuses to start (one stderr line,

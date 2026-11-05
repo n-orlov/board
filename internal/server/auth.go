@@ -92,6 +92,10 @@ func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *htt
 	case err != nil:
 		writeProblem(w, http.StatusServiceUnavailable, "the session could not be checked")
 	default:
+		if detail := login.csrfProblem(r, sess.CSRFToken); detail != "" {
+			writeProblem(w, http.StatusForbidden, detail)
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sessionIdentity{id: id, session: sess})))
 	}
 }

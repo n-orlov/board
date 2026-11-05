@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,8 @@ func (f *fakeIdentity) Verify(_ context.Context, _, nonce string) (oidc.Claims, 
 	return f.claims, f.verifyErr
 }
 
+const publicURL = "https://board.example.test"
+
 func newLogin(t *testing.T, id *fakeIdentity) *Login {
 	t.Helper()
 	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
@@ -56,7 +59,7 @@ func newLogin(t *testing.T, id *fakeIdentity) *Login {
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return &Login{Identity: id, Sessions: auth.Sessions{Store: st}, Allowed: map[string]bool{"alice@example.com": true}, Operator: "operator"}
+	return &Login{Identity: id, Sessions: auth.Sessions{Store: st}, Allowed: map[string]bool{"alice@example.com": true}, Operator: "operator", PublicURL: publicURL}
 }
 
 func browse(h http.Handler, method, path string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -186,7 +189,7 @@ func TestCallbackStartsASessionForAnAllowedVerifiedEmail(t *testing.T) {
 	if browse(h, http.MethodGet, "/readyz", session).Code != http.StatusOK {
 		t.Fatal("a session cookie did not authenticate /readyz")
 	}
-	out := browse(h, http.MethodPost, "/auth/logout", session)
+	out := write(h, "/auth/logout", session, csrfOf(t, body), publicURL)
 	if out.Code != http.StatusNoContent || setCookie(out, SessionCookie).MaxAge >= 0 {
 		t.Fatalf("logout: %d", out.Code)
 	}
@@ -307,5 +310,82 @@ func TestLogoutFailsWhenTheStoreCannotDeleteTheSession(t *testing.T) {
 	_ = l.Sessions.Store.Close()
 	if _, err := (loginOps{login: l}).PostAuthLogout(ctx, PostAuthLogoutRequestObject{}); err == nil {
 		t.Fatal("logout on a closed store succeeded")
+	}
+}
+
+// write sends a POST the way a page script would, with the given CSRF token and
+// Origin (a header left empty is not sent).
+func write(h http.Handler, path string, session *http.Cookie, token, origin string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, path, nil)
+	r.Header.Set("Accept", "application/json")
+	r.AddCookie(session)
+	if token != "" {
+		r.Header.Set(CSRFHeader, token)
+	}
+	if origin != "" {
+		r.Header.Set("Origin", origin)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec
+}
+
+func csrfOf(t *testing.T, sessionResponse *httptest.ResponseRecorder) string {
+	t.Helper()
+	var doc struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(sessionResponse.Body.Bytes(), &doc); err != nil || doc.CSRFToken == "" {
+		t.Fatalf("session body %q holds no csrf_token: %v", sessionResponse.Body, err)
+	}
+	return doc.CSRFToken
+}
+
+func TestACookieAuthenticatedWriteNeedsTheCSRFTokenAndTheSameOrigin(t *testing.T) {
+	l := newLogin(t, &fakeIdentity{claims: alice})
+	h := handler(l)
+	callback, cookie := startLogin(t, h)
+	session := setCookie(browse(h, http.MethodGet, callback, cookie), SessionCookie)
+	token := csrfOf(t, browse(h, http.MethodGet, "/auth/session", session))
+	cases := map[string]struct{ token, origin string }{
+		"no token":          {"", publicURL},
+		"a wrong token":     {token + "x", publicURL},
+		"no origin":         {token, ""},
+		"a foreign origin":  {token, "https://evil.example"},
+		"another scheme":    {token, "http://board.example.test"},
+		"another port":      {token, "https://board.example.test:8443"},
+		"the null origin":   {token, "null"},
+		"neither header":    {"", ""},
+		"a look-alike host": {token, "https://board.example.test.evil.example"},
+	}
+	for name, c := range cases {
+		if rec := write(h, "/auth/logout", session, c.token, c.origin); rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %d, want 403", name, rec.Code)
+		}
+	}
+	if rec := browse(h, http.MethodGet, "/auth/session", session); rec.Code != http.StatusOK {
+		t.Fatalf("a refused write ended the session: %d", rec.Code)
+	}
+	// A Referer on the public base URL stands in for a missing Origin.
+	r := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	r.AddCookie(session)
+	r.Header.Set(CSRFHeader, token)
+	r.Header.Set("Referer", publicURL+"/some/page")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("a write with the token and a same-origin Referer: %d, want 204", rec.Code)
+	}
+}
+
+func TestABearerWriteNeedsNoCSRFToken(t *testing.T) {
+	h := handler(newLogin(t, &fakeIdentity{}))
+	r := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	r.Header.Set("Authorization", "Bearer brd_x")
+	r.Header.Set(ActorHeader, "a")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("a key-authenticated write was held to the CSRF rule: %d", rec.Code)
 	}
 }

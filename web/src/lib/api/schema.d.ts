@@ -195,7 +195,7 @@ export interface paths {
         put?: never;
         /**
          * End the browser session
-         * @description Deletes the session server-side and clears the cookie.
+         * @description Deletes the session server-side and clears the cookie. A cookie-authenticated write needs the X-CSRF-Token header and a same-origin Origin (SPEC 3.2), or the request is refused with 403 before it runs.
          */
         post: operations["postAuthLogout"];
         delete?: never;

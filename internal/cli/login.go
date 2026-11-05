@@ -42,10 +42,11 @@ func loginFromEnv(env Env, st *store.Store) (*server.Login, error) {
 		RedirectURL: strings.TrimRight(cfg.publicURL, "/") + "/auth/oidc/callback",
 	})
 	return &server.Login{
-		Identity: provider,
-		Sessions: auth.Sessions{Store: st, TTL: cfg.ttl, Idle: cfg.idle},
-		Allowed:  cfg.allowed,
-		Operator: cfg.operator,
+		Identity:  provider,
+		Sessions:  auth.Sessions{Store: st, TTL: cfg.ttl, Idle: cfg.idle},
+		Allowed:   cfg.allowed,
+		PublicURL: cfg.publicURL,
+		Operator:  cfg.operator,
 	}, nil
 }
 

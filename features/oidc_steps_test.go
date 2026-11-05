@@ -36,6 +36,9 @@ type browser struct {
 	// makes it discard the pre-login cookie the moment it is set.
 	stateOverride string
 	dropLogin     bool
+	// csrf is the CSRF token the browser read from /auth/session, remembered
+	// the session cookie one it set aside to present again.
+	csrf, remembered string
 }
 
 func (b *browser) jar(host string) map[string]string {
@@ -70,12 +73,21 @@ func (h *harness) resolve(target string) string {
 
 // browse sends GET target as the browser and records the response.
 func (h *harness) browse(ctx context.Context, target string) error {
+	return h.send(ctx, http.MethodGet, target, "text/html", nil)
+}
+
+// send sends method target as the browser, with its cookies, the Accept header
+// and extra headers, and records the response.
+func (h *harness) send(ctx context.Context, method, target, accept string, headers map[string]string) error {
 	target = h.resolve(target)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "text/html")
+	req.Header.Set("Accept", accept)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 	for name, value := range h.web.jar(req.URL.Host) {
 		req.AddCookie(&http.Cookie{Name: name, Value: value, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	}
@@ -226,12 +238,23 @@ func (h *harness) providerSignsIn(email, kind string) error {
 }
 
 func (h *harness) serverWithOIDC(ctx context.Context, allowed string) (context.Context, error) {
+	return h.serverWithOIDCSetting(ctx, allowed, "", "")
+}
+
+// serverWithOIDCSetting starts the server with OIDC login and, when name is
+// not empty, one more BOARD_* setting.
+func (h *harness) serverWithOIDCSetting(ctx context.Context, allowed, name, value string) (context.Context, error) {
 	if h.idp == nil {
 		return ctx, errors.New("the mock OIDC provider is not running")
 	}
-	return h.startServerWith(ctx,
-		"BOARD_PUBLIC_URL=http://{addr}", "BOARD_OIDC_ISSUER="+h.idp.URL(), "BOARD_OIDC_CLIENT_ID="+oidcClientID,
-		"BOARD_OIDC_CLIENT_SECRET="+h.idpSecret, "BOARD_OIDC_ALLOWED_EMAILS="+allowed)
+	extra := []string{
+		"BOARD_PUBLIC_URL=http://{addr}", "BOARD_OIDC_ISSUER=" + h.idp.URL(), "BOARD_OIDC_CLIENT_ID=" + oidcClientID,
+		"BOARD_OIDC_CLIENT_SECRET=" + h.idpSecret, "BOARD_OIDC_ALLOWED_EMAILS=" + allowed,
+	}
+	if name != "" {
+		extra = append(extra, name+"="+value)
+	}
+	return h.startServerWith(ctx, extra...)
 }
 
 func (h *harness) providerSawAuthorization() error {
@@ -337,6 +360,8 @@ func (h *harness) sessionsStoredHashed(ctx context.Context, n int) error {
 func registerOIDCSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the mock OIDC provider signs in "([^"]*)" with (a verified|an unverified) email$`, h.providerSignsIn)
 	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)"$`, h.serverWithOIDC)
+	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE) set to "([^"]*)"$`, h.serverWithOIDCSetting)
+	registerSessionSteps(sc, h)
 	sc.Step(`^the browser opens "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser requests GET "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser follows the redirects$`, h.followRedirects)

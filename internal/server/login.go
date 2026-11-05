@@ -45,6 +45,9 @@ type Login struct {
 	Sessions auth.Sessions
 	// Allowed are the lower-case emails that log in as the operator.
 	Allowed map[string]bool
+	// PublicURL is the external base URL: a cookie-authenticated write must
+	// come from its origin (SPEC 3.2).
+	PublicURL string
 	// Operator is the handle of the operator actor sessions act as.
 	Operator string
 	// Now is the clock; nil means time.Now.
