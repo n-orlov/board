@@ -100,7 +100,7 @@ func moduleLine(gomod string) (string, bool) {
 // during a whole-tree scan.
 func skipDirName(name string) bool {
 	switch name {
-	case ".git", "vendor":
+	case ".git", "vendor", "node_modules":
 		return true
 	}
 	return strings.HasPrefix(name, ".")

@@ -356,7 +356,7 @@ func TestGoModMinimumPrefersToolchainThenGoLineAndRejectsBadInput(t *testing.T) 
 
 func TestSkippedScanDir(t *testing.T) {
 	for name, want := range map[string]bool{
-		"vendor": true, "testdata": true, ".git": true, ".hidden": true,
+		"vendor": true, "node_modules": true, "testdata": true, ".git": true, ".hidden": true,
 		"internal": false, "cmd": false, "vendored": false, "data": false,
 	} {
 		if got := skippedScanDir(name); got != want {

@@ -298,6 +298,7 @@ func TestSourcePackagesSkipsTestdataHiddenAndNestedModules(t *testing.T) {
 	writeFile(t, filepath.Join(root, "_skip", "s.go"), "package s\n")
 	writeFile(t, filepath.Join(root, "vendor", "v", "v.go"), "package v\n")
 	writeFile(t, filepath.Join(root, "ci-results", "r.go"), "package r\n")
+	writeFile(t, filepath.Join(root, "web", "node_modules", "n", "n.go"), "package n\n")
 	writeFile(t, filepath.Join(root, "nested", "go.mod"), "module other\n")
 	writeFile(t, filepath.Join(root, "nested", "n.go"), "package n\n")
 	writeFile(t, filepath.Join(root, "main.go"), "package main\n")

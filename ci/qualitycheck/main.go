@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -197,10 +198,11 @@ func newGates(cfg config, configPath string) []gateRunner {
 		}
 	}
 	add(cfg.CrapTS.Enabled, "crap-ts", func() (bool, string, error) {
-		return pendingGate("crap-ts", "task 008 (the TS CRAP gate)", crapTSInput)
+		return runCrapTSGate(configPath, sbomBase.OutDir)
 	})
 	add(cfg.FrontendCoverage.Enabled, "frontend-coverage", func() (bool, string, error) {
-		return pendingGate("frontend-coverage", "task 008 (the frontend coverage gate)", frontendCoverageInput)
+		return runFrontendCoverageGate(filepath.Join(webCoverageDir(sbomBase.OutDir), "coverage-summary.json"),
+			cfg.FrontendCoverage.TotalFloor, cfg.FrontendCoverage.FileFloor)
 	})
 	add(cfg.TrivyImage.Enabled, "trivy-image", func() (bool, string, error) {
 		return pendingGate("trivy-image", "task 011 (the image gates)", imageTarInput)
@@ -209,7 +211,7 @@ func newGates(cfg config, configPath string) []gateRunner {
 		return runMutationGate(configPath, mutationReportDir(sbomBase.OutDir))
 	})
 	add(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
-		return pendingGate("stryker", "task 008 (the Stryker gate)", cfg.Stryker.Path)
+		return runStrykerGate(configPath, sbomBase.OutDir)
 	})
 	add(cfg.SBOMModule.Enabled, "sbom-module", func() (bool, string, error) {
 		return runSBOMGate(sbomModule(sbomBase))

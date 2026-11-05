@@ -41,7 +41,7 @@ func TestParseFilter(t *testing.T) {
 }
 
 func TestSkipDirName(t *testing.T) {
-	for name, want := range map[string]bool{".git": true, "vendor": true, ".hidden": true, "internal": false, "cmd": false} {
+	for name, want := range map[string]bool{".git": true, "vendor": true, "node_modules": true, ".hidden": true, "internal": false, "cmd": false} {
 		if got := skipDirName(name); got != want {
 			t.Errorf("skipDirName(%q) = %v, want %v", name, got, want)
 		}

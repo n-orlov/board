@@ -1041,12 +1041,12 @@ All gates are **on from the first commit**. Thresholds live in `ci/quality.json`
 |---|---|
 | Go coverage | total ≥ 85 %, every package ≥ 80 %, fixture floor 50 % (deck's values) |
 | **CRAP (Go)** | deck's `ci/crapgate`, **ceiling 8**, **fixture ceiling 8** (deck uses 10). **No baseline or exemption file**: greenfield, every function must pass. |
-| **CRAP (TS/Svelte)** | scored like s3-browser's `scripts/crap` (ESLint complexity × Vitest coverage), **ceiling 8**, **no baseline file** (s3-browser's `crap-baseline.json` mechanism is not used). |
-| Frontend coverage | statements/lines ≥ 85 %, per file ≥ 80 % (aligned with the Go floors) |
+| **CRAP (TS/Svelte)** | scored like s3-browser's `scripts/crap` (ESLint complexity × Vitest coverage), **ceiling 8**, **no baseline file** (s3-browser's `crap-baseline.json` mechanism is not used). `web/scripts/crap` reads the ceiling from `ci/quality.json` (`crap_ts.ceiling`) and scores every function of `web/src`; Svelte logic that needs scoring lives in `web/src/lib`. |
+| Frontend coverage | statements/lines ≥ 85 %, per file ≥ 80 % (aligned with the Go floors), over `web/src/lib` as Vitest measures it; read from Vitest's `coverage-summary.json` |
 | golangci-lint | on (deck's config as the starting point) |
 | govulncheck | on |
 | Trivy | HIGH, CRITICAL fail the gate (source and the built image) |
-| Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 % (killed over killed plus lived, per package, read from `ci/quality.json`), a run that generates no mutant fails (`ci/mutation.sh`, evaluated by `ci/mutationgate`); frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
+| Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 % (killed over killed plus lived, per package, read from `ci/quality.json`), a run that generates no mutant fails (`ci/mutation.sh`, evaluated by `ci/mutationgate`); frontend: Stryker over `web/src/lib`, as s3-browser (`thresholds.break` 80 in `web/stryker.config.mjs`, per-module break 80 from `ci/quality.json`; `ci/mutation.sh` runs it after gremlins). Every `main` build and the extended lane. |
 | SBOM | CycloneDX generated for module, frontend and image; a missing or empty SBOM fails the build |
 | OpenAPI | spec lints clean; generated server/client code has no drift |
 

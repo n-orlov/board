@@ -23,6 +23,7 @@ type sbomOptions struct {
 	CacheDir string   // --cache-dir
 	OutDir   string   // directory the CycloneDX file is written into
 	OutFile  string   // file name inside OutDir
+	Extra    []string // "fs": further trivy flags
 }
 
 // sbomBase carries the flag-supplied options shared by the three gates.
@@ -35,6 +36,8 @@ func sbomModule(b sbomOptions) sbomOptions {
 
 func sbomFrontend(b sbomOptions) sbomOptions {
 	b.Name, b.Kind, b.Files, b.OutFile = "sbom-frontend", "fs", []string{"web/package.json", "web/package-lock.json"}, "sbom-frontend.cdx.json"
+	// Every package of the frontend is a devDependency (Vite bundles what the page runs), and Trivy omits those unless asked.
+	b.Extra = []string{"--include-dev-deps"}
 	return b
 }
 
@@ -111,7 +114,8 @@ func sbomArgs(o sbomOptions, out string) (args []string, cleanup func(), problem
 	if err := stageFiles(o.Files, stage); err != nil {
 		return nil, cleanup, "", err
 	}
-	return append(append([]string{"fs", "--scanners", "license"}, common...), stage), cleanup, "", nil
+	args = append([]string{"fs", "--scanners", "license"}, o.Extra...)
+	return append(append(args, common...), stage), cleanup, "", nil
 }
 
 // missingFiles lists the files that do not exist.

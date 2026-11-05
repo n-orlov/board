@@ -35,7 +35,7 @@ func findModule(dir string) (root, modulePath string, err error) {
 // suite's own output directory.
 func skipDir(name string) bool {
 	switch name {
-	case "vendor", "testdata", "ci-results":
+	case "vendor", "testdata", "ci-results", "node_modules":
 		return true
 	}
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")

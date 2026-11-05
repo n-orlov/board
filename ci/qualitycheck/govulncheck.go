@@ -163,7 +163,7 @@ func countGoFiles(dir string) int {
 // skippedScanDir reports whether a directory name is one the scan target's
 // Go-file count does not look inside.
 func skippedScanDir(name string) bool {
-	return name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".")
+	return name == "vendor" || name == "testdata" || name == "node_modules" || strings.HasPrefix(name, ".")
 }
 
 // govulncheckCommand builds the govulncheck invocation for o: the binary

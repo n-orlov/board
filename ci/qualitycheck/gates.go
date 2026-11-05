@@ -6,9 +6,9 @@
 // A gate whose input does not exist yet (the frontend, the image, the
 // OpenAPI document) FAILS, never passes: a gate that cannot measure
 // anything has measured nothing. The Go mutation gate runs (mutation.go).
-// The runners for the Stryker, TS CRAP, frontend coverage, image Trivy and
-// OpenAPI gates land with the tasks that create their inputs; until then pendingGate
-// reports the missing input, or -- when the input is present but no
+// The frontend gates run (frontend.go). The runners for the image Trivy and
+// OpenAPI gates land with the tasks that create their inputs; until then
+// pendingGate reports the missing input, or -- when the input is present but no
 // runner is wired -- says so, and fails in both cases.
 package main
 
@@ -65,10 +65,8 @@ type switchConfig struct {
 
 // Inputs the pending gates measure. A gate fails while any is missing.
 const (
-	frontendCoverageInput = "web/coverage/coverage-summary.json"
-	crapTSInput           = "web/coverage/coverage-final.json"
-	imageTarInput         = "ci-results/board-image.tar"
-	openapiInput          = "api/openapi.yaml"
+	imageTarInput = "ci-results/board-image.tar"
+	openapiInput  = "api/openapi.yaml"
 )
 
 // pendingGate is a gate whose runner has not landed (landsIn names the

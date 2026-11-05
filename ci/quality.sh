@@ -16,7 +16,8 @@
 # Every SPEC 15.4 gate is on in ci/quality.json from the first commit. A
 # gate whose input does not exist yet (the frontend, the image, the OpenAPI
 # document) fails instead of passing, so this script exits non-zero until
-# those inputs land; the golangci gate runs ci/golangci.sh, the same single
+# those inputs land. The frontend gates read what ci/suite.sh (web-coverage/)
+# and ci/mutation.sh (mutation/stryker/) wrote under "$outdir". The golangci gate runs ci/golangci.sh, the same single
 # invocation ci/lint.sh runs. The SBOM gates write CycloneDX files into
 # "$outdir". With every gate off this script still runs, prints that
 # nothing is enabled, and exits 0.

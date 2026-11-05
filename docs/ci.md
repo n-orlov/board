@@ -130,16 +130,17 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 |---|---|---|
 | `coverage` | 85 total, 80 per package, 50 fixture | runs |
 | `crap` | ceiling 8, fixture ceiling 8 | runs |
-| `crap_ts` | ceiling 8 | fails until the web gates land (task 008) |
-| `frontend_coverage` | 85 total, 80 per file | fails until task 008 |
+| `crap_ts` | ceiling 8, no baseline | runs (needs `web-coverage/` from `ci/suite.sh` and `web/node_modules`) |
+| `frontend_coverage` | 85 total, 80 per file (statements and lines) | runs (needs `web-coverage/coverage-summary.json` from `ci/suite.sh`) |
 | `golangci` | zero findings | runs |
 | `govulncheck` | zero reachable | runs |
 | `trivy` | HIGH, CRITICAL on the source | runs |
 | `trivy_image` | HIGH, CRITICAL on the image | fails until the image tar exists (task 011) |
 | `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`) |
-| `stryker` | break 80, per module 80, `web/src/lib` | fails until task 008 |
+| `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`) |
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
-| `sbom_frontend`, `sbom_image` | CycloneDX, non-empty | fail until `web/package-lock.json` and the image tar exist |
+| `sbom_frontend` | CycloneDX of `web/package.json` and `web/package-lock.json` (dev dependencies included: all of the frontend's are), non-empty | runs |
+| `sbom_image` | CycloneDX, non-empty | fails until the image tar exists |
 | `openapi_lint`, `openapi_drift` | lint clean, no drift | fail until `api/openapi.yaml` and the generated code exist |
 
 `ci/quality.sh` exits non-zero until every row runs. Each row that fails for
@@ -169,6 +170,27 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   reports as its `mutation-go` gate and fails when `ci-results/mutation/` is
   absent. Run it with `ci/run.sh ci/mutation.sh`, which is also the Jenkinsfile
   Mutation stage's command (see "The Jenkinsfile").
+- The frontend gates (`ci/qualitycheck/frontend.go`, tests in `frontend_test.go`
+  and in `web/scripts/*/*.test.ts`, which Vitest runs):
+  - `web/scripts/crap/` scores every function of `web/src` (`*.ts`, tests
+    excluded) as ESLint complexity against the Vitest v8 coverage in
+    `coverage-final.json` and fails above `crap_ts.ceiling` (8), which the
+    script reads from `ci/quality.json`. There is no baseline and no exemption
+    list. Logic that a Svelte component needs belongs in a `src/lib` module,
+    where it is scored, covered and mutated. Run it by hand with
+    `ci/run.sh sh -c 'cd web && npm run test && npm run crap'`.
+  - `frontend_coverage`: `coverage-summary.json` must show statements and lines
+    at or above `total_floor` (85) over the frontend and `file_floor` (80) for
+    every file; a summary that lists no file fails. Vitest measures
+    `src/lib/**/*.ts` only (`web/vitest.config.ts`).
+  - `stryker`: `ci/mutation.sh` also runs `npm run mutation` in `web/`
+    (`web/stryker.config.mjs`: `src/lib`, `thresholds.break` 80). Stryker's own
+    break judges the whole run; `web/scripts/mutation/` also fails any one module
+    below `stryker.module_break` (80) and checks that the config's break and path
+    equal `ci/quality.json`'s. The report is copied to
+    `ci-results/mutation/stryker/mutation.json`, which `ci/quality.sh` judges.
+    `web/scripts/mutation/vitestFileRunner.mjs` (from s3-browser) narrows a mutant
+    run to the covering test files because Vitest 5 matches `-t` differently.
 - `ci/covgate`: coverage floors from `ci/quality.json` (total, per package,
   fixture) over the merged profile. A package with no statements is named by
   exact path in `zeroStatementPackages`; a stale or missing entry fails.
