@@ -18,8 +18,10 @@ fix_volume() { # name, mount point, label
     --mount "type=volume,src=$1,dst=$2" board-ci:local -c %u:%g "$2")
   if [ "$owner" != "$me" ]; then
     echo "chowning $1 from $owner to $me"
-    docker run --rm --user 0 --entrypoint chown \
-      --mount "type=volume,src=$1,dst=$2" board-ci:local -R "$me" "$2"
+    # An empty volume is populated from the image again at every container
+    # start, which resets its owner: the marker file keeps it non-empty.
+    docker run --rm --user 0 --entrypoint sh \
+      --mount "type=volume,src=$1,dst=$2" board-ci:local -c 'touch "$1/.board-cache" && chown -R "$2" "$1"' sh "$2" "$me"
   fi
 }
 fix_volume "$BOARD_CI_CACHE_VOLUME" /go-cache go
