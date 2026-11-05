@@ -1024,7 +1024,7 @@ All gates are **on from the first commit**. Thresholds live in `ci/quality.json`
 | golangci-lint | on (deck's config as the starting point) |
 | govulncheck | on |
 | Trivy | HIGH, CRITICAL fail the gate (source and the built image) |
-| Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 %, a run that generates no mutant fails; frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
+| Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 % (killed over killed plus lived, per package, read from `ci/quality.json`), a run that generates no mutant fails (`ci/mutation.sh`, evaluated by `ci/mutationgate`); frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
 | SBOM | CycloneDX generated for module, frontend and image; a missing or empty SBOM fails the build |
 | OpenAPI | spec lints clean; generated server/client code has no drift |
 

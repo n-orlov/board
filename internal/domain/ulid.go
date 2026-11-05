@@ -1,8 +1,8 @@
 package domain
 
 import (
-	"encoding/binary"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"time"
 )

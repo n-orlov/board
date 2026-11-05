@@ -106,7 +106,7 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 | `govulncheck` | zero reachable | runs |
 | `trivy` | HIGH, CRITICAL on the source | runs |
 | `trivy_image` | HIGH, CRITICAL on the image | fails until the image tar exists (task 011) |
-| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | fails until task 006 |
+| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`) |
 | `stryker` | break 80, per module 80, `web/src/lib` | fails until task 008 |
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
 | `sbom_frontend`, `sbom_image` | CycloneDX, non-empty | fail until `web/package-lock.json` and the image tar exist |
@@ -120,6 +120,25 @@ a missing input names the input in the report.
 The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 ./ci/...` runs them all:
 
+- `ci/mutation.sh` and `ci/mutationgate`: the Go mutation gate, the command of
+  the Jenkins Mutation stage (every `main` build and the extended lane). The
+  script runs `gremlins unleash` over each package in `mutation_go.packages`
+  (`internal/domain`, `internal/store`), writes one JSON report per package to
+  `ci-results/mutation/` and then runs `mutationgate`, which reads the
+  threshold from `ci/quality.json` and fails when
+  - a package's efficacy (gremlins' definition, killed over killed plus lived)
+    is below `mutation_go.efficacy` (80 %), or
+  - a package generated no mutant, or judged none (all not covered or timed
+    out): a gate that measured nothing has not passed (`fail_on_no_mutants`),
+    or
+  - a package's report is missing or unreadable.
+  Counts come from the per-mutation statuses, since gremlins' summary fields
+  omit timed-out and not-covered mutants. The script passes
+  `--timeout-coefficient 60`: with a warm build cache gremlins' default bound
+  timed out every `internal/store` mutant. `ci/quality.sh` evaluates the same
+  reports as its `mutation-go` gate and fails when `ci-results/mutation/` is
+  absent. Run it with `ci/run.sh ci/mutation.sh`; the Jenkinsfile stage lands
+  with task 011.
 - `ci/covgate`: coverage floors from `ci/quality.json` (total, per package,
   fixture) over the merged profile. A package with no statements is named by
   exact path in `zeroStatementPackages`; a stale or missing entry fails.

@@ -185,11 +185,11 @@ func enabledGates(cfg config, configPath, profilePath string) []gateRunner {
 			return runGolangciGate(golangciBase)
 		}})
 	}
-	return append(gates, newGates(cfg)...)
+	return append(gates, newGates(cfg, configPath)...)
 }
 
 // newGates lists the section 15.4 gates beyond deck's five, in report order.
-func newGates(cfg config) []gateRunner {
+func newGates(cfg config, configPath string) []gateRunner {
 	var gates []gateRunner
 	add := func(on bool, name string, run func() (bool, string, error)) {
 		if on {
@@ -206,7 +206,7 @@ func newGates(cfg config) []gateRunner {
 		return pendingGate("trivy-image", "task 011 (the image gates)", imageTarInput)
 	})
 	add(cfg.MutationGo.Enabled, "mutation-go", func() (bool, string, error) {
-		return pendingGate("mutation-go", "task 006 (the gremlins gate)", cfg.MutationGo.Packages...)
+		return runMutationGate(configPath, mutationReportDir(sbomBase.OutDir))
 	})
 	add(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
 		return pendingGate("stryker", "task 008 (the Stryker gate)", cfg.Stryker.Path)

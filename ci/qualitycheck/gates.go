@@ -5,9 +5,9 @@
 //
 // A gate whose input does not exist yet (the frontend, the image, the
 // OpenAPI document) FAILS, never passes: a gate that cannot measure
-// anything has measured nothing. The runners for the Go mutation,
-// Stryker, TS CRAP, frontend coverage, image Trivy and OpenAPI gates
-// land with the tasks that create their inputs; until then pendingGate
+// anything has measured nothing. The Go mutation gate runs (mutation.go).
+// The runners for the Stryker, TS CRAP, frontend coverage, image Trivy and
+// OpenAPI gates land with the tasks that create their inputs; until then pendingGate
 // reports the missing input, or -- when the input is present but no
 // runner is wired -- says so, and fails in both cases.
 package main

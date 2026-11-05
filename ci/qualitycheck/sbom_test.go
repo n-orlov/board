@@ -166,7 +166,7 @@ func TestRunFailsEveryGateWhoseInputDoesNotExist(t *testing.T) {
 	}
 	// Only the gates that need no tool: everything but deck's five and the module SBOM.
 	byName := map[string]bool{}
-	for _, g := range newGates(c) {
+	for _, g := range newGates(c, cfg) {
 		ok, out, rerr := g.run()
 		if rerr != nil {
 			t.Fatalf("%s: %v", g.name, rerr)
