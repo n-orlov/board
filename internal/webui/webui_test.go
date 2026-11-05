@@ -30,3 +30,20 @@ func TestBuiltMatchesWhichTreeIsServed(t *testing.T) {
 		t.Errorf("Built() = %v but index.html placeholder = %v", Built(), placeholder)
 	}
 }
+
+// The placeholder is served when there is no build, and the build tree is served
+// when there is one, whichever of the two this checkout embeds.
+func TestFilesServeThePlaceholderOrTheBuildAsTold(t *testing.T) {
+	b, err := fs.ReadFile(files(false), "index.html")
+	if err != nil || !strings.Contains(string(b), "was not built") {
+		t.Errorf("files(false): index.html = %q, %v, want the placeholder page", b, err)
+	}
+	if _, err := fs.Stat(files(true), "."); err != nil {
+		t.Errorf("files(true): the build tree is not readable: %v", err)
+	}
+	if Built() {
+		if b, err := fs.ReadFile(files(true), "index.html"); err != nil || strings.Contains(string(b), "was not built") {
+			t.Errorf("files(true) with a build: index.html = %q, %v, want the built page", b, err)
+		}
+	}
+}

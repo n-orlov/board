@@ -17,7 +17,13 @@ var fallback embed.FS
 // has not been built carries only a placeholder page, so the package (and every Go
 // test) still compiles and serves something; Built reports which one this is.
 func Files() fs.FS {
-	if Built() {
+	return files(Built())
+}
+
+// files serves the real build when built, else the placeholder. It is separate
+// from Files so both choices can be tested whichever tree this checkout embeds.
+func files(built bool) fs.FS {
+	if built {
 		return sub(dist, "dist")
 	}
 	return sub(fallback, "fallback")
