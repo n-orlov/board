@@ -82,7 +82,7 @@ while [ "$i" -le "$runs" ]; do
         status=$?
     fi
 
-    cat "$run_log" | tee -a "$summary_log" >/dev/null
+    tee -a "$summary_log" < "$run_log" >/dev/null
 
     if [ "$status" -eq 0 ]; then
         echo "=== RUN $i: PASS (exit $status) ===" | tee -a "$summary_log"

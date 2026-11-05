@@ -8,10 +8,15 @@
     "test": "vitest run --coverage",
     "check": "tsc --noEmit",
     "crap": "node scripts/crap/crap.ts",
-    "mutation": "node scripts/mutation/mutation.ts"
+    "mutation": "node scripts/mutation/mutation.ts",
+    "lint": "eslint . --max-warnings 0",
+    "check:svelte": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "openapi:lint": "redocly lint --config redocly.yaml",
+    "openapi:ts": "openapi-typescript"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@redocly/cli": "2.76.0",
     "@stryker-mutator/core": "10.1.1",
     "@stryker-mutator/vitest-runner": "10.1.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
@@ -19,10 +24,18 @@
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.1.0",
     "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "openapi-typescript": "7.13.0",
     "svelte": "5.57.3",
+    "svelte-check": "4.7.8",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
     "vite": "8.3.6",
     "vitest": "5.1.0"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }

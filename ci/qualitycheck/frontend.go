@@ -126,13 +126,24 @@ func runFrontendCoverageGate(summaryPath string, totalFloor, fileFloor float64) 
 	if err := json.Unmarshal(data, &rows); err != nil {
 		return false, fmt.Sprintf("frontend-coverage gate: FAILED, %s is not a coverage summary: %v\n", summaryPath, err), nil
 	}
-	var problems []string
+	problems, files := coverageProblems(summaryPath, rows, totalFloor, fileFloor)
+	total := rows["total"]
+	if len(problems) > 0 {
+		return false, "frontend-coverage gate: FAILED\n  " + strings.Join(problems, "\n  ") + "\n" +
+			"what to do: add tests for the named file(s); never lower a floor in ci/quality.json or exclude a measured file.\n", nil
+	}
+	return true, fmt.Sprintf("frontend-coverage gate: ok, %d files, statements %.2f%% lines %.2f%% (floors %g total, %g per file)\n",
+		len(files), pctOf(total.Statements), pctOf(total.Lines), totalFloor, fileFloor), nil
+}
+
+// coverageProblems lists every way the summary misses the floors, and the
+// sorted names of the files it lists (the "total" row excluded).
+func coverageProblems(summaryPath string, rows map[string]coverageEntry, totalFloor, fileFloor float64) (problems, files []string) {
 	total, hasTotal := rows["total"]
 	if !hasTotal {
 		problems = append(problems, summaryPath+" has no total row")
 	}
 	problems = append(problems, belowFloor("total", total, totalFloor)...)
-	files := make([]string, 0, len(rows))
 	for name := range rows {
 		if name != "total" {
 			files = append(files, name)
@@ -145,12 +156,7 @@ func runFrontendCoverageGate(summaryPath string, totalFloor, fileFloor float64) 
 	for _, name := range files {
 		problems = append(problems, belowFloor(name, rows[name], fileFloor)...)
 	}
-	if len(problems) > 0 {
-		return false, "frontend-coverage gate: FAILED\n  " + strings.Join(problems, "\n  ") + "\n" +
-			"what to do: add tests for the named file(s); never lower a floor in ci/quality.json or exclude a measured file.\n", nil
-	}
-	return true, fmt.Sprintf("frontend-coverage gate: ok, %d files, statements %.2f%% lines %.2f%% (floors %g total, %g per file)\n",
-		len(files), pctOf(total.Statements), pctOf(total.Lines), totalFloor, fileFloor), nil
+	return problems, files
 }
 
 func pctOf(m coverageMetric) float64 {

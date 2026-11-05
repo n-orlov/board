@@ -414,7 +414,12 @@ and CLI can show badges without the lists.
 - Base path `/api/v1`. JSON in and out. Errors are RFC 9457 problem documents.
 - **The OpenAPI 3.1 document is the source of truth**, checked in (`api/openapi.yaml`). Server
   handler interfaces and the CLI client are generated from it (oapi-codegen); a CI check fails
-  if generated code is stale. Served at `/api/openapi.yaml` and `/api/openapi.json`.
+  if generated code is stale. `ci/openapi-gen.sh` writes `internal/server/openapi.gen.go`
+  (oapi-codegen) and `web/src/lib/api/schema.d.ts` (openapi-typescript); `ci/openapi-drift.sh`
+  regenerates both into a scratch directory and exits non-zero when either checked-in file
+  differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
+  any finding fails) and runs the drift check. The document declares `GET /healthz` and
+  `GET /readyz` and the RFC 9457 `Problem` schema. Served at `/api/openapi.yaml` and `/api/openapi.json`.
 - **Swagger UI** at `/api/docs` (assets embedded, no CDN).
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is

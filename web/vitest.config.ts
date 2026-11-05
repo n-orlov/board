@@ -13,7 +13,8 @@ export default defineConfig({
       reportsDirectory: process.env.WEB_COVERAGE_DIR ?? 'coverage',
       reporter: ['text', 'json', 'json-summary', 'lcov'],
       include: ['src/lib/**/*.ts'],
-      exclude: ['src/**/*.test.ts'],
+      // src/lib/api holds generated type declarations (openapi-typescript): no statements.
+      exclude: ['src/**/*.test.ts', 'src/lib/api/**'],
     },
   },
 });

@@ -9,7 +9,7 @@ export default {
   testRunner: 'vitest-file',
   plugins: ['@stryker-mutator/vitest-runner', path.resolve('scripts/mutation/vitestFileRunner.mjs')],
   vitest: { configFile: 'vitest.mutation.config.ts', related: false },
-  mutate: ['src/lib/**/*.ts', '!src/lib/**/*.test.ts'],
+  mutate: ['src/lib/**/*.ts', '!src/lib/**/*.test.ts', '!src/lib/api/**'],
   reporters: ['clear-text', 'progress', 'html', 'json'],
   htmlReporter: { fileName: 'reports/mutation/mutation.html' },
   jsonReporter: { fileName: 'reports/mutation/mutation.json' },

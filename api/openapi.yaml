@@ -1,0 +1,98 @@
+openapi: 3.1.0
+info:
+  title: Board API
+  version: 0.1.0
+  summary: The board server's HTTP API.
+  description: >-
+    Phase 0 declares the two probe operations. Every later operation is added
+    here first; the Go server code and the TypeScript client are generated from
+    this document and ci/lint.sh fails when either is stale.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: /
+tags:
+  - name: probes
+    description: Liveness and readiness.
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [probes]
+      summary: Liveness probe
+      description: Answers 200 whenever the process is up. The only unauthenticated operation.
+      security: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples: [ok]
+  /readyz:
+    get:
+      operationId: getReadyz
+      tags: [probes]
+      summary: Readiness probe
+      description: Answers 200 when the database is reachable and migrated, 503 otherwise.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The server is ready.
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples: [ok]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: The server is not ready.
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples: [not ready]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: An API key minted by `board admin keys create`.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: board_session
+      description: The operator's browser session.
+  responses:
+    Unauthorized:
+      description: No valid credentials were presented.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      description: An RFC 9457 problem document.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: A URI reference that identifies the problem type.
+        title:
+          type: string
+          description: A short, human-readable summary.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: A human-readable explanation of this occurrence.
+        instance:
+          type: string
+          description: A URI reference that identifies this occurrence.

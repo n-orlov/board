@@ -57,6 +57,40 @@ fi
 exit 0
 `
 
+// shellcheckStub records its argument list and can be told to fail.
+const shellcheckStub = `#!/bin/sh
+echo "shellcheck $*" >> "$LINTPROBE_LOG"
+if [ -n "${LINTPROBE_SHELLCHECK_FAIL:-}" ]; then
+    echo "stub shellcheck: findings" >&2
+    exit 1
+fi
+exit 0
+`
+
+// npmStub records the npm invocation and fails the script named by
+// LINTPROBE_NPM_FAIL (lint, check:svelte, check or openapi:lint).
+const npmStub = `#!/bin/sh
+echo "npm $*" >> "$LINTPROBE_LOG"
+for arg in "$@"; do
+    if [ -n "${LINTPROBE_NPM_FAIL:-}" ] && [ "$arg" = "$LINTPROBE_NPM_FAIL" ]; then
+        echo "stub npm: $arg failing on request" >&2
+        exit 1
+    fi
+done
+exit 0
+`
+
+// driftStub stands in for ci/openapi-drift.sh, which needs the real Go
+// toolchain; the real script is exercised by fixtures_test.go.
+const driftStub = `#!/bin/sh
+echo "openapi-drift" >> "$LINTPROBE_LOG"
+if [ -n "${LINTPROBE_DRIFT_FAIL:-}" ]; then
+    echo "stub openapi-drift: stale" >&2
+    exit 1
+fi
+exit 0
+`
+
 const originalGoMod = "module example.com/lintprobe\n\ngo 1.25\n"
 
 func repositoryRoot() (string, error) {
@@ -90,6 +124,20 @@ type lintRun struct {
 // scratch go.mod as the script left it.
 func runLintScript(t *testing.T, switches ...string) lintRun {
 	t.Helper()
+	return runLintScriptWith(t, scratchOptions{switches: switches})
+}
+
+// scratchOptions shapes the scratch repository runLintScriptWith builds.
+type scratchOptions struct {
+	switches []string
+	// realShellcheck leaves the shellcheck stub out so the real binary runs.
+	realShellcheck bool
+	// extraFiles are written into the scratch repository and tracked.
+	extraFiles map[string]string
+}
+
+func runLintScriptWith(t *testing.T, opts scratchOptions) lintRun {
+	t.Helper()
 	root, err := repositoryRoot()
 	if err != nil {
 		t.Fatalf("repositoryRoot: %v", err)
@@ -107,7 +155,7 @@ func runLintScript(t *testing.T, switches ...string) lintRun {
 	repo := filepath.Join(scratch, "repo")
 	stubs := filepath.Join(scratch, "stubs")
 	logPath := filepath.Join(scratch, "calls.log")
-	for _, dir := range []string{filepath.Join(repo, "ci"), stubs} {
+	for _, dir := range []string{filepath.Join(repo, "ci"), filepath.Join(repo, "web", "node_modules"), filepath.Join(repo, "api"), stubs} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -116,15 +164,36 @@ func runLintScript(t *testing.T, switches ...string) lintRun {
 		content string
 		mode    os.FileMode
 	}{
-		filepath.Join(repo, "ci", "lint.sh"):     {string(script), 0o755},
-		filepath.Join(repo, "ci", "golangci.sh"): {string(shared), 0o755},
-		filepath.Join(repo, "a.go"):              {"package lintprobe\n", 0o644},
-		filepath.Join(repo, "go.mod"):            {originalGoMod, 0o644},
-		filepath.Join(repo, "go.sum"):            {"", 0o644},
-		filepath.Join(stubs, "go"):               {goStub, 0o755},
-		filepath.Join(stubs, "gofmt"):            {gofmtStub, 0o755},
-		filepath.Join(stubs, "golangci-lint"):    {golangciLintStub, 0o755},
-		logPath:                                  {"", 0o644},
+		filepath.Join(repo, "ci", "lint.sh"):          {string(script), 0o755},
+		filepath.Join(repo, "ci", "golangci.sh"):      {string(shared), 0o755},
+		filepath.Join(repo, "ci", "openapi-drift.sh"): {driftStub, 0o755},
+		filepath.Join(repo, "api", "openapi.yaml"):    {"openapi: 3.1.0\n", 0o644},
+		filepath.Join(repo, "a.go"):                   {"package lintprobe\n", 0o644},
+		filepath.Join(repo, "go.mod"):                 {originalGoMod, 0o644},
+		filepath.Join(repo, "go.sum"):                 {"", 0o644},
+		filepath.Join(stubs, "go"):                    {goStub, 0o755},
+		filepath.Join(stubs, "gofmt"):                 {gofmtStub, 0o755},
+		filepath.Join(stubs, "golangci-lint"):         {golangciLintStub, 0o755},
+		filepath.Join(stubs, "npm"):                   {npmStub, 0o755},
+		logPath:                                       {"", 0o644},
+	}
+	if !opts.realShellcheck {
+		files[filepath.Join(stubs, "shellcheck")] = struct {
+			content string
+			mode    os.FileMode
+		}{shellcheckStub, 0o755}
+	}
+	tracked := []string{"a.go", "go.mod", "go.sum", "ci/lint.sh", "ci/golangci.sh", "ci/openapi-drift.sh", "api/openapi.yaml"}
+	for name, content := range opts.extraFiles {
+		path := filepath.Join(repo, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		files[path] = struct {
+			content string
+			mode    os.FileMode
+		}{content, 0o755}
+		tracked = append(tracked, name)
 	}
 	for path, f := range files {
 		if err := os.WriteFile(path, []byte(f.content), f.mode); err != nil {
@@ -136,7 +205,7 @@ func runLintScript(t *testing.T, switches ...string) lintRun {
 	if err != nil {
 		t.Fatalf("git not on PATH: %v", err)
 	}
-	for _, args := range [][]string{{"init", "-q"}, {"add", "a.go", "go.mod", "go.sum", "ci/lint.sh", "ci/golangci.sh"}} {
+	for _, args := range [][]string{{"init", "-q"}, append([]string{"add"}, tracked...)} {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -150,8 +219,11 @@ func runLintScript(t *testing.T, switches ...string) lintRun {
 		"PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"LINTPROBE_LOG="+logPath,
 	)
-	for _, s := range switches {
-		cmd.Env = append(cmd.Env, s+"=1")
+	for _, s := range opts.switches {
+		if !strings.Contains(s, "=") {
+			s += "=1"
+		}
+		cmd.Env = append(cmd.Env, s)
 	}
 	out, runErr := cmd.CombinedOutput()
 	result := lintRun{output: string(out)}
@@ -185,8 +257,12 @@ func runLintScript(t *testing.T, switches ...string) lintRun {
 //
 //   - clean tree: `gofmt -l <tracked .go files>`, then `go vet ./...`, then
 //     `go mod tidy`, then `golangci-lint run ./...` (the shared ci/golangci.sh
-//     invocation) are all actually invoked, in that order, and the script
+//     invocation), then shellcheck over the tracked .sh files, ESLint,
+//     svelte-check, `tsc --noEmit`, the OpenAPI lint and the generated-code
+//     drift check are all actually invoked, in that order, and the script
 //     exits 0;
+//   - a finding from any later stage: the script exits non-zero and no stage
+//     after it runs;
 //   - golangci-lint findings: the script exits non-zero;
 //   - gofmt drift: the script exits non-zero and neither vet nor tidy runs;
 //   - vet failure: the script exits non-zero and tidy never runs;
@@ -200,6 +276,15 @@ func TestLintScriptRunsAllStagesFailFastAndExitsOnDrift(t *testing.T) {
 	vetCall := "go vet ./..."
 	tidyCall := "go mod tidy"
 	lintCall := "golangci-lint run ./..."
+	shellcheckCall := "shellcheck ci/golangci.sh ci/lint.sh ci/openapi-drift.sh"
+	eslintCall := "npm run --silent lint"
+	svelteCall := "npm run --silent check:svelte"
+	tscCall := "npm run --silent check"
+	openapiCall := "npm run --silent openapi:lint -- ../api/openapi.yaml"
+	driftCall := "openapi-drift"
+
+	goStages := []string{gofmtCall, vetCall, tidyCall, lintCall}
+	upTo := func(calls ...string) []string { return append(append([]string{}, goStages...), calls...) }
 
 	cases := []struct {
 		name      string
@@ -207,11 +292,18 @@ func TestLintScriptRunsAllStagesFailFastAndExitsOnDrift(t *testing.T) {
 		wantFail  bool
 		wantCalls []string
 	}{
-		{"clean tree runs gofmt then vet then tidy and passes", nil, false, []string{gofmtCall, vetCall, tidyCall, lintCall}},
+		{"clean tree runs every stage in order and passes", nil, false,
+			upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall)},
 		{"gofmt drift fails before vet and tidy", []string{"LINTPROBE_GOFMT_DRIFT"}, true, []string{gofmtCall}},
 		{"vet failure fails before tidy", []string{"LINTPROBE_VET_FAIL"}, true, []string{gofmtCall, vetCall}},
 		{"go mod tidy drift fails before golangci-lint", []string{"LINTPROBE_TIDY_DRIFT"}, true, []string{gofmtCall, vetCall, tidyCall}},
-		{"golangci-lint findings fail", []string{"LINTPROBE_GOLANGCI_FAIL"}, true, []string{gofmtCall, vetCall, tidyCall, lintCall}},
+		{"golangci-lint findings fail before shellcheck", []string{"LINTPROBE_GOLANGCI_FAIL"}, true, goStages},
+		{"shellcheck findings fail before ESLint", []string{"LINTPROBE_SHELLCHECK_FAIL"}, true, upTo(shellcheckCall)},
+		{"ESLint findings fail before svelte-check", []string{"LINTPROBE_NPM_FAIL=lint"}, true, upTo(shellcheckCall, eslintCall)},
+		{"svelte-check findings fail before tsc", []string{"LINTPROBE_NPM_FAIL=check:svelte"}, true, upTo(shellcheckCall, eslintCall, svelteCall)},
+		{"tsc findings fail before the OpenAPI lint", []string{"LINTPROBE_NPM_FAIL=check"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall)},
+		{"OpenAPI lint findings fail before the drift check", []string{"LINTPROBE_NPM_FAIL=openapi:lint"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall)},
+		{"generated-code drift fails last", []string{"LINTPROBE_DRIFT_FAIL"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

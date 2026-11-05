@@ -141,7 +141,7 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
 | `sbom_frontend` | CycloneDX of `web/package.json` and `web/package-lock.json` (dev dependencies included: all of the frontend's are), non-empty | runs |
 | `sbom_image` | CycloneDX, non-empty | fails until the image tar exists |
-| `openapi_lint`, `openapi_drift` | lint clean, no drift | fail until `api/openapi.yaml` and the generated code exist |
+| `openapi_lint`, `openapi_drift` | lint clean, no drift | runs (the same commands `ci/lint.sh` runs; fails when `api/openapi.yaml`, the generated code or `web/node_modules` is missing) |
 
 `ci/quality.sh` exits non-zero until every row runs. Each row that fails for
 a missing input names the input in the report.
@@ -210,7 +210,13 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   the Godog steps and issue links.
 - `ci/suitecheck`: probes of `ci/suite.sh` against small fixture modules (the
   `BOARD_*` scrub, merged coverage, retry-once, timeouts, Allure results).
-- `ci/lintcheck`: probes of `ci/lint.sh` and of the golangci-lint config.
+- `ci/lintcheck`: probes of `ci/lint.sh` (stubbed tools: every stage runs in
+  order and a failing stage stops the rest) and of the golangci-lint config, plus
+  one fixture per added checker (`fixtures_test.go`): ESLint, svelte-check, tsc,
+  shellcheck, the OpenAPI lint and the generated-code drift check each pass on an
+  unmodified copy of the tree and fail on one planted violation. They run the
+  real tools, so they need `web/node_modules` (the test runs `npm ci` itself on a
+  fresh checkout).
 - `ci/repocheck`: repository probes. Besides the Dockerfile digest and
   `ci/run.sh` argv checks above, it asserts that go.mod carries a
   `toolchain go1.N.P` line naming a patched release no older than the `go`
@@ -252,9 +258,27 @@ Scripts, each run through `ci/run.sh` unless noted:
   switched off or loosened: `ci/qualitycheck` fails on a change that does.
   There is no baseline or exemption file. The CycloneDX files the SBOM gates
   write go into the results directory.
-- `ci/lint.sh`: gofmt, `go vet`, `go mod tidy` drift, then `ci/golangci.sh`
-  (the golangci-lint invocation `ci/quality.sh` shares, configured by
-  `.golangci.yml`; a `//nolint` must name its linter and give a reason).
+- `ci/lint.sh`: fail-fast, in this order: gofmt, `go vet`, `go mod tidy` drift,
+  `ci/golangci.sh` (the golangci-lint invocation `ci/quality.sh` shares,
+  configured by `.golangci.yml`; a `//nolint` must name its linter and give a
+  reason), shellcheck over `git ls-files '*.sh'` (no ignore list), then, from
+  `web/` (`npm ci` runs first when `web/node_modules` is missing), ESLint
+  (`web/eslint.config.mjs`, `--max-warnings 0`), `svelte-check
+  --fail-on-warnings`, `tsc --noEmit`, the Redocly lint of `api/openapi.yaml`
+  (`web/redocly.yaml`: `recommended-strict`, every finding is an error, plus
+  `operationId`, summary, description, licence and tag-description rules; the
+  one rule left off is `operation-4xx-response`, because `GET /healthz` has no
+  failing client path) and `ci/openapi-drift.sh`.
+- `ci/openapi-gen.sh` writes the generated code from `api/openapi.yaml`:
+  `internal/server/openapi.gen.go` (oapi-codegen, pinned by go.mod's `tool`
+  directive, so no image change) and `web/src/lib/api/schema.d.ts`
+  (openapi-typescript, pinned by `web/package-lock.json`; its `typescript` peer
+  range is overridden in `web/package.json` because it predates TypeScript 6).
+  `ci/openapi-drift.sh` regenerates both into a scratch directory and fails when
+  either checked-in file differs or is missing. Run
+  `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the
+  result. `web/src/lib/api` is excluded from Vitest coverage and Stryker: it is
+  generated type declarations with no statements.
 - `ci/stability.sh`: the suite N times, each run labelled by the exit status of
   `go test` itself.
 - On the Jenkins agent, outside `ci/run.sh`: `ci/jenkins-image.sh` (builds

@@ -1,0 +1,13 @@
+# OpenAPI lint rules for api/openapi.yaml (ci/lint.sh). recommended-strict is
+# Redocly's recommended ruleset with every warning promoted to an error, so the
+# lint has no threshold: a finding of any severity fails it.
+extends:
+  - recommended-strict
+rules:
+  # GET /healthz is a liveness probe with no failing client path to document.
+  operation-4xx-response: off
+  operation-operationId: error
+  operation-summary: error
+  operation-description: error
+  info-license: error
+  tag-description: error

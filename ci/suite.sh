@@ -223,7 +223,7 @@ ci_build_name=${BOARD_CI_BUILD_NAME:-board CI}
 db_legs=${BOARD_CI_DB_LEGS:-sqlite postgres}
 ci_run_id=${BOARD_CI_RUN_ID:-}
 ci_docker_host=${BOARD_CI_DOCKER_HOST:-}
-covermode=set
+covermode='set'
 case " $go_extra_flags " in
     *' -race '*) covermode=atomic ;;
 esac
@@ -322,6 +322,7 @@ unit_coverprofile="$outdir/coverage-unit.out"
 
 if [ -n "$pkgs" ]; then
     go_status=0
+    # shellcheck disable=SC2086 # go_extra_flags is a space-separated flag list (BOARD_CI_GO_EXTRA_FLAGS); splitting it is intended
     go run "$gotestsum_pkg" \
         --format testname \
         --junitfile "$go_junit" \
@@ -399,6 +400,7 @@ mkdir -p "$covdir"
 run_test_features() {
     junit=$1
     shift
+    # shellcheck disable=SC2086 # go_extra_flags is a space-separated flag list (BOARD_CI_GO_EXTRA_FLAGS); splitting it is intended
     env "BOARD_FEATURES_COVERMODE=$covermode" "BOARD_DB_LEG=$features_leg" "BOARD_CI_RUN_ID=$ci_run_id" "BOARD_CI_DOCKER_HOST=$ci_docker_host" "$@" go run "$gotestsum_pkg" \
         --format standard-verbose \
         --junitfile "$junit" \

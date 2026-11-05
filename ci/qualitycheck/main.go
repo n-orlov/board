@@ -222,12 +222,8 @@ func newGates(cfg config, configPath string) []gateRunner {
 	add(cfg.SBOMImage.Enabled, "sbom-image", func() (bool, string, error) {
 		return runSBOMGate(sbomImage(sbomBase))
 	})
-	add(cfg.OpenAPILint.Enabled, "openapi-lint", func() (bool, string, error) {
-		return pendingGate("openapi-lint", "task 009 (OpenAPI lint)", openapiInput)
-	})
-	add(cfg.OpenAPIDrift.Enabled, "openapi-drift", func() (bool, string, error) {
-		return pendingGate("openapi-drift", "task 016 (the generated code)", openapiInput)
-	})
+	add(cfg.OpenAPILint.Enabled, "openapi-lint", runOpenAPILintGate)
+	add(cfg.OpenAPIDrift.Enabled, "openapi-drift", runOpenAPIDriftGate)
 	return gates
 }
 
