@@ -3,6 +3,7 @@ package features
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestFeatures(t *testing.T) {
 			registerSteps(sc, h)
 		},
 		Options: &godog.Options{
-			Format:   "pretty",
+			Format:   godogFormat(),
 			Paths:    godogPaths(),
 			Strict:   true,
 			Tags:     tags,
@@ -60,4 +61,34 @@ func godogPaths() []string {
 		return []string{"."}
 	}
 	return paths
+}
+
+// godogFormat returns the godog Format string TestFeatures uses: exactly
+// "pretty" unless BOARD_GODOG_JUNIT names a path (godog's own JUnit formatter
+// then writes one <testcase> per scenario there) or BOARD_GODOG_ALLURE names
+// an absolute allure-results directory (the in-repo "allure" formatter,
+// allure_formatter_test.go, writes Allure 2 results there). ci/suite.sh sets
+// both; a local run that sets neither is unaffected.
+func godogFormat() string {
+	format := "pretty"
+	if path := strings.TrimSpace(os.Getenv("BOARD_GODOG_JUNIT")); path != "" {
+		format += ",junit:" + path
+	}
+	if dir := envAbsPath(allureDirEnv); dir != "" {
+		if err := os.MkdirAll(dir, 0o750); err == nil {
+			// godog needs a file for every "name:path" part: a one-line summary.
+			format += ",allure:" + filepath.Join(dir, "godog-allure-summary.txt")
+		}
+	}
+	return format
+}
+
+// envAbsPath returns the cleaned absolute path exported in the named
+// environment variable, or "" when it is unset, blank or not absolute.
+func envAbsPath(name string) string {
+	p := strings.TrimSpace(os.Getenv(name))
+	if !filepath.IsAbs(p) {
+		return ""
+	}
+	return filepath.Clean(p)
 }

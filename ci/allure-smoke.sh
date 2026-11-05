@@ -61,7 +61,7 @@ if want not in links:
     sys.exit("ci/allure-smoke.sh: \"passes with tags\" lacks the @gh-61 link %s, report has %r" % (want, links))
 
 failing = [c for c in cases if c.get("name") == "fails with an attachment"]
-if not failing or "the harness fails with a frame" not in steps_of(failing[0]):
+if not failing or "the harness fails with a response" not in steps_of(failing[0]):
     sys.exit("ci/allure-smoke.sh: the failing fixture scenario lacks its failing step in the report")
 
 print("ci/allure-smoke.sh: ok -- %d test cases, steps and the @gh-61 link are in the report" % len(cases))

@@ -1,0 +1,105 @@
+// board release job on the homelab Jenkins: pipeline job board/release,
+// started by hand, running this file from main (see docs/ci.md, "Release").
+//
+// This is a placeholder until the release phase (SPEC 16, phase 4). It
+// validates its parameters against the release candidate that a green
+// board/ci main build archived in ci-results/release-candidate.json (the last
+// fully green one, or CI_BUILD), checks that candidate commit out, and stops:
+// Candidate -> Checkout. It behaves as a dry run whatever DRY_RUN says: it
+// builds nothing, publishes nothing, creates no tag and holds no credential.
+// Every result posts a Telegram message (notifyTelegram, from the homelab
+// shared library github.com/n-orlov/jenkins-library).
+@Library('homelab') _
+
+pipeline {
+  agent { label 'linux && amd64 && docker' }
+
+  options {
+    ansiColor('xterm')
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '50'))
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+    skipDefaultCheckout()                 // the Checkout stage, once the commit is known
+  }
+
+  parameters {
+    string(name: 'VERSION', defaultValue: '', trim: true,
+           description: 'Release version, e.g. v1.4.0 or v1.5.0-rc.1 (required)')
+    string(name: 'CI_BUILD', defaultValue: '', trim: true,
+           description: 'board/ci main build number to validate; empty = the last successful one')
+    booleanParam(name: 'DRY_RUN', defaultValue: true,
+                 description: 'Dry run. The only behaviour in this phase: nothing is published whatever this says')
+  }
+
+  environment {
+    CANDIDATE = 'candidate/ci-results/release-candidate.json'
+  }
+
+  stages {
+    // Which commit: the release candidate of a green board/ci main build. A
+    // build that was not green has none, so the copy fails.
+    stage('Candidate') {
+      steps {
+        script {
+          if (!(params.VERSION ==~ /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/)) {
+            error('VERSION "' + params.VERSION + '" is not vMAJOR.MINOR.PATCH[-pre]')
+          }
+          currentBuild.displayName = params.VERSION + ' (dry run)'
+          if (params.CI_BUILD && !(params.CI_BUILD ==~ /^[0-9]+$/)) {
+            error('CI_BUILD "' + params.CI_BUILD + '" is not a build number')
+          }
+        }
+        sh 'rm -rf candidate'
+        script {
+          try {
+            copyArtifacts projectName: '/board/ci/main', filter: 'ci-results/release-candidate.json',
+                          target: 'candidate', fingerprintArtifacts: true,
+                          selector: params.CI_BUILD ? specific(params.CI_BUILD) : lastSuccessful(stable: true)
+          } catch (err) {
+            error('no release candidate in board/ci main ' + (params.CI_BUILD ? '#' + params.CI_BUILD : 'last successful build') +
+                  ': only a fully green main build is releasable (' + err.getMessage() + ')')
+          }
+          env.RELEASE_SHA = sh(returnStdout: true, script: '''
+            python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["commit"])' "$CANDIDATE"
+          ''').trim()
+          env.CI_BUILD_URL = sh(returnStdout: true, script: '''
+            python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["build_url"])' "$CANDIDATE"
+          ''').trim()
+          if (!(env.RELEASE_SHA ==~ /^[0-9a-f]{40}$/)) {
+            error('release candidate commit "' + env.RELEASE_SHA + '" is not a full sha')
+          }
+          echo 'Validated ' + params.VERSION + ' against ' + env.RELEASE_SHA + ' from ' + env.CI_BUILD_URL
+        }
+      }
+    }
+
+    // The candidate commit must be in the repository; then the job stops.
+    stage('Checkout') {
+      steps {
+        checkout scm
+        sh 'git checkout --quiet --detach "$RELEASE_SHA"'
+        echo 'Dry run: ' + params.VERSION + ' would release ' + env.RELEASE_SHA + '. Nothing is built or published in this phase.'
+      }
+    }
+  }
+
+  post {
+    always {
+      script {
+        if (env.RELEASE_SHA) {
+          addSummary(icon: currentBuild.currentResult == 'SUCCESS' ? 'symbol-checkmark-circle-outline plugin-ionicons-api'
+                                                                   : 'symbol-close-circle-outline plugin-ionicons-api',
+                     text: params.VERSION + ' from ' + env.RELEASE_SHA +
+                           ' (<a href="' + env.CI_BUILD_URL + '">CI build</a>): dry run, not published')
+        }
+      }
+    }
+    cleanup {
+      script {
+        notifyTelegram(notifyOn: 'ALL', silent: false, title: 'board release ' + params.VERSION,
+                       commit: env.RELEASE_SHA, extra: 'dry run, not published')
+      }
+    }
+  }
+}

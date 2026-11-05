@@ -88,6 +88,9 @@ type trivyOptions struct {
 	IgnoreFile string // .trivyignore path; may be absent
 	Severity   string
 	Now        time.Time
+	// Image, when set, is the tar of a container image to scan (trivy image
+	// --input) instead of Target, a directory (trivy fs).
+	Image string
 	// DBRetryDelay is the pause between attempts when trivy could not
 	// download its vulnerability database (zero: no pause; the gate
 	// itself sets trivyDBRetryDelay).
@@ -213,6 +216,9 @@ func scanTargetHasFiles(dir string) error {
 
 // trivyArgs builds the trivy command line.
 func trivyArgs(o trivyOptions) []string {
+	if o.Image != "" {
+		return trivyImageArgs(o)
+	}
 	args := []string{"fs",
 		"--scanners", "vuln,secret,misconfig",
 		"--severity", o.Severity,

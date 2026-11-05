@@ -28,3 +28,11 @@ func runMutationGate(configPath, dir string) (ok bool, output string, err error)
 	}
 	return code == 0, text, nil
 }
+
+// deferredToMutationStage is the report section of a mutation gate under
+// -mutation-deferred. It passes here and says plainly where the gate is
+// judged: the Mutation stage's ci/mutation.sh, which reads the same
+// thresholds from ci/quality.json and fails the build below them.
+func deferredToMutationStage(name string) (ok bool, output string, err error) {
+	return true, name + " gate: deferred to the Mutation stage (ci/mutation.sh judges it against the same ci/quality.json thresholds; every main build and the extended lane)\n", nil
+}

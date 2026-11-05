@@ -37,6 +37,18 @@ outdir=${1:-ci-results}
 # checked-in ci/quality.json (which never changes for a test run).
 config=${2:-ci/quality.json}
 
+# mutation: "--mutation-deferred" as the third argument reports the two
+# mutation gates (mutation-go, stryker) as judged by the Jenkinsfile's
+# Mutation stage instead of reading ci-results/mutation/, which that later
+# stage writes and a branch build never writes. ci/mutation.sh judges the same
+# thresholds from ci/quality.json. Without the argument they are read here, and
+# a missing report fails.
+mutation_flag=${3:-}
+case "$mutation_flag" in
+    ""|--mutation-deferred) ;;
+    *) echo "usage: ci/quality.sh [outdir [config [--mutation-deferred]]]" >&2; exit 2 ;;
+esac
+
 # Scrub leaked BOARD_* environment (R187: "Gate and suite scripts scrub
 # every BOARD_* variable"), identical in mechanism to ci/suite.sh's own
 # scrub -- a stray BOARD_GODOG_PATHS/BOARD_HOME from the caller's shell
@@ -78,7 +90,9 @@ mkdir -p "$outdir"
 rm -f "$report_file"
 
 exit_code=0
-go run ./ci/qualitycheck -config "$config" -profile "$profile" \
+set -- -config "$config" -profile "$profile"
+[ -z "$mutation_flag" ] || set -- "$@" -mutation-deferred
+go run ./ci/qualitycheck "$@" \
     -trivy-target . -trivy-cache "$trivy_cache" -trivy-ignore .trivyignore \
     -govulncheck-target . -govulncheck-cache "$govuln_cache" \
     -sbom-outdir "$outdir" \

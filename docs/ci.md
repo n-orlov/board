@@ -93,7 +93,8 @@ The clone is of the committed HEAD, so commit before running it.
 
 ## The Jenkinsfile
 
-`Jenkinsfile` is the multibranch job `board/ci` (agent label
+`Jenkinsfile` is the multibranch job `board/ci`
+(`$JENKINS_URL/job/board/job/ci/`; agent label
 `linux && amd64 && docker`, `@Library('homelab')`, `disableConcurrentBuilds`, a
 `git clean -ffdxq` workspace). Stages, in order:
 
@@ -102,24 +103,81 @@ The clone is of the committed HEAD, so commit before running it.
 | CI image | `ci/jenkins-image.sh` (cache volume `board-go-cache-jenkins`) | every build |
 | Lint | `ci/run.sh ci/lint.sh` | every build |
 | Suite | `ci/run.sh ci/suite.sh` | every build |
-| Quality | `ci/run.sh ci/quality.sh ci-results` | every build |
+| Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |
+| Quality | `ci/image-build.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
 | Stability | `ci/stability.sh 3` on the agent | extended lane only |
 | Mutation | `ci/run.sh ci/mutation.sh` | every `main` build and the extended lane; other branches skip it |
 
 The extended lane is the nightly `main` build (03:17) or a build with the
 `EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
-Mutation. A red Suite, Quality, Stability or Mutation stage fails the build
-and the later stages still run. `post` publishes the JUnit, Allure and CI
-summary reports, archives `ci-results/` (the gremlins reports in
-`ci-results/mutation/` included), archives `ci-results/release-candidate.json`
-on a fully green `main` build and sends `notifyTelegram` last.
-`ci/repocheck/jenkinsfile_test.go` pins the Mutation stage: last, after
-Quality and Stability, on `main` and in the extended lane, running
-`ci/run.sh ci/mutation.sh`. The Allure smoke stage, the README badges,
-`Jenkinsfile.release` and deck's other Jenkinsfile probes land with task 011.
-Quality's `mutation-go` row reads `ci-results/mutation/`, which the Mutation
-stage writes after Quality, so on Jenkins that row fails until task 011
-reconciles the two.
+Mutation. A red Suite, Allure smoke, Quality, Stability or Mutation stage fails
+the build and the later stages still run.
+
+**Allure smoke.** `features/allure_formatter_test.go` is board's Godog formatter
+for Allure 2 (selected by `BOARD_GODOG_ALLURE=<absolute results dir>`, which
+`ci/suite.sh` sets for every `features/` run, rerun included, so a rerun scenario
+keeps its history id). `features/allure_formatter_fixture_test.go` runs a fixture
+feature through it (a pass with an issue link, a failure with attachments, a skip
+and a retried scenario). The stage runs that test with `BOARD_ALLURE_FIXTURE_OUT`
+set, then `ci/allure-smoke.sh` runs the pinned Allure CLI over the results and
+fails unless the report carries the fixture's steps and its `@gh-61` link.
+
+**Quality and Mutation.** `ci/mutation.sh` writes the reports that `mutation-go`
+and `stryker` read, after Quality, and not at all on a branch build. So the Quality
+stage passes `--mutation-deferred` as `ci/quality.sh`'s third argument: those two
+rows print "deferred to the Mutation stage" instead of reading reports that
+cannot exist yet. The Mutation stage's `ci/mutation.sh` judges the same reports
+against the same `ci/quality.json` thresholds (efficacy, break, per-module
+break, no mutant fails) and fails the build below them. Without the flag
+(`ci/run.sh ci/quality.sh`, the local recipe) the rows read
+`ci-results/mutation/` and fail when it is missing. Every other gate runs in the
+Quality stage on every build.
+
+**The image.** The root `Dockerfile` is multi-stage (the Svelte build, a static
+`CGO_ENABLED=0` Go build, then `FROM scratch` with the binary, the CA
+certificates, the time zone database embedded in the binary, `/data` and uid
+65532), every `FROM` pinned by digest. It builds natively with the classic
+builder, which is all the agent has; the cross-compiled multi-arch build comes
+with the image task. `ci/image-build.sh` (on the agent, outside `ci/run.sh`: it
+needs the docker CLI) builds it as `board:ci` and saves
+`ci-results/board-image.tar`, which the `trivy-image` and `sbom-image` gates scan.
+Nothing is pushed.
+
+**Reports.** `post { always }` publishes the JUnit, Allure and CI summary reports,
+declares the README badges, adds the build page summary line, and archives
+`ci-results/` (the gremlins reports in `ci-results/mutation/` and the CycloneDX
+SBOMs `ci-results/*.cdx.json` included). A fully green `main` build (`post {
+success }`) archives `ci-results/release-candidate.json`. `notifyTelegram` runs
+last, in `post { cleanup }`.
+
+- **Build page summary line** (badge plugin `addSummary`): pass/fail/skip/flaky
+  counts and unit coverage, with links to the Allure and CI summary reports.
+- **README badges** (`embeddable-build-status`): `build` (the plugin's own),
+  `tests`, `coverage` and `quality`, which the Jenkinsfile declares on every
+  build ("not run" until the build fills them in), served from
+  `https://int21h.mooo.com/jenkins-static/board/ci/main/<id>.svg`. The README
+  shows `main`'s as plain images: deck links each to its report on the Jenkins
+  host, but the commit hook treats that host as a secret, so board's carry no link.
+
+`ci/repocheck/jenkinsfile_test.go` pins all of it: the seven stages in order (a
+test fails if one is removed), the job shape, the nightly lane, the Quality and
+Mutation stages, that the job never releases, the reports, the badges and
+`notifyTelegram`; `ci/repocheck/lintgate_test.go` pins that Lint runs
+`ci/lint.sh` before the Suite.
+
+## Release
+
+`Jenkinsfile.release` is the pipeline job `board/release`, started by hand, and
+a placeholder until the release phase. Its parameters are `VERSION`
+(`vMAJOR.MINOR.PATCH[-pre]`, required), `CI_BUILD` (a `board/ci` `main` build
+number, empty for the last successful one) and `DRY_RUN`. Candidate validates both
+against the release candidate that build archived in
+`ci-results/release-candidate.json` (a build that was not fully green has none, so
+the copy fails), Checkout checks the candidate commit out, and the job stops: it
+builds nothing, publishes nothing, creates no tag, holds no credential and
+behaves as a dry run whatever `DRY_RUN` says. `ci/repocheck/jenkinsfile_test.go`
+fails if it gains a Build or Publish stage, a credential, a push or `gh release`,
+or loses the validation.
 
 ## Quality gates
 
@@ -135,16 +193,16 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 | `golangci` | zero findings | runs |
 | `govulncheck` | zero reachable | runs |
 | `trivy` | HIGH, CRITICAL on the source | runs |
-| `trivy_image` | HIGH, CRITICAL on the image | fails until the image tar exists (task 011) |
-| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`) |
-| `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`) |
+| `trivy_image` | HIGH, CRITICAL on the image | runs (`trivy image --input ci-results/board-image.tar`; fails when the tar, which `ci/image-build.sh` writes, is missing or empty) |
+| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
+| `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
 | `sbom_frontend` | CycloneDX of `web/package.json` and `web/package-lock.json` (dev dependencies included: all of the frontend's are), non-empty | runs |
-| `sbom_image` | CycloneDX, non-empty | fails until the image tar exists |
+| `sbom_image` | CycloneDX, non-empty | runs (from the image tar; fails when it is missing) |
 | `openapi_lint`, `openapi_drift` | lint clean, no drift | runs (the same commands `ci/lint.sh` runs; fails when `api/openapi.yaml`, the generated code or `web/node_modules` is missing) |
 
-`ci/quality.sh` exits non-zero until every row runs. Each row that fails for
-a missing input names the input in the report.
+`ci/quality.sh` exits non-zero when any row fails. Each row that fails for a
+missing input names the input in the report.
 
 ## Pipeline tools and scripts
 
@@ -199,9 +257,8 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 - `ci/legcompare`: compares per-leg JUnit and lists the scenarios that are
   green on one database leg and red on another (exit 1).
 - `ci/qualitycheck`: the single quality-gate runner behind `ci/quality.sh`. It
-  runs whichever gates `ci/quality.json` switches on (coverage, CRAP,
-  golangci-lint, govulncheck, Trivy and the module SBOM run today; see the
-  table below for the rest) and fails if a threshold is loosened against the
+  runs whichever gates `ci/quality.json` switches on (every row of the table
+  above) and fails if a threshold is loosened against the
   merge-base copy of the file. A table-driven test (`completeness_test.go`)
   holds the real file to SPEC section 15.4 and proves that removing,
   disabling or loosening any gate is noticed.
@@ -288,6 +345,8 @@ Scripts, each run through `ci/run.sh` unless noted:
   `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the
   result. `web/src/lib/api` is excluded from Vitest coverage and Stryker: it is
   generated type declarations with no statements.
+- `ci/image-build.sh [tar]`: builds the root `Dockerfile` as `board:ci` and saves
+  it to `ci-results/board-image.tar` (the Jenkins Quality stage; on the agent).
 - `ci/stability.sh`: the suite N times, each run labelled by the exit status of
   `go test` itself.
 - On the Jenkins agent, outside `ci/run.sh`: `ci/jenkins-image.sh` (builds
@@ -314,10 +373,16 @@ ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
   `ci/allureverify/allureverify_test.go`) are not carried. `install.sh` is
   Phase 4 (SPEC §16), and its tests are rewritten then against SPEC §8.5's
   immutability check, not deck's checksum-only one.
-- **Jenkinsfile tests, carried by task 011.** deck's
-  `ci/repocheck/jenkinsfile_test.go` and
-  `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
-  `ci/repocheck/lintgate_test.go`) arrive with the Jenkinsfile itself, in the
-  task that lands it (task 011), with the release assertion adapted to the
-  placeholder `Jenkinsfile.release`. Until then `ci/repocheck/lintgate_test.go`
-  carries deck's other two lint-gate probes.
+- **Jenkinsfile tests, carried here.** deck's `ci/repocheck/jenkinsfile_test.go`
+  and `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
+  `ci/repocheck/lintgate_test.go`) are carried against board's `Jenkinsfile`,
+  renamed (`DECK_*` to `BOARD_*`, the `deck/` jobs to `board/`). Board's stages add
+  Mutation and the image build, and drop the tmux-only parts. deck's release
+  assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is adapted to the
+  placeholder `Jenkinsfile.release` as
+  `TestJenkinsfileReleaseValidatesTheCandidateAndStops`: it asserts the `VERSION`
+  and `CI_BUILD` validation against the candidate, that the job has no behaviour
+  beyond a dry run and publishes nothing (no Build or Publish stage, no tag push,
+  no `gh release`, no credential), and that it fails if `Jenkinsfile.release`
+  publishes or drops that validation. deck's own Build, Publish, Version check
+  and `ci/release-build.sh` assertions arrive with the real release job.

@@ -28,7 +28,7 @@ func goodSmokeCases() []smokeCase {
 		},
 		{
 			"name":      "fails with an attachment",
-			"testStage": map[string]any{"steps": []any{smokeStep("a passing step"), smokeStep("the harness fails with a frame")}},
+			"testStage": map[string]any{"steps": []any{smokeStep("a passing step"), smokeStep("the harness fails with a response")}},
 		},
 	}
 }

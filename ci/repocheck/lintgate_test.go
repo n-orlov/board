@@ -2,10 +2,6 @@
 // advisory. It fails the moment the two entry points (ci/lint.sh and
 // ci/quality.sh) stop sharing one invocation, the quality gate is switched
 // off, or gofmt/go vet/go mod tidy turn up in a second place.
-//
-// deck's third probe here, TestLintJobRunsGolangciLintBeforeTheSuite, asserts
-// the Jenkinsfile's Lint stage order; it lands with the Jenkinsfile itself
-// (task 011), together with deck's jenkinsfile_test.go probes.
 package repocheck
 
 import (
@@ -49,6 +45,31 @@ func anyLineContains(lines []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestLintJobRunsGolangciLintBeforeTheSuite: the Jenkinsfile's Lint stage
+// runs ci/lint.sh, ci/lint.sh runs the shared golangci-lint invocation, and
+// the Lint stage comes before the Suite stage, so the linter runs first.
+func TestLintJobRunsGolangciLintBeforeTheSuite(t *testing.T) {
+	jf := readRepoFile(t, "Jenkinsfile")
+	lint, ok := jenkinsStage(jf, "Lint")
+	if !ok {
+		t.Fatal("the Jenkinsfile has no Lint stage")
+	}
+	if !strings.Contains(lint, "ci/run.sh ci/lint.sh") {
+		t.Error("the Lint stage does not run ci/run.sh ci/lint.sh")
+	}
+	if !stageBefore(jf, "Lint", "Suite") {
+		t.Error("the Lint stage does not come before the Suite stage, so the linter would not run first")
+	}
+
+	lintSh := shellLines(readRepoFile(t, "ci", "lint.sh"))
+	if !anyLineContains(lintSh, "ci/golangci.sh") {
+		t.Error("ci/lint.sh does not run ci/golangci.sh, so golangci-lint never gates the Lint stage")
+	}
+	if !strings.Contains(strings.Join(shellLines(readRepoFile(t, "ci", "golangci.sh")), "\n"), "golangci-lint run ./...") {
+		t.Error("ci/golangci.sh does not run `golangci-lint run ./...` over the whole tree")
+	}
 }
 
 // TestQualityGateRunsTheSameGolangciInvocation: ci/quality.json switches the

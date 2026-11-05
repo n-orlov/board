@@ -135,21 +135,6 @@ func TestSBOMGateFrontendAndImageGenerate(t *testing.T) {
 // constant is caught here.
 const imageTarInputName = "ci-results/board-image.tar"
 
-func TestPendingGatesFailWhenInputMissingAndWhenNotWired(t *testing.T) {
-	t.Chdir(t.TempDir())
-	ok, out, err := pendingGate("x", "task 999", "web/src/lib")
-	if err != nil || ok || !strings.Contains(out, "input missing: web/src/lib") {
-		t.Errorf("missing input: ok=%v err=%v out=%q", ok, err, out)
-	}
-	if err := os.MkdirAll("web/src/lib", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ok, out, err = pendingGate("x", "task 999", "web/src/lib")
-	if err != nil || ok || !strings.Contains(out, "not wired") {
-		t.Errorf("present input: ok=%v err=%v out=%q", ok, err, out)
-	}
-}
-
 // A gate whose input does not exist yet fails through run() too: the
 // real ci/quality.json, in an empty working tree, fails every gate that
 // measures the frontend, the image or the OpenAPI document.

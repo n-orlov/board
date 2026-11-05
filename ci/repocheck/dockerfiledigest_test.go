@@ -115,20 +115,25 @@ func TestUndigestedCopyFromsFlagsAnImageWithoutADigest(t *testing.T) {
 	}
 }
 
-func TestCIDockerfilePinsEveryImageByDigest(t *testing.T) {
+// TestEveryDockerfilePinsEveryImageByDigest covers both Dockerfiles in the
+// tree: the CI toolchain image and the root Dockerfile that builds the
+// container image.
+func TestEveryDockerfilePinsEveryImageByDigest(t *testing.T) {
 	root, err := repositoryRoot()
 	if err != nil {
 		t.Fatalf("repositoryRoot: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "ci", "Dockerfile"))
-	if err != nil {
-		t.Fatalf("read ci/Dockerfile: %v", err)
-	}
-	if bad := undigestedFroms(string(raw)); len(bad) > 0 {
-		t.Fatalf("ci/Dockerfile FROM lines without an @sha256 digest: %q", bad)
-	}
-	if bad := undigestedCopyFroms(string(raw)); len(bad) > 0 {
-		t.Fatalf("ci/Dockerfile COPY --from lines without an @sha256 digest: %q", bad)
+	for _, rel := range []string{"Dockerfile", filepath.Join("ci", "Dockerfile")} {
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if bad := undigestedFroms(string(raw)); len(bad) > 0 {
+			t.Errorf("%s FROM lines without an @sha256 digest: %q", rel, bad)
+		}
+		if bad := undigestedCopyFroms(string(raw)); len(bad) > 0 {
+			t.Errorf("%s COPY --from lines without an @sha256 digest: %q", rel, bad)
+		}
 	}
 }
 

@@ -1,17 +1,21 @@
 // board CI on the homelab Jenkins: multibranch job board/ci (see docs/ci.md).
 //
-// Every branch: CI image -> Lint -> Suite -> Quality; main also runs nightly
-// (03:17) in the extended lane (-race, fresh vulnerability databases, three
-// clean-state stability runs), which the EXTENDED parameter asks for on
-// demand. Mutation (ci/mutation.sh, the Go mutation gate) runs last, on every
-// main build and in the extended lane; other branches skip it. A fully green
-// main build archives ci-results/release-candidate.json. Reports are Jenkins
-// HTML reports on the build page ("Allure", "CI summary"), built in
-// post { always } so a red build still has them.
+// Every branch: CI image -> Lint -> Suite -> Allure smoke -> Quality; main
+// also runs nightly (03:17) in the extended lane (-race, fresh vulnerability
+// databases, three clean-state stability runs), which the EXTENDED parameter
+// asks for on demand. Mutation (ci/mutation.sh, the Go and frontend mutation
+// gates) runs last, on every main build and in the extended lane; other
+// branches skip it. A fully green main build archives
+// ci-results/release-candidate.json, which Jenkinsfile.release (the
+// board/release job, a placeholder in this phase) validates against; this job
+// never releases. Reports are Jenkins HTML reports on the build page
+// ("Allure", "CI summary"), built in post { always } so a red build still has
+// them.
 //
 // Everything Go runs in the board-ci image through ci/run.sh, like a local
-// run; only Allure (needs the agent's JRE) and ci/stability.sh (starts its
-// own ci/run.sh siblings) run on the agent itself.
+// run; only Allure (needs the agent's JRE), the container image build (needs
+// the docker CLI) and ci/stability.sh (starts its own ci/run.sh siblings) run
+// on the agent itself.
 //
 // Telegram: notifyTelegram from the homelab shared library
 // (github.com/n-orlov/jenkins-library), last, in post { cleanup }.
@@ -26,7 +30,9 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
     timeout(time: 200, unit: 'MINUTES')   // ceiling; stages carry their own
-    copyArtifactPermission('/board/ci/*')
+    // board/release reads release-candidate.json; this job's own next build
+    // reads allure-history/ (patterns match the copier's absolute name).
+    copyArtifactPermission('/board/release,/board/ci/*')
   }
 
   parameters {
@@ -81,6 +87,27 @@ pipeline {
       }
     }
 
+    // The pinned Allure CLI still renders the Godog formatter's output.
+    stage('Allure smoke') {
+      options { timeout(time: 15, unit: 'MINUTES') }
+      steps {
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh '''
+            mkdir -p allure-smoke/fixture/allure-results
+            BOARD_ALLURE_FIXTURE_OUT=/w/allure-smoke/fixture/allure-results \
+              ci/run.sh go test -count=1 -run '^TestAllureFormatterWritesResultsForAFixtureRun$' ./features/
+            ALLURE_CACHE_DIR="$HOME/.cache/board-allure" ci/allure-smoke.sh allure-smoke/fixture allure-smoke/report
+          '''
+        }
+      }
+    }
+
+    // The mutation gates (mutation-go, stryker) read the Mutation stage's
+    // reports, which are written after this stage and not at all on a branch
+    // build, so --mutation-deferred reports them as judged there: ci/mutation.sh
+    // reads the same thresholds from ci/quality.json and fails the build below
+    // them. Every other gate runs here. The image the Trivy and SBOM image
+    // gates scan is built on the agent (it needs the docker CLI) and never pushed.
     stage('Quality') {
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
@@ -93,7 +120,8 @@ pipeline {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
           script {
             env.QUALITY_RESULT = 'failing'
-            sh 'ci/run.sh ci/quality.sh "$BOARD_CI_OUT"'
+            sh 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar"'
+            sh 'ci/run.sh ci/quality.sh "$BOARD_CI_OUT" ci/quality.json --mutation-deferred'
             env.QUALITY_RESULT = 'passing'
           }
         }
@@ -148,11 +176,54 @@ pipeline {
                    keepAll: true, alwaysLinkToLastBuild: true, allowMissing: true])
       publishHTML([reportName: 'CI summary', reportDir: 'ci-summary', reportFiles: 'index.html',
                    keepAll: true, alwaysLinkToLastBuild: true, allowMissing: true])
-      archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/mutation/*.json, ci-results/stability/**/*.log, ci-summary/**, allure-history/**',
+      script {
+        // README badges (public via https://int21h.mooo.com/jenkins-static/
+        // board/ci/<branch>/<id>.svg; "build" is the plugin's own). Declared on
+        // every build, so a build without counts shows "not run", not the
+        // previous build's numbers.
+        def testsBadge = addEmbeddableBadgeConfiguration(id: 'tests', subject: 'tests', status: 'not run', color: 'lightgrey')
+        def coverageBadge = addEmbeddableBadgeConfiguration(id: 'coverage', subject: 'coverage', status: 'not run', color: 'lightgrey')
+        def qualityBadge = addEmbeddableBadgeConfiguration(id: 'quality', subject: 'quality', status: 'not run', color: 'lightgrey')
+        if (env.QUALITY_RESULT) {
+          qualityBadge.setStatus(env.QUALITY_RESULT)
+          qualityBadge.setColor(env.QUALITY_RESULT == 'passing' ? 'brightgreen' : 'red')
+        }
+        if (fileExists('ci-summary/counts.txt')) {
+          def c = [:]
+          readFile('ci-summary/counts.txt').split('\n').each { line ->
+            def i = line.indexOf('=')
+            if (i > 0) {
+              c[line.substring(0, i)] = line.substring(i + 1).trim()
+            }
+          }
+          if (c.pass) {
+            def text = 'Tests: ' + c.pass + ' passed, ' + c.fail + ' failed, ' + c.skip + ' skipped, ' + c.flaky + ' flaky'
+            if (c.coverage) {
+              text += '; unit coverage ' + c.coverage
+            }
+            def ok = c.fail == '0'
+            testsBadge.setStatus(ok ? c.pass + ' passed' : c.fail + ' failed')
+            testsBadge.setColor(ok ? 'brightgreen' : 'red')
+            if (c.coverage) {
+              def pct = c.coverage.replace('%', '').toDouble()
+              coverageBadge.setStatus(c.coverage)
+              coverageBadge.setColor(pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : 'red')
+            }
+            addSummary(icon: ok ? 'symbol-checkmark-circle-outline plugin-ionicons-api'
+                                : 'symbol-close-circle-outline plugin-ionicons-api',
+                       text: text + ' (<a href="' + env.BUILD_URL + 'Allure/">Allure</a>, ' +
+                             '<a href="' + env.BUILD_URL + 'CI_20summary/">CI summary</a>)')
+          }
+        }
+      }
+      // ci-results/stability/**/*.log: ci/stability.sh's per-run go test logs,
+      // the only full record of a stability failure (the console has an excerpt).
+      archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/*.cdx.json, ci-results/mutation/*.json, ci-results/stability/**/*.log, ci-summary/**, allure-history/**',
                        allowEmptyArchive: true
     }
     // Only a fully green main build (SUCCESS, not UNSTABLE) is a release
-    // candidate; success {} runs after always {}.
+    // candidate; success {} runs after always {}, so the reports cannot turn
+    // it unstable afterwards. board/release copies this file.
     success {
       script {
         if (env.BRANCH_NAME == 'main') {
@@ -164,7 +235,8 @@ pipeline {
       }
     }
     // One Telegram message per build; only a red or aborted main or nightly
-    // build makes a sound.
+    // build makes a sound; everything else arrives silently. cleanup runs after
+    // success {}, so the message carries the final result.
     cleanup {
       script {
         def watched = env.BRANCH_NAME == 'main' || env.CI_NIGHTLY == 'true'

@@ -1040,9 +1040,9 @@ Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent
 | Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
 | Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, merged coverage, JUnit | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
 | Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
-| Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4 |
+| Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. The stage first builds the root `Dockerfile` image (`ci/image-build.sh`, not pushed) for the image gates. The two mutation rows are reported as judged by the Mutation stage (`--mutation-deferred`), whose reports exist only after it and not on a branch build |
 | Stability | extended lane only, `ci/stability.sh 3` | same |
-| Mutation | — (not in deck) | every `main` build and the extended lane (branches skip it), §15.4 |
+| Mutation | — (not in deck) | every `main` build and the extended lane (branches skip it), §15.4; `ci/mutation.sh` judges efficacy and break against the same `ci/quality.json` thresholds and fails the build below them |
 
 Extended lane (nightly on `main` + `EXTENDED` parameter): `-race`, fresh vulnerability
 databases, three clean-state stability runs, benchmarks, mutation. SBOM: CycloneDX for the

@@ -1,0 +1,12 @@
+.git
+.ref
+.review-clone
+ci-results
+node_modules
+**/node_modules
+web/coverage
+web/junit
+web/reports
+web/.stryker-tmp
+e2e/out
+internal/webui/dist

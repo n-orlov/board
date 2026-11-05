@@ -1,3 +1,8 @@
+![build](https://int21h.mooo.com/jenkins-static/board/ci/main/build.svg)
+![tests](https://int21h.mooo.com/jenkins-static/board/ci/main/tests.svg)
+![coverage](https://int21h.mooo.com/jenkins-static/board/ci/main/coverage.svg)
+![quality](https://int21h.mooo.com/jenkins-static/board/ci/main/quality.svg)
+
 # board
 
 A shared work board for one operator and the coding agents working for them:

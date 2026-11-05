@@ -7,17 +7,13 @@
 // OpenAPI document) FAILS, never passes: a gate that cannot measure
 // anything has measured nothing. The Go mutation gate runs (mutation.go).
 // The frontend gates run (frontend.go), and so do the OpenAPI gates
-// (openapi.go). The runner for the image Trivy gate lands with the task that
-// creates its input; until then pendingGate reports the missing input, or --
-// when the input is present but no runner is wired -- says so, and fails in
-// both cases.
+// (openapi.go), and so does the image Trivy gate (trivyimage.go), which
+// scans the tar the Jenkinsfile's Quality stage builds from the root
+// Dockerfile.
 package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 // crapTSConfig is the TS/Svelte CRAP gate (ESLint complexity x Vitest
@@ -69,26 +65,6 @@ const (
 	imageTarInput = "ci-results/board-image.tar"
 	openapiInput  = "api/openapi.yaml"
 )
-
-// pendingGate is a gate whose runner has not landed (landsIn names the
-// task). It fails when any input is missing, naming each, and fails
-// with a "no runner" message when every input is present: it can never
-// pass.
-func pendingGate(name, landsIn string, inputs ...string) (ok bool, output string, err error) {
-	var missing []string
-	for _, in := range inputs {
-		if _, serr := os.Stat(filepath.Clean(in)); serr != nil {
-			missing = append(missing, in)
-		}
-	}
-	if len(missing) > 0 {
-		return false, fmt.Sprintf("%s gate: FAILED, input missing: %s\n"+
-			"what to do: %s produces it; a gate with nothing to measure fails instead of passing.\n",
-			name, strings.Join(missing, ", "), landsIn), nil
-	}
-	return false, fmt.Sprintf("%s gate: FAILED, its input exists but the gate's runner is not wired yet\n"+
-		"what to do: wire the runner (%s); a gate that measures nothing never passes.\n", name, landsIn), nil
-}
 
 // looserNew reports the loosening of every gate in this file, relative to base.
 func looserNew(base, current config) []string {

@@ -85,6 +85,14 @@ var trivyBase = trivyOptions{Target: ".", IgnoreFile: ".trivyignore", CacheDir: 
 // govulncheckBase carries the govulncheck gate's flag-supplied options.
 var govulncheckBase = govulncheckOptions{Target: "."}
 
+// mutationDeferred (-mutation-deferred) moves the judging of the two mutation
+// gates, mutation-go and stryker, to the Jenkinsfile's Mutation stage: that
+// stage runs after Quality, and on a branch build it does not run at all, so
+// there is no ci-results/mutation/ yet for these rows to read. The stage's
+// command, ci/mutation.sh, evaluates the same reports against the same
+// ci/quality.json thresholds and fails the build below them.
+var mutationDeferred bool
+
 // golangciBase carries the golangci gate's flag-supplied options.
 var golangciBase = golangciOptions{Target: "."}
 
@@ -100,6 +108,7 @@ func main() {
 	flag.StringVar(&govulncheckBase.CacheDir, "govulncheck-cache", "", "XDG_CACHE_HOME for govulncheck (its vuln DB cache); empty inherits")
 	flag.StringVar(&golangciBase.Script, "golangci-script", "", "the shared golangci-lint invocation (default ci/golangci.sh under -golangci-target)")
 	flag.StringVar(&golangciBase.Target, "golangci-target", ".", "repository root the golangci gate runs from")
+	flag.BoolVar(&mutationDeferred, "mutation-deferred", false, "report the mutation gates as judged by the Mutation stage (ci/mutation.sh) instead of reading its reports")
 	flag.StringVar(&sbomBase.OutDir, "sbom-outdir", "ci-results", "directory the SBOM gates write their CycloneDX files into")
 	flag.Parse()
 	sbomBase.Binary, sbomBase.CacheDir = trivyBase.Binary, trivyBase.CacheDir
@@ -205,12 +214,20 @@ func newGates(cfg config, configPath string) []gateRunner {
 			cfg.FrontendCoverage.TotalFloor, cfg.FrontendCoverage.FileFloor)
 	})
 	add(cfg.TrivyImage.Enabled, "trivy-image", func() (bool, string, error) {
-		return pendingGate("trivy-image", "task 011 (the image gates)", imageTarInput)
+		opts := trivyBase
+		opts.Severity, opts.Now, opts.Image = cfg.TrivyImage.Severity, time.Now(), imageTarInput
+		return runTrivyImageGate(opts)
 	})
 	add(cfg.MutationGo.Enabled, "mutation-go", func() (bool, string, error) {
+		if mutationDeferred {
+			return deferredToMutationStage("mutation-go")
+		}
 		return runMutationGate(configPath, mutationReportDir(sbomBase.OutDir))
 	})
 	add(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
+		if mutationDeferred {
+			return deferredToMutationStage("stryker")
+		}
 		return runStrykerGate(configPath, sbomBase.OutDir)
 	})
 	add(cfg.SBOMModule.Enabled, "sbom-module", func() (bool, string, error) {
