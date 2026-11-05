@@ -173,6 +173,10 @@ func (brokenResponse) VisitCreateInitiativeResponse(http.ResponseWriter) error {
 	return errBroken
 }
 func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error { return errBroken }
+func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
+	return errBroken
+}
 
 // outcome is what every stub operation returns: an error or a response that
 // fails to write.
@@ -273,6 +277,18 @@ func (s stubOperations) GetInitiative(context.Context, GetInitiativeRequestObjec
 	return resp, err
 }
 
+func (s stubOperations) GetMeta(context.Context, GetMetaRequestObject) (GetMetaResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetMetaResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) PutProtocolSeen(context.Context, PutProtocolSeenRequestObject) (PutProtocolSeenResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PutProtocolSeenResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetDocsResponseObject)
@@ -289,6 +305,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
 		"/api/v1/keys", "POST /api/v1/keys", "POST /api/v1/keys/workstation/revoke",
 		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
+		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		var seen []string
@@ -381,6 +398,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get initiative 401", 401, GetInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
 		{"get initiative 404", 404, GetInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
 		{"get initiative 503", 503, GetInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
+		{"meta 401", 401, GetMeta401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetMetaResponse},
+		{"protocol seen 400", 400, PutProtocolSeen400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
+		{"protocol seen 401", 401, PutProtocolSeen401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
+		{"protocol seen 503", 503, PutProtocolSeen503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
 		{"logout 404", 404, PostAuthLogout404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPostAuthLogoutResponse},
 	}
 	for _, tc := range cases {

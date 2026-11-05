@@ -24,7 +24,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|whoami|init|admin>"
+const usageLine = "usage: board <serve|version|help|whoami|init|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -380,6 +380,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerInitiativeAPISteps(sc, h)
 	registerCLIInitiativeSteps(sc, h)
 	registerCLIOutputSteps(sc, h)
+	registerHelpAgentSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

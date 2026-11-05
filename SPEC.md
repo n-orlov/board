@@ -256,7 +256,7 @@ The server records **who** did everything (§4.6), so misuse is visible after th
 
 All timestamps are UTC, stored with millisecond precision as a `BIGINT` of milliseconds since the Unix epoch
 in every dialect (`store.EncodeTime` / `store.DecodeTime`); dates (`target_start`, `target_end`) are
-`YYYY-MM-DD` text; JSON columns are text. IDs are ULIDs (sortable by creation time, text in every dialect).
+`YYYY-MM-DD` text; JSON columns are text. IDs are ULIDs (sortable by creation time, text in every dialect). Within one server process a ULID always sorts after the one made before it, even in the same millisecond, so ids order objects by creation.
 Every table except the join tables and `sessions` also has an integer identity column `n` (unique, never
 reused: SQLite `AUTOINCREMENT`, Postgres `GENERATED ALWAYS AS IDENTITY`) from which the **short ref** is
 formed (§8.2):
@@ -649,7 +649,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|whoami|init|admin>`.
+`usage: board <serve|version|help|whoami|init|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -667,7 +667,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|whoami|init|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -779,7 +779,7 @@ A server problem document is printed as one line, `<detail> → <next>`, and exi
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|whoami|init|admin>`.
+- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|admin>`.
 
 ```
 board version | update [--check] [--version vX.Y.Z]
@@ -909,8 +909,28 @@ lets drift. `board help agent` prints a cheat sheet of about 40 lines, headed
 
 The text is a Go `embed`ded file (`internal/cli/protocol.txt`) with its version number `N`, a
 small integer bumped whenever an agent would have to behave differently (wording fixes don't
-bump it). `board help agent --version` prints just `N`. Running `board help agent` records the
-version as read for the actor (`PUT /actors/me/protocol-seen`; offline it still prints).
+bump it). `board help agent --version` prints just `N` and records nothing. Running
+`board help agent` prints the text, then records the version as read for the actor
+(`PUT /actors/me/protocol-seen`, best effort: with no `BOARD_URL` or `BOARD_API_KEY`, an unreachable
+server or a refused key it still prints the text, prints nothing on stderr and exits 0). Any other
+argument to `board help` is the exit-2 usage error `usage: board help agent [--version]`.
+
+**Protocol v0** is the text of Phase 0: it covers only what the build has. It is headed
+`board protocol v0` and holds the identity rules (`BOARD_URL`, `BOARD_API_KEY`, `BOARD_ACTOR`,
+`BOARD_WAY_BACK`, the fallback handle, subagents using their parent's handle, `board whoami`),
+the initiative commands (`board init ls` with `--tag`, `--all` and `--limit`, `board init show`,
+`board init add` with `--tag`, and `--json`), the output and exit-code rules (§8.1) and a note on
+`board help agent` itself. It names no command a Phase 0 build lacks: the sections above
+(start, ping, block, finish, catchup, …) arrive with their commands, each bumping the version.
+
+**Server side.** `GET /meta` answers `{version, protocol, principal, actor}`: the server binary's
+version (as `board version` prints it), the protocol version its binary embeds, the principal
+that authenticated (`key:<name>` or `oidc:<email>`) and the actor the request acts as. It reads
+nothing from the database. `PUT /actors/me/protocol-seen` takes `{"version": N}` (an integer of
+0 or more; anything else is 400 with a `next`), upserts the calling actor and sets its
+`protocol_seen` column to N when N is higher than what is stored, so the column holds the highest
+version read and a repeated or older call changes nothing. It answers
+`{actor, protocol_seen}` with the value stored.
 
 **Staleness hint.** `GET /meta` returns the server's protocol version (the one its own binary
 embeds). `board start` (and `board new`) prints at most one extra line when either is newer:
@@ -923,10 +943,14 @@ hint: board protocol v4 changed since you last read it → board help agent
 The hint never changes the exit code and never blocks the command.
 
 **Tests.**
-- Golden file: the exact text (`testdata/help-agent.golden`), updated deliberately with
+- Golden file: the exact text (`internal/cli/testdata/help-agent.golden`), updated deliberately with
   `go test -update`. A changed golden file shows up in review, where the version bump is decided.
-- E2E (Godog): every `board …` command and every `--flag` the text mentions is parsed and
-  resolved against the CLI's command tree; an unknown command or flag fails the build. The text
+- E2E (Godog, `features/help_agent.feature`): the text the binary prints is parsed for every
+  `board …` command (written in backticks) and every `--flag` in it, and each is resolved against the
+  CLI's command tree (`cli.Commands()`, which holds the flag tables the parsers read); an unknown
+  command or flag fails the build. The same feature checks that reading the text records
+  `protocol_seen` and that the text prints with the server unreachable; `features/meta.feature`
+  covers `GET /meta`. The text
   never mentions a command that does not exist in that build.
 - Line budget: the test fails above 45 lines or 100 columns.
 

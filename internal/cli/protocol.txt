@@ -1,0 +1,33 @@
+board protocol v0
+
+The board is the shared tracker of what is being worked on. Read this once, then follow it.
+
+IDENTITY
+  Export these before any other command (the operator's instructions say what to put in them):
+    BOARD_URL        address of the board server
+    BOARD_API_KEY    this environment's key. Never print it, log it or commit it.
+    BOARD_ACTOR      your handle, for example claude:laptop:1a2b3c4d
+    BOARD_WAY_BACK   how a human gets back to your session
+  With BOARD_ACTOR unset the board acts as agent:<host>:<ppid>. Subagents never register:
+  they use their parent's handle.
+  Check the setup with `board whoami`. It prints your handle, your key's name and "server ok".
+
+INITIATIVES
+  An initiative groups related work under a slug of 2 to 40 characters of a-z, 0-9 and -.
+  Search before you create, and never duplicate an open one:
+    `board init ls`                 one line per initiative: slug, status, title, [tags]
+    `board init ls --tag work`      only the initiatives that carry every tag given
+    `board init ls --all`           all of them (the plain list stops at 20, or --limit N)
+    `board init show phone-onboard` the details, who created it and when
+  Create one when the work has no initiative yet:
+    `board init add phone-onboard "Onboard the new phone" --tag work`
+  Add `--json` to any of them for the full object instead of a line.
+
+OUTPUT AND EXIT CODES
+  A write prints one line starting with "ok". An error prints one line on stderr that ends
+  with the next action, after an arrow: do what it says.
+  Exit codes: 0 ok, 1 error, 2 usage, 4 not found, 5 key refused, 6 conflict.
+
+THIS TEXT
+  `board help agent` prints it again and records that you read it. `board help agent --version`
+  prints only its number.

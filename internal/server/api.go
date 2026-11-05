@@ -43,6 +43,7 @@ type operations struct {
 	loginOps
 	keyOps
 	initiativeOps
+	metaOps
 	ready Readiness
 }
 

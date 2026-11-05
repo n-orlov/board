@@ -11,10 +11,11 @@ type flagSpec struct {
 }
 
 var (
-	initAddFlags  = []flagSpec{{"--tag", true}, {"--json", false}}
-	initLsFlags   = []flagSpec{{"--tag", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
-	initShowFlags = []flagSpec{{"--json", false}}
-	whoamiFlags   = []flagSpec{}
+	initAddFlags   = []flagSpec{{"--tag", true}, {"--json", false}}
+	initLsFlags    = []flagSpec{{"--tag", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
+	initShowFlags  = []flagSpec{{"--json", false}}
+	whoamiFlags    = []flagSpec{}
+	helpAgentFlags = []flagSpec{{"--version", false}}
 )
 
 // parsedArgs is a command line split into positional arguments and flags.

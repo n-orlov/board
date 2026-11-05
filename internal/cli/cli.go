@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/server"
@@ -26,7 +27,7 @@ const (
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
-const Usage = "usage: board <serve|version|whoami|init|admin>"
+const Usage = "usage: board <serve|version|help|whoami|init|admin>"
 
 // Env looks up an environment variable.
 type Env func(string) string
@@ -48,6 +49,8 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 			return usage(stderr)
 		}
 		return serve(stderr, env)
+	case "help":
+		return helpCmd(args[1:], stdout, stderr, env)
 	case "admin":
 		return admin(args[1:], stdout, stderr, env)
 	default:
@@ -148,7 +151,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st})); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st})); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

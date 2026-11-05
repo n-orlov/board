@@ -57,3 +57,35 @@ func TestNewULIDSortsByTimeAndDiffersWithinAMillisecond(t *testing.T) {
 		t.Fatalf("same millisecond: %q and %q should share a time prefix and differ in the random tail", a, c)
 	}
 }
+
+func TestNewULIDSortsInCreationOrderWithinOneMillisecondAndWhenTheClockGoesBack(t *testing.T) {
+	t0 := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	prev := ""
+	for i := 0; i < 500; i++ {
+		at := t0
+		if i%2 == 1 {
+			at = t0.Add(-time.Second) // an earlier instant never sorts earlier
+		}
+		id, err := NewULID(at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id <= prev {
+			t.Fatalf("ULID %d, %q, does not sort after %q", i, id, prev)
+		}
+		prev = id
+	}
+}
+
+func TestIncrementCarriesAndWraps(t *testing.T) {
+	b := []byte{0, 0xff, 0xff}
+	increment(b)
+	if b[0] != 1 || b[1] != 0 || b[2] != 0 {
+		t.Fatalf("carry gave %v", b)
+	}
+	w := []byte{0xff, 0xff}
+	increment(w)
+	if w[0] != 0 || w[1] != 0 {
+		t.Fatalf("wrap gave %v", w)
+	}
+}

@@ -233,6 +233,21 @@ type KeyList struct {
 	Items []Key `json:"items"`
 }
 
+// Meta The server and the caller.
+type Meta struct {
+	// Actor The actor the request acts as.
+	Actor string `json:"actor"`
+
+	// Principal Who authenticated, such as `key:workstation` or `oidc:<email>`.
+	Principal string `json:"principal"`
+
+	// Protocol The agent protocol version the server binary embeds (`board help agent`).
+	Protocol int `json:"protocol"`
+
+	// Version The version the server binary was built as.
+	Version string `json:"version"`
+}
+
 // Problem An RFC 9457 problem document.
 type Problem struct {
 	// Detail A human-readable explanation of this occurrence.
@@ -252,6 +267,21 @@ type Problem struct {
 
 	// Type A URI reference that identifies the problem type.
 	Type string `json:"type"`
+}
+
+// ProtocolSeen An actor and the highest agent protocol version it has read.
+type ProtocolSeen struct {
+	// Actor The actor's handle.
+	Actor string `json:"actor"`
+
+	// ProtocolSeen The highest protocol version this actor has read.
+	ProtocolSeen int `json:"protocol_seen"`
+}
+
+// ProtocolSeenRequest The agent protocol version the caller has read.
+type ProtocolSeenRequest struct {
+	// Version The protocol version, as `board help agent --version` prints it.
+	Version int `json:"version"`
 }
 
 // Session A browser session.
@@ -302,6 +332,9 @@ type ListInitiativesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
+type PutProtocolSeenJSONRequestBody = ProtocolSeenRequest
+
 // CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
 type CreateInitiativeJSONRequestBody = InitiativeCreate
 
@@ -322,6 +355,9 @@ type ServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(w http.ResponseWriter, r *http.Request)
+	// PutProtocolSeen Record that the calling actor has read an agent protocol version
+	// (PUT /api/v1/actors/me/protocol-seen)
+	PutProtocolSeen(w http.ResponseWriter, r *http.Request)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams)
@@ -340,6 +376,9 @@ type ServerInterface interface {
 	// RevokeKey Revoke an API key
 	// (POST /api/v1/keys/{name}/revoke)
 	RevokeKey(w http.ResponseWriter, r *http.Request, name string)
+	// GetMeta Describe the server and the caller
+	// (GET /api/v1/meta)
+	GetMeta(w http.ResponseWriter, r *http.Request)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(w http.ResponseWriter, r *http.Request)
@@ -428,6 +467,20 @@ func (siw *ServerInterfaceWrapper) GetOpenapiYAML(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOpenapiYAML(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutProtocolSeen operation middleware
+func (siw *ServerInterfaceWrapper) PutProtocolSeen(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutProtocolSeen(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -566,6 +619,20 @@ func (siw *ServerInterfaceWrapper) RevokeKey(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeKey(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMeta operation middleware
+func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMeta(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -791,6 +858,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives", wrapper.ListInitiatives)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/oidc/callback", wrapper.GetAuthOidcCallback)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetAuthSession)
@@ -1076,6 +1145,76 @@ func (response GetOpenapiYAML401ApplicationProblemPlusJSONResponse) VisitGetOpen
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutProtocolSeenRequestObject struct {
+	Body *PutProtocolSeenJSONRequestBody
+}
+
+type PutProtocolSeenResponseObject interface {
+	VisitPutProtocolSeenResponse(w http.ResponseWriter) error
+}
+
+type PutProtocolSeen200JSONResponse ProtocolSeen
+
+func (response PutProtocolSeen200JSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutProtocolSeen400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PutProtocolSeen400ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutProtocolSeen401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PutProtocolSeen401ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutProtocolSeen503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PutProtocolSeen503ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1563,6 +1702,43 @@ func (response RevokeKey503ApplicationProblemPlusJSONResponse) VisitRevokeKeyRes
 	return err
 }
 
+type GetMetaRequestObject struct {
+}
+
+type GetMetaResponseObject interface {
+	VisitGetMetaResponse(w http.ResponseWriter) error
+}
+
+type GetMeta200JSONResponse Meta
+
+func (response GetMeta200JSONResponse) VisitGetMetaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMeta401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetMeta401ApplicationProblemPlusJSONResponse) VisitGetMetaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAuthLoginRequestObject struct {
 }
 
@@ -1994,6 +2170,9 @@ type StrictServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(ctx context.Context, request GetOpenapiYAMLRequestObject) (GetOpenapiYAMLResponseObject, error)
+	// PutProtocolSeen Record that the calling actor has read an agent protocol version
+	// (PUT /api/v1/actors/me/protocol-seen)
+	PutProtocolSeen(ctx context.Context, request PutProtocolSeenRequestObject) (PutProtocolSeenResponseObject, error)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(ctx context.Context, request ListInitiativesRequestObject) (ListInitiativesResponseObject, error)
@@ -2012,6 +2191,9 @@ type StrictServerInterface interface {
 	// RevokeKey Revoke an API key
 	// (POST /api/v1/keys/{name}/revoke)
 	RevokeKey(ctx context.Context, request RevokeKeyRequestObject) (RevokeKeyResponseObject, error)
+	// GetMeta Describe the server and the caller
+	// (GET /api/v1/meta)
+	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
@@ -2162,6 +2344,37 @@ func (sh *strictHandler) GetOpenapiYAML(w http.ResponseWriter, r *http.Request) 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOpenapiYAMLResponseObject); ok {
 		if err := validResponse.VisitGetOpenapiYAMLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutProtocolSeen operation middleware
+func (sh *strictHandler) PutProtocolSeen(w http.ResponseWriter, r *http.Request) {
+	var request PutProtocolSeenRequestObject
+
+	var body PutProtocolSeenJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutProtocolSeen(ctx, request.(PutProtocolSeenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutProtocolSeen")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutProtocolSeenResponseObject); ok {
+		if err := validResponse.VisitPutProtocolSeenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2326,6 +2539,30 @@ func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, name 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeKeyResponseObject); ok {
 		if err := validResponse.VisitRevokeKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMeta operation middleware
+func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
+	var request GetMetaRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMeta(ctx, request.(GetMetaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMeta")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
+		if err := validResponse.VisitGetMetaResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

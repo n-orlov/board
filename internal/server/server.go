@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/webui"
@@ -52,6 +53,13 @@ type Option func(*operations)
 // WithInitiatives serves /api/v1/initiatives from st.
 func WithInitiatives(st *initiatives.Store) Option {
 	return func(o *operations) { o.inits = st }
+}
+
+// WithMeta sets what GET /api/v1/meta reports about the server, and gives
+// PUT /api/v1/actors/me/protocol-seen its store; without the store that
+// operation answers 503.
+func WithMeta(b Build, st *actors.Store) Option {
+	return func(o *operations) { o.metaOps = metaOps{build: b, actors: st} }
 }
 
 // Serve listens on addr and serves NewHandler(ready, verify, login, keys) until ctx is cancelled, then shuts

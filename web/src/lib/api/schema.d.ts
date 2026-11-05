@@ -212,6 +212,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Describe the server and the caller
+         * @description The server's version, the agent protocol version its binary embeds (the one `board help agent` prints), and who the caller is: the principal that authenticated and the actor it acts as. Reads nothing from the database.
+         */
+        get: operations["getMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/actors/me/protocol-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record that the calling actor has read an agent protocol version
+         * @description Sets the calling actor's `protocol_seen` to `version` when that is higher than what is recorded (the column holds the highest version read, so repeating a call, or sending an older version, changes nothing) and upserts the actor. A negative `version` is 400.
+         */
+        put: operations["putProtocolSeen"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -427,6 +467,29 @@ export interface components {
             actor: string;
             /** @description The value cookie-authenticated writes send as `X-CSRF-Token`. */
             csrf_token: string;
+        };
+        /** @description The server and the caller. */
+        Meta: {
+            /** @description The version the server binary was built as. */
+            version: string;
+            /** @description The agent protocol version the server binary embeds (`board help agent`). */
+            protocol: number;
+            /** @description Who authenticated, such as `key:workstation` or `oidc:<email>`. */
+            principal: string;
+            /** @description The actor the request acts as. */
+            actor: string;
+        };
+        /** @description The agent protocol version the caller has read. */
+        ProtocolSeenRequest: {
+            /** @description The protocol version, as `board help agent --version` prints it. */
+            version: number;
+        };
+        /** @description An actor and the highest agent protocol version it has read. */
+        ProtocolSeen: {
+            /** @description The actor's handle. */
+            actor: string;
+            /** @description The highest protocol version this actor has read. */
+            protocol_seen: number;
         };
         /** @description An RFC 9457 problem document. */
         Problem: {
@@ -820,6 +883,54 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The server and the caller. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Meta"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    putProtocolSeen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtocolSeenRequest"];
+            };
+        };
+        responses: {
+            /** @description The actor with the highest protocol version it has read. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolSeen"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };
