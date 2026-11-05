@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,5 +88,36 @@ func TestNowDefaultsToTheClock(t *testing.T) {
 	s := Store{}
 	if d := time.Since(s.now()); d < 0 || d > time.Minute {
 		t.Fatalf("default clock is %v away from now", d)
+	}
+}
+
+func exec(t *testing.T, s Store, stmt string) {
+	t.Helper()
+	if _, err := s.Store.Writer().ExecContext(context.Background(), stmt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecordProtocolSeenReportsADatabaseThatFailsAtEachStep(t *testing.T) {
+	who := audit.Actor{Handle: "a@h"}
+	for name, c := range map[string]struct {
+		break_ func(*testing.T, Store)
+		want   string
+	}{
+		"the database is closed":   {func(t *testing.T, s Store) { _ = s.Store.Close() }, "begin"},
+		"the actors table is gone": {func(t *testing.T, s Store) { exec(t, s, `DROP TABLE actors`) }, "record actor"},
+		"the update is refused": {func(t *testing.T, s Store) {
+			exec(t, s, `CREATE TRIGGER no_update BEFORE UPDATE ON actors BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+		}, "record protocol seen"},
+		"the column cannot be read back": {func(t *testing.T, s Store) {
+			exec(t, s, `CREATE TRIGGER wipe AFTER UPDATE OF protocol_seen ON actors BEGIN UPDATE actors SET protocol_seen = NULL WHERE id = NEW.id; END`)
+		}, "record protocol seen"},
+	} {
+		s := newStore(t)
+		c.break_(t, s)
+		_, err := s.RecordProtocolSeen(context.Background(), who, 1)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error %v, want one containing %q", name, err, c.want)
+		}
 	}
 }
