@@ -26,7 +26,7 @@ INITIATIVES
 OUTPUT AND EXIT CODES
   A write prints one line starting with "ok". An error prints one line on stderr that ends
   with the next action, after an arrow: do what it says.
-  Exit codes: 0 ok, 1 error, 2 usage, 4 not found, 5 key refused, 6 conflict.
+  Exit codes: 0 ok, 1 error, 2 usage, 4 not found, 5 key refused.
 
 THIS TEXT
   `board help agent` prints it again and records that you read it. `board help agent --version`

@@ -15,12 +15,8 @@ import (
 	"time"
 )
 
-// Exit codes of the client commands (SPEC §8.1) that ExitNotFound does not
-// already name.
-const (
-	ExitAuth     = 5
-	ExitConflict = 6
-)
+// ExitAuth is the exit code of a refused or missing key (SPEC §8.1).
+const ExitAuth = 5
 
 // requestTimeout bounds one request to the server.
 const requestTimeout = 30 * time.Second
@@ -84,8 +80,6 @@ func (e *apiError) exitCode() int {
 		return ExitAuth
 	case http.StatusNotFound:
 		return ExitNotFound
-	case http.StatusConflict:
-		return ExitConflict
 	default:
 		return ExitError
 	}

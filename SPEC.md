@@ -720,7 +720,7 @@ Exit codes:
 | 3 | timed out waiting (`--poll`), the ask stays open | not yet reachable: arrives with `board ask` |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board admin keys revoke` of an unknown name |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | in Phase 0 only a taken initiative slug (`board init add`) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | not yet reachable: arrives with leases and tasks (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | not yet reachable: arrives with leases |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
@@ -762,12 +762,12 @@ no `BOARD_API_KEY` a client command exits 5 with `no BOARD_API_KEY → export BO
 key)`, with no `BOARD_URL` it exits 1 with `no BOARD_URL → export BOARD_URL (the address of the board server)`, and
 an unreachable server exits 1 with `server unreachable at <url> → check BOARD_URL and that board serve is running`.
 A server problem document is printed as one line, `<detail> → <next>`, and exits by its status: 401 is 5, 404 is 4,
-409 is 6, anything else 1. The flags may come before or after the positional arguments, as `--flag value` or
+anything else, a 409 included, is 1: Phase 0 produces only the exit codes 0, 1, 2, 4 and 5. The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
-  created` (`--json`: the created object instead). A taken slug exits 6, a bad slug or tag exits 1 with the server's
-  message.
+  created` (`--json`: the created object instead). A taken slug, a bad slug and a bad tag each exit 1 with the server's
+  message and, for a taken slug, `→ board init show <slug>`.
 - `board init ls [--tag t]... [--limit N|--all] [--json]` prints one line per initiative in creation order,
   `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A tag
   given more than once keeps the initiatives that carry every tag. It shows 20 by default, `--limit N` (N ≥ 1)

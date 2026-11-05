@@ -19,7 +19,7 @@ Feature: Initiatives from the command line
     And neither stdout nor stderr contains the remembered key
     And the initiative_created event for "phone-onboard" has principal "key:workstation" and actor "claude@laptop"
     When I run the client 'board init add phone-onboard "Again"' as actor "claude@laptop"
-    Then the exit code is 6
+    Then the exit code is 1
     And stdout is empty
     And stderr is exactly one line containing "→"
     When I run the client 'board init add X "Bad slug"' as actor "claude@laptop"

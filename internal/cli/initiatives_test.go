@@ -110,7 +110,7 @@ func TestInitAddRefusals(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "init", "add", "xx", "T")
-	if code != ExitConflict || out != "" || errs != "initiative \"x\" already exists → board init show xx\n" {
+	if code != ExitError || out != "" || errs != "initiative \"x\" already exists → board init show xx\n" {
 		t.Fatalf("got %d %q %q", code, out, errs)
 	}
 	f.handler = func(w http.ResponseWriter, _ *http.Request) {

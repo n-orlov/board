@@ -73,7 +73,7 @@ func TestNewClientNeedsKeyAndURL(t *testing.T) {
 }
 
 func TestAPIErrorExitCodes(t *testing.T) {
-	for status, want := range map[int]int{401: ExitAuth, 404: ExitNotFound, 409: ExitConflict, 400: ExitError, 503: ExitError} {
+	for status, want := range map[int]int{401: ExitAuth, 404: ExitNotFound, 409: ExitError, 400: ExitError, 503: ExitError} {
 		if got := (&apiError{Status: status}).exitCode(); got != want {
 			t.Errorf("status %d: exit %d, want %d", status, got, want)
 		}
