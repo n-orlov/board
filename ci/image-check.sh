@@ -27,6 +27,7 @@ ci/run.sh go run ./ci/imagecheck "$dir/board-image-oci.tar"
 echo "ci/image-check.sh: board version"
 docker run --rm "$tag" version
 
+# shellcheck disable=SC2317 # invoked by the trap below
 cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
