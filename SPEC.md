@@ -158,9 +158,9 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   start the server with lifetimes of a few seconds, so no step sleeps longer than 5 s.
 - **CSRF**: every cookie-authenticated request whose method is not GET, HEAD or OPTIONS (so
   `POST /auth/logout` and every write) must carry `X-CSRF-Token` equal to the session's CSRF token
-  (delivered to the UI by `GET /auth/session`) **and** an `Origin` header, or failing that a
-  `Referer`, whose scheme, host and port equal those of `BOARD_PUBLIC_URL`. A missing or wrong
-  token, a missing or foreign origin (including `null`) gets **403** with a problem document, and
+  (delivered to the UI by `GET /auth/session`) **and** an `Origin` header whose scheme, host and port equal those of `BOARD_PUBLIC_URL`; a
+  `Referer` never stands in for a missing `Origin`. A missing or wrong token, a missing or foreign
+  `Origin` (including `null`) gets **403** with a problem document, and
   the request does not run. Bearer-authenticated requests are exempt (no ambient credential).
 - **API call or browser navigation**: a browser navigation is a `GET` whose `Accept` header
   contains `text/html`; every other request is an API call. A request with no credential (no

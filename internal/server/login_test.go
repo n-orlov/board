@@ -366,15 +366,19 @@ func TestACookieAuthenticatedWriteNeedsTheCSRFTokenAndTheSameOrigin(t *testing.T
 	if rec := browse(h, http.MethodGet, "/auth/session", session); rec.Code != http.StatusOK {
 		t.Fatalf("a refused write ended the session: %d", rec.Code)
 	}
-	// A Referer on the public base URL stands in for a missing Origin.
+	// A Referer never stands in for a missing Origin: a same-origin Referer
+	// without an Origin is refused like no origin at all.
 	r := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	r.AddCookie(session)
 	r.Header.Set(CSRFHeader, token)
 	r.Header.Set("Referer", publicURL+"/some/page")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("a write with the token and a same-origin Referer: %d, want 204", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a write with the token and a same-origin Referer but no Origin: %d, want 403", rec.Code)
+	}
+	if rec := write(h, "/auth/logout", session, token, publicURL); rec.Code != http.StatusNoContent {
+		t.Fatalf("a write with the token and the same Origin: %d, want 204", rec.Code)
 	}
 }
 

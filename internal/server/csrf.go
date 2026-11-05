@@ -28,7 +28,8 @@ func originOf(raw string) string {
 
 // csrfProblem returns why a cookie-authenticated request must be refused, or
 // "" when it passes (SPEC 3.2): a write needs the session's CSRF token in
-// X-CSRF-Token and an Origin, or failing that a Referer, on the public base URL.
+// X-CSRF-Token and an Origin header on the public base URL. A Referer never
+// stands in for a missing Origin.
 func (l *Login) csrfProblem(r *http.Request, token string) string {
 	if safeMethod(r.Method) {
 		return ""
@@ -37,13 +38,9 @@ func (l *Login) csrfProblem(r *http.Request, token string) string {
 	if got == "" || token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 		return "a write authenticated by a session cookie needs the session's " + CSRFHeader + " header"
 	}
-	from := r.Header.Get("Origin")
-	if from == "" {
-		from = r.Header.Get("Referer")
-	}
 	want := originOf(l.PublicURL)
-	if want == "" || originOf(from) != want {
-		return "a write authenticated by a session cookie needs an Origin (or Referer) equal to the public base URL"
+	if want == "" || originOf(r.Header.Get("Origin")) != want {
+		return "a write authenticated by a session cookie needs an Origin header equal to the public base URL"
 	}
 	return ""
 }
