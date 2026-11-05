@@ -308,7 +308,6 @@ func TestListCap(t *testing.T) {
 	}
 }
 
-
 func TestPrintJSONReportsAnUnencodableValue(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := printJSON(&out, &errb, []json.RawMessage{json.RawMessage("{")}); code != ExitError || errb.Len() == 0 || out.Len() != 0 {
