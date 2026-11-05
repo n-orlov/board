@@ -19,10 +19,12 @@ const DefaultListen = ":8080"
 type Readiness func(ctx context.Context) error
 
 // Handler returns the HTTP handler the server serves. GET /healthz answers 200
-// whenever the process is up. GET /readyz answers 200 when ready returns nil
-// and 503 otherwise. Every other GET is answered from the web UI embedded in the
+// whenever the process is up and needs no credential. Every other request needs
+// a Bearer key that verify accepts and a Board-Actor header (401, 400 or 503
+// otherwise). GET /readyz answers 200 when ready returns nil and 503
+// otherwise. Every other GET is answered from the web UI embedded in the
 // binary, so GET / is its index.html.
-func Handler(ready Readiness) http.Handler {
+func Handler(ready Readiness, verify KeyVerifier) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeText(w, http.StatusOK, "ok\n")
@@ -37,7 +39,7 @@ func Handler(ready Readiness) http.Handler {
 		writeText(w, http.StatusOK, "ok\n")
 	})
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
-	return mux
+	return authenticated(mux, verify)
 }
 
 func writeText(w http.ResponseWriter, status int, body string) {
@@ -46,18 +48,18 @@ func writeText(w http.ResponseWriter, status int, body string) {
 	_, _ = w.Write([]byte(body))
 }
 
-// Serve listens on addr and serves Handler(ready) until ctx is cancelled, then shuts
+// Serve listens on addr and serves Handler(ready, verify) until ctx is cancelled, then shuts
 // down gracefully. It returns nil on a clean shutdown.
-func Serve(ctx context.Context, addr string, ready Readiness) error {
+func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
-	return serveOn(ctx, ln, ready)
+	return serveOn(ctx, ln, ready, verify)
 }
 
-func serveOn(ctx context.Context, ln net.Listener, ready Readiness) error {
-	srv := &http.Server{Handler: Handler(ready), ReadHeaderTimeout: 10 * time.Second}
+func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier) error {
+	srv := &http.Server{Handler: Handler(ready, verify), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

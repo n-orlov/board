@@ -1,4 +1,7 @@
+import { mkdtempSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
 
 // A free port, asked of the kernel once per run: Playwright loads this file in
@@ -16,6 +19,10 @@ async function freePort(): Promise<number> {
 }
 
 const port = Number(process.env.E2E_PORT ?? (process.env.E2E_PORT = String(await freePort())));
+// The directory holding the binary and the SQLite store of this run. Like the
+// port it is chosen once and inherited by every later load of this file;
+// global-setup.ts mints the API key in it and global-teardown.ts removes it.
+const work = process.env.E2E_WORK ?? (process.env.E2E_WORK = mkdtempSync(join(tmpdir(), 'board-e2e-')));
 // ci/suite.sh points this at its own result directory; every reporter and the
 // test artifacts live under it.
 const out = process.env.E2E_OUT ?? 'out';
@@ -36,6 +43,8 @@ export default defineConfig({
     ['json', { outputFile: `${out}/results.json` }],
     ['junit', { outputFile: `${out}/junit.xml` }],
   ],
+  globalSetup: './global-setup.ts',
+  globalTeardown: './global-teardown.ts',
   timeout: 30000,
   expect: { timeout: 10000 },
   outputDir: `${out}/test-results`,
@@ -51,7 +60,7 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}/healthz`,
     reuseExistingServer: false,
     timeout: 180000,
-    env: { E2E_PORT: String(port) },
+    env: { E2E_PORT: String(port), E2E_WORK: work },
   },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });

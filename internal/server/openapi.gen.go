@@ -21,5 +21,8 @@ type Problem struct {
 	Type string `json:"type"`
 }
 
+// BadRequest An RFC 9457 problem document.
+type BadRequest = Problem
+
 // Unauthorized An RFC 9457 problem document.
 type Unauthorized = Problem

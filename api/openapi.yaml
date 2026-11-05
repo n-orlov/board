@@ -36,7 +36,9 @@ paths:
       operationId: getReadyz
       tags: [probes]
       summary: Readiness probe
-      description: Answers 200 when the database is reachable and migrated, 503 otherwise.
+      description: >-
+        Answers 200 when the database is reachable and migrated, 503 otherwise.
+        A presented key the database cannot check also gets 503, as a problem document.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -48,6 +50,8 @@ paths:
               schema:
                 type: string
                 examples: [ok]
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "503":
@@ -69,8 +73,14 @@ components:
       name: board_session
       description: The operator's browser session.
   responses:
+    BadRequest:
+      description: A valid key was presented without a `Board-Actor` header.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     Unauthorized:
-      description: No valid credentials were presented.
+      description: No credential, or an unknown, revoked or expired key.
       content:
         application/problem+json:
           schema:

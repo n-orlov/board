@@ -1,23 +1,41 @@
 Feature: Liveness and readiness
-  GET /healthz answers while the process is up. GET /readyz answers 200 only
-  when the database is reachable and migrated, and 503 otherwise. These
-  scenarios send no credentials because the binary has no authentication layer
-  yet: task 015 puts /readyz behind credentials and rewrites them to
-  authenticated access.
+  GET /healthz answers while the process is up and is the only route that needs
+  no credential. GET /readyz needs an API key (and a Board-Actor header) and
+  then answers 200 only when the database is reachable and migrated, and 503
+  otherwise. A key is made by `board admin keys create` on a migrated database.
 
   Scenario: /healthz answers 200 without credentials
     Given the board server is running on a free port
     When I request GET "/healthz" without credentials
     Then the response status is 200
 
-  Scenario: /readyz answers 200 on a migrated store
+  Scenario: /readyz answers 401 without credentials
     Given the board server is running on a free port
     When I request GET "/readyz" without credentials
+    Then the response status is 401
+
+  Scenario: /readyz answers 200 with a key on a migrated store
+    Given a new database for the board commands
+    When I run "board admin migrate"
+    And I run "board admin keys create workstation"
+    And I remember the key stdout printed
+    And the board server is running on a free port
+    And I request GET "/readyz" with the remembered key
     Then the response status is 200
 
-  Scenario: /readyz answers 503 on an unmigrated store with BOARD_MIGRATE=off
-    Given the board server is running on a free port with BOARD_MIGRATE=off
-    When I request GET "/readyz" without credentials
+  Scenario: /readyz answers 400 with a key and no Board-Actor header
+    Given a new database for the board commands
+    When I run "board admin migrate"
+    And I run "board admin keys create workstation"
+    And I remember the key stdout printed
+    And the board server is running on a free port
+    And I request GET "/readyz" with the remembered key and no Board-Actor header
+    Then the response status is 400
+
+  Scenario: /readyz answers 503 with a key on an unmigrated store with BOARD_MIGRATE=off
+    Given I hold a key made on another database
+    And the board server is running on a free port with BOARD_MIGRATE=off
+    When I request GET "/readyz" with the remembered key
     Then the response status is 503
 
   Scenario: /healthz still answers 200 on an unmigrated store
@@ -27,11 +45,15 @@ Feature: Liveness and readiness
 
   @postgres @dedicated-database
   Scenario: /readyz answers 503 once the Postgres database is stopped
-    Given the board server is running on a free port
-    When I request GET "/readyz" without credentials
+    Given a new database for the board commands
+    When I run "board admin migrate"
+    And I run "board admin keys create workstation"
+    And I remember the key stdout printed
+    And the board server is running on a free port
+    And I request GET "/readyz" with the remembered key
     Then the response status is 200
     When the database is stopped
-    And I request GET "/readyz" without credentials
+    And I request GET "/readyz" with the remembered key
     Then the response status is 503
 
   @postgres @dedicated-database

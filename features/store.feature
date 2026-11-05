@@ -20,8 +20,10 @@ Feature: The store and board admin migrate
   Scenario: a database migrated by board admin migrate is ready without BOARD_MIGRATE
     Given a new database for the board commands
     When I run "board admin migrate"
+    And I run "board admin keys create workstation"
+    And I remember the key stdout printed
     And the board server is running on a free port with BOARD_MIGRATE=off
-    And I request GET "/readyz" without credentials
+    And I request GET "/readyz" with the remembered key
     Then the response status is 200
 
   Scenario: board admin migrate refuses a schema newer than the binary

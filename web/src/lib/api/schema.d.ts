@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Readiness probe
-         * @description Answers 200 when the database is reachable and migrated, 503 otherwise.
+         * @description Answers 200 when the database is reachable and migrated, 503 otherwise. A presented key the database cannot check also gets 503, as a problem document.
          */
         get: operations["getReadyz"];
         put?: never;
@@ -63,7 +63,16 @@ export interface components {
         };
     };
     responses: {
-        /** @description No valid credentials were presented. */
+        /** @description A valid key was presented without a `Board-Actor` header. */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description No credential, or an unknown, revoked or expired key. */
         Unauthorized: {
             headers: {
                 [name: string]: unknown;
@@ -118,6 +127,7 @@ export interface operations {
                     "text/plain": string;
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             /** @description The server is not ready. */
             503: {

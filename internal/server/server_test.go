@@ -11,10 +11,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/webui"
 )
 
 func ok(context.Context) error { return nil }
+
+// testKey is a well-formed key the accepting verifier knows.
+const testKey = "brd_00000000000000000000000000000000000000000000000000ab"
+
+func acceptKey(_ context.Context, key string) (string, error) {
+	if key != testKey {
+		return "", auth.ErrKeyUnknown
+	}
+	return "test", nil
+}
+
+// authed sends a GET request with the test key and an actor.
+func authed(path string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer "+testKey)
+	r.Header.Set(ActorHeader, "tester")
+	return r
+}
 
 func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
@@ -26,7 +45,7 @@ func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, addr, ok) }()
+	go func() { done <- Serve(ctx, addr, ok, acceptKey) }()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -57,7 +76,7 @@ func TestServeReportsBusyAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	if err := Serve(context.Background(), ln.Addr().String(), ok); err == nil {
+	if err := Serve(context.Background(), ln.Addr().String(), ok, acceptKey); err == nil {
 		t.Fatal("expected an error for an address already in use")
 	}
 }
@@ -77,7 +96,7 @@ func TestHealthzIsAlwaysOKAndReadyzFollowsReadiness(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			Handler(tc.ready).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			Handler(tc.ready, acceptKey).ServeHTTP(rec, authed(tc.path))
 			if rec.Code != tc.want {
 				t.Fatalf("GET %s = %d, want %d", tc.path, rec.Code, tc.want)
 			}
@@ -91,7 +110,7 @@ func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
 		t.Fatalf("the embedded UI has no index.html: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	Handler(ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	Handler(ok, acceptKey).ServeHTTP(rec, authed("/"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", rec.Code)
 	}
@@ -109,7 +128,7 @@ func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
 func TestProbesAreNotShadowedByTheUI(t *testing.T) {
 	for _, path := range []string{"/healthz", "/readyz"} {
 		rec := httptest.NewRecorder()
-		Handler(ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		Handler(ok, acceptKey).ServeHTTP(rec, authed(path))
 		if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
 			t.Errorf("GET %s = %d %q, want 200 \"ok\\n\"", path, rec.Code, rec.Body.String())
 		}
@@ -118,7 +137,7 @@ func TestProbesAreNotShadowedByTheUI(t *testing.T) {
 
 func TestUnknownPathIs404NotTheIndex(t *testing.T) {
 	rec := httptest.NewRecorder()
-	Handler(ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/no-such-asset.js", nil))
+	Handler(ok, acceptKey).ServeHTTP(rec, authed("/no-such-asset.js"))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET /no-such-asset.js = %d, want 404", rec.Code)
 	}

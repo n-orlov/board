@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/server"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/version"
@@ -128,7 +129,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, url, addr string, migrate
 	if err := prepareSchema(ctx, st, migrate); err != nil {
 		return fail(stderr, err)
 	}
-	if err := server.Serve(ctx, addr, st.Ready); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

@@ -148,7 +148,14 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - Lookup is by hash (indexed, unique); comparison cost does not depend on the key.
 - **One key per environment** (e.g. `workstation`, `ralphd`, `laptop`), not per agent, so a
   leaked environment is revoked alone. Names are unique.
-- A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail).
+- A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail); a key
+  that is not shaped like a key or that no row holds gets 401 (`key unknown`).
+- The server checks a presented key against `api_keys` on every request (no cache, so a revocation
+  takes effect at once) and bumps `last_used_at` at most once per key per 30 s.
+- The checks run in this order: a request with no `Authorization: Bearer` credential gets 401 and the
+  store is not touched; a key the store refuses gets 401; a key the store cannot check, because it is
+  unreachable or not migrated, gets 503 and never a 2xx; a valid key without a `Board-Actor` header
+  gets 400.
 - Management:
   - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
   - **Bootstrap, no HTTP**: `board admin keys create <name> [--expires 90d]`, `board admin keys
@@ -423,7 +430,12 @@ and CLI can show badges without the lists.
 - **Swagger UI** at `/api/docs` (assets embedded, no CDN).
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is
-  unauthenticated (`/readyz` and `/metrics` too require a key or session).
+  unauthenticated (`/readyz` and `/metrics` too require a key or session). Every other route,
+  including the embedded UI at `/` and an unknown path, answers a request with no credential
+  with 401 and a problem document (`application/problem+json`, `WWW-Authenticate: Bearer`)
+  without touching the store. A Bearer key that is unknown, revoked (`key revoked`) or expired
+  (`key expired`) gets 401. A valid key without a `Board-Actor` header gets 400. A presented key
+  the store cannot check, because the database is unreachable or unmigrated, gets 503, never a 2xx.
 - Every key-authenticated request names its actor: header `Board-Actor: <handle>` (required), optional
   `Board-Actor-Way-Back`, `Board-Actor-Meta` (JSON), `Board-On-Behalf-Of`. The actor is
   upserted on use. Session requests always act as the operator.

@@ -21,6 +21,8 @@ Feature: Migrating an empty store
 
   Scenario: a server started on an empty store with BOARD_MIGRATE unset migrates it and is ready
     Given the board server is running on a free port
-    When I request GET "/readyz" without credentials
+    When I run "board admin keys create workstation"
+    And I remember the key stdout printed
+    And I request GET "/readyz" with the remembered key
     Then the response status is 200
     And the database holds every Phase 0 table

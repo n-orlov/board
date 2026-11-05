@@ -252,11 +252,15 @@ func (h *harness) databaseStopped(ctx context.Context) error {
 	return h.own.stop(ctx)
 }
 
-// get sends a credential-less GET to the running server and records the status.
-func (h *harness) get(ctx context.Context, path string) error {
+// get sends a GET to the running server and records the status. headers are
+// added to the request; none means a credential-less request.
+func (h *harness) get(ctx context.Context, path string, headers map[string]string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+h.addr+path, nil)
 	if err != nil {
 		return err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -265,6 +269,49 @@ func (h *harness) get(ctx context.Context, path string) error {
 	defer resp.Body.Close()
 	h.status = resp.StatusCode
 	return nil
+}
+
+func (h *harness) getWithoutCredentials(ctx context.Context, path string) error {
+	return h.get(ctx, path, nil)
+}
+
+// getWithKey sends the remembered key and an actor.
+func (h *harness) getWithKey(ctx context.Context, path string) error {
+	if h.key == "" {
+		return errors.New("no key was remembered")
+	}
+	return h.get(ctx, path, map[string]string{"Authorization": "Bearer " + h.key, "Board-Actor": "godog"})
+}
+
+// getWithKeyAndNoActor sends the remembered key and no Board-Actor header.
+func (h *harness) getWithKeyAndNoActor(ctx context.Context, path string) error {
+	if h.key == "" {
+		return errors.New("no key was remembered")
+	}
+	return h.get(ctx, path, map[string]string{"Authorization": "Bearer " + h.key})
+}
+
+// keyFromAnotherDatabase migrates a throwaway SQLite database, mints a key on
+// it and remembers the key, so that a scenario holds a genuine key the
+// scenario's own (unmigrated) database has never seen.
+func (h *harness) keyFromAnotherDatabase(ctx context.Context) error {
+	dir, err := os.MkdirTemp("", "board-godog-other-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	url := "BOARD_DB_URL=sqlite://" + filepath.Join(dir, "other.db")
+	for _, args := range [][]string{{"admin", "migrate"}, {"admin", "keys", "create", "elsewhere"}} {
+		cmd := exec.CommandContext(ctx, h.binary, args...)
+		cmd.Env = h.env(url)
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("board %s: %w: %s", strings.Join(args, " "), err, errb.String())
+		}
+		h.stdout = out.String()
+	}
+	return h.rememberKey()
 }
 
 func (h *harness) stopServer() {
@@ -349,7 +396,10 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	})
 	sc.Step(`^the board server is running on a free port$`, h.startServer)
 	sc.Step(`^the board server is running on a free port with (BOARD_[A-Z_]+)=(\w+)$`, h.startServerWithVar)
-	sc.Step(`^I request GET "([^"]*)" without credentials$`, h.get)
+	sc.Step(`^I request GET "([^"]*)" without credentials$`, h.getWithoutCredentials)
+	sc.Step(`^I request GET "([^"]*)" with the remembered key$`, h.getWithKey)
+	sc.Step(`^I request GET "([^"]*)" with the remembered key and no Board-Actor header$`, h.getWithKeyAndNoActor)
+	sc.Step(`^I hold a key made on another database$`, h.keyFromAnotherDatabase)
 	sc.Step(`^the response status is (\d+)$`, func(want int) error {
 		if h.status != want {
 			return fmt.Errorf("response status %d, want %d", h.status, want)

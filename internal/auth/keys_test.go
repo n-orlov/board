@@ -144,3 +144,78 @@ func TestKeysClockDefaultsToTheWallClock(t *testing.T) {
 		t.Fatalf("default clock is %v away from now", d)
 	}
 }
+
+func TestVerifyTellsKeysApart(t *testing.T) {
+	ctx := context.Background()
+	k := newKeys(t, t0)
+	good, _, _ := k.Create(ctx, "good", "t", 0)
+	old, _, _ := k.Create(ctx, "old", "t", time.Hour)
+	gone, _, _ := k.Create(ctx, "gone", "t", 0)
+	if _, err := k.Revoke(ctx, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	now := t0.Add(2 * time.Hour)
+	v := &Verifier{Store: k.Store, Now: func() time.Time { return now }}
+	unknown, _ := NewKey()
+	cases := []struct {
+		key  string
+		name string
+		err  error
+	}{
+		{good, "good", nil},
+		{old, "", ErrKeyExpired},
+		{gone, "", ErrKeyRevoked},
+		{unknown, "", ErrKeyUnknown},
+		{"not-a-key", "", ErrKeyUnknown},
+	}
+	for _, tc := range cases {
+		name, err := v.Verify(ctx, tc.key)
+		if name != tc.name || !errors.Is(err, tc.err) {
+			t.Errorf("Verify(%q) = %q, %v; want %q, %v", tc.key, name, err, tc.name, tc.err)
+		}
+	}
+}
+
+func TestVerifyReportsAStoreItCannotReadAsNeitherKnownNorRefused(t *testing.T) {
+	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "unmigrated.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	key, _ := NewKey()
+	_, err = (&Verifier{Store: st}).Verify(context.Background(), key)
+	if err == nil || errors.Is(err, ErrKeyUnknown) || errors.Is(err, ErrKeyRevoked) || errors.Is(err, ErrKeyExpired) {
+		t.Fatalf("Verify on an unmigrated store = %v, want a store error", err)
+	}
+}
+
+func TestVerifyCoalescesLastUsedAt(t *testing.T) {
+	ctx := context.Background()
+	k := newKeys(t, t0)
+	plain, _, _ := k.Create(ctx, "w", "t", 0)
+	now := t0.Add(time.Minute)
+	v := &Verifier{Store: k.Store, Now: func() time.Time { return now }}
+	lastUsed := func() int64 {
+		var n int64
+		if err := k.Store.Reader().QueryRowContext(ctx, `SELECT COALESCE(last_used_at, 0) FROM api_keys WHERE name = 'w'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if lastUsed() != 0 {
+		t.Fatal("a new key has a last_used_at")
+	}
+	for _, step := range []struct {
+		advance time.Duration
+		changes bool
+	}{{0, true}, {LastUsedInterval - time.Second, false}, {time.Second, true}} {
+		before := lastUsed()
+		now = now.Add(step.advance)
+		if _, err := v.Verify(ctx, plain); err != nil {
+			t.Fatal(err)
+		}
+		if changed := lastUsed() != before; changed != step.changes {
+			t.Fatalf("after +%s last_used_at changed = %v, want %v", step.advance, changed, step.changes)
+		}
+	}
+}

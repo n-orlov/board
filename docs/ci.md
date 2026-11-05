@@ -242,8 +242,12 @@ Scripts, each run through `ci/run.sh` unless noted:
   repeated once: a pass on the repeat is recorded in `flaky-vitest.txt`, a
   second failure fails the suite. `ci/suitecheck/vitest_test.go` pins this.
   It then runs Playwright (`e2e/`, after `npm ci` there): the config starts the
-  real binary on a free port against a freshly migrated, seeded SQLite store
-  (`e2e/serve.sh`) and never retries (`retries: 0`). The retry-once is the
+  real binary on a free port against a freshly migrated SQLite store
+  (`e2e/serve.sh`) and never retries (`retries: 0`). Only `GET /healthz` is open,
+  so `e2e/global-setup.ts` mints a key with `board admin keys create` at test
+  time (no key is committed) and the `test` exported by `e2e/fixtures.ts`
+  sends it, with a `Board-Actor` header, on every request; every spec imports
+  `test` from there. The retry-once is the
   suite's: a failed run is kept as `junit-playwright-run1.xml` and
   `playwright-run1.log`, repeated once, and a pass on the repeat is recorded in
   `flaky-playwright.txt`; a second failure fails the suite. `junit-playwright.xml`
