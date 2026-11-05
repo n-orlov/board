@@ -786,7 +786,7 @@ network requests (all assets embedded).
   creation, `LISTEN/NOTIFY` availability). Queries are hand-written portable SQL; no ORM.
 - **Migrations**: `pressly/goose` v3 with Go-embedded SQL files, one directory per dialect only
   where the DDL must differ; applied on start (`BOARD_MIGRATE=auto`, default) or by
-  `board migrate`.
+  `board admin migrate`.
 - SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, one
   writer connection plus a read pool. SQLite is single-replica.
 - **Supported = in the CI matrix.** v1 supports SQLite and Postgres (16+). MySQL/MariaDB or
@@ -958,7 +958,7 @@ All gates are **on from the first commit**. Thresholds live in `ci/quality.json`
 | golangci-lint | on (deck's config as the starting point) |
 | govulncheck | on |
 | Trivy | HIGH, CRITICAL fail the gate (source and the built image) |
-| Mutation | Go: gremlins over `internal/` domain packages; frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
+| Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 %, a run that generates no mutant fails; frontend: Stryker over the TS logic modules, as s3-browser (`thresholds.break` 80, per-module break 80). Every `main` build and the extended lane. |
 | SBOM | CycloneDX generated for module, frontend and image; a missing or empty SBOM fails the build |
 | OpenAPI | spec lints clean; generated server/client code has no drift |
 
