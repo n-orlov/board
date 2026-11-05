@@ -2,6 +2,8 @@ module github.com/n-orlov/board
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/cucumber/godog v0.16.0
 	github.com/pressly/goose/v3 v3.29.0

@@ -62,6 +62,13 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 - `ci/suitecheck`: probes of `ci/suite.sh` against small fixture modules (the
   `BOARD_*` scrub, merged coverage, retry-once, timeouts, Allure results).
 - `ci/lintcheck`: probes of `ci/lint.sh` and of the golangci-lint config.
+- `ci/repocheck`: repository probes. Besides the Dockerfile digest and
+  `ci/run.sh` argv checks above, it asserts that go.mod carries a
+  `toolchain go1.N.P` line naming a patched release no older than the `go`
+  directive (`toolchain_test.go`), and that golangci-lint is one shared
+  invocation switched on in `ci/quality.json`, while gofmt, `go vet` and
+  `go mod tidy` run only in `ci/lint.sh` and in no other CI script or pipeline
+  file (`lintgate_test.go`).
 
 Scripts, each run through `ci/run.sh` unless noted:
 
