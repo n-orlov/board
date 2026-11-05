@@ -112,7 +112,7 @@ for f in "$outdir"/flaky-features-*.txt; do
 done
 
 # shellcheck disable=SC2086 # the leg lists are paths without spaces
-for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" $leg_junits; do
+for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" "$outdir/junit-vitest.xml" $leg_junits; do
     [ -f "$junit" ] || continue
     counts=$(count_junit "$junit")
     set -- $counts
@@ -122,7 +122,7 @@ for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" $leg_juni
 done
 
 # shellcheck disable=SC2086
-for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" $leg_flakies; do
+for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" "$outdir/flaky-vitest.txt" $leg_flakies; do
     [ -f "$flaky" ] || continue
     n=$(grep -c . "$flaky" 2>/dev/null || true)
     flaky_count=$((flaky_count + ${n:-0}))
@@ -145,7 +145,7 @@ if [ "$flaky_count" -gt 0 ]; then
     echo "#### flaky (failed, then passed on retry)"
     echo
     # shellcheck disable=SC2086
-for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" $leg_flakies; do
+for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" "$outdir/flaky-vitest.txt" $leg_flakies; do
         [ -f "$flaky" ] || continue
         grep . "$flaky" | sed 's/^/- /' || true
     done
@@ -158,7 +158,7 @@ times=$(mktemp)
 trap 'rm -f "$times"' EXIT
 
 # shellcheck disable=SC2086
-for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" $leg_junits; do
+for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" "$outdir/junit-vitest.xml" $leg_junits; do
     [ -f "$junit" ] || continue
     grep -oE '<testsuite [^>]*>' "$junit" | while IFS= read -r line; do
         # The attribute's XML entities are decoded (&amp; last), so the

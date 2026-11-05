@@ -862,6 +862,16 @@ network requests (all assets embedded).
 
 - Vite + TypeScript + Svelte 5, `vis-timeline` for the timeline.
 - Built to static assets, embedded in the Go binary with `go:embed`. The binary serves it at `/`.
+- `web/` is the app; `npm run build` writes it to `internal/webui/dist`, which
+  `internal/webui` embeds. `GET /` answers with the embedded `index.html` and every other
+  `GET` the server does not route itself is looked up in the embedded files (404 when
+  absent). A checkout whose web/ has not been built embeds a one-line placeholder page
+  instead, so the Go packages still compile; the container build and `ci/suite.sh` build
+  the real UI first.
+- Asset URLs are relative, and the API base comes from the page's own path
+  (`web/src/lib/apibase.ts`): the mount prefix of the page plus `/api`, always a
+  path, never an absolute or protocol-relative URL, so the UI works behind a
+  path-prefixing proxy.
 - API client generated from the same OpenAPI document (`openapi-typescript`).
 
 ### 12.4 Container

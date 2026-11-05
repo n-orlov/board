@@ -90,6 +90,45 @@ echo "ci/suite.sh: writing JUnit/flaky/log files to $outdir"
 
 overall_status=0
 
+# --- 0. the web UI: build it into the binary's embed directory, then Vitest ---
+# (task 007, R11). The build comes first so every Go pass below compiles and
+# tests the binary with the real UI embedded rather than the placeholder page.
+# Vitest (vitest run --coverage, configured in web/vitest.config.ts) writes
+# its JUnit file to <outdir>/junit-vitest.xml and its @vitest/coverage-v8
+# reports to <outdir>/web-coverage/. The same fail-once-retry-once policy as
+# the Go passes applies: a failed first attempt is kept as junit-vitest-run1.xml,
+# the run is repeated once, and a pass on the repeat is recorded in
+# flaky-vitest.txt and exits 0; a second failure fails the suite. A checkout
+# with no web/ (the suitecheck fixtures) skips this step.
+vitest_junit="$outdir/junit-vitest.xml"
+vitest_flaky="$outdir/flaky-vitest.txt"
+: > "$vitest_flaky"
+if [ -f web/package.json ]; then
+    vitest_log="$outdir/vitest.log"
+    if ! (cd web && npm ci --no-audit --no-fund && npm run build) > "$outdir/web-build.log" 2>&1; then
+        echo "ci/suite.sh: web build failed (see $outdir/web-build.log)" >&2
+        overall_status=1
+    fi
+    run_vitest() {
+        (cd web && WEB_JUNIT_FILE="$vitest_junit" WEB_COVERAGE_DIR="$outdir/web-coverage" npm run test) > "$vitest_log" 2>&1
+    }
+    if ! run_vitest; then
+        echo "ci/suite.sh: Vitest failed; repeating it once (see $vitest_log)" >&2
+        [ -f "$vitest_junit" ] && cp "$vitest_junit" "$outdir/junit-vitest-run1.xml"
+        cp "$vitest_log" "$outdir/vitest-run1.log"
+        if run_vitest; then
+            echo "vitest: failed once, then passed on the repeat (see vitest-run1.log)" >> "$vitest_flaky"
+        else
+            echo "ci/suite.sh: Vitest failed twice (see $vitest_log)" >&2
+            overall_status=1
+        fi
+    fi
+    if [ ! -s "$vitest_junit" ]; then
+        echo "ci/suite.sh: Vitest wrote no JUnit file at $vitest_junit" >&2
+        overall_status=1
+    fi
+fi
+
 # --- 1. every Go test except TestFeatures, via gotestsum ---
 # BOARD_CI_GO_PACKAGES lets a caller narrow the package list (used by this
 # task's own local demonstration, so a scratch worktree's throwaway package

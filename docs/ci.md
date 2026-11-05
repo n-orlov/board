@@ -206,6 +206,13 @@ Scripts, each run through `ci/run.sh` unless noted:
   feature coverage-data directories first, so a rerun into the same results
   directory never merges stale counters. `BOARD_CI_OUT` or a
   positional argument names the results directory.
+  When `web/package.json` exists it first runs `npm ci` and `npm run build` in
+  `web/` (the build lands in `internal/webui/dist`, so the Go passes embed the
+  real UI rather than the placeholder page), then `npm run test` (Vitest with
+  `@vitest/coverage-v8`), writing `junit-vitest.xml`, `web-coverage/` and
+  `flaky-vitest.txt` into the results directory. A failed Vitest run is
+  repeated once: a pass on the repeat is recorded in `flaky-vitest.txt`, a
+  second failure fails the suite. `ci/suitecheck/vitest_test.go` pins this.
 - `ci/quality.sh`: scrubs `BOARD_*` and runs `ci/qualitycheck` over
   `ci/quality.json` and the suite's merged coverage profile.
   **CRAP ceiling 8**, for product code and for fixtures alike; coverage floors

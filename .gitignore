@@ -2,3 +2,7 @@
 .review-clone/
 ci-results/
 node_modules/
+web/coverage/
+web/junit/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep

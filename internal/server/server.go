@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/n-orlov/board/internal/webui"
 )
 
 // DefaultListen is the listen address when BOARD_LISTEN is unset.
@@ -18,7 +20,8 @@ type Readiness func(ctx context.Context) error
 
 // Handler returns the HTTP handler the server serves. GET /healthz answers 200
 // whenever the process is up. GET /readyz answers 200 when ready returns nil
-// and 503 otherwise.
+// and 503 otherwise. Every other GET is answered from the web UI embedded in the
+// binary, so GET / is its index.html.
 func Handler(ready Readiness) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -33,6 +36,7 @@ func Handler(ready Readiness) http.Handler {
 		}
 		writeText(w, http.StatusOK, "ok\n")
 	})
+	mux.Handle("GET /", http.FileServerFS(webui.Files()))
 	return mux
 }
 
