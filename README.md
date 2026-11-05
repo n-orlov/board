@@ -17,4 +17,7 @@ Status: **design**. Nothing is implemented yet. Read [SPEC.md](SPEC.md):
 - stack: Go, `database/sql` over SQLite or Postgres, Svelte UI embedded in one binary (§12)
 - testing, CI and quality gates (§15), delivery phases (§16)
 
+Install (once releases exist): `curl -fsSL <repo>/install.sh | sh`, or ask your agent:
+*install board following `<repo URL>/INSTALL-AGENT.md`* (SPEC §8.5).
+
 License: to be decided before the repository goes public.

@@ -176,8 +176,10 @@ The server records **who** did everything (§4.6), so misuse is visible after th
 ## 4. Data model
 
 All timestamps are UTC, stored with millisecond precision. IDs are ULIDs (sortable by
-creation time, text in every dialect). Short human references are derived: initiative
-`slug`, task `ref` = `<initiative-slug>-<n>` (per-initiative counter, e.g. `phone-onboard-3`).
+creation time, text in every dialect). Every table except the join tables also has an integer
+identity column `n` (unique, never reused) from which the **short ref** is formed (§8.2):
+initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e.g.
+`phone-onboard-3`), lease `L<n>`, ask `A<n>`, note `N<n>`, event `E<n>`.
 
 ### 4.1 `actors`
 
@@ -409,7 +411,10 @@ and CLI can show badges without the lists.
   upserted on use. Session requests always act as the operator.
 - Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
   original response. Agents retry safely.
-- Pagination: `limit` (default 100, max 1000) + `after=<ulid>` cursor. Lists are ordered by id.
+- Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
+- Path and query parameters accept the short ref (§8.2) or the ULID of an object; responses
+  carry both (`id`, `ref`).
+- Errors carry a `next` field (the suggested next action) that the CLI prints (§8.1).
 - Compact mode: `?view=compact` returns the minimal fields agents need (ids, refs, one-line
   text, times), to keep agent context small.
 
@@ -441,6 +446,7 @@ and CLI can show badges without the lists.
 | GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
 | GET | `/stream` | SSE live feed (§7.1) |
+| POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
 | GET | `/healthz` | liveness, **unauthenticated** |
 | GET | `/readyz` | DB reachable and migrated |
 | GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
@@ -474,50 +480,167 @@ marks the ask as "asker waiting" in the attention view.
 
 ## 8. CLI
 
-One binary, same Go module: `board serve` runs the server, every other subcommand is a client.
-Static builds for linux/darwin × amd64/arm64.
+One binary, same Go module: `board serve` runs the server, every other subcommand is a client
+(`board admin …` excepted, below). Static builds for linux/darwin × amd64/arm64.
 
 Configuration: `BOARD_URL`, `BOARD_ACTOR` (handle; if unset, the CLI derives one with the
 built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_API_KEY` (the environment's key, §3.3;
 never accepted as a flag, so it does not land in shell history or process lists).
 `board admin …` subcommands talk to the database directly (`BOARD_DB_URL`) and need no key.
 
-Output is **compact plain text by default** (designed for agent context: one line per item,
-refs not ids, relative times), `--json` for machines.
+### 8.1 Output rules
+
+The CLI is written for agents first: every line costs context.
+
+- **Compact plain text by default**: one line per item, short refs (§8.2), relative times.
+  `--json` gives the full objects (ULIDs included) for machines.
+- **Every write command prints exactly one confirmation line**, starting with `ok`, naming the
+  object by its short ref and the one fact that matters next:
+  `ok lease L7 phone-onboard-3 exp 2h`, `ok task phone-onboard-4 created`,
+  `ok ask A12 raised (stop)`, `ok note N40 → host:gw1`.
+- **Every error is one line, on stderr, with the next action** after `→` when there is one:
+  `lease L7 expired 14m ago → board lease start phone-onboard-3 "<intent>"`,
+  `no BOARD_API_KEY → export BOARD_API_KEY (this environment's key)`,
+  `task phone-onboard-9 not found → board task ls phone-onboard`.
+  The server's problem documents carry a machine-readable `next` field the CLI renders.
+- **List caps**: each list section in `board now`, `board attention`, `board notes` and
+  `board catchup` shows at most **5** items, then `+K more → <command that shows them>`.
+  `--limit N` changes the cap, `--all` removes it. Plain list commands (`board task ls`, …) cap
+  at 20 by the same rule.
+
+Exit codes:
+
+| code | meaning |
+|---|---|
+| 0 | success |
+| 1 | error (server, network, unexpected) |
+| 2 | usage error (bad flags or arguments) |
+| 3 | timed out waiting (`--poll`); the ask stays open |
+| 4 | not found (unknown ref) |
+| 5 | authentication failed (missing, revoked or expired key) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) |
+| 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap |
+
+### 8.2 Short refs
+
+Every object has a short, unique ref that is typed back into any command; ULIDs stay internal
+and appear only in `--json`.
+
+| object | ref | example |
+|---|---|---|
+| initiative | its slug | `phone-onboard` |
+| task | `<initiative-slug>-<n>` | `phone-onboard-3` |
+| lease | `L<n>` | `L7` |
+| ask | `A<n>` | `A12` |
+| note | `N<n>` | `N40` |
+| event | `E<n>` | `E1043` |
+| API key | its name | `workstation` |
+| actor | its handle | `deck:personal/vpn-debug` |
+
+`<n>` is a per-table integer identity column (§4), assigned on insert, never reused. Refs are
+case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
+
+### 8.3 Commands
 
 ```
-board now [--resources r1,r2]          # check-in: what's live, conflicts, asks, new notes
+board version | update [--check] [--version vX.Y.Z]
+board whoami                            # handle, way back, key name, server reachability
+board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
 board attention
-board init add <slug> "<title>" [--tag t]...
+board init add <slug> "<title>" [--tag t]... | ls [--tag t] | show <slug> | close <slug>
 board task add <initiative> "<title>" [--kind watch --cadence 24h] [--after <ref>]...
-board task show|done|reopen|close <ref> [--resolution dropped] [--for operator]
-board lease start <ref> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
-board lease renew [<lease-id>|<ref>] [--ttl 4h] [--intent ...]
-board lease end   [<lease-id>|<ref>] ["<outcome>"]
-board ask <ref> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
-board answer <ask-id> "<answer>" [--relay]
+board task ls [<initiative>] [--status …] | show|done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
+board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
+board lease renew [<L…>|<task>] [--ttl 4h] [--intent …]      # no argument: all my live leases
+board lease end   [<L…>|<task>] ["<outcome>"]
+board ask <task> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
+board answer <A…> "<answer>" [--relay]
 board note "<summary>" [--body file|-] [--task <ref>] [--res r] [--mention h]
-board notes [--since last|<time>] [--task <ref>] [--broadcast] [--res r] [--ack]
-board note show <id>
-board milestone <ref> "<summary>"
-board check <ref> "<summary>" [--next 24h]
-board whoami                           # resolved handle, way back, server reachability
+board notes [--since last|<time>|<N…>] [--task <ref>] [--broadcast] [--res r] [--ack]
+board note show <N…>
+board milestone <task> "<summary>"
+board check <task> "<summary>" [--next 24h]
+board admin keys create <name> [--expires 90d] | list | revoke <name>   # direct DB, no HTTP
+board admin migrate | backup <dest>
 ```
 
-`board ask --poll D` exits 0 printing the answer, or exit code 3 on timeout (the ask stays
-open). `board lease renew` with no argument renews every live lease held by the current actor.
+`board ask --poll D` prints the answer (exit 0), or exits 3 on timeout.
+
+### 8.4 Shortcuts
+
+The most frequent sequences are single commands. Where a shortcut would otherwise need several
+calls, the server has a composite endpoint doing it in **one round trip and one transaction**.
+
+| shortcut | does | primitives | endpoint |
+|---|---|---|---|
+| `board start <task> "<intent>" [--res r]… [--ttl D]` | check in and start (or renew) a lease; prints the lease line, conflicts, and the `now` summary | `whoami` + `now --resources` + `lease start` | `POST /api/v1/start` |
+| `board finish [<task>] "<outcome>" [--done]` | end my lease on the task (my only live lease if omitted), write the outcome as a note on the task, optionally mark done | `lease end` + `note --task` + `task done` | `POST /api/v1/finish` |
+| `board new <initiative> "<title>" --start "<intent>" [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
+| `board ping ["<progress>"]` | renew all my live leases; with text, also a milestone on each leased task | `lease renew` (all) + `milestone` | `POST /api/v1/ping` |
+| `board block <task> "<question>" [--poll D \| --stop]` | raise an ask on the task; `--poll` keeps the lease and waits (renewing it while waiting); `--stop` ends the lease with outcome "blocked on A…" | `ask` + `lease end` (stop) | `POST /api/v1/asks` with `lease_action` |
+| `board catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `GET /api/v1/catchup` |
+
+Shortcuts print the same `ok …` lines as the primitives they replace (one per effect, so
+`board finish --done` prints two lines) and follow the same exit codes.
 
 Example `board now` output:
 
 ```
-you: claude:ws1:3f2a  leases: phone-onboard-3 (exp 1h52m)
-live: deck:personal/vpn-debug  homelab-7 "rotate wstunnel prefix" res host:gw1 (exp 41m)
-      ralph:trip-m6            trip-12   "attachments e2e"         res repo:trip (exp 3h10m)
-CONFLICT host:gw1 — you (phone-onboard-3) and deck:personal/vpn-debug (homelab-7)
-asks: #01J…Q answered: "use the rack AP"
-notes since 10:42 (3): [broadcast] ralph:trip-m6 "registry slow, builds may time out" …
+you: claude:ws1:3f2a (key workstation)  leases: L7 phone-onboard-3 exp 1h52m
+live: L5 deck:personal/vpn-debug  homelab-7 "rotate wstunnel prefix" res host:gw1 exp 41m
+      L3 ralph:trip-m6            trip-12   "attachments e2e"         res repo:trip exp 3h10m
+CONFLICT host:gw1: L7 (you, phone-onboard-3) and L5 deck:personal/vpn-debug (homelab-7)
+asks: A12 answered: "use the rack AP"
+notes since 10:42: N40 [broadcast] ralph:trip-m6 "registry slow, builds may time out"
+      N41 [host:gw1] deck:personal/vpn-debug "gw1 reboot at 11:30"
+      +3 more → board notes --since last
 attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1
 ```
+
+### 8.5 Installing the CLI
+
+**Script** (mirrors deck's `install.sh`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/<owner>/board/main/install.sh | sh
+```
+
+- Detects OS (linux, darwin) and arch (amd64, arm64), downloads `board_<os>_<arch>.tar.gz` and
+  `checksums.txt` from the GitHub release over HTTPS only, verifies SHA-256, installs to
+  `~/.local/bin/board` (copy then rename, so a running binary is replaced safely).
+- `BOARD_VERSION=vX.Y.Z` pins a release (default latest); `BOARD_INSTALL_DIR` changes the
+  directory.
+- **Immutability**: before installing it asks the GitHub release API whether the release is
+  immutable and refuses one that is not confirmed, as `deck update` does;
+  `BOARD_REQUIRE_IMMUTABLE=0` (exactly `0`) opts out with a note. (deck's own `install.sh` does
+  not check this yet; board's does.)
+- Prints the installed `board version` and warns if the directory is not on `PATH`.
+
+**`board update`** replaces the running binary with the latest (or `--version`) release, with
+the same checksum and immutability checks; `--check` only reports. It refuses dev builds,
+package-managed installs and unwritable directories, like `deck update`.
+
+**`INSTALL-AGENT.md`**: an install guide for agents, with no script to pipe into a shell.
+Numbered steps the agent runs and checks itself, each with the command and the expected result:
+
+1. Detect OS and arch (`uname -s`, `uname -m`) and map them to the asset name.
+2. Check prerequisites (`curl` or `gh`, `tar`, `sha256sum` or `shasum`).
+3. Find the release: latest tag from the GitHub API (or the pinned version).
+4. Confirm the release is immutable (API field), and stop if not.
+5. Download the asset and `checksums.txt`; verify the SHA-256 of the asset.
+6. Extract and install to `~/.local/bin` (or the chosen directory); make it executable.
+7. Run `board version` and compare with the release tag.
+8. Configure `BOARD_URL` and `BOARD_API_KEY` (from the operator's secret store, never pasted
+   into files under version control), and `BOARD_ACTOR` per the identity rules (§9).
+9. Run `board whoami` and expect the handle, key name and `server ok`.
+
+The README says: *"or ask your agent: install board following
+`<repo URL>/INSTALL-AGENT.md`"*.
+
+A CI check (Lint stage) parses `install.sh` and `INSTALL-AGENT.md` and fails if they disagree on
+the asset name pattern, supported OS/arch list, checksum file name, default install directory or
+the environment variable names. Where releases come from while the repository is private is the
+operator's deployment concern, not part of this spec.
 
 ---
 
@@ -638,6 +761,12 @@ network requests (all assets embedded).
   certificates and tzdata. Runs as a non-root uid. Multi-arch: linux/amd64, linux/arm64.
 - One volume (`/data`) for the SQLite file when SQLite is used.
 
+### 12.5 Release artifacts
+
+Per release: `board_<os>_<arch>.tar.gz` for linux/darwin × amd64/arm64, `checksums.txt`
+(SHA-256), SBOMs, the multi-arch image, and `install.sh` / `INSTALL-AGENT.md` from the tagged
+commit. Releases are immutable (§8.5, §15.3).
+
 ---
 
 ## 13. Configuration and deployment
@@ -751,7 +880,7 @@ Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent
 | stage | as in deck | board specifics |
 |---|---|---|
 | CI image | `ci/jenkins-image.sh`, Go cache volume | image also carries Node (frontend build, Vitest, Playwright browsers) |
-| Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check |
+| Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
 | Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, merged coverage, JUnit | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
 | Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
 | Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4 |
@@ -816,7 +945,9 @@ Everything below exists and the gates measure real code before any product featu
 - **goose migrations + dialect layer** running on SQLite and Postgres.
 - **One thin vertical slice**: initiatives create / list / get, via API, via CLI
   (`board init add`, `board init ls`, `board init show`), and a minimal Svelte page listing and
-  creating initiatives. Enough real code for every gate to measure.
+  creating initiatives. Enough real code for every gate to measure. The slice already follows the
+  CLI output rules (§8.1): `ok` confirmation lines, one-line errors with `→ next`, the exit codes,
+  list caps.
 - Svelte/Vite shell embedded via `go:embed`.
 - **Multi-arch container image** (amd64 + arm64), built in CI.
 - **deck-equivalent `Jenkinsfile` + `ci/`**: lint (Go + TS), unit, coverage gates, CRAP 8 for Go
@@ -832,10 +963,10 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 
 | phase | scope |
 |---|---|
-| 1 | Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts; `board now` (lease/conflict parts), task and lease CLI. |
+| 1 | Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
 | 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page). |
 | 3 | Timeline UI (`vis-timeline`, archive window, filters), SSE live feed, remaining UI views. |
-| 4 | Skill (`skill/SKILL.md`), identity template, CLI polish (compact output, idempotency), performance targets verified (§14), operator's own deployment. |
+| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); skill (`skill/SKILL.md`), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 
 Each phase ends on a green `main` build with all gates still enforced.
 
