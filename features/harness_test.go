@@ -29,7 +29,7 @@ func dbLeg() (string, error) {
 	case "", "sqlite":
 		return "sqlite", nil
 	case "postgres":
-		return "", errors.New("BOARD_DB_LEG=postgres: the Postgres leg is not available yet (it arrives with the store)")
+		return "postgres", nil
 	default:
 		return "", fmt.Errorf("BOARD_DB_LEG=%q: want sqlite or postgres", leg)
 	}
@@ -63,6 +63,14 @@ type harness struct {
 	addr   string
 	dir    string
 	dbURL  string
+
+	// shared is the Postgres every scenario of the run gets a database on
+	// (nil on the SQLite leg). own is a container private to the running
+	// scenario, started for one tagged @dedicated-database so that it may stop
+	// the database without disturbing the others.
+	shared    *postgresServer
+	dedicated bool
+	own       *postgresServer
 }
 
 func (h *harness) env(extra ...string) []string {
@@ -153,6 +161,9 @@ func (h *harness) freshDatabase() error {
 	if h.dbURL != "" {
 		return nil
 	}
+	if h.leg == "postgres" {
+		return h.freshPostgres()
+	}
 	dir, err := os.MkdirTemp("", "board-godog-")
 	if err != nil {
 		return err
@@ -162,19 +173,80 @@ func (h *harness) freshDatabase() error {
 	return nil
 }
 
+// freshPostgres names an empty database on the run's Postgres, or on a private
+// container for a scenario tagged @dedicated-database.
+func (h *harness) freshPostgres() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	server := h.shared
+	if h.dedicated {
+		own, err := startPostgres(ctx)
+		if err != nil {
+			return err
+		}
+		h.own, server = own, own
+	}
+	url, err := server.newDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	h.dbURL = url
+	return nil
+}
+
+// openDB opens the scenario's database with the driver of the leg.
+func (h *harness) openDB() (*sql.DB, error) {
+	if h.leg == "postgres" {
+		return sql.Open("pgx", h.dbURL)
+	}
+	return sql.Open("sqlite", strings.TrimPrefix(h.dbURL, "sqlite://"))
+}
+
 // recordSchemaVersion makes the scenario's database claim goose version v as
 // applied, the way a newer binary's migration would have.
 func (h *harness) recordSchemaVersion(ctx context.Context, v int) error {
 	if err := h.freshDatabase(); err != nil {
 		return err
 	}
-	db, err := sql.Open("sqlite", strings.TrimPrefix(h.dbURL, "sqlite://"))
+	db, err := h.openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	_, err = db.ExecContext(ctx, "INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v)
+	insert := "INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)"
+	if h.leg == "postgres" {
+		insert = "INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)"
+	}
+	_, err = db.ExecContext(ctx, insert, v)
 	return err
+}
+
+// phase0Tables are the tables the embedded migrations create.
+var phase0Tables = []string{"actors", "initiatives", "events", "api_keys", "initiative_tags", "sessions"}
+
+// hasPhase0Tables reads every Phase 0 table, which fails when one is missing.
+func (h *harness) hasPhase0Tables(ctx context.Context) error {
+	db, err := h.openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for _, table := range phase0Tables {
+		var n int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&n); err != nil {
+			return fmt.Errorf("table %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+// databaseStopped stops the database the way an outage would. Only a scenario
+// with its own container may do it.
+func (h *harness) databaseStopped(ctx context.Context) error {
+	if h.own == nil {
+		return errors.New("only a scenario tagged @dedicated-database on the Postgres leg may stop its database")
+	}
+	return h.own.stop(ctx)
 }
 
 // get sends a credential-less GET to the running server and records the status.
@@ -200,12 +272,24 @@ func (h *harness) stopServer() {
 	if h.dir != "" {
 		_ = os.RemoveAll(h.dir)
 	}
-	h.dir, h.dbURL = "", ""
+	if h.own != nil {
+		h.own.terminate(context.Background())
+	}
+	h.dir, h.dbURL, h.own, h.dedicated = "", "", nil, false
 }
 
 var versionPattern = regexp.MustCompile(`^(v[0-9][^\s]*|devel(\+[0-9a-f]+)?)(-dirty)?$`)
 
 func registerSteps(sc *godog.ScenarioContext, h *harness) {
+	sc.Before(func(ctx context.Context, scenario *godog.Scenario) (context.Context, error) {
+		h.dedicated = false
+		for _, tag := range scenario.Tags {
+			if tag.Name == "@dedicated-database" {
+				h.dedicated = true
+			}
+		}
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		h.stopServer()
 		return ctx, nil
@@ -243,7 +327,9 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		}
 		return nil
 	})
-	sc.Step(`^a new SQLite database for the board commands$`, h.freshDatabase)
+	sc.Step(`^a new database for the board commands$`, h.freshDatabase)
+	sc.Step(`^the database holds every Phase 0 table$`, h.hasPhase0Tables)
+	sc.Step(`^the database is stopped$`, h.databaseStopped)
 	sc.Step(`^the database records schema version (\d+) as applied$`, h.recordSchemaVersion)
 	sc.Step(`^stderr is exactly one line containing "([^"]*)"$`, func(want string) error {
 		if strings.Count(h.stderr, "\n") != 1 || !strings.HasSuffix(h.stderr, "\n") || !strings.Contains(h.stderr, want) {

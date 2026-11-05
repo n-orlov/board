@@ -96,7 +96,23 @@ count_junit() {
     }' "$1"
 }
 
-for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml"; do
+# Besides the SQLite leg's junit-features.xml, ci/suite.sh writes one
+# junit-features-<leg>.xml per further database leg (the Postgres leg), whose
+# scenarios are separate tests. junit-features-sqlite.xml repeats the SQLite
+# leg's scenarios for ci/legcompare and is not counted again.
+leg_junits=""
+for f in "$junit_dir"/junit-features-*.xml; do
+    [ -f "$f" ] || continue
+    case "$f" in *-sqlite.xml | *-aborted.xml) continue ;; esac
+    leg_junits="$leg_junits $f"
+done
+leg_flakies=""
+for f in "$outdir"/flaky-features-*.txt; do
+    [ -f "$f" ] && leg_flakies="$leg_flakies $f"
+done
+
+# shellcheck disable=SC2086 # the leg lists are paths without spaces
+for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" $leg_junits; do
     [ -f "$junit" ] || continue
     counts=$(count_junit "$junit")
     set -- $counts
@@ -105,7 +121,8 @@ for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml"; do
     total_skipped=$((total_skipped + ${3:-0}))
 done
 
-for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt"; do
+# shellcheck disable=SC2086
+for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" $leg_flakies; do
     [ -f "$flaky" ] || continue
     n=$(grep -c . "$flaky" 2>/dev/null || true)
     flaky_count=$((flaky_count + ${n:-0}))
@@ -127,7 +144,8 @@ echo
 if [ "$flaky_count" -gt 0 ]; then
     echo "#### flaky (failed, then passed on retry)"
     echo
-    for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt"; do
+    # shellcheck disable=SC2086
+for flaky in "$outdir/flaky-go.txt" "$outdir/flaky-features.txt" $leg_flakies; do
         [ -f "$flaky" ] || continue
         grep . "$flaky" | sed 's/^/- /' || true
     done
@@ -139,7 +157,8 @@ echo
 times=$(mktemp)
 trap 'rm -f "$times"' EXIT
 
-for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml"; do
+# shellcheck disable=SC2086
+for junit in "$junit_dir/junit-go.xml" "$junit_dir/junit-features.xml" $leg_junits; do
     [ -f "$junit" ] || continue
     grep -oE '<testsuite [^>]*>' "$junit" | while IFS= read -r line; do
         # The attribute's XML entities are decoded (&amp; last), so the

@@ -388,9 +388,10 @@ func TestSuiteScriptWritesOneAllureResultsDirWithEnvironmentAndExecutor(t *testi
 }
 
 // TestSuiteScriptFeedsTheAllureFormatterToEveryFeaturesRun: the initial
-// TestFeatures run and each solo rerun write native results into the same
-// directory (same historyId, so the rerun is a retry), and -race reaches
-// environment.properties.
+// TestFeatures run and each solo rerun of the SQLite leg write native results
+// into the same directory (same historyId, so the rerun is a retry), the other
+// database legs' runs do not (the same scenario on another leg is not a retry
+// of it), and -race reaches environment.properties.
 func TestSuiteScriptFeedsTheAllureFormatterToEveryFeaturesRun(t *testing.T) {
 	root, err := repositoryRoot()
 	if err != nil {
@@ -401,8 +402,12 @@ func TestSuiteScriptFeedsTheAllureFormatterToEveryFeaturesRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := stripCommentLines(string(raw))
+	extra := strings.Index(script, "run_extra_leg()")
+	if extra < 0 {
+		t.Fatal("ci/suite.sh has no run_extra_leg(), the function that runs the other database legs")
+	}
 	calls := 0
-	for _, line := range strings.Split(script, "\n") {
+	for _, line := range strings.Split(script[:extra], "\n") {
 		if strings.Contains(line, "run_test_features ") && !strings.Contains(line, "run_test_features()") {
 			calls++
 			if !strings.Contains(line, `"BOARD_GODOG_ALLURE=$allure_dir"`) {
@@ -411,7 +416,12 @@ func TestSuiteScriptFeedsTheAllureFormatterToEveryFeaturesRun(t *testing.T) {
 		}
 	}
 	if calls != 2 {
-		t.Errorf("found %d run_test_features calls, want 2 (the initial run and the solo rerun)", calls)
+		t.Errorf("found %d SQLite-leg run_test_features calls, want 2 (the initial run and the solo rerun)", calls)
+	}
+	for _, line := range strings.Split(script[extra:], "\n") {
+		if strings.Contains(line, "run_test_features ") && strings.Contains(line, "BOARD_GODOG_ALLURE=") {
+			t.Errorf("another leg's run feeds the SQLite leg's Allure results, where its scenarios would read as retries: %s", strings.TrimSpace(line))
+		}
 	}
 	if !strings.Contains(script, `*' -race '*) race_mode=yes`) {
 		t.Error("environment.properties no longer records race=yes for a -race run")

@@ -51,18 +51,44 @@ set -- "$@" docker run --rm \
     --mount "type=volume,src=$volume,dst=/go-cache" \
     --mount "type=volume,src=$npm_volume,dst=/npm-cache" \
     ${RALPHD_RUN_ID:+--label ralphd.run=$RALPHD_RUN_ID} \
-    ${RALPHD_RUN_ID:+--label ralphd.role=sibling} \
-    "$image"
+    ${RALPHD_RUN_ID:+--label ralphd.role=sibling}
+
+# The docker socket (the Postgres leg of the feature matrix): the sibling mounts
+# the host daemon's socket, joins the socket's group so the non-root uid can use
+# it, and resolves host.docker.internal to the docker host. Containers the
+# features harness starts through testcontainers are siblings of this one, on
+# the host daemon; their published ports are on the host, so the harness reaches
+# them at host.docker.internal (BOARD_CI_DOCKER_HOST) and labels them as
+# siblings with the run id (BOARD_CI_RUN_ID). The socket's HOST path is the same
+# path the caller sees, since a ralphd job container mounts it at that path.
+sock=${BOARD_CI_DOCKER_SOCK:-/var/run/docker.sock}
+extra_env=""
+if [ -S "$sock" ]; then
+    sock_gid=$(stat -c %g "$sock" 2>/dev/null || stat -f %g "$sock")
+    set -- "$@" \
+        --mount "type=bind,src=$sock,dst=/var/run/docker.sock" \
+        --group-add "$sock_gid" \
+        --add-host host.docker.internal:host-gateway
+    extra_env="BOARD_CI_DOCKER_HOST=host.docker.internal"
+fi
+if [ -n "${RALPHD_RUN_ID:-}" ]; then
+    extra_env="$extra_env BOARD_CI_RUN_ID=$RALPHD_RUN_ID"
+fi
+set -- "$@" "$image"
 
 # Forward every BOARD_* variable present in the caller's environment, as an `env`
 # prefix on the command itself. This makes
 #   BOARD_GODOG_PATHS=x ci/run.sh go test ./features/ -run TestFeatures
 # behave exactly like the longhand form
 #   ci/run.sh env BOARD_GODOG_PATHS=x go test ./features/ -run TestFeatures
-# which keeps working unchanged. Nothing is added when no BOARD_* variable is set.
+# which keeps working unchanged. The BOARD_CI_* values above come first, so a
+# caller's own value of the same name wins.
 forwarded=$(env | sed -n 's/^\(BOARD_[A-Za-z0-9_]*\)=.*/\1/p' | sort -u)
-if [ -n "$forwarded" ]; then
+if [ -n "$forwarded" ] || [ -n "$extra_env" ]; then
     set -- "$@" env
+    for assignment in $extra_env; do
+        set -- "$@" "$assignment"
+    done
     for name in $forwarded; do
         eval "set -- \"\$@\" \"$name=\${$name}\""
     done

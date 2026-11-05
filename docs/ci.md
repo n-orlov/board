@@ -28,10 +28,59 @@ the image above, on the host docker daemon:
   build and golangci-lint caches) and `board-npm-cache` (`/npm-cache`);
 - every `BOARD_*` variable in the caller's environment is forwarded, and no
   other variable is. `BOARD_CI_IMAGE`, `BOARD_CI_CACHE_VOLUME` and
-  `BOARD_CI_NPM_VOLUME` override the image and the volume names.
+  `BOARD_CI_NPM_VOLUME` override the image and the volume names;
+- when the docker socket exists (`/var/run/docker.sock`, or
+  `BOARD_CI_DOCKER_SOCK`) it is bind-mounted into the sibling, the sibling joins
+  the socket's group so its non-root uid can use it, and `host.docker.internal`
+  resolves to the docker host. See the next section.
 
 `ci/repocheck/runsh_test.go` runs the script against a stub `docker` and checks
 that argv.
+
+## The database matrix and the docker socket
+
+The scenarios in `features/` run on two database legs, chosen by
+`BOARD_DB_LEG=sqlite|postgres` (SQLite when unset):
+
+    BOARD_GODOG_PATHS=health.feature BOARD_DB_LEG=postgres ci/run.sh go test -count=1 ./features/ -run TestFeatures
+
+The Postgres leg starts a Postgres 16 container (pinned by digest in
+`features/postgres_test.go`) with testcontainers-go through the docker socket
+`ci/run.sh` mounted, so the container is a sibling of the toolchain container on
+the host daemon, not a child of it:
+
+- it publishes its port on the host, and the harness reaches it at
+  `host.docker.internal` (`BOARD_CI_DOCKER_HOST`, which `ci/run.sh` sets while
+  the socket is mounted);
+- it carries the labels `ralphd.role=sibling`, `board.ci=postgres` and, when the
+  caller runs inside a ralphd job, `ralphd.run=<run id>` (`BOARD_CI_RUN_ID`), so
+  the job that owns the run can reap a leaked one without matching anything else;
+- the testcontainers reaper is off (`TESTCONTAINERS_RYUK_DISABLED`): the harness
+  terminates each container it started when the run, or the scenario that owns
+  it, ends;
+- one container serves the whole run, with a fresh empty database per scenario.
+  A scenario tagged `@dedicated-database` gets a container of its own, so that
+  `the database is stopped` cannot disturb another scenario. A scenario tagged
+  `@postgres` runs on the Postgres leg only (the SQLite leg runs `~@postgres`).
+
+`ci/suite.sh` runs the `features/` pass once per leg of `BOARD_CI_DB_LEGS`
+(default `sqlite postgres`; SQLite is always first and keeps the file names it
+had before the matrix). Each other leg gets the same fail-once-retry-once, a
+scenario at a time, into files named for it: `features-run1-<leg>.log`,
+`flaky-features-<leg>.txt` and `junit-features-<leg>-gotestsum.xml`. Both legs
+write a merged JUnit, `junit-merged/junit-features-<leg>.xml`, kept apart so that
+one scenario run on both legs is never read as a retry of itself, and
+`ci/legcompare` reads them: a scenario green on one leg and red on another is
+written to `leg-divergence.txt` and fails the suite. A scenario red on both legs
+fails its legs, not the comparison, and one that only some legs run is not
+compared. `ci/summary.sh` counts every leg. Allure covers the SQLite leg only:
+the same scenario on a second leg would share a history id with it and read as
+its retry.
+
+`ci/suitecheck/legfixture_test.go` runs the real `ci/suite.sh` against
+`testdata/legfixture/`, a `TestFeatures` that reads `BOARD_DB_LEG` and is red on
+the leg `LEGFIXTURE_RED_ON` names, and requires the suite to fail and name the
+scenario.
 
 ## Disposable-clone measurement: `ci/review.sh`
 
@@ -76,6 +125,8 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   exact path in `zeroStatementPackages`; a stale or missing entry fails.
 - `ci/crapgate`: CRAP score (cyclomatic complexity against coverage) per
   function against the ceiling in `ci/quality.json`. There is no baseline file.
+- `ci/legcompare`: compares per-leg JUnit and lists the scenarios that are
+  green on one database leg and red on another (exit 1).
 - `ci/qualitycheck`: the single quality-gate runner behind `ci/quality.sh`. It
   runs whichever gates `ci/quality.json` switches on (coverage, CRAP,
   golangci-lint, govulncheck, Trivy and the module SBOM run today; see the

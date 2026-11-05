@@ -24,3 +24,19 @@ Feature: Liveness and readiness
     Given the board server is running on a free port with BOARD_MIGRATE=off
     When I request GET "/healthz" without credentials
     Then the response status is 200
+
+  @postgres @dedicated-database
+  Scenario: /readyz answers 503 once the Postgres database is stopped
+    Given the board server is running on a free port
+    When I request GET "/readyz" without credentials
+    Then the response status is 200
+    When the database is stopped
+    And I request GET "/readyz" without credentials
+    Then the response status is 503
+
+  @postgres @dedicated-database
+  Scenario: /healthz still answers 200 once the Postgres database is stopped
+    Given the board server is running on a free port
+    When the database is stopped
+    And I request GET "/healthz" without credentials
+    Then the response status is 200

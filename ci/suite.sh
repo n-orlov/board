@@ -127,6 +127,16 @@ go_extra_flags=${BOARD_CI_GO_EXTRA_FLAGS:-}
 ci_sha=${BOARD_CI_SHA:-}
 ci_run_url=${BOARD_CI_RUN_URL:-}
 ci_build_name=${BOARD_CI_BUILD_NAME:-board CI}
+# db_legs / ci_run_id / ci_docker_host (task 013, R4): the database legs the
+# feature scenarios run on (SQLite always, first; every other named leg after
+# it), and what the Postgres leg's harness needs to start its container through
+# the docker socket ci/run.sh mounted: the run id the container is labelled with
+# and the name the docker host answers to from inside this container. The
+# BOARD_* scrub below would drop all three, and run_test_features hands them to
+# the features pass explicitly.
+db_legs=${BOARD_CI_DB_LEGS:-sqlite postgres}
+ci_run_id=${BOARD_CI_RUN_ID:-}
+ci_docker_host=${BOARD_CI_DOCKER_HOST:-}
 covermode=set
 case " $go_extra_flags " in
     *' -race '*) covermode=atomic ;;
@@ -303,13 +313,31 @@ mkdir -p "$covdir"
 run_test_features() {
     junit=$1
     shift
-    env "BOARD_FEATURES_COVERMODE=$covermode" "$@" go run "$gotestsum_pkg" \
+    env "BOARD_FEATURES_COVERMODE=$covermode" "BOARD_DB_LEG=$features_leg" "BOARD_CI_RUN_ID=$ci_run_id" "BOARD_CI_DOCKER_HOST=$ci_docker_host" "$@" go run "$gotestsum_pkg" \
         --format standard-verbose \
         --junitfile "$junit" \
         --packages ./features/ \
         -- -p=1 -count=1 -run '^TestFeatures$' "-timeout=$features_test_timeout" $go_extra_flags
 }
 
+# failed_scenario_locations <log>: the "<file>.feature:<line>" of every scenario
+# Godog's own summary block names as failed in a run's log, one per line.
+# Only that block ("--- Failed steps:" up to its "N scenarios (...)" tally)
+# names failed scenarios; bounding the range keeps any later reprint of passing
+# scenarios' headers (gotestsum's "=== Failed" recap) from being mistaken for a
+# failure. The recap can repeat the summary block itself, hence sort -u.
+failed_scenario_locations() {
+    sed -E 's/\x1b\[[0-9;]*m//g' "$1" \
+        | sed -n '/^--- Failed steps:/,/^[0-9][0-9]* scenarios (/p' \
+        | grep -E '^[[:space:]]*Scenario' \
+        | grep -oE '# [^[:space:]]+\.feature:[0-9]+' \
+        | sed 's/^# //' \
+        | sort -u
+}
+
+# The first leg is always SQLite; its files keep the names below, and every other
+# leg of $db_legs runs after it (step 2b) into files of its own.
+features_leg=sqlite
 features_status=0
 # features_aborted_without_locations (cure-01-08, R146): set only when the
 # initial run fails AND the pretty log never printed a parseable
@@ -328,16 +356,7 @@ if ! run_test_features "$outdir/junit-features-gotestsum.xml" "BOARD_GODOG_JUNIT
     clean_log="$outdir/features-run1.clean.log"
     sed -E 's/\x1b\[[0-9;]*m//g' "$features_log" > "$clean_log"
 
-    # Only Godog's own summary block ("--- Failed steps:" up to its
-    # "N scenarios (...)" tally) names failed scenarios; bounding the range
-    # keeps any later reprint of passing scenarios' headers (gotestsum's
-    # "=== Failed" recap) from being mistaken for a failure. The recap can
-    # repeat the summary block itself, hence sort -u.
-    locations=$(sed -n '/^--- Failed steps:/,/^[0-9][0-9]* scenarios (/p' "$clean_log" \
-        | grep -E '^[[:space:]]*Scenario' \
-        | grep -oE '# [^[:space:]]+\.feature:[0-9]+' \
-        | sed 's/^# //' \
-        | sort -u)
+    locations=$(failed_scenario_locations "$features_log")
 
     if [ -z "$locations" ]; then
         echo "ci/suite.sh: features/ failed but no scenario location could be parsed from $features_log" >&2
@@ -366,6 +385,53 @@ if [ "$features_status" -ne 0 ]; then
     echo "ci/suite.sh: features/ failed after per-scenario retry" >&2
     overall_status=1
 fi
+
+# --- 2b. every other database leg: the same scenarios against Postgres (task 013, R4) ---
+# One run of features/TestFeatures with BOARD_DB_LEG=<leg>, then each failed
+# scenario alone by its "<file>:<line>" (the SQLite leg's retry-once, scenario by
+# scenario). Everything lands in files named for the leg: features-run1-<leg>.log,
+# flaky-features-<leg>.txt, junit-features-<leg>-gotestsum.xml and
+# junit-features-<leg>-rerun-<i>-gotestsum.xml. Step 3c folds those into
+# junit-merged/junit-features-<leg>.xml and compares the legs.
+run_extra_leg() {
+    leg=$1
+    features_leg=$leg
+    leg_log="$outdir/features-run1-$leg.log"
+    leg_flaky="$outdir/flaky-features-$leg.txt"
+    : > "$leg_flaky"
+    if run_test_features "$outdir/junit-features-$leg-gotestsum.xml" "GOCOVERDIR=$covdir" > "$leg_log" 2>&1; then
+        return 0
+    fi
+    leg_locations=$(failed_scenario_locations "$leg_log")
+    if [ -z "$leg_locations" ]; then
+        echo "ci/suite.sh: features/ on the $leg leg failed but no scenario location could be parsed from $leg_log" >&2
+        return 1
+    fi
+    leg_recovered=1
+    leg_i=0
+    for loc in $leg_locations; do
+        leg_i=$((leg_i + 1))
+        echo "ci/suite.sh: features/ rerunning failed scenario alone on the $leg leg: BOARD_GODOG_PATHS=$loc" >&2
+        if run_test_features "$outdir/junit-features-$leg-rerun-$leg_i-gotestsum.xml" "BOARD_GODOG_PATHS=$loc" "GOCOVERDIR=$covdir" > "$outdir/features-rerun-$leg-$leg_i.log" 2>&1; then
+            echo "$loc" >> "$leg_flaky"
+        else
+            echo "ci/suite.sh: features/ scenario $loc failed again on its solo rerun on the $leg leg" >&2
+            leg_recovered=0
+        fi
+    done
+    [ "$leg_recovered" -eq 1 ]
+}
+
+extra_legs=""
+for leg in $db_legs; do
+    [ "$leg" = sqlite ] && continue
+    extra_legs="$extra_legs $leg"
+    if ! run_extra_leg "$leg"; then
+        echo "ci/suite.sh: features/ failed on the $leg leg after per-scenario retry" >&2
+        overall_status=1
+    fi
+done
+features_leg=sqlite
 
 # --- 3. one merged JUnit file per pass, retries folded (R146/task 019) ---
 # The raw files above keep every attempt as its own <testcase>, and
@@ -499,6 +565,37 @@ fi
 
 if [ "$features_merge_ok" -eq 0 ]; then
     echo "ci/suite.sh: no features/ JUnit data survived to merge (godog JUnit, gotestsum JUnit and every rerun file were all missing, empty or malformed)" >&2
+fi
+
+# --- 3c. per-leg JUnit, and the legs compared (task 013, R4) ---
+# junit-merged/junit-features-<leg>.xml holds one leg's scenarios as gotestsum
+# saw them (TestFeatures/<scenario>), the leg's solo reruns folded in by
+# ci/junitflaky. They are separate files so that a scenario run on both legs is
+# never read as a retry of itself. A scenario green on one leg and red on another
+# fails the suite: ci/legcompare names it, and its report is leg-divergence.txt.
+leg_args="sqlite=$merged_dir/junit-features-sqlite.xml"
+# shellcheck disable=SC2086
+merge_junit "$merged_dir/junit-features-sqlite.xml" "$outdir/junit-features-gotestsum.xml" $features_reruns_gotestsum || true
+for leg in $extra_legs; do
+    leg_reruns=""
+    n=1
+    while [ -f "$outdir/junit-features-$leg-rerun-$n-gotestsum.xml" ]; do
+        leg_reruns="$leg_reruns $outdir/junit-features-$leg-rerun-$n-gotestsum.xml"
+        n=$((n + 1))
+    done
+    # shellcheck disable=SC2086
+    merge_junit "$merged_dir/junit-features-$leg.xml" "$outdir/junit-features-$leg-gotestsum.xml" $leg_reruns || true
+    leg_args="$leg_args $leg=$merged_dir/junit-features-$leg.xml"
+done
+if [ -n "$extra_legs" ]; then
+    # shellcheck disable=SC2086 # one <leg>=<path> word per leg, paths hold no spaces
+    if go run ./ci/legcompare $leg_args > "$outdir/leg-divergence.txt"; then
+        echo "ci/suite.sh: every scenario gave the same answer on all database legs ($leg_args)"
+    else
+        cat "$outdir/leg-divergence.txt" >&2
+        echo "ci/suite.sh: the database legs disagree, or could not be compared (see $outdir/leg-divergence.txt)" >&2
+        overall_status=1
+    fi
 fi
 
 # --- 3b. one Allure results directory: features native, unit converted, environment, executor (task 005, R195/R196) ---
