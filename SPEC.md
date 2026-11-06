@@ -1162,6 +1162,18 @@ The PNGs are rendered from `icon.svg`. `e2e/manifest.spec.ts` signs in, reads th
 the page, and checks the manifest is same-origin JSON with those fields and that the five icon
 URLs answer 200 with an `image/*` content type.
 
+**Touch and phone ergonomics.** At the phone width (390x844) every visible interactive element
+(`a, button, input, select, textarea, [role=button]`) in the shell, the forms, the lists and the
+dialogs has a hit area of at least 44x44 CSS px, and every visible `input`, `select` and `textarea`
+has a computed `font-size` of at least 16 px, so iOS does not zoom on focus. The hit area is the
+element's own box: a visually hidden control does not count as met by being 1 px, so the Theme
+radios are transparent inputs laid over their 44 px-high labels rather than `sr-only`. Only the
+skip link, clipped away (`clip-path: inset(50%)`) until it takes focus, is outside the rule while
+hidden. Nothing depends on hover: every action is a button or a link. `e2e/touch.spec.ts` measures
+the Initiatives, Settings -> API keys and Signed out views and the new-initiative sheet, the new-key
+sheet, the revoke confirmation and the account menu opened over them, and fails with the offending
+elements named when one is smaller or a field's text is under 16 px.
+
 Global: tag filter persisted in the URL, keyboard navigation, no external
 network requests (all assets embedded).
 

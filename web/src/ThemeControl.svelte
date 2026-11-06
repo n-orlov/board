@@ -17,12 +17,12 @@
   <div class="flex gap-2" data-testid="theme-control">
     {#each THEME_SETTINGS as option (option)}
       <label
-        class="flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-md border border-border px-3 text-sm text-text has-[:checked]:border-accent has-[:checked]:bg-surface has-[:checked]:font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+        class="relative flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-md border border-border px-3 text-sm text-text has-[:checked]:border-accent has-[:checked]:bg-surface has-[:checked]:font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
       >
         <input
           type="radio"
           name="theme"
-          class="sr-only"
+          class="absolute -inset-px h-[calc(100%+2px)] w-[calc(100%+2px)] cursor-pointer opacity-0 text-base"
           value={option}
           checked={setting === option}
           onchange={() => choose(option)}
