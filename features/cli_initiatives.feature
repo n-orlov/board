@@ -63,7 +63,7 @@ Feature: Initiatives from the command line
     When I run the client 'board init show nope-nope' as actor "claude@laptop"
     Then the exit code is 4
     And stdout is empty
-    And stderr is exactly one line containing "→"
+    And stderr is exactly one line containing "→ board init ls"
     When I run the client 'board init show phone-onboard --api-key brd_nope' as actor "claude@laptop"
     Then the exit code is 2
     And stderr is exactly one line containing "usage: board init"

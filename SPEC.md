@@ -775,7 +775,10 @@ and, unless `BOARD_WAY_BACK` is set, the way back is `pid <ppid> on <hostname>, 
 no `BOARD_API_KEY` a client command exits 5 with `no BOARD_API_KEY → export BOARD_API_KEY (this environment's
 key)`, with no `BOARD_URL` it exits 1 with `no BOARD_URL → export BOARD_URL (the address of the board server)`, and
 an unreachable server exits 1 with `server unreachable at <url> → check BOARD_URL and that board serve is running`.
-A server problem document is printed as one line, `<detail> → <next>`, and exits by its status: 401 is 5, 404 is 4,
+A server problem document is printed as one line, `<detail> → <next>`, with the server's `next` except where the
+CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
+taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
+It exits by its status: 401 is 5, 404 is 4,
 anything else, a 409 included, is 1: Phase 0 produces only the exit codes 0, 1, 2, 4 and 5. The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
@@ -789,7 +792,7 @@ anything else, a 409 included, is 1: Phase 0 produces only the exit codes 0, 1, 
   `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array.
 - `board init show <slug> [--json]` prints the one-line form, then `targets: <start> → <end>` when it has either,
   `created by <handle> <relative time>`, `closed by <handle> <relative time>` when closed, and the description. An
-  unknown slug exits 4 with the server's `next`.
+  unknown slug exits 4 with `<detail> → board init ls`, whatever `next` the server sent.
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.

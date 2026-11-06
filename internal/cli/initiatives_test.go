@@ -236,7 +236,7 @@ func TestInitShow(t *testing.T) {
 	f := &fakeBoard{handler: func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/initiatives/missing" {
 			w.WriteHeader(404)
-			_, _ = w.Write([]byte(`{"detail":"initiative missing not found","next":"board init ls"}`))
+			_, _ = w.Write([]byte(`{"detail":"initiative missing not found","next":"List initiatives with GET /api/v1/initiatives."}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"slug":"phone","title":"Phone","description":"The body.","status":"closed","tags":["a","b"],"target_start":"2026-01-01","target_end":"2026-02-01","created_by":"x","created_at":"2000-01-01T00:00:00Z","closed_at":"2000-01-02T00:00:00Z","closed_by":"y"}`))
