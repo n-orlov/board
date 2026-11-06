@@ -1061,8 +1061,9 @@ On success the form closes and the response's key appears once, in a highlighted
 wraps (the page never scrolls sideways at 390 px) with a **Copy** button and a **Done** button. Copy
 writes exactly that key with the Clipboard API and confirms it with "Copied" (a refused write says so and
 leaves the key selectable). The key is on the page nowhere else: Done, creating or revoking another key,
-or reloading drops it. Each key that is not revoked has a Revoke button that posts
-`POST /api/v1/keys/{name}/revoke`; the list then reloads and shows the key as `revoked`. While the list
+or reloading drops it. Each key that is not revoked has a Revoke button. It asks for confirmation first, in the
+dialog component (a bottom sheet on the phone) that names the key: Cancel (focused first), Escape or the backdrop
+revokes nothing, and confirming posts `POST /api/v1/keys/{name}/revoke`; the list then reloads and shows the key as `revoked`. While the list
 loads it shows skeleton rows, and with no keys an empty state. The page calls the API with the session
 cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from
 its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).

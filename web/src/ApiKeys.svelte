@@ -13,6 +13,8 @@
   let formOpen = $state(false);
   let copied = $state(false);
   let copyFailed = $state(false);
+  // The name of the key the person asked to revoke; the dialog is open while it is set.
+  let revoking: string | undefined = $state(undefined);
 
   const store = new KeysStore(new KeysApi(currentBrowser(), () => csrf), (s) => (view = s));
 
@@ -31,6 +33,12 @@
       copied = false;
       copyFailed = false;
     }
+  }
+
+  async function confirmRevoke() {
+    const name = revoking;
+    revoking = undefined;
+    if (name !== undefined) await store.revoke(name);
   }
 
   async function copy(key: string) {
@@ -138,7 +146,7 @@
             </td>
             <td class="w-full md:table-cell md:w-auto md:px-3 md:py-3 md:text-right">
               {#if key.status !== 'revoked'}
-                <button type="button" class="{secondary} w-full md:w-auto" onclick={() => store.revoke(key.name)}>Revoke</button>
+                <button type="button" class="{secondary} w-full md:w-auto" onclick={() => (revoking = key.name)}>Revoke</button>
               {/if}
             </td>
           </tr>
@@ -157,5 +165,22 @@
 {#if formOpen}
   <Dialog label="New API key" onclose={() => (formOpen = false)} initialFocus="input[name=name]">
     <KeyForm error={view.formError} oncreate={create} oncancel={() => (formOpen = false)} />
+  </Dialog>
+{/if}
+
+{#if revoking !== undefined}
+  <Dialog label="Revoke API key" onclose={() => (revoking = undefined)} initialFocus="button[data-cancel]">
+    <div class="flex flex-col gap-4">
+      <h2 class="text-lg font-bold">Revoke API key</h2>
+      <p class="text-sm">
+        Revoke <strong class="break-all">{revoking}</strong>? Anything using it gets 401 from its next request. This cannot be undone.
+      </p>
+      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <button type="button" data-cancel class="{secondary} border-border" onclick={() => (revoking = undefined)}>Cancel</button>
+        <button type="button" class="min-h-11 rounded-md border border-danger bg-surface-raised px-4 text-sm font-medium text-danger" onclick={confirmRevoke}
+          >Revoke key</button
+        >
+      </div>
+    </div>
   </Dialog>
 {/if}

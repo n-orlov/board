@@ -95,7 +95,21 @@ for (const vp of viewports) {
       await expect(page.getByText(key)).toHaveCount(0);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
 
+      // Revoke asks first. Cancel revokes nothing: the key is still active and still works.
       await row.getByRole('button', { name: 'Revoke' }).click();
+      const confirm = page.getByRole('dialog', { name: 'Revoke API key' });
+      await expect(confirm).toBeVisible();
+      await expect(confirm).toContainText(name);
+      if (vp.size.width < 768) await expect.poll(async () => Math.round((await confirm.boundingBox())?.y ?? -1) + Math.round((await confirm.boundingBox())?.height ?? 0)).toBe(vp.size.height);
+      await confirm.getByRole('button', { name: 'Cancel' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(row.getByTestId('key-status')).toHaveText('active');
+      expect((await bare.get('/api/v1/keys')).status()).toBe(200);
+
+      // Revoke then confirm: revoked, no Revoke button, and the key gets a problem+json 401.
+      await row.getByRole('button', { name: 'Revoke' }).click();
+      await page.getByRole('dialog', { name: 'Revoke API key' }).getByRole('button', { name: 'Revoke key' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(row.getByTestId('key-status')).toHaveText('revoked');
       await expect(row.getByRole('button', { name: 'Revoke' })).toHaveCount(0);
 

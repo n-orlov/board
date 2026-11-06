@@ -19,6 +19,10 @@ try {
   const row = page.locator(`[data-testid=key-row][data-name="${name}"]`);
   await row.waitFor();
   await row.getByRole('button', { name: 'Revoke' }).click();
+  // Revoking asks first: confirm the dialog that names the key.
+  const dialog = page.getByRole('dialog', { name: 'Revoke API key' });
+  await dialog.getByText(name).waitFor();
+  await dialog.getByRole('button', { name: 'Revoke key' }).click();
   await row.getByTestId('key-status').filter({ hasText: 'revoked' }).waitFor();
 } catch (e) {
   console.error(String(e));
