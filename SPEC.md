@@ -298,7 +298,7 @@ on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 | slug | text, unique | `[a-z0-9-]{2,40}` (`domain.ValidateSlug`) |
 | title | text | |
 | description | text | Markdown |
-| status | `open` \| `closed` | closing an initiative requires all its tasks closed (or `force=true`, which closes them `dropped`) |
+| status | `open` \| `closed` | closing an initiative requires all its tasks closed (or `force=true`, which closes them `dropped`); `POST /initiatives/{slug}/close` and `/reopen` move it (§6.3). A closed initiative keeps `closed_at`/`closed_by` and takes no new task (§4.3); reopening clears them and leaves its tasks closed |
 | target_start, target_end | date, nullable | planning window for the timeline |
 | created_by, created_at, closed_at, closed_by | | |
 | next_task_seq | int | the `seq` the next task of this initiative takes, starting at 1; only counts up, so a `seq` is never reused (§4.3) |
@@ -727,8 +727,8 @@ unknown task is **404**.
 
 ### 6.3 Initiatives
 
-`GET/POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` are in `api/openapi.yaml`. The
-list filters `status` and `closed_within`, close and reopen (§6.2) come with later phases.
+`GET/POST /api/v1/initiatives`, `GET`/`PATCH /api/v1/initiatives/{slug}` and `POST /api/v1/initiatives/{slug}/close` and
+`/reopen` are in `api/openapi.yaml`. The list filters `status` and `closed_within` (§6.2) come with later phases.
 
 - **`POST /api/v1/initiatives`**, body `{slug, title, description?, tags?, target_start?, target_end?}`.
   `slug` matches `[a-z0-9-]{2,40}` (`domain.ValidateSlug`). `title` is 1 to 200 characters,
@@ -757,6 +757,24 @@ list filters `status` and `closed_within`, close and reopen (§6.2) come with la
   `description`, `tags`, `target_start`, `target_end`. A bad field is **400**, an unknown initiative **404**, and a
   refusal changes nothing: no row, tag, event or actor. A closed initiative can still be edited. A zero-length body is
   **400** (the body is required JSON); `{}` is the empty patch.
+- **`POST /api/v1/initiatives/{slug}/close`**, optional body `{force?: bool}`. Answers **200** with the initiative
+  (`status` `closed`, `closed_at`, `closed_by` the acting actor). An initiative whose tasks are all closed, or that has
+  none, closes at once. With a task that is `open` or `done` and no `force` (absent or `false`), the answer is **409**
+  whose `detail` says how many tasks are not closed and whose `next` names the `force` option, and nothing changes.
+  With `force: true`, in one transaction the server first closes each task that is not closed as `dropped`, in task
+  order, each exactly as `POST /tasks/{ref}/close` does (a `task_closed` event with `data.resolution` `dropped` and
+  `data.from` the status it left; a done task keeps `done_at` and `done_by`), and then appends one `initiative_closed`
+  event whose `data` is `{slug, force, dropped}`, `dropped` the number of tasks it closed; tasks already closed keep
+  their resolution. The row is updated first, so a task cannot be created in the initiative while the close runs. A
+  `Board-On-Behalf-Of` header is stored on the `task_closed` and `initiative_closed` events. Closing a closed initiative
+  is **409** whose `next` says to reopen it, an unknown initiative is **404**, and a refusal writes no row, event or
+  actor. The operation needs both the initiatives and the tasks store and answers **503** without them.
+- **`POST /api/v1/initiatives/{slug}/reopen`** takes no body. A closed initiative becomes `open` again, `closed_at` and
+  `closed_by` are cleared, one `initiative_reopened` event (`data` `{slug}`) is appended and the initiative is
+  answered with **200**; its tasks stay closed, each reopened one by one. An open initiative is **409** and writes
+  nothing; an unknown one is **404**.
+- A closed initiative refuses task writes with **409**: `POST /api/v1/tasks` naming it, `PATCH /api/v1/tasks/{ref}`
+  and `POST /api/v1/tasks/{ref}/reopen` for one of its tasks (§6.4). It can still be edited itself (`PATCH` above).
 - **`GET /api/v1/initiatives`** answers `{items, next_after?}`, items ordered by id (creation order).
   `tag` (repeatable) keeps initiatives carrying every tag given. `limit` is 1 to 1000 (default 100; 0
   is a 400). `after` is a ULID or a slug in either letter case (`domain.ParseCursor`, resolved as above): the

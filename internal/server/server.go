@@ -61,7 +61,10 @@ func WithInitiatives(st *initiatives.Store) Option {
 // WithTasks serves /api/v1/tasks from st, reading live leases from ls; without
 // both the operations answer 503.
 func WithTasks(st *tasks.Store, ls *leases.Store) Option {
-	return func(o *operations) { o.taskOps = taskOps{tasks: st, leases: ls} }
+	return func(o *operations) {
+		o.taskOps = taskOps{tasks: st, leases: ls}
+		o.initiativeOps.tasks = st
+	}
 }
 
 // WithEvents serves GET /api/v1/events and GET /api/v1/tasks/{ref}/events from

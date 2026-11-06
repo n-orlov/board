@@ -35,6 +35,8 @@ func newStore(t *testing.T) Store {
 
 var who = audit.Actor{Handle: "claude@host"}
 
+func audit2(handle string) audit.Actor { return audit.Actor{Handle: handle} }
+
 func mk(t *testing.T, s Store, slug string, tags ...string) Initiative {
 	t.Helper()
 	i, err := s.Create(context.Background(), who, "key:caller", New{Slug: slug, Title: "T " + slug, Tags: tags})

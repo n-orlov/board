@@ -62,12 +62,17 @@ func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, res
 	if err := domain.ValidateResolution(resolution); err != nil {
 		return Task{}, InvalidError{Msg: err.Error(), Next: "Send resolution completed, dropped, superseded or duplicate."}
 	}
-	return s.transit(ctx, actor, principal, ref, transition{
+	return s.transit(ctx, actor, principal, ref, closeTransition(resolution))
+}
+
+// closeTransition is the close of a task with the resolution.
+func closeTransition(resolution string) transition {
+	return transition{
 		action: "close", event: EventClosed, allowed: []string{"open", "done"},
 		set:  `status = 'closed', resolution = ?, closed_at = ?, closed_by = ?`,
 		args: func(actorID string, at int64) []any { return []any{resolution, at, actorID} },
 		data: map[string]any{"resolution": resolution}, behalf: true,
-	})
+	}
 }
 
 func (s Store) transit(ctx context.Context, actor audit.Actor, principal, ref string, tr transition) (Task, error) {

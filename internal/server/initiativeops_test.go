@@ -246,3 +246,70 @@ func TestPatchInitiativeUnknownIsNotFoundAndNoOpIsOK(t *testing.T) {
 		t.Errorf("events = %d", n)
 	}
 }
+
+func TestCloseAndReopenInitiativeAnswerTheInitiativeAndWriteEvents(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	rec := s.send(http.MethodPost, "/api/v1/initiatives/aa/close", "", "op@host")
+	doc := decode(t, rec)
+	if rec.Code != http.StatusConflict || !strings.Contains(fmt.Sprint(doc["next"]), "force") {
+		t.Fatalf("close without force = %d %v", rec.Code, doc)
+	}
+	rec = s.send(http.MethodPost, "/api/v1/initiatives/aa/close", `{"force":true}`, "op@host")
+	doc = decode(t, rec)
+	if rec.Code != http.StatusOK || doc["status"] != "closed" || doc["closed_by"] != "op@host" || doc["closed_at"] == nil {
+		t.Fatalf("close = %d %v", rec.Code, doc)
+	}
+	if rec = s.send(http.MethodPost, "/api/v1/initiatives/aa/close", "", "op@host"); rec.Code != http.StatusConflict {
+		t.Errorf("close closed = %d", rec.Code)
+	}
+	rec = s.send(http.MethodPost, "/api/v1/initiatives/aa/reopen", "", "op@host")
+	doc = decode(t, rec)
+	if rec.Code != http.StatusOK || doc["status"] != "open" || doc["closed_at"] != nil || doc["closed_by"] != nil {
+		t.Fatalf("reopen = %d %v", rec.Code, doc)
+	}
+	if rec = s.send(http.MethodPost, "/api/v1/initiatives/aa/reopen", "", "op@host"); rec.Code != http.StatusConflict {
+		t.Errorf("reopen open = %d", rec.Code)
+	}
+	var types []string
+	for _, e := range s.events() {
+		types = append(types, e.typ)
+	}
+	if got := strings.Join(types, ","); got != "initiative_created,task_created,task_closed,initiative_closed,initiative_reopened" {
+		t.Errorf("events = %s", got)
+	}
+}
+
+func TestCloseAndReopenUnknownInitiativeAreNotFound(t *testing.T) {
+	s := newKeyServer(t)
+	for _, verb := range []string{"close", "reopen"} {
+		rec := s.send(http.MethodPost, "/api/v1/initiatives/zz/"+verb, "", "op@host")
+		if rec.Code != http.StatusNotFound || decode(t, rec)["next"] == nil {
+			t.Errorf("%s = %d %s", verb, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestCloseInitiativeNeedsTheTaskStoreAndReopenNeedsTheInitiativeStore(t *testing.T) {
+	h := NewHandler(ok, acceptKey, nil, nil)
+	for _, verb := range []string{"close", "reopen"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, authedWith("POST", "/api/v1/initiatives/aa/"+verb, ""))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s = %d", verb, rec.Code)
+		}
+	}
+}
+
+func TestCloseInitiativeRefusesABodyThatIsNotJSON(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	rec := s.send(http.MethodPost, "/api/v1/initiatives/aa/close", `{"force":`, "op@host")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("close = %d %s", rec.Code, rec.Body)
+	}
+	if got := decode(t, s.send(http.MethodGet, "/api/v1/initiatives/aa", "", "op@host")); got["status"] != "open" {
+		t.Errorf("status = %v", got["status"])
+	}
+}

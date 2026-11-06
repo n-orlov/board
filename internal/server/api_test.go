@@ -201,6 +201,8 @@ func (brokenResponse) VisitCreateInitiativeResponse(http.ResponseWriter) error {
 }
 func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitPatchInitiativeResponse(http.ResponseWriter) error     { return errBroken }
+func (brokenResponse) VisitCloseInitiativeResponse(http.ResponseWriter) error     { return errBroken }
+func (brokenResponse) VisitReopenInitiativeResponse(http.ResponseWriter) error    { return errBroken }
 func (brokenResponse) VisitCreateTaskResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitGetTaskResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error           { return errBroken }
@@ -327,6 +329,18 @@ func (s stubOperations) GetInitiative(context.Context, GetInitiativeRequestObjec
 func (s stubOperations) PatchInitiative(context.Context, PatchInitiativeRequestObject) (PatchInitiativeResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(PatchInitiativeResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) CloseInitiative(context.Context, CloseInitiativeRequestObject) (CloseInitiativeResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(CloseInitiativeResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ReopenInitiative(context.Context, ReopenInitiativeRequestObject) (ReopenInitiativeResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ReopenInitiativeResponseObject)
 	return resp, err
 }
 
@@ -471,7 +485,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js",
 		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
 		"/api/v1/keys", "POST /api/v1/keys", "POST /api/v1/keys/workstation/revoke",
-		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
+		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard", "POST /api/v1/initiatives/phone-onboard/close", "POST /api/v1/initiatives/phone-onboard/reopen",
 		"POST /api/v1/tasks", "/api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack",
@@ -602,6 +616,15 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"patch initiative 401", 401, PatchInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
 		{"patch initiative 404", 404, PatchInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
 		{"patch initiative 503", 503, PatchInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
+		{"close initiative 400", 400, CloseInitiative400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitCloseInitiativeResponse},
+		{"close initiative 401", 401, CloseInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitCloseInitiativeResponse},
+		{"close initiative 404", 404, CloseInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitCloseInitiativeResponse},
+		{"close initiative 409", 409, CloseInitiative409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitCloseInitiativeResponse},
+		{"close initiative 503", 503, CloseInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitCloseInitiativeResponse},
+		{"reopen initiative 401", 401, ReopenInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitReopenInitiativeResponse},
+		{"reopen initiative 404", 404, ReopenInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitReopenInitiativeResponse},
+		{"reopen initiative 409", 409, ReopenInitiative409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitReopenInitiativeResponse},
+		{"reopen initiative 503", 503, ReopenInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitReopenInitiativeResponse},
 		{"create task 400", 400, CreateTask400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},
 		{"create task 401", 401, CreateTask401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},
 		{"create task 404", 404, CreateTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},

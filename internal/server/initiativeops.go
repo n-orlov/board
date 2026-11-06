@@ -9,6 +9,7 @@ import (
 
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/tasks"
 )
 
 func (p problemResponse) VisitListInitiativesResponse(w http.ResponseWriter) error { return p.write(w) }
@@ -19,10 +20,20 @@ func (p problemResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error
 func (p problemResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
 	return p.write(w)
 }
+func (p problemResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
+func (p problemResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
 
 // initiativeOps is the /api/v1/initiatives operations (SPEC 6.2). Any
 // authenticated principal may use them: v1 has no ACL.
-type initiativeOps struct{ inits *initiatives.Store }
+type initiativeOps struct {
+	inits *initiatives.Store
+	// tasks closes an initiative with the tasks it holds.
+	tasks *tasks.Store
+}
 
 // ready answers 503 when the operations have no store behind them.
 func (o initiativeOps) ready() (problemResponse, bool) {
@@ -245,4 +256,59 @@ func (o initiativeOps) PatchInitiative(ctx context.Context, req PatchInitiativeR
 		return nil, err
 	}
 	return PatchInitiative200JSONResponse(apiInitiative(got)), nil
+}
+
+// conflict is the 409 for a close or reopen the initiative's state refuses.
+func conflict(err error) (problemResponse, bool) {
+	var c initiatives.ConflictError
+	if !errors.As(err, &c) {
+		return problemResponse{}, false
+	}
+	return failure(http.StatusConflict, c.Msg).withNext(c.Next), true
+}
+
+// closeFailure is the problem a failed close or reopen is answered with, or the
+// error when the failure is the server's.
+func closeFailure(ref string, err error) (problemResponse, error) {
+	if errors.Is(err, initiatives.ErrNotFound) {
+		return missingInitiative(ref), nil
+	}
+	if r, ok := conflict(err); ok {
+		return r, nil
+	}
+	return problemResponse{}, err
+}
+
+// CloseInitiative closes an initiative; with force it first drops its tasks
+// that are not closed.
+func (o initiativeOps) CloseInitiative(ctx context.Context, req CloseInitiativeRequestObject) (CloseInitiativeResponseObject, error) {
+	if o.inits == nil || o.tasks == nil {
+		return failure(http.StatusServiceUnavailable, "initiatives are not available"), nil
+	}
+	who, r, ok := caller(ctx)
+	if !ok {
+		return r, nil
+	}
+	force := req.Body != nil && req.Body.Force != nil && *req.Body.Force
+	got, err := o.tasks.CloseInitiative(ctx, who.AuditActor(), who.Principal, req.Slug, force)
+	if err != nil {
+		return closeFailure(req.Slug, err)
+	}
+	return CloseInitiative200JSONResponse(apiInitiative(got)), nil
+}
+
+// ReopenInitiative reopens a closed initiative; its tasks stay closed.
+func (o initiativeOps) ReopenInitiative(ctx context.Context, req ReopenInitiativeRequestObject) (ReopenInitiativeResponseObject, error) {
+	if r, off := o.ready(); off {
+		return r, nil
+	}
+	who, r, ok := caller(ctx)
+	if !ok {
+		return r, nil
+	}
+	got, err := o.inits.Reopen(ctx, who.AuditActor(), who.Principal, req.Slug)
+	if err != nil {
+		return closeFailure(req.Slug, err)
+	}
+	return ReopenInitiative200JSONResponse(apiInitiative(got)), nil
 }

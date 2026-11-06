@@ -407,6 +407,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerInitiativeAPISteps(sc, h)
 	registerTaskAPISteps(sc, h)
 	registerInitiativeEditSteps(sc, h)
+	registerInitiativeCloseSteps(sc, h)
 	registerCLIInitiativeSteps(sc, h)
 	registerCLIOutputSteps(sc, h)
 	registerHelpAgentSteps(sc, h)

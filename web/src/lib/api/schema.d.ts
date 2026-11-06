@@ -216,6 +216,46 @@ export interface paths {
         patch: operations["patchInitiative"];
         trace?: never;
     };
+    "/api/v1/initiatives/{slug}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close an initiative
+         * @description Closes an open initiative, setting `closed_at` and `closed_by` and appending `initiative_closed`. An initiative with no task that is not closed closes at once. With an open or done task and no `force`, the answer is 409 and its `next` names the `force` option. With `force` true every task that is not closed is first closed `dropped`, each with its `task_closed` event, and then the initiative closes, all in one transaction. A closed initiative cannot take new tasks or edits to its tasks, and closing a closed initiative is 409. An unknown initiative is 404. A `Board-On-Behalf-Of` header is stored as the `on_behalf_of` of the events.
+         */
+        post: operations["closeInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/initiatives/{slug}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a closed initiative
+         * @description Reopens a closed initiative, clearing `closed_at` and `closed_by` and appending `initiative_reopened`. Its tasks stay closed. Reopening an open initiative is 409. An unknown initiative is 404.
+         */
+        post: operations["reopenInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks": {
         parameters: {
             query?: never;
@@ -956,6 +996,13 @@ export interface components {
             /** @description Refs or ULIDs of the tasks the new task starts out blocked by. */
             blocked_by?: string[];
         };
+        InitiativeClose: {
+            /**
+             * @description Close the tasks that are not closed as `dropped` and then the initiative. Without it, an initiative with such a task is not closed.
+             * @example true
+             */
+            force?: boolean;
+        };
         TaskClose: {
             /**
              * @description Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
@@ -1578,6 +1625,65 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    closeInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The initiative's slug or ULID. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InitiativeClose"];
+            };
+        };
+        responses: {
+            /** @description The initiative after the close. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Initiative"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    reopenInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The initiative's slug or ULID. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The initiative after the reopen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Initiative"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

@@ -416,6 +416,84 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/initiatives/{slug}/close:
+    post:
+      operationId: closeInitiative
+      tags: [initiatives]
+      summary: Close an initiative
+      description: >-
+        Closes an open initiative, setting `closed_at` and `closed_by` and appending `initiative_closed`. An initiative
+        with no task that is not closed closes at once. With an open or done task and no `force`, the answer is 409 and
+        its `next` names the `force` option. With `force` true every task that is not closed is first closed
+        `dropped`, each with its `task_closed` event, and then the initiative closes, all in one transaction. A closed
+        initiative cannot take new tasks or edits to its tasks, and closing a closed initiative is 409. An unknown
+        initiative is 404. A `Board-On-Behalf-Of` header is stored as the `on_behalf_of` of the events.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The initiative's slug or ULID.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitiativeClose"
+      responses:
+        "200":
+          description: The initiative after the close.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/initiatives/{slug}/reopen:
+    post:
+      operationId: reopenInitiative
+      tags: [initiatives]
+      summary: Reopen a closed initiative
+      description: >-
+        Reopens a closed initiative, clearing `closed_at` and `closed_by` and appending `initiative_reopened`. Its
+        tasks stay closed. Reopening an open initiative is 409. An unknown initiative is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The initiative's slug or ULID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The initiative after the reopen.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/tasks:
     get:
       operationId: listTasks
@@ -1928,6 +2006,15 @@ components:
           description: Refs or ULIDs of the tasks the new task starts out blocked by.
           items:
             type: string
+    InitiativeClose:
+      type: object
+      properties:
+        force:
+          type: boolean
+          description: >-
+            Close the tasks that are not closed as `dropped` and then the initiative. Without it, an initiative with
+            such a task is not closed.
+          examples: [true]
     TaskClose:
       type: object
       required: [resolution]

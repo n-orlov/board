@@ -500,6 +500,14 @@ type Initiative struct {
 // InitiativeStatus defines model for Initiative.Status.
 type InitiativeStatus string
 
+// InitiativeClose defines model for InitiativeClose.
+type InitiativeClose struct {
+	// Force Close the tasks that are not closed as `dropped` and then the initiative. Without it, an initiative with such a task is not closed.
+	//
+	// Examples: true
+	Force *bool `json:"force,omitempty"`
+}
+
 // InitiativeCreate A new initiative.
 type InitiativeCreate struct {
 	// Description Markdown, at most 20000 characters.
@@ -1225,6 +1233,9 @@ type CreateInitiativeJSONRequestBody = InitiativeCreate
 // PatchInitiativeJSONRequestBody defines body for PatchInitiative for application/json ContentType.
 type PatchInitiativeJSONRequestBody = InitiativePatch
 
+// CloseInitiativeJSONRequestBody defines body for CloseInitiative for application/json ContentType.
+type CloseInitiativeJSONRequestBody = InitiativeClose
+
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = KeyCreate
 
@@ -1284,6 +1295,12 @@ type ServerInterface interface {
 	// PatchInitiative Edit an initiative
 	// (PATCH /api/v1/initiatives/{slug})
 	PatchInitiative(w http.ResponseWriter, r *http.Request, slug string)
+	// CloseInitiative Close an initiative
+	// (POST /api/v1/initiatives/{slug}/close)
+	CloseInitiative(w http.ResponseWriter, r *http.Request, slug string)
+	// ReopenInitiative Reopen a closed initiative
+	// (POST /api/v1/initiatives/{slug}/reopen)
+	ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(w http.ResponseWriter, r *http.Request)
@@ -1610,6 +1627,58 @@ func (siw *ServerInterfaceWrapper) PatchInitiative(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchInitiative(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CloseInitiative operation middleware
+func (siw *ServerInterfaceWrapper) CloseInitiative(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseInitiative(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReopenInitiative operation middleware
+func (siw *ServerInterfaceWrapper) ReopenInitiative(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReopenInitiative(w, r, slug)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2451,6 +2520,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.PatchInitiative)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives/{slug}/close", wrapper.CloseInitiative)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives/{slug}/reopen", wrapper.ReopenInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks", wrapper.ListTasks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks", wrapper.CreateTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.GetTask)
@@ -3237,6 +3308,195 @@ type PatchInitiative503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response PatchInitiative503ApplicationProblemPlusJSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiativeRequestObject struct {
+	Slug string `json:"slug"`
+	Body *CloseInitiativeJSONRequestBody
+}
+
+type CloseInitiativeResponseObject interface {
+	VisitCloseInitiativeResponse(w http.ResponseWriter) error
+}
+
+type CloseInitiative200JSONResponse Initiative
+
+func (response CloseInitiative200JSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiative400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative400ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiative401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative401ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiative404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative404ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiative409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative409ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseInitiative503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative503ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiativeRequestObject struct {
+	Slug string `json:"slug"`
+}
+
+type ReopenInitiativeResponseObject interface {
+	VisitReopenInitiativeResponse(w http.ResponseWriter) error
+}
+
+type ReopenInitiative200JSONResponse Initiative
+
+func (response ReopenInitiative200JSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiative401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenInitiative401ApplicationProblemPlusJSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiative404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenInitiative404ApplicationProblemPlusJSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiative409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenInitiative409ApplicationProblemPlusJSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiative503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenInitiative503ApplicationProblemPlusJSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5738,6 +5998,12 @@ type StrictServerInterface interface {
 	// PatchInitiative Edit an initiative
 	// (PATCH /api/v1/initiatives/{slug})
 	PatchInitiative(ctx context.Context, request PatchInitiativeRequestObject) (PatchInitiativeResponseObject, error)
+	// CloseInitiative Close an initiative
+	// (POST /api/v1/initiatives/{slug}/close)
+	CloseInitiative(ctx context.Context, request CloseInitiativeRequestObject) (CloseInitiativeResponseObject, error)
+	// ReopenInitiative Reopen a closed initiative
+	// (POST /api/v1/initiatives/{slug}/reopen)
+	ReopenInitiative(ctx context.Context, request ReopenInitiativeRequestObject) (ReopenInitiativeResponseObject, error)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
@@ -6127,6 +6393,68 @@ func (sh *strictHandler) PatchInitiative(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PatchInitiativeResponseObject); ok {
 		if err := validResponse.VisitPatchInitiativeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseInitiative operation middleware
+func (sh *strictHandler) CloseInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+	var request CloseInitiativeRequestObject
+
+	request.Slug = slug
+
+	var body CloseInitiativeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseInitiative(ctx, request.(CloseInitiativeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseInitiative")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseInitiativeResponseObject); ok {
+		if err := validResponse.VisitCloseInitiativeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReopenInitiative operation middleware
+func (sh *strictHandler) ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+	var request ReopenInitiativeRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReopenInitiative(ctx, request.(ReopenInitiativeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReopenInitiative")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReopenInitiativeResponseObject); ok {
+		if err := validResponse.VisitReopenInitiativeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
