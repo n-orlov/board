@@ -502,8 +502,10 @@ and CLI can show badges without the lists.
   server's handler interface is generated from it by oapi-codegen's strict-server mode
   (`internal/server/openapi.gen.go`: `StrictServerInterface`, typed request and response
   objects, `std-http` routing on Go's `ServeMux`) and the TypeScript types by openapi-typescript
-  (`web/src/lib/api/schema.d.ts`); the CLI client is generated from it too. A CI check fails if
-  generated code is stale: `ci/openapi-gen.sh` writes both files, `ci/openapi-drift.sh`
+  (`web/src/lib/api/schema.d.ts`). Phase 0 generates exactly these two outputs. The Go CLI client
+  (`internal/cli/client.go`) is handwritten `net/http` code, not generated, and the drift check
+  does not cover it; its requests and problem handling are held to the document by Go tests, not
+  by generation. A CI check fails if generated code is stale: `ci/openapi-gen.sh` writes the two files, `ci/openapi-drift.sh`
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
@@ -1112,7 +1114,7 @@ network requests (all assets embedded).
   (`web/src/lib/apibase.ts`): the mount prefix of the page plus `/api`, always a
   path, never an absolute or protocol-relative URL, so the UI works behind a
   path-prefixing proxy.
-- API client generated from the same OpenAPI document (`openapi-typescript`).
+- API types generated from the same OpenAPI document (`openapi-typescript`).
 
 ### 12.4 Container
 
@@ -1300,7 +1302,7 @@ All gates are **on from the first commit**. Thresholds live in `ci/quality.json`
 | Trivy | HIGH, CRITICAL fail the gate (source and the built image) |
 | Mutation | Go: gremlins over `internal/domain` and `internal/store`, efficacy ≥ 80 % (killed over killed plus lived, per package, read from `ci/quality.json`), a run that generates no mutant fails (`ci/mutation.sh`, evaluated by `ci/mutationgate`); frontend: Stryker over `web/src/lib`, as s3-browser (`thresholds.break` 80 in `web/stryker.config.mjs`, per-module break 80 from `ci/quality.json`; `ci/mutation.sh` runs it after gremlins). Every `main` build and the extended lane. |
 | SBOM | CycloneDX generated for module, frontend and image; a missing or empty SBOM fails the build |
-| OpenAPI | spec lints clean; generated server/client code has no drift |
+| OpenAPI | spec lints clean; the generated Go server code and TypeScript types have no drift |
 
 A gate is never weakened to make a build pass; a threshold change is a reviewed commit to
 `ci/quality.json` with its reason. A gate whose input does not exist (no frontend, no image,
@@ -1325,7 +1327,7 @@ Everything below exists and the gates measure real code before any product featu
 - **Authentication** (§3) complete: OIDC login with the mock provider in tests, sessions, CSRF,
   API keys with `board admin keys` and the UI page. The vertical slice is authenticated from the
   start.
-- **OpenAPI** spec checked in, server and TS client generated, drift check; Swagger UI at
+- **OpenAPI** spec checked in, Go server code and TS types generated, drift check; Swagger UI at
   `/api/docs`.
 - **goose migrations + dialect layer** running on SQLite and Postgres.
 - **One thin vertical slice**: initiatives create / list / get, via API, via CLI
