@@ -14,13 +14,15 @@ import (
 
 // Event types a task write appends.
 const (
-	EventCreated  = "task_created"
-	EventUpdated  = "task_updated"
-	EventDone     = "task_done"
-	EventReopened = "task_reopened"
-	EventClosed   = "task_closed"
-	EventDepAdded = "dep_added"
-	EventDepGone  = "dep_removed"
+	EventCreated   = "task_created"
+	EventUpdated   = "task_updated"
+	EventDone      = "task_done"
+	EventReopened  = "task_reopened"
+	EventClosed    = "task_closed"
+	EventDepAdded  = "dep_added"
+	EventDepGone   = "dep_removed"
+	EventCheck     = "check_recorded"
+	EventMilestone = "milestone"
 )
 
 // Errors a caller tells apart.
@@ -96,6 +98,9 @@ type Task struct {
 	ClosedBy       string
 	// Blocked is derived: true while some task it is blocked by is not closed.
 	Blocked bool
+	// Overdue is derived: a watch task, not closed, whose next_check_at is
+	// before the store's clock when the task was read.
+	Overdue bool
 }
 
 // fields are the editable columns of a task.

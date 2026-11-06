@@ -205,6 +205,7 @@ func (s Store) find(ctx context.Context, q queryer, ref string) (Task, error) {
 	case err != nil:
 		return Task{}, fmt.Errorf("read task: %w", err)
 	}
+	t.Overdue = domain.Overdue(t.Kind, t.Status, t.NextCheckAt, s.now())
 	return t, nil
 }
 

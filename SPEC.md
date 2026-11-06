@@ -340,7 +340,7 @@ initiative is `ErrInitiativeClosed` and writes nothing. A transition ends nothin
 
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
 open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is the
-dependency half of **blocked**, computed in the same query that reads the task.
+dependency half of **blocked**, computed in the same query that reads the task. `Task.Overdue` is **overdue** (§4.6).
 
 `task_deps(task_id, blocked_by_task_id)`: PK both, no self-reference, cycles rejected on insert.
 A dependency is **open** while the blocking task is not `closed` (done-not-closed still blocks).
@@ -429,6 +429,45 @@ Event types (closed set in v1, extended by migration):
 `check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
 `key_created` and `key_revoked` record an API key being made or revoked over HTTP (§3.3); they have no
 `initiative_id` or `task_id`.
+
+**Short ref and summary.** An event's sequence number `n` (the table's auto-incrementing key) is its short ref `E<n>`
+(`domain.FormatEventRef`; read back by `domain.ParseEventRef` with `E` in either case and a positive `n`). `summary`
+is never empty and is one line: a check's or milestone's text has its whitespace folded (`domain.OneLine`), the
+original text stays in `data.summary`.
+
+**Watch checks and milestones** (`internal/tasks`: `Check`, `Milestone`), each in one transaction with its event:
+
+| call | event | `data` | row change |
+|---|---|---|---|
+| `Check(ref, summary, next_check_at?)` | `check_recorded`, summary `check on <ref>: <text>` | `{ref, summary, next_check_at}` | `next_check_at` = the given time, else now + `cadence_seconds`; sets `updated_at` |
+| `Milestone(ref, summary, data?)` | `milestone`, summary `milestone on <ref>: <text>` | `{ref, summary}` plus `data` (the caller's object, under the key `data`) when given | none |
+
+A summary is 1 to 200 characters once trimmed (`domain.ValidateSummary`), else `ErrInvalid`, checked before the task
+is read. A check on a work task or on a closed watch task is a `ConflictError` (`ErrConflict`; "cannot record a check
+on task aa-1: it is a work task"). A milestone is accepted on a task of any kind and status. An unknown task is
+`ErrNotFound`. A refused call writes no row, event or actor. Both events carry the task's `task_id`, `initiative_id`
+and `ref_id` (the task id).
+
+**Overdue** is derived (`domain.Overdue`, `Task.Overdue`): kind `watch`, status not `closed` (a done watch task still
+counts) and `next_check_at` strictly before the store's clock when the task is read.
+
+**Reads** (`internal/events`: `Store.List(Query)`, `Store.ForTask(ref, after, limit)`). Events are returned in
+insertion order (`n`) as `Event{N, ID, Ref, At, Type, Actor, Principal, OnBehalfOf, Initiative, InitiativeID, Task,
+TaskID, RefID, Summary, Data}`: `Ref` is `E<n>`, `Actor` and `OnBehalfOf` are handles, `Initiative` a slug, `Task` a
+task ref (the task id when the task row is gone) and the optional ones are empty when the event has none. Filters
+combine with AND:
+
+| filter | meaning |
+|---|---|
+| `since` | an event ULID or `E<n>` (either case): the events after that event. An RFC 3339 time: the events at or after that instant. Anything else is `ErrInvalid` (an `InvalidError` naming the value and what to send) |
+| `after` | the page cursor, an event ULID or `E<n>`; a time or anything else is `ErrInvalid` |
+| `initiative` | slug or ULID, either case; an unknown one is `initiatives.ErrNotFound` |
+| `task` | task ref or ULID, either case; an unknown one is `tasks.ErrNotFound` |
+| `type` | one or more event types (any of them); an empty one is `ErrInvalid` |
+| `actor` | the handle of the actor |
+| `limit` | 1 to 1000, default 100, else `ErrInvalid` |
+
+A page holds `limit` events; `NextAfter` is the ULID of its last event when more follow, else empty.
 
 Timeline markers: `lease_started`/`lease_ended`/`lease_expired` bound lease bars;
 `milestone`, `ask_raised`, `ask_answered`, `check_recorded`, `task_done`, `task_closed`
