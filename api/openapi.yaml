@@ -576,6 +576,69 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/deps/{blockedByRef}:
+    post:
+      operationId: addTaskDep
+      tags: [tasks]
+      summary: Make a task blocked by another
+      description: >-
+        Makes the task `ref` blocked by the task `blockedByRef`, which may be in another initiative, and appends
+        `dep_added` on `ref` whose `data.blocked_by` is the blocker's ref. Answers 200 with the dependent task.
+        Adding a dependency that exists is 200 too and writes nothing. A task blocked by itself is 400. A
+        dependency that would close a cycle of any length is 409 and the problem's `detail` names the path. An
+        unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/BlockedByRef"
+      responses:
+        "200":
+          description: The dependent task, with its `deps`, `blocking` and derived `blocked`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: removeTaskDep
+      tags: [tasks]
+      summary: Remove a task's dependency on another
+      description: >-
+        Removes the dependency of the task `ref` on the task `blockedByRef` and appends `dep_removed` on `ref`
+        whose `data.blocked_by` is the blocker's ref. Answers 200 with the dependent task. A dependency that does
+        not exist, or an unknown task, is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/BlockedByRef"
+      responses:
+        "200":
+          description: The dependent task after the removal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -777,6 +840,13 @@ components:
       in: path
       required: true
       description: The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case.
+      schema:
+        type: string
+    BlockedByRef:
+      name: blockedByRef
+      in: path
+      required: true
+      description: The ref or ULID, in either letter case, of the task that blocks.
       schema:
         type: string
   responses:

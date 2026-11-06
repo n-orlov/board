@@ -316,6 +316,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{ref}/deps/{blockedByRef}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a task blocked by another
+         * @description Makes the task `ref` blocked by the task `blockedByRef`, which may be in another initiative, and appends `dep_added` on `ref` whose `data.blocked_by` is the blocker's ref. Answers 200 with the dependent task. Adding a dependency that exists is 200 too and writes nothing. A task blocked by itself is 400. A dependency that would close a cycle of any length is 409 and the problem's `detail` names the path. An unknown task is 404.
+         */
+        post: operations["addTaskDep"];
+        /**
+         * Remove a task's dependency on another
+         * @description Removes the dependency of the task `ref` on the task `blockedByRef` and appends `dep_removed` on `ref` whose `data.blocked_by` is the blocker's ref. Answers 200 with the dependent task. A dependency that does not exist, or an unknown task, is 404.
+         */
+        delete: operations["removeTaskDep"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -862,6 +886,8 @@ export interface components {
     parameters: {
         /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
         TaskRef: string;
+        /** @description The ref or ULID, in either letter case, of the task that blocks. */
+        BlockedByRef: string;
     };
     requestBodies: never;
     headers: never;
@@ -1349,6 +1375,65 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    addTaskDep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+                /** @description The ref or ULID, in either letter case, of the task that blocks. */
+                blockedByRef: components["parameters"]["BlockedByRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dependent task, with its `deps`, `blocking` and derived `blocked`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    removeTaskDep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+                /** @description The ref or ULID, in either letter case, of the task that blocks. */
+                blockedByRef: components["parameters"]["BlockedByRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dependent task after the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

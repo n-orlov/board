@@ -206,6 +206,8 @@ func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error     { re
 func (brokenResponse) VisitDoneTaskResponse(http.ResponseWriter) error      { return errBroken }
 func (brokenResponse) VisitReopenTaskResponse(http.ResponseWriter) error    { return errBroken }
 func (brokenResponse) VisitCloseTaskResponse(http.ResponseWriter) error     { return errBroken }
+func (brokenResponse) VisitAddTaskDepResponse(http.ResponseWriter) error    { return errBroken }
+func (brokenResponse) VisitRemoveTaskDepResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -343,6 +345,18 @@ func (s stubOperations) ReopenTask(context.Context, ReopenTaskRequestObject) (Re
 func (s stubOperations) CloseTask(context.Context, CloseTaskRequestObject) (CloseTaskResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(CloseTaskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) AddTaskDep(context.Context, AddTaskDepRequestObject) (AddTaskDepResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(AddTaskDepResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) RemoveTaskDep(context.Context, RemoveTaskDepRequestObject) (RemoveTaskDepResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RemoveTaskDepResponseObject)
 	return resp, err
 }
 
@@ -528,6 +542,15 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"close task 404", 404, CloseTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
 		{"close task 409", 409, CloseTask409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
 		{"close task 503", 503, CloseTask503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
+		{"add task dep 400", 400, AddTaskDep400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskDepResponse},
+		{"add task dep 401", 401, AddTaskDep401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskDepResponse},
+		{"add task dep 404", 404, AddTaskDep404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskDepResponse},
+		{"add task dep 409", 409, AddTaskDep409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskDepResponse},
+		{"add task dep 503", 503, AddTaskDep503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskDepResponse},
+		{"remove task dep 400", 400, RemoveTaskDep400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
+		{"remove task dep 401", 401, RemoveTaskDep401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
+		{"remove task dep 404", 404, RemoveTaskDep404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
+		{"remove task dep 503", 503, RemoveTaskDep503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
 		{"meta 401", 401, GetMeta401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetMetaResponse},
 		{"protocol seen 400", 400, PutProtocolSeen400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
 		{"protocol seen 401", 401, PutProtocolSeen401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},

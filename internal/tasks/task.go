@@ -58,6 +58,18 @@ func (e ConflictError) Error() string {
 // Is makes errors.Is(err, ErrConflict) true for every ConflictError.
 func (e ConflictError) Is(target error) bool { return target == ErrConflict }
 
+// NoDepError is a dependency to remove that does not exist. It satisfies
+// errors.Is(err, ErrNotFound).
+type NoDepError struct{ Ref, BlockedBy string }
+
+// Error names the two tasks.
+func (e NoDepError) Error() string {
+	return "task " + e.Ref + " is not blocked by " + e.BlockedBy
+}
+
+// Is makes errors.Is(err, ErrNotFound) true for every NoDepError.
+func (e NoDepError) Is(target error) bool { return target == ErrNotFound }
+
 // CycleError is a dependency that would close a cycle. It satisfies
 // errors.Is(err, ErrConflict) and its text names the path, each task blocked by
 // the next.

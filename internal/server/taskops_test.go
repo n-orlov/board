@@ -176,6 +176,8 @@ func TestTaskFailureMapsEachStoreErrorToItsStatus(t *testing.T) {
 		{fmt.Errorf("%w: aa-3", tasks.ErrNotFound), 404, "missing aa-3"},
 		{fmt.Errorf("%w: zz", tasks.ErrInitiativeClosed), 409, "initiative zz is closed"},
 		{fmt.Errorf("%w: aa-3", tasks.ErrClosed), 409, "task aa-3 is closed"},
+		{tasks.NoDepError{Ref: "aa-2", BlockedBy: "aa-1"}, 404, "task aa-2 is not blocked by aa-1"},
+		{tasks.CycleError{Path: []string{"aa-1", "aa-2", "aa-1"}}, 409, "aa-1 is blocked by aa-2 is blocked by aa-1"},
 	} {
 		p, ok := taskFailure(c.err, "missing ")
 		if !ok || p.status != c.status || !strings.Contains(p.detail, c.detail) || p.next == "" {
@@ -314,5 +316,31 @@ func TestCloseRecordsTheBoardOnBehalfOfHeaderAndNoOtherTransitionDoes(t *testing
 	}
 	if fmt.Sprint(got) != "[task_done: task_closed:operator]" {
 		t.Errorf("events = %v", got)
+	}
+}
+
+func TestDependencyOperationsAnswerTheDependentTaskAndEachRefusalWithAProblem(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	s.task(`{"initiative":"aa","title":"two"}`)
+	for _, tc := range []struct {
+		method, path string
+		code         int
+		want         string
+	}{
+		{http.MethodPost, "/api/v1/tasks/aa-2/deps/aa-1", 200, "true"},
+		{http.MethodPost, "/api/v1/tasks/aa-2/deps/aa-1", 200, "true"},
+		{http.MethodPost, "/api/v1/tasks/aa-1/deps/aa-1", 400, "itself"},
+		{http.MethodPost, "/api/v1/tasks/aa-1/deps/aa-2", 409, "cycle"},
+		{http.MethodPost, "/api/v1/tasks/aa-1/deps/aa-9", 404, "aa-9"},
+		{http.MethodDelete, "/api/v1/tasks/aa-1/deps/aa-2", 404, "aa-1 is not blocked by aa-2"},
+		{http.MethodDelete, "/api/v1/tasks/aa-2/deps/aa-1", 200, "false"},
+	} {
+		rec := s.send(tc.method, tc.path, "", "claude@host")
+		doc := decode(t, rec)
+		if rec.Code != tc.code || !strings.Contains(fmt.Sprint(doc["blocked"], doc["detail"]), tc.want) {
+			t.Errorf("%s %s = %d %s, want %d and %q", tc.method, tc.path, rec.Code, rec.Body, tc.code, tc.want)
+		}
 	}
 }

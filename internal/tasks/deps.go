@@ -113,7 +113,7 @@ func (s Store) removeDep(ctx context.Context, tx *sql.Tx, actor audit.Actor, pri
 	if has, err := s.hasDep(ctx, tx, task, blocker); err != nil {
 		return Task{}, err
 	} else if !has {
-		return Task{}, fmt.Errorf("%w: %s is not blocked by %s", ErrNotFound, task.Ref, blocker.Ref)
+		return Task{}, NoDepError{Ref: task.Ref, BlockedBy: blocker.Ref}
 	}
 	if err := s.writeDep(ctx, tx, actor, principal, task, blocker, EventDepGone, "no longer blocked by",
 		`DELETE FROM task_deps WHERE task_id = ? AND blocked_by_task_id = ?`); err != nil {

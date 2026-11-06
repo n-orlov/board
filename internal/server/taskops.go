@@ -18,6 +18,10 @@ func (p problemResponse) VisitPatchTaskResponse(w http.ResponseWriter) error  { 
 func (p problemResponse) VisitDoneTaskResponse(w http.ResponseWriter) error   { return p.write(w) }
 func (p problemResponse) VisitReopenTaskResponse(w http.ResponseWriter) error { return p.write(w) }
 func (p problemResponse) VisitCloseTaskResponse(w http.ResponseWriter) error  { return p.write(w) }
+func (p problemResponse) VisitAddTaskDepResponse(w http.ResponseWriter) error { return p.write(w) }
+func (p problemResponse) VisitRemoveTaskDepResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
 
 // taskOps is the /api/v1/tasks operations (SPEC 6.4). Any authenticated
 // principal may use them: v1 has no ACL.
@@ -37,7 +41,11 @@ const nextTaskBody = "Send a JSON body; POST /api/v1/tasks needs an initiative a
 // when the failure is the server's. missing is the 404 detail for ErrNotFound.
 func taskFailure(err error, missing string) (problemResponse, bool) {
 	var bad tasks.InvalidError
+	var noDep tasks.NoDepError
 	switch {
+	case errors.As(err, &noDep):
+		return failure(http.StatusNotFound, noDep.Error()).
+			withNext("Read the task with GET /api/v1/tasks/" + noDep.Ref + " and look at its deps for the tasks it is blocked by."), true
 	case errors.As(err, &bad):
 		return failure(http.StatusBadRequest, bad.Msg).withNext(bad.Next), true
 	case errors.Is(err, tasks.ErrNoInitiative):
@@ -325,4 +333,25 @@ func (o taskOps) CloseTask(ctx context.Context, req CloseTaskRequestObject) (Clo
 	}
 	got, err := o.tasks.Close(ctx, who.AuditActor(), who.Principal, req.Ref, resolution)
 	return transitioned(ctx, o, got, err, func(d TaskDetail) CloseTaskResponseObject { return CloseTask200JSONResponse(d) })
+}
+
+// AddTaskDep makes a task blocked by another, or leaves it as it is when it
+// already is. A cycle is 409 and its detail names the path.
+func (o taskOps) AddTaskDep(ctx context.Context, req AddTaskDepRequestObject) (AddTaskDepResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.AddDep(ctx, who.AuditActor(), who.Principal, req.Ref, req.BlockedByRef)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) AddTaskDepResponseObject { return AddTaskDep200JSONResponse(d) })
+}
+
+// RemoveTaskDep removes the dependency of a task on another.
+func (o taskOps) RemoveTaskDep(ctx context.Context, req RemoveTaskDepRequestObject) (RemoveTaskDepResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.RemoveDep(ctx, who.AuditActor(), who.Principal, req.Ref, req.BlockedByRef)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) RemoveTaskDepResponseObject { return RemoveTaskDep200JSONResponse(d) })
 }

@@ -736,8 +736,9 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
 
 ### 6.4 Tasks
 
-`POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}` and `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close` are
-in `api/openapi.yaml`. The list (`GET /api/v1/tasks`), dependencies, checks, milestones and events of §6.2 come with later tasks. Any authenticated
+`POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}`, `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close`, and
+`POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}` are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`),
+checks, milestones and events of §6.2 come with later tasks. Any authenticated
 principal may use them. The server answers 503 problem documents when it runs without a store.
 
 - **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
@@ -778,7 +779,20 @@ principal may use them. The server answers 503 problem documents when it runs wi
   upserts the actor it names and stores it as the `task_closed` event's `on_behalf_of` (`operator` when an agent
   closes on instruction); without the header, or on a refused close, the event's `on_behalf_of` is null. A closed
   task is not editable (`PATCH` is **409** until it is reopened).
-- **The task document** (all three answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
+- **`POST /api/v1/tasks/{ref}/deps/{blockedByRef}`** makes `ref` blocked by `blockedByRef` (each a ref or ULID in either
+  letter case; the two tasks may be in different initiatives) and answers **200** with the dependent task, whose `deps`
+  and derived `blocked` now show it. In one transaction it upserts the actor and appends `dep_added` on the dependent
+  task, `data` `{ref, blocked_by}` with the blocker's ref. A dependency that already exists is **200** too and writes
+  no row, no event and no actor. A task blocked by itself is **400**. A dependency that would close a cycle of any
+  length is **409**: the problem's `detail` names the path, each task blocked by the next
+  (`dependency would close a cycle: aa-1 is blocked by aa-2 is blocked by aa-1`), and nothing is written. An unknown
+  task, on either side, is **404**. The status of the tasks does not matter: closed tasks may be linked.
+- **`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}`** removes that dependency and answers **200** with the dependent
+  task after the removal, appending `dep_removed` with the same `data`. A dependency that does not exist is **404**
+  (`detail` says `aa-2 is not blocked by aa-1`), and so is an unknown task; nothing is written then. A dependency is
+  open while its blocker is not `closed`, so `blocked` stays true for a blocker that is only `done` and turns false once
+  the blocker is closed (and true again if it is reopened); `GET` reads the two lists as `deps` and `blocking`.
+- **The task document** (all of the above answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
   status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,
   live_leases}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional

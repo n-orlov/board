@@ -302,4 +302,5 @@ func registerTaskAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^exactly (\d+) ([a-z_]+) events? exists? for the task "([^"]*)"$`, h.eventCount)
 	sc.Step(`^the latest ([a-z_]+) event of "([^"]*)" has data.([a-z_]+) "([^"]*)"$`, h.eventDataIs)
 	registerTaskTransitionSteps(sc, h)
+	registerTaskDepSteps(sc, h)
 }
