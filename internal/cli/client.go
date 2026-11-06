@@ -64,6 +64,9 @@ type apiError struct {
 	Status int
 	Detail string
 	Next   string
+	// Exit, when not zero, is the exit code this error ends the command with
+	// instead of the one its status maps to.
+	Exit int
 }
 
 func (e *apiError) Error() string {
@@ -75,6 +78,9 @@ func (e *apiError) Error() string {
 
 // exitCode maps the status to the exit codes of SPEC §8.1.
 func (e *apiError) exitCode() int {
+	if e.Exit != 0 {
+		return e.Exit
+	}
 	switch e.Status {
 	case http.StatusUnauthorized:
 		return ExitAuth

@@ -80,7 +80,7 @@ func TestCommandsListsTheFlagsOfEachCommand(t *testing.T) {
 	if got := strings.Join(tree["help agent"], " "); got != "--version" {
 		t.Errorf("help agent flags %q", got)
 	}
-	if got := strings.Join(tree["init ls"], " "); got != "--all --json --limit --tag" {
+	if got := strings.Join(tree["init ls"], " "); got != "--all --closed-within --json --limit --status --tag" {
 		t.Errorf("init ls flags %q", got)
 	}
 	if _, ok := tree["whoami"]; !ok {

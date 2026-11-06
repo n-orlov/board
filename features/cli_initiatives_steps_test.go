@@ -2,6 +2,7 @@ package features
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -89,6 +90,18 @@ func (h *harness) stdoutLineMatches(n int, pattern string) error {
 	return nil
 }
 
+// stdoutJSONField checks stdout is exactly one JSON object whose string member name is value.
+func (h *harness) stdoutJSONField(name, value string) error {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(h.stdout), &obj); err != nil || strings.Count(h.stdout, "\n") != 1 {
+		return fmt.Errorf("stdout %q is not exactly one JSON object line", h.stdout)
+	}
+	if got, _ := obj[name].(string); got != value {
+		return fmt.Errorf("stdout member %q is %v, want %q", name, obj[name], value)
+	}
+	return nil
+}
+
 func (h *harness) stderrIs(want string) error {
 	if h.stderr != want+"\n" {
 		return fmt.Errorf("stderr %q, want %q", h.stderr, want+"\n")
@@ -111,6 +124,7 @@ func registerCLIInitiativeSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)" with way back "([^"]*)"$`, h.runClientWithWayBack)
 	sc.Step(`^I run the client '([^']*)' with no actor$`, h.runClientWithNoActor)
 	sc.Step(`^stdout is:$`, h.stdoutIs)
+	sc.Step(`^stdout is one JSON object whose "([^"]*)" is "([^"]*)"$`, h.stdoutJSONField)
 	sc.Step(`^stdout line (\d+) matches "([^"]*)"$`, h.stdoutLineMatches)
 	sc.Step(`^stderr is exactly "([^"]*)"$`, h.stderrIs)
 	sc.Step(`^neither stdout nor stderr contains the remembered key$`, h.outputLacksKey)

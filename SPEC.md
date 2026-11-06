@@ -1067,7 +1067,7 @@ Exit codes:
 | 3 | timed out waiting (`--poll`), the ask stays open | not yet reachable: arrives with `board ask` |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board admin keys revoke` of an unknown name |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | not yet reachable: arrives with leases and tasks (a taken initiative slug is a plain error, exit 1) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; the rest arrives with leases and tasks (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | not yet reachable: arrives with leases |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
@@ -1099,7 +1099,7 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami` and `init add|ls|show`; the other lines
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami` and `init add|ls|show|edit|close|reopen`; the other lines
 below arrive with their phases. The client commands (`whoami`, `init …`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
@@ -1112,7 +1112,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else, a 409 included, is 1: Phase 0 produces only the exit codes 0, 1, 2, 4 and 5. The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close` and `init reopen`, which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1122,10 +1122,28 @@ anything else, a 409 included, is 1: Phase 0 produces only the exit codes 0, 1, 
   `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A tag
   given more than once keeps the initiatives that carry every tag. It shows 20 by default, `--limit N` (N ≥ 1)
   changes the cap and `--all` removes it (both together are a usage error); when more exist the last line is
-  `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array.
+  `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array. `--status
+  open|closed|all` (default `open`) picks the initiatives by status and `--closed-within N` (N days, or `Nd`) keeps
+  the ones closed in the last N days; it needs `--status closed` or `all` (with `all` the open ones stay). A status
+  other than the three, a window that is not a positive number of days and a window without `--status closed|all`
+  exit 2. The `+K more` line repeats `--tag`, `--status` and `--closed-within`.
 - `board init show <slug> [--json]` prints the one-line form, then `targets: <start> → <end>` when it has either,
   `created by <handle> <relative time>`, `closed by <handle> <relative time>` when closed, and the description. An
   unknown slug exits 4 with `<detail> → board init ls`, whatever `next` the server sent.
+- `board init edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D]
+  [--clear-start] [--clear-end] [--json]` sends only the fields it is given (`PATCH /api/v1/initiatives/<slug>`) and
+  prints `ok initiative <slug> updated` (`--json`: the object). `--description` reads the text from the named file,
+  or from standard input for `-`; `--tag` (repeatable) replaces the tag set and `--no-tags` empties it; `--start` and
+  `--end` take `YYYY-MM-DD` and `--clear-start` and `--clear-end` remove the date. No field to change, `--tag` with
+  `--no-tags`, and a date with the flag that clears it are exit 2. A value the server refuses (a date that does not
+  exist, a bad tag) exits 1 with its message; an unknown slug exits 4 with `<detail> → board init ls`; an
+  unreadable description file exits 1.
+- `board init close <slug> [--force] [--json]` prints `ok initiative <slug> closed`. With an open or done task left
+  and no `--force` it exits 6 with `<detail> → board init close <slug> --force`; with `--force` every task not
+  closed is dropped first. Closing a closed initiative exits 6 with `<detail> → board init reopen <slug>`. An
+  unknown slug exits 4 with `→ board init ls`.
+- `board init reopen <slug> [--json]` prints `ok initiative <slug> reopened`; reopening an open initiative exits 6
+  with `<detail> → board init show <slug>`, an unknown slug exits 4 with `→ board init ls`.
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
@@ -1137,7 +1155,9 @@ board help agent [--version]            # the agent protocol cheat sheet (§8.6)
 board whoami                            # handle, way back, key name, server reachability
 board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
 board attention
-board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--limit N|--all] | show <slug> | close <slug>
+board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
+                | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
+                | close <slug> [--force] | reopen <slug>
 board task add <initiative> "<title>" [--kind watch --cadence 24h] [--after <ref>]...
 board task ls [<initiative>] [--status …] | show|done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
 board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]

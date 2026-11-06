@@ -16,7 +16,7 @@ import (
 )
 
 // InitUsage is the single stderr line for a malformed `board init` command line.
-const InitUsage = "usage: board init add <slug> \"<title>\" [--tag t]... | ls [--tag t]... [--limit N|--all] | show <slug>"
+const InitUsage = "usage: board init add <slug> \"<title>\" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug> | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end] | close <slug> [--force] | reopen <slug>"
 
 // WhoamiUsage is the single stderr line for a malformed `board whoami`.
 const WhoamiUsage = "usage: board whoami"
@@ -66,6 +66,12 @@ func initCmd(args []string, stdout, stderr io.Writer, env Env) int {
 		return initLs(args[1:], stdout, stderr, env)
 	case "show":
 		return initShow(args[1:], stdout, stderr, env)
+	case "edit":
+		return initEdit(args[1:], stdout, stderr, env)
+	case "close":
+		return initClose(args[1:], stdout, stderr, env)
+	case "reopen":
+		return initReopen(args[1:], stdout, stderr, env)
 	default:
 		return usageLine(stderr, InitUsage)
 	}
@@ -123,7 +129,8 @@ func listCap(p parsedArgs) (int, bool) {
 func initLs(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, initLsFlags)
 	limit, okCap := listCap(p)
-	if !ok || !okCap || len(p.pos) != 0 {
+	filter, okFilter := lsFilter(p)
+	if !ok || !okCap || !okFilter || len(p.pos) != 0 {
 		return usageLine(stderr, InitUsage)
 	}
 	c, err := newClient(env)
@@ -132,7 +139,7 @@ func initLs(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	ctx, stop := clientContext()
 	defer stop()
-	items, err := c.allInitiatives(ctx, p.values["--tag"])
+	items, err := c.allInitiatives(ctx, filter)
 	if err != nil {
 		return report(stderr, err)
 	}
@@ -140,7 +147,7 @@ func initLs(args []string, stdout, stderr io.Writer, env Env) int {
 	if p.has("--json") {
 		return printJSON(stdout, stderr, items)
 	}
-	return printInitiativeLines(stdout, stderr, items, more, p.values["--tag"])
+	return printInitiativeLines(stdout, stderr, items, more, filter.command())
 }
 
 // capItems keeps the first limit items (all when limit is 0) and counts the rest.
@@ -152,11 +159,12 @@ func capItems(items []json.RawMessage, limit int) ([]json.RawMessage, int) {
 }
 
 // allInitiatives follows next_after until the last page.
-func (c *client) allInitiatives(ctx context.Context, tags []string) ([]json.RawMessage, error) {
+func (c *client) allInitiatives(ctx context.Context, f lsQuery) ([]json.RawMessage, error) {
 	items := []json.RawMessage{}
 	after := ""
 	for {
-		q := url.Values{"limit": {strconv.Itoa(listPageSize)}, "tag": tags}
+		q := f.values()
+		q.Set("limit", strconv.Itoa(listPageSize))
 		if after != "" {
 			q.Set("after", after)
 		}
@@ -181,7 +189,7 @@ func printJSON(stdout, stderr io.Writer, v any) int {
 	return ExitOK
 }
 
-func printInitiativeLines(stdout, stderr io.Writer, items []json.RawMessage, more int, tags []string) int {
+func printInitiativeLines(stdout, stderr io.Writer, items []json.RawMessage, more int, cmd string) int {
 	for _, raw := range items {
 		var in initiative
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -190,10 +198,6 @@ func printInitiativeLines(stdout, stderr io.Writer, items []json.RawMessage, mor
 		_, _ = fmt.Fprintln(stdout, initiativeLine(in))
 	}
 	if more > 0 {
-		cmd := "board init ls"
-		for _, t := range tags {
-			cmd += " --tag " + t
-		}
 		_, _ = fmt.Fprintf(stdout, "+%d more → %s --all\n", more, cmd)
 	}
 	return ExitOK
