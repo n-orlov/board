@@ -1,0 +1,87 @@
+/*
+ * Design tokens for the board UI.
+ *
+ * Every token is a CSS custom property, defined once for the light theme and once
+ * for the dark theme (the `data-theme` attribute on <html> picks the set; light is
+ * also the default when the attribute is absent). Components use the Tailwind
+ * utilities that the @theme block below maps onto these properties, never a literal
+ * colour. Fonts are system stacks: nothing is fetched from another origin.
+ */
+@import 'tailwindcss';
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --surface: #f6f7f9;
+  --surface-raised: #ffffff;
+  --border: #d5d9e0;
+  --text: #1a1d23;
+  --text-muted: #565d6b;
+  --accent: #1f5fd1;
+  --danger: #b3261e;
+  --success: #1b7a43;
+  --warning: #8a5a00;
+
+  --radius: 0.5rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface: #14161a;
+  --surface-raised: #1d2026;
+  --border: #323843;
+  --text: #e8eaee;
+  --text-muted: #a2a9b6;
+  --accent: #7aa7ff;
+  --danger: #ff8a80;
+  --success: #6fd197;
+  --warning: #f0c05a;
+
+  --radius: 0.5rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* `inline` keeps the utilities pointing at var(--token), so a theme switch needs no rebuild. */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --radius-md: var(--radius);
+  --spacing: var(--space-1);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+}

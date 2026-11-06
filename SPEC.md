@@ -1119,6 +1119,18 @@ network requests (all assets embedded).
   (`web/src/lib/apibase.ts`): the mount prefix of the page plus `/api`, always a
   path, never an absolute or protocol-relative URL, so the UI works behind a
   path-prefixing proxy.
+- Styling is Tailwind CSS v4, built through `@tailwindcss/vite` (both pinned to exact versions in
+  `web/package.json`; no PostCSS config, no CDN). One stylesheet, `web/src/styles.css`, holds the design
+  tokens as CSS custom properties: surface, raised surface, border, text, muted text, accent, danger,
+  success, warning, radius, a spacing scale (`--space-1`..`--space-8`) and the sans and mono font stacks
+  (system stacks; no web fonts). The full set is defined once for the light theme (`:root`,
+  `[data-theme='light']`) and once for the dark theme (`[data-theme='dark']`), the theme being the
+  `data-theme` attribute on `<html>`. Its `@theme inline` block maps Tailwind's colour, radius, spacing
+  and font utilities onto those properties, so components use utilities or `var(--token)` and never a
+  literal colour, and a theme switch needs no rebuild. Vitest builds the UI into a scratch directory
+  (`web/scripts/buildcheck`) and fails when a token is missing from either theme's block, or when a
+  `src`/`href` of the built `index.html` or a `url(...)` of the built CSS is absolute, root-relative or
+  protocol-relative.
 - API types generated from the same OpenAPI document (`openapi-typescript`).
 
 ### 12.4 Container
