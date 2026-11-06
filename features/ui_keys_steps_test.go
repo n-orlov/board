@@ -72,9 +72,7 @@ func buildUIBinary() (string, error) {
 		return "", err
 	}
 	bin := filepath.Join(dir, "board")
-	build := exec.CommandContext(ctx, "go", "build", "-o", bin, "github.com/n-orlov/board/cmd/board")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
+	if out, err := compileBoard(bin); err != nil {
 		return "", fmt.Errorf("building the board binary with the UI: %w\n%s", err, out)
 	}
 	return bin, nil

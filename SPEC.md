@@ -1264,7 +1264,7 @@ Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent
 |---|---|---|
 | CI image | `ci/jenkins-image.sh`, Go cache volume | image also carries Node (frontend build, Vitest, Playwright browsers) |
 | Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
-| Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, merged coverage, JUnit | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
+| Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, JUnit, coverage merged from the unit pass and the Godog scenarios' `-cover` board binary (a leg that ran scenarios without leaving feature counters fails the suite) | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
 | Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
 | Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. The stage first builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, not pushed); the amd64 image feeds the image gates. The two mutation rows are reported as judged by the Mutation stage (`--mutation-deferred`), whose reports exist only after it and not on a branch build |
 | Stability | extended lane only, `ci/stability.sh 3` | same |

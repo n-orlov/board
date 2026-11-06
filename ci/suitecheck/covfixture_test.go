@@ -44,7 +44,7 @@ func runCovFixture(t *testing.T, extraEnv ...string) covFixtureRun {
 	fixture := filepath.Join(root, "ci", "suitecheck", "testdata", "covfixture")
 	module := t.TempDir()
 	copyFile(t, filepath.Join(fixture, "go.mod.fixture"), filepath.Join(module, "go.mod"), 0o644)
-	for _, rel := range []string{"unit/unit_test.go", "unit/extraflag_test.go", "features/fixture_test.go", "features/extraflag_test.go"} {
+	for _, rel := range []string{"unit/unit_test.go", "unit/extraflag_test.go", "features/fixture_test.go", "features/extraflag_test.go", "probe/main.go"} {
 		copyFile(t, filepath.Join(fixture, filepath.FromSlash(rel)), filepath.Join(module, filepath.FromSlash(rel)), 0o644)
 	}
 	copyFile(t, filepath.Join(root, "ci", "suite.sh"), filepath.Join(module, "ci", "suite.sh"), 0o755)
@@ -166,6 +166,65 @@ func TestSuiteScriptGivesTheFeaturesPassTheUnitPassCoverMode(t *testing.T) {
 			}
 			if string(got) != tc.want {
 				t.Errorf("features pass saw BOARD_FEATURES_COVERMODE=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSuiteScriptFailsWhenScenariosLeaveNoFeatureCoverage is the regression for
+// the suite accepting a unit-only merged profile (cure-01-04): a features leg
+// whose log shows scenarios ran must have left counter data in GOCOVERDIR, and
+// the leg that did not is named. The fixture's probe stands in for the
+// instrumented board binary; the real build path is pinned by
+// features/coverage_test.go.
+func TestSuiteScriptFailsWhenScenariosLeaveNoFeatureCoverage(t *testing.T) {
+	const missing = "ran scenarios but wrote no coverage counters"
+	for _, tc := range []struct {
+		name         string
+		coverageLegs string
+		flags        string
+		wantLegs     []string // legs the failure must name
+	}{
+		{"neither leg instrumented", "", "", []string{"sqlite", "postgres"}},
+		{"only sqlite instrumented", "sqlite", "", []string{"postgres"}},
+		{"only postgres instrumented", "postgres", "", []string{"sqlite"}},
+		{"both legs instrumented", "sqlite postgres", "", nil},
+		{"both legs instrumented under -race", "sqlite postgres", "-race", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := []string{"FIXTURE_SCENARIOS=1", "FIXTURE_COVERAGE_LEGS=" + tc.coverageLegs, "BOARD_CI_DB_LEGS=sqlite postgres"}
+			if tc.flags != "" {
+				if _, err := exec.LookPath("gcc"); err != nil && tc.flags == "-race" {
+					t.Skip("-race needs cgo")
+				}
+				env = append(env, "BOARD_CI_GO_EXTRA_FLAGS="+tc.flags)
+			}
+			run := runCovFixture(t, env...)
+			out := string(run.out)
+			for _, leg := range []string{"sqlite", "postgres"} {
+				named := strings.Contains(out, "features/ on the "+leg+" leg "+missing)
+				want := false
+				for _, w := range tc.wantLegs {
+					want = want || w == leg
+				}
+				if named != want {
+					t.Errorf("failure naming the %s leg = %v, want %v", leg, named, want)
+				}
+			}
+			if len(tc.wantLegs) > 0 && run.err == nil {
+				t.Errorf("ci/suite.sh exited 0 although a leg ran scenarios without leaving feature coverage")
+			}
+			if len(tc.wantLegs) == 0 {
+				if strings.Contains(out, "no usable feature coverage") {
+					t.Errorf("a suite whose legs left counters was refused:\n%s", out)
+				}
+				merged, err := os.ReadFile(filepath.Join(run.outdir, "coverage-merged.out"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Count(string(merged), "\n") < 2 || !strings.Contains(string(merged), "boardci.fixture/cov/probe") {
+					t.Errorf("merged profile lacks the feature binary's blocks:\n%s", merged)
+				}
 			}
 		})
 	}

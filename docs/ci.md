@@ -309,6 +309,16 @@ Scripts, each run through `ci/run.sh` unless noted:
   feature coverage-data directories first, so a rerun into the same results
   directory never merges stale counters. `BOARD_CI_OUT` or a
   positional argument names the results directory.
+  The feature passes get `GOCOVERDIR` and `BOARD_FEATURES_COVERMODE` (the unit
+  pass's mode, `atomic` under `-race`): the Godog harness then builds the real
+  board binary with `-cover -covermode=<mode>` (`features/harness_test.go`), and
+  stops a scenario's server with SIGTERM so its counters are flushed. The suite
+  merges those counters with the unit pass's into `coverage-merged.out`. A
+  database leg whose log shows scenarios ran but that left no non-empty counter
+  file in the feature coverage directory fails the suite and is named, as does a
+  run whose feature profile has no blocks; a unit-only merged profile is never
+  accepted. `features/coverage_test.go` pins the build line, the emitted
+  counters and the server flush; `ci/suitecheck` probes the suite's refusal per leg.
   When `web/package.json` exists it first runs `npm ci` and `npm run build` in
   `web/` (the build lands in `internal/webui/dist`, so the Go passes embed the
   real UI rather than the placeholder page), then `npm run test` (Vitest with

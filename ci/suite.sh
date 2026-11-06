@@ -386,6 +386,32 @@ covdir="$outdir/covdata-features"
 rm -rf "$covdir"
 mkdir -p "$covdir"
 
+# count_counters / require_feature_counters (cure-01-04, R13): a features/
+# leg whose log shows Godog ran scenarios must have left non-empty counter
+# files in covdir, because the harness builds the black-box board binary
+# with -cover whenever GOCOVERDIR is supplied. A leg that ran scenarios and
+# left none means the binary was built (or run) without instrumentation, and
+# the merged profile would silently be unit-only, so the suite fails instead.
+feature_scenarios_ran=0
+count_counters() {
+    find "$covdir" -type f -name 'covcounters.*' -size +0c | wc -l | tr -d ' '
+}
+
+# require_feature_counters <leg> <log> <counters-before>: returns 1, saying
+# why on stderr, when <log> shows scenarios ran but covdir gained no counters.
+require_feature_counters() {
+    rfc_leg=$1
+    rfc_log=$2
+    rfc_before=$3
+    sed -E 's/\x1b\[[0-9;]*m//g' "$rfc_log" | grep -Eq '^[0-9]+ scenarios? \(' || return 0
+    feature_scenarios_ran=1
+    if [ "$(count_counters)" -le "$rfc_before" ]; then
+        echo "ci/suite.sh: features/ on the $rfc_leg leg ran scenarios but wrote no coverage counters into $covdir: no usable feature coverage (is the board binary built with -cover when GOCOVERDIR is set?)" >&2
+        return 1
+    fi
+    return 0
+}
+
 # run_test_features <gotestsum-junit-path> <NAME=value>...: one gotestsum-driven
 # run of features/TestFeatures and nothing else. No --rerun-fails here on purpose
 # (see the header); --format standard-verbose keeps Godog's pretty output,
@@ -439,6 +465,7 @@ features_status=0
 # whether a synthetic failed/aborted TestFeatures marker is needed so the
 # report input never silently drops the pass.
 features_aborted_without_locations=0
+sqlite_counters_before=$(count_counters)
 if ! run_test_features "$outdir/junit-features-gotestsum.xml" "BOARD_GODOG_JUNIT=$features_junit" "BOARD_GODOG_ALLURE=$allure_dir" "GOCOVERDIR=$covdir" > "$features_log" 2>&1; then
     features_status=1
     clean_log="$outdir/features-run1.clean.log"
@@ -473,6 +500,9 @@ if [ "$features_status" -ne 0 ]; then
     echo "ci/suite.sh: features/ failed after per-scenario retry" >&2
     overall_status=1
 fi
+if ! require_feature_counters sqlite "$features_log" "$sqlite_counters_before"; then
+    overall_status=1
+fi
 
 # --- 2b. every other database leg: the same scenarios against Postgres (task 013, R4) ---
 # One run of features/TestFeatures with BOARD_DB_LEG=<leg>, then each failed
@@ -487,6 +517,7 @@ run_extra_leg() {
     leg_log="$outdir/features-run1-$leg.log"
     leg_flaky="$outdir/flaky-features-$leg.txt"
     : > "$leg_flaky"
+    leg_counters_before=$(count_counters)
     if run_test_features "$outdir/junit-features-$leg-gotestsum.xml" "GOCOVERDIR=$covdir" > "$leg_log" 2>&1; then
         return 0
     fi
@@ -516,6 +547,9 @@ for leg in $db_legs; do
     extra_legs="$extra_legs $leg"
     if ! run_extra_leg "$leg"; then
         echo "ci/suite.sh: features/ failed on the $leg leg after per-scenario retry" >&2
+        overall_status=1
+    fi
+    if ! require_feature_counters "$leg" "$outdir/features-run1-$leg.log" "$leg_counters_before"; then
         overall_status=1
     fi
 done
@@ -771,6 +805,10 @@ if ! go tool covdata textfmt -i="$covdir" -o="$features_coverprofile" 2>"$outdir
     echo "ci/suite.sh: no features/ black-box coverage data in $covdir (see $outdir/covdata-textfmt.log)" >&2
 fi
 ensure_legacy_profile "$features_coverprofile"
+if [ "$feature_scenarios_ran" -eq 1 ] && [ "$(($(wc -l < "$features_coverprofile") - 1))" -le 0 ]; then
+    echo "ci/suite.sh: features/ ran scenarios but $features_coverprofile has no blocks: no usable feature coverage, so the merged profile would be unit-only" >&2
+    overall_status=1
+fi
 if ! go tool covdata textfmt -i="$unit_covdir" -o="$unit_coverprofile" 2>"$outdir/covdata-unit-textfmt.log"; then
     echo "ci/suite.sh: no unit coverage data in $unit_covdir (see $outdir/covdata-unit-textfmt.log)" >&2
 fi

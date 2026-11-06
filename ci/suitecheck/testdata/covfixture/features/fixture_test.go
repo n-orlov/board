@@ -7,8 +7,11 @@
 package features
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,7 +19,43 @@ import (
 // -tags=suiteextraflag.
 var extraFlagMarker string
 
+// emitCoverage stands in for the real harness's instrumented board binary:
+// it builds probe/ with -cover in the mode the suite chose and runs it with
+// GOCOVERDIR, so the leg leaves real counter data.
+func emitCoverage(t *testing.T) {
+	dir := os.Getenv("GOCOVERDIR")
+	if dir == "" {
+		t.Fatal("the suite supplied no GOCOVERDIR")
+	}
+	bin := filepath.Join(t.TempDir(), "probe")
+	args := []string{"build", "-o", bin, "-cover"}
+	if mode := os.Getenv("BOARD_FEATURES_COVERMODE"); mode != "" {
+		args = append(args, "-covermode="+mode)
+	}
+	args = append(args, "boardci.fixture/cov/probe")
+	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+		t.Fatalf("building the probe: %v\n%s", err, out)
+	}
+	run := exec.Command(bin)
+	run.Env = append(os.Environ(), "GOCOVERDIR="+dir)
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("running the probe: %v\n%s", err, out)
+	}
+}
+
 func TestFeatures(t *testing.T) {
+	// FIXTURE_SCENARIOS=1 makes this pass look like a Godog run that executed
+	// scenarios (the summary line Godog prints), FIXTURE_COVERAGE_LEGS names
+	// the database legs whose "scenarios" leave coverage counters.
+	if os.Getenv("FIXTURE_SCENARIOS") == "1" {
+		fmt.Println("1 scenarios (1 passed)")
+		legs := strings.Fields(os.Getenv("FIXTURE_COVERAGE_LEGS"))
+		for _, leg := range legs {
+			if leg == os.Getenv("BOARD_DB_LEG") {
+				emitCoverage(t)
+			}
+		}
+	}
 	dir := os.Getenv("EXTRA_PROBE_DIR")
 	if dir != "" {
 		// What ci/suite.sh told this pass about the unit pass's covermode.

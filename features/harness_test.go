@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -38,14 +39,39 @@ func dbLeg() (string, error) {
 	}
 }
 
+// boardPackage is the import path of the binary every scenario drives.
+const boardPackage = "github.com/n-orlov/board/cmd/board"
+
+// boardBuildArgs is the `go build` argument list for the black-box board
+// binary. With a coverDir (the suite's GOCOVERDIR) the binary is built with
+// -cover, and with a coverMode (the suite's BOARD_FEATURES_COVERMODE, the
+// unit pass's mode) -covermode=<mode> too: `go tool covdata` cannot merge
+// atomic counters (a -race unit pass) with a set-mode binary's. Neither set:
+// the plain build. A mode without a coverDir is ignored.
+func boardBuildArgs(binary, coverDir, coverMode string) []string {
+	args := []string{"build", "-o", binary}
+	if coverDir != "" {
+		args = append(args, "-cover")
+		if coverMode != "" {
+			args = append(args, "-covermode="+coverMode)
+		}
+	}
+	return append(args, boardPackage)
+}
+
+// compileBoard builds the real board binary at bin, instrumented for coverage
+// whenever GOCOVERDIR is supplied, the way the suite supplies it.
+func compileBoard(bin string) ([]byte, error) {
+	cmd := exec.Command("go", boardBuildArgs(bin, os.Getenv("GOCOVERDIR"), os.Getenv("BOARD_FEATURES_COVERMODE"))...)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	return cmd.CombinedOutput()
+}
+
 // buildBoard compiles the real binary once for the whole run.
 func buildBoard(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "board")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/n-orlov/board/cmd/board")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	bin := filepath.Join(t.TempDir(), "board")
+	if out, err := compileBoard(bin); err != nil {
 		t.Fatalf("building the board binary: %v\n%s", err, out)
 	}
 	return bin
@@ -340,8 +366,7 @@ func (h *harness) keyFromAnotherDatabase(ctx context.Context) error {
 
 func (h *harness) stopServer() {
 	if h.server != nil && h.server.Process != nil {
-		_ = h.server.Process.Kill()
-		_, _ = h.server.Process.Wait()
+		endServer(h.server)
 	}
 	if h.dir != "" {
 		_ = os.RemoveAll(h.dir)
@@ -449,4 +474,23 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 		}
 		return conn.Close()
 	})
+}
+
+// endServer stops a started `board serve` so that it can flush the coverage
+// counters an instrumented build holds: SIGTERM first, which the server
+// handles by shutting down and exiting, and a kill only when it does not
+// exit in time.
+func endServer(cmd *exec.Cmd) {
+	done := make(chan struct{})
+	go func() {
+		_, _ = cmd.Process.Wait()
+		close(done)
+	}()
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
 }
