@@ -273,10 +273,12 @@ func (h *harness) recordSchemaVersion(ctx context.Context, v int) error {
 	return err
 }
 
-// phase0Tables are the tables the embedded migrations create.
-var phase0Tables = []string{"actors", "initiatives", "events", "api_keys", "initiative_tags", "sessions"}
+// phase0Tables are the tables the embedded migrations create: the Phase 0 ones
+// and, since Phase 1, tasks and task_deps.
+var phase0Tables = []string{"actors", "initiatives", "events", "api_keys", "initiative_tags", "sessions", "tasks", "task_deps"}
 
-// hasPhase0Tables reads every Phase 0 table, which fails when one is missing.
+// hasPhase0Tables reads every table the migrations create, which fails when one
+// is missing.
 func (h *harness) hasPhase0Tables(ctx context.Context) error {
 	db, err := h.openDB()
 	if err != nil {

@@ -150,7 +150,7 @@ func columns(t *testing.T, s *Store, table string) map[string]bool {
 	return cols
 }
 
-// TestMigrateCreatesThePhase0Tables checks the SPEC 4 columns Phase 0 uses.
+// TestMigrateCreatesThePhase0Tables checks the SPEC 4 columns of the tables in use.
 func TestMigrateCreatesThePhase0Tables(t *testing.T) {
 	s := open(t)
 	if err := s.Migrate(context.Background()); err != nil {
@@ -160,13 +160,17 @@ func TestMigrateCreatesThePhase0Tables(t *testing.T) {
 		"actors": {"n", "id", "handle", "kind", "display_name", "host", "way_back", "meta",
 			"first_seen_at", "last_seen_at", "protocol_seen"},
 		"initiatives": {"n", "id", "slug", "title", "description", "status", "target_start", "target_end",
-			"created_by", "created_at", "closed_at", "closed_by"},
+			"created_by", "created_at", "closed_at", "closed_by", "next_task_seq"},
 		"initiative_tags": {"initiative_id", "tag"},
 		"events": {"n", "id", "at", "actor_id", "principal", "on_behalf_of", "initiative_id", "task_id",
 			"type", "ref_id", "summary", "data"},
 		"api_keys": {"n", "id", "name", "key_hash", "display_prefix", "created_at", "created_by",
 			"last_used_at", "expires_at", "revoked_at"},
 		"sessions": {"id_hash", "email", "csrf_token", "created_at", "last_seen_at", "expires_at"},
+		"tasks": {"n", "id", "initiative_id", "seq", "title", "description", "kind", "status", "resolution",
+			"planned_start", "planned_end", "cadence_seconds", "next_check_at", "external_refs",
+			"created_by", "created_at", "updated_at", "done_at", "done_by", "closed_at", "closed_by"},
+		"task_deps": {"task_id", "blocked_by_task_id"},
 	}
 	for table, cols := range want {
 		got := columns(t, s, table)
@@ -273,7 +277,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 2 || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" {
+		if len(files) != 3 || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {

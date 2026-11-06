@@ -7,7 +7,7 @@ Feature: The store and board admin migrate
     Given a new database for the board commands
     When I run "board admin migrate"
     Then the exit code is 0
-    And stdout is exactly "ok migrated, schema version 2"
+    And stdout is exactly "ok migrated, schema version 3"
     And stderr is empty
 
   Scenario: board admin migrate is idempotent
@@ -15,7 +15,7 @@ Feature: The store and board admin migrate
     When I run "board admin migrate"
     And I run "board admin migrate"
     Then the exit code is 0
-    And stdout is exactly "ok migrated, schema version 2"
+    And stdout is exactly "ok migrated, schema version 3"
 
   Scenario: a database migrated by board admin migrate is ready without BOARD_MIGRATE
     Given a new database for the board commands

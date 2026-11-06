@@ -301,6 +301,7 @@ on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 | status | `open` \| `closed` | closing an initiative requires all its tasks closed (or `force=true`, which closes them `dropped`) |
 | target_start, target_end | date, nullable | planning window for the timeline |
 | created_by, created_at, closed_at, closed_by | | |
+| next_task_seq | int | the `seq` the next task of this initiative takes, starting at 1; only counts up, so a `seq` is never reused (§4.3) |
 
 `initiative_tags(initiative_id, tag)`, PK both columns, index on `tag`.
 
@@ -310,16 +311,16 @@ on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 |---|---|---|
 | id | ulid | |
 | initiative_id | fk | |
-| seq | int | per-initiative counter → `ref` |
+| seq | int | per-initiative counter → `ref`; unique per initiative (`UNIQUE (initiative_id, seq)`), starts at 1 and is taken from `initiatives.next_task_seq` in the creating transaction, so it is never reused |
 | title | text | |
 | description | text | Markdown |
 | kind | `work` \| `watch` | |
 | status | `open` \| `done` \| `closed` | |
 | resolution | `completed` \| `dropped` \| `superseded` \| `duplicate`, nullable | set on close |
-| planned_start, planned_end | ts, nullable | planned bar on the timeline |
-| cadence_seconds | int, nullable | watch tasks only |
+| planned_start, planned_end | ts, nullable | planned bar on the timeline; the end is not before the start |
+| cadence_seconds | int, nullable | watch tasks only: 60 to 31536000, required on a watch task |
 | next_check_at | ts, nullable | watch tasks only |
-| external_refs | json text | list of `{label, url}` (tickets, PRs, builds) |
+| external_refs | json text | list of `{label, url}` (tickets, PRs, builds): at most 20, `label` 1-80 characters, `url` http or https; `[]` when none |
 | created_by, created_at, updated_at, done_at, done_by, closed_at, closed_by | | |
 
 Transitions: `open → done`, `done → open` (reopen), `open|done → closed`, `closed → open`
@@ -330,6 +331,14 @@ open blocking ask), **overdue** (watch with `next_check_at < now`).
 
 `task_deps(task_id, blocked_by_task_id)`: PK both, no self-reference, cycles rejected on insert.
 A dependency is **open** while the blocking task is not `closed` (done-not-closed still blocks).
+Both tables exist (migration `00003_tasks`, in both dialects) with the §4.10 indexes; `task_deps` also has an index on
+`blocked_by_task_id` for the `blocking` list, and the database refuses a self-reference (cycle checks are the service's).
+`events.task_id` has no foreign key, so the event log outlives any task row.
+
+A task's ref is parsed by `domain.ParseTaskRef`: `<slug>-<seq>` (the text after the last `-` is a positive integer, the
+rest a valid slug) or a ULID, either in upper or lower case. A write through `internal/tasks` (`Create`, `Patch`) appends
+its event (`task_created`, `task_updated` with `data.changed` naming the changed fields in column order) in the same
+transaction; a patch that changes nothing writes no row, no event and no actor.
 
 ### 4.4 `leases`, `lease_resources`
 
@@ -438,9 +447,10 @@ verifier answers 401 `key expired` from that instant on.
 are deleted by the same sweeper as leases. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
 and is indexed on `expires_at` for that sweep.
 
-Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; the other
-tables of this section arrive with the phases that use them. `events.task_id` is a plain nullable column until
-`tasks` exists. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
+Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
+`tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`). The other tables of this
+section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
 ### 4.10 Indexes (the hot queries)
