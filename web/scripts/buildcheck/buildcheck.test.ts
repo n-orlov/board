@@ -6,9 +6,11 @@ import { build } from 'vite';
 import {
   cssUrls,
   htmlReferences,
+  hasFocusVisibleRing,
   isNonRelative,
   missingTokens,
   nonRelativeReferences,
+  reducedMotionBlock,
   TOKENS,
 } from './buildcheck.ts';
 
@@ -137,5 +139,47 @@ describe('reference extraction', () => {
 
   it('passes a relative page', () => {
     expect(nonRelativeReferences('<script src="./a.js"></script>', 'a{background:url(./b.png)}')).toEqual([]);
+  });
+});
+
+describe('built dialog styles', () => {
+  it('gives interactive elements a visible :focus-visible ring', () => {
+    expect(hasFocusVisibleRing(css)).toBe(true);
+  });
+
+  it('switches animations and transitions off under prefers-reduced-motion: reduce', () => {
+    const block = reducedMotionBlock(css) ?? '';
+    expect(block).toMatch(/animation\s*:\s*none/);
+    expect(block).toMatch(/transition\s*:\s*none/);
+  });
+
+  it('declares the dialog animations the reduced-motion block has to switch off', () => {
+    expect(css).toMatch(/\.dialog-panel\s*\{[^}]*animation/);
+  });
+});
+
+describe('reducedMotionBlock', () => {
+  it('returns the nested body of the block', () => {
+    expect(reducedMotionBlock('a{x:1}@media (prefers-reduced-motion: reduce){*{animation:none}}b{y:2}')).toBe(
+      '*{animation:none}',
+    );
+  });
+  it('is undefined without the block or when it is unterminated', () => {
+    expect(reducedMotionBlock('a{x:1}')).toBeUndefined();
+    expect(reducedMotionBlock('@media (prefers-reduced-motion:reduce){*{animation:none}')).toBeUndefined();
+  });
+  it('does not match a no-preference block', () => {
+    expect(reducedMotionBlock('@media (prefers-reduced-motion: no-preference){*{animation:none}}')).toBeUndefined();
+  });
+});
+
+describe('hasFocusVisibleRing', () => {
+  it('accepts an outline on :focus-visible', () => {
+    expect(hasFocusVisibleRing('a:focus-visible{outline:2px solid red}')).toBe(true);
+  });
+  it('rejects a missing rule, outline none and an offset alone', () => {
+    expect(hasFocusVisibleRing('a{outline:2px solid red}')).toBe(false);
+    expect(hasFocusVisibleRing('a:focus-visible{outline:none}')).toBe(false);
+    expect(hasFocusVisibleRing('a:focus-visible{outline-offset:2px}')).toBe(false);
   });
 });

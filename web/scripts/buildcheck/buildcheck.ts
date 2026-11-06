@@ -66,3 +66,24 @@ export function cssUrls(css: string): string[] {
 export function nonRelativeReferences(html: string, css: string): string[] {
   return [...htmlReferences(html), ...cssUrls(css)].filter(isNonRelative);
 }
+
+/** The body of the first `@media (prefers-reduced-motion: reduce)` block, or undefined when there is none. */
+export function reducedMotionBlock(css: string): string | undefined {
+  const open = /@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{/.exec(css);
+  if (open === null) return undefined;
+  let depth = 1;
+  let i = open.index + open[0].length;
+  const start = i;
+  for (; i < css.length && depth > 0; i++) {
+    if (css[i] === '{') depth++;
+    else if (css[i] === '}') depth--;
+  }
+  return depth === 0 ? css.slice(start, i - 1) : undefined;
+}
+
+/** True when the stylesheet gives `:focus-visible` an outline for at least one rule. */
+export function hasFocusVisibleRing(css: string): boolean {
+  return [...css.matchAll(/([^{}]*:focus-visible[^{}]*)\{([^{}]*)\}/g)].some((rule) =>
+    /outline(?!-offset)[\w-]*\s*:\s*(?!none|0\b)[^;}]+/.test(rule[2]),
+  );
+}

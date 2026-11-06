@@ -1067,6 +1067,19 @@ taken slug, a bad tag) shows the problem document's detail on the form and keeps
 it can be corrected. The page calls the API with the session cookie, and its write sends the
 session's `X-CSRF-Token` (§3.2) (`e2e/initiatives.spec.ts`).
 
+**Dialogs and sheets.** Every modal surface in the UI is the one `Dialog` component
+(`web/src/Dialog.svelte`); its focus rules are pure functions in `web/src/lib/focustrap.ts`.
+It renders `role="dialog"` and `aria-modal="true"` with an accessible label (`aria-label`).
+When it opens, focus moves into it: to the element the caller prefers, else the first focusable
+element, else the dialog container. Tab and Shift+Tab are trapped: Tab on the last focusable
+element wraps to the first and Shift+Tab on the first wraps to the last. Escape closes it, and so
+does a click on the backdrop. On close, focus returns to the element that had it when the dialog
+opened (the opener), if that element is still in the page. Below 768 px the dialog is a bottom
+sheet, full width and anchored to the bottom edge; from 768 px up it is a centred dialog. It fades
+in (and the sheet slides up); under `prefers-reduced-motion: reduce` every animation and
+transition is off. Interactive elements show a visible `:focus-visible` ring from the token
+stylesheet.
+
 Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
 network requests (all assets embedded).
 
