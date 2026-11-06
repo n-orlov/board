@@ -1097,7 +1097,21 @@ in (and the sheet slides up); under `prefers-reduced-motion: reduce` every anima
 transition is off. Interactive elements show a visible `:focus-visible` ring from the token
 stylesheet.
 
-Global: tag filter persisted in the URL, keyboard navigation, dark/light theme, no external
+**Theme.** The account menu has a Theme control with three settings: **System** (the default),
+**Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
+it; the effective theme is `light` or `dark` and is the `data-theme` attribute of `<html>`, which
+selects the token set in `web/src/styles.css`. The setting is stored in `localStorage` under
+`board.theme`; a stored value that is not one of the three (or storage that cannot be read) is
+System. The mapping of setting and system preference to the effective theme, the persistence and
+the controller that applies it are `web/src/lib/theme.ts`; while the setting is System the page
+follows a change of the system preference without a reload. **Pre-paint rule:** `web/index.html`
+holds a small inline script in `<head>`, before the app bundle, that applies the same rule and
+sets `data-theme` on `<html>` and the content of `<meta name="theme-color">` to the effective
+theme's surface colour (`#f6f7f9` light, `#14161a` dark), so the first paint is already in the
+right theme and there is no flash; `theme.test.ts` runs that script against the module's mapping
+(`e2e/theme.spec.ts` emulates a dark system).
+
+Global: tag filter persisted in the URL, keyboard navigation, no external
 network requests (all assets embedded).
 
 ---
