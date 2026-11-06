@@ -117,3 +117,16 @@ func (s Sessions) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// DeleteExpired removes every session past its absolute expiry and returns how
+// many it removed. A session only the idle timeout has ended is removed when it
+// is next looked up (Lookup), since the idle clock is not indexed.
+func (s Sessions) DeleteExpired(ctx context.Context) (int, error) {
+	d := s.Store.Dialect()
+	res, err := s.Store.Writer().ExecContext(ctx, d.Rebind(`DELETE FROM sessions WHERE expires_at <= ?`), store.EncodeTime(s.now()))
+	if err != nil {
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}

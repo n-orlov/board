@@ -121,3 +121,30 @@ func TestSessionsReportAnUnusableStore(t *testing.T) {
 		t.Fatal("Delete on a closed store succeeded")
 	}
 }
+
+func TestDeleteExpiredRemovesOnlySessionsPastTheirAbsoluteExpiry(t *testing.T) {
+	c := &clock{t0}
+	s := newSessions(t, c, time.Hour, 24*time.Hour)
+	ctx := context.Background()
+	old, _, _ := s.Create(ctx, "a@example.com")
+	c.now = c.now.Add(30 * time.Minute)
+	young, _, _ := s.Create(ctx, "b@example.com")
+	if n, err := s.DeleteExpired(ctx); err != nil || n != 0 {
+		t.Fatalf("nothing due: %d, %v", n, err)
+	}
+	c.now = t0.Add(time.Hour + time.Minute)
+	if n, err := s.DeleteExpired(ctx); err != nil || n != 1 {
+		t.Fatalf("one due: %d, %v", n, err)
+	}
+	var left int
+	if err := s.Store.Reader().QueryRowContext(ctx, `SELECT count(*) FROM sessions WHERE id_hash = ?`, HashKey(old)).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("expired session left: %d, %v", left, err)
+	}
+	if _, err := s.Lookup(ctx, young); err != nil {
+		t.Fatalf("the live session was removed: %v", err)
+	}
+	_ = s.Store.Close()
+	if _, err := s.DeleteExpired(ctx); err == nil {
+		t.Fatal("DeleteExpired on a closed store succeeded")
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/server"
 	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/board/internal/sweep"
 	"github.com/n-orlov/board/internal/tasks"
 	"github.com/n-orlov/board/internal/version"
 )
@@ -134,6 +135,9 @@ func serve(stderr io.Writer, env Env) int {
 		_, _ = fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
 		return ExitError
 	}
+	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
+		return fail(stderr, err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serveUntil(ctx, stderr, env, dbURL(env), addr, migrate != "off")
@@ -154,6 +158,8 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err != nil {
 		return fail(stderr, err)
 	}
+	stopSweeper := startSweeper(ctx, stderr, env, st)
+	defer stopSweeper()
 	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st})); err != nil {
 		return fail(stderr, err)
 	}
@@ -170,4 +176,30 @@ func prepareSchema(ctx context.Context, st *store.Store, migrate bool) error {
 		return st.Migrate(ctx)
 	}
 	return nil
+}
+
+// startSweeper runs runSweeper in the background and returns the function that
+// stops it and waits for it, so it never touches the store after it is closed.
+func startSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSweeper(ctx, stderr, env, st)
+	}()
+	return func() { cancel(); <-done }
+}
+
+// runSweeper expires due leases and deletes expired sessions every
+// BOARD_SWEEP_INTERVAL until ctx ends; "off" runs nothing. serve has already
+// checked the setting parses.
+func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store) {
+	interval, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL"))
+	if err != nil {
+		return
+	}
+	ls, sessions := &leases.Store{Store: st}, &auth.Sessions{Store: st}
+	sweep.Run(ctx, interval, func(err error) { _, _ = fmt.Fprintf(stderr, "board: sweep: %v\n", err) },
+		func(ctx context.Context) error { _, err := ls.ExpireDue(ctx); return err },
+		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err })
 }

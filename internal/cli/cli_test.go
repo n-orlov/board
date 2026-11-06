@@ -7,11 +7,14 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite" // the driver the store registers, for the schema-version fixture
 
+	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/version"
 )
 
@@ -144,3 +147,91 @@ func TestServeReportsAListenFailureFromTheEnvironment(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }
+
+func TestServeRejectsAMalformedSweepInterval(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := Run([]string{"serve"}, &out, &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "soon"})); code != ExitError ||
+		!strings.Contains(errb.String(), "BOARD_SWEEP_INTERVAL") {
+		t.Fatalf("got code=%d err=%q", code, errb.String())
+	}
+}
+
+// sessionsLeft counts the rows of the sessions table.
+func sessionsLeft(t *testing.T, st *store.Store) int {
+	t.Helper()
+	var n int
+	if err := st.Reader().QueryRow(`SELECT count(*) FROM sessions`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestSweeperDeletesExpiredSessionsAtTheConfiguredIntervalAndNotWhenOff(t *testing.T) {
+	for _, tc := range []struct {
+		interval string
+		want     int
+	}{{"5ms", 0}, {"off", 1}} {
+		st, err := store.Open(sqliteURL(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Migrate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-time.Hour)
+		sessions := auth.Sessions{Store: st, TTL: time.Minute, Now: func() time.Time { return old }}
+		if _, _, err := sessions.Create(context.Background(), "a@example.com"); err != nil {
+			t.Fatal(err)
+		}
+		var errb bytes.Buffer
+		stop := startSweeper(context.Background(), &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": tc.interval}), st)
+		deadline := time.Now().Add(3 * time.Second)
+		for sessionsLeft(t, st) != tc.want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if tc.want == 1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+		stop()
+		if got := sessionsLeft(t, st); got != tc.want || errb.Len() != 0 {
+			t.Errorf("interval %s: %d sessions left, want %d (stderr %q)", tc.interval, got, tc.want, errb.String())
+		}
+		_ = st.Close()
+	}
+}
+
+func TestSweeperReportsAFailingJobOnStderr(t *testing.T) {
+	st, err := store.Open(sqliteURL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errb syncBuffer
+	_ = st.Close()
+	stop := startSweeper(context.Background(), &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "5ms"}), st)
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.Contains(errb.String(), "board: sweep:") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	stop()
+	if !strings.Contains(errb.String(), "board: sweep:") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+func TestSweeperWithAMalformedIntervalRunsNothing(_ *testing.T) {
+	stop := startSweeper(context.Background(), io.Discard, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "soon"}), nil)
+	stop()
+}
+
+// syncBuffer is a bytes.Buffer the sweeper goroutine and the test may share.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

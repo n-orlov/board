@@ -408,7 +408,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
   `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
-- **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It only reads.
+- **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It first runs `ExpireDue` (§5.1), so a lease past its expiry is marked expired and left out.
 
 ### 4.5 `asks`
 
@@ -531,8 +531,9 @@ last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key. `c
 HTTP and `admin-cli` for one made by `board admin keys create`. `expires_at` is when the key stops working; the
 verifier answers 401 `key expired` from that instant on.
 
-`sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Expired rows
-are deleted by the same sweeper as leases. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
+`sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Rows past
+`expires_at` are deleted by the same sweeper as leases (§5.1), on the same `BOARD_SWEEP_INTERVAL` tick; a session
+that only the idle timeout has ended is deleted when it is next looked up. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
 and is indexed on `expires_at` for that sweep.
 
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
@@ -567,9 +568,14 @@ an upgrade survive it. `events.task_id` is a plain nullable column with no forei
   visible on the timeline.
 - **End** `POST /api/v1/leases/{id}/end {outcome?}`.
 - **Expire**: a sweeper marks `live` leases with `expires_at < now` as `expired` and writes
-  `lease_expired`. It runs every 15 s and also lazily on every read that returns leases, so a
-  read never shows a lease as live past its expiry. Expiry is idempotent and safe with several
-  replicas (conditional update `WHERE state='live' AND expires_at < ?`).
+  `lease_expired`. `board serve` runs it every `BOARD_SWEEP_INTERVAL` (default `15s`; any Go duration
+  above zero; `off`, `0` or `0s` turns the sweeper off, and any other value makes `board serve` exit 1
+  naming the variable). It also runs lazily first on every read that returns leases (`GET /leases`,
+  `GET /leases/{ref}`, and the live leases of `GET /tasks/{ref}`), so a read never shows a lease as live past
+  its expiry even with the sweeper off. Expiry is idempotent and safe with several replicas (conditional
+  update `WHERE state='live' AND expires_at < ?`: of two servers that race, one marks the lease and writes
+  its one `lease_expired` event, the other finds it already expired). The same tick deletes expired
+  sessions (§4.9).
 
 ### 5.2 Conflicts
 
@@ -847,7 +853,7 @@ principal may use them. The server answers 503 problem documents when it runs wi
   `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
   status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
   is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
-  expires_at, state, resources}`, resources sorted); the read does not write. The derived `active` is a non-empty
+  expires_at, state, resources}`, resources sorted); the read first expires the due leases (§5.1), so a lease past its expiry is not listed. The derived `active` is a non-empty
   `live_leases`, `blocked` is an open dependency (§4.3) and `overdue` is §4.6's rule at the time of the read.
 - A PATCH body is read with a three-state field (`internal/server` `Maybe`): left out, `null`, or a value. Fields the
   document does not name are ignored.
@@ -858,8 +864,8 @@ principal may use them. The server answers 503 problem documents when it runs wi
 `api/openapi.yaml`. `{ref}` is `L<n>` (either letter case) or the lease's ULID; one that names no lease is **404**
 (`there is no lease L9`). Any authenticated principal may use them. The server answers 503 problem documents when
 it runs without a store. The rules are those of `internal/leases` (§4.4). The sweeper that expires leases in the
-background comes with a later task; every operation here expires the due leases first (§5.1), so none shows a
-lease live past its expiry.
+background runs every `BOARD_SWEEP_INTERVAL` (§5.1, §13); every operation here also expires the due leases
+first, so none shows a lease live past its expiry, with the sweeper off too.
 
 - **`POST /api/v1/leases`**, body `{task, intent, ttl_seconds?, resources?}`. `task` is a task ref or ULID, `intent`
   1 to 200 characters, `ttl_seconds` an integer clamped to [60, 43200] (7200 when absent), `resources` at most 20
@@ -1568,7 +1574,7 @@ All configuration is by environment variable:
 | `BOARD_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. Phase 0 does not seed the row at start-up: it is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
-| `BOARD_SWEEP_INTERVAL` | `15s` | lease expiry sweep |
+| `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
 | `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check |

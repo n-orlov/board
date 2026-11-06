@@ -31,13 +31,20 @@ func TestLiveOfListsOnlyTheLiveUnexpiredLeasesOfThatTaskOldestFirst(t *testing.T
 	if got, _ = e.S.LiveOf(ctx, task.ID); len(got) != 1 || got[0].Ref != first.Lease.Ref {
 		t.Errorf("after an end, LiveOf = %+v", got)
 	}
-	// 601 s later the first lease has run out, though no sweep marked it.
+	// 601 s later the first lease has run out, though no sweep marked it: the read does.
 	e.Clock.add(601 * time.Second)
 	if got, _ = e.S.LiveOf(ctx, task.ID); got == nil || len(got) != 0 {
 		t.Errorf("after expiry, LiveOf = %#v, want an empty list", got)
 	}
-	if st := mustGet(t, e, first.Lease.Ref).State; st != "live" {
-		t.Errorf("LiveOf wrote: state = %q", st)
+	if st := mustGet(t, e, first.Lease.Ref).State; st != "expired" {
+		t.Errorf("after LiveOf, state = %q, want expired", st)
+	}
+	if _, err := e.S.LiveOf(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	// the aa-2 lease of the same age expired with it: one event each, however many reads.
+	if evs := e.events(t, EventExpired); len(evs) != 2 {
+		t.Errorf("%d lease_expired events after two reads, want 2", len(evs))
 	}
 }
 

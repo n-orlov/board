@@ -210,6 +210,19 @@ func (h *harness) leaseEventCount(ctx context.Context, want int, typ, ref string
 	return nil
 }
 
+// leaseStateWithin polls the lease row for up to the seconds until it holds
+// the state, for the background sweeper, which writes on its own schedule.
+func (h *harness) leaseStateWithin(ctx context.Context, seconds int, ref, want string) error {
+	deadline := time.Now().Add(time.Duration(seconds) * time.Second)
+	for {
+		err := h.leaseStateIs(ctx, ref, want)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func registerLeaseSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I start a lease with body "([^"]*)" as actor "([^"]*)"$`, h.startLease)
 	sc.Step(`^I start a lease without a body as actor "([^"]*)"$`, h.startLeaseWithoutBody)
@@ -222,6 +235,7 @@ func registerLeaseSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I list the leases with "([^"]*)" as actor "([^"]*)"$`, h.listLeases)
 	sc.Step(`^I request the next leases page with "([^"]*)" as actor "([^"]*)"$`, h.nextLeasesPage)
 	sc.Step(`^the lease "([^"]*)" ran out (\d+) seconds ago$`, h.expireLease)
+	sc.Step(`^within (\d+) seconds the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateWithin)
 	sc.Step(`^there are (\d+) leases in the database$`, h.leaseCount)
 	sc.Step(`^the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateIs)
 	sc.Step(`^the response path "([^"]*)" is the request time plus (\d+) seconds$`, h.pathIsTimePlus)
