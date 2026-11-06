@@ -229,3 +229,42 @@ func TestSuiteScriptFailsWhenScenariosLeaveNoFeatureCoverage(t *testing.T) {
 		})
 	}
 }
+
+// TestSuiteScriptDemandsFeatureCoverageOnlyFromLegsThatRanScenarios pins the
+// edges of the same rule (cure-01-04) that the table above does not name: a
+// suite configured with one database leg names only that leg, a leg whose log
+// shows no scenarios ran is never accused of missing counters (there was
+// nothing to instrument), and an instrumented leg is not blamed for a
+// neighbour's gap.
+func TestSuiteScriptDemandsFeatureCoverageOnlyFromLegsThatRanScenarios(t *testing.T) {
+	const missing = "ran scenarios but wrote no coverage counters"
+	for _, tc := range []struct {
+		name      string
+		scenarios string // FIXTURE_SCENARIOS
+		legs      string // BOARD_CI_DB_LEGS
+		covLegs   string // FIXTURE_COVERAGE_LEGS
+		wantNamed []string
+	}{
+		{"single sqlite leg, uninstrumented", "1", "sqlite", "", []string{"sqlite"}},
+		{"single sqlite leg, instrumented", "1", "sqlite", "sqlite", nil},
+		{"no scenarios ran on any leg", "", "sqlite postgres", "", nil},
+		{"postgres instrumented, sqlite not, only sqlite named", "1", "sqlite postgres", "postgres", []string{"sqlite"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := runCovFixture(t, "FIXTURE_SCENARIOS="+tc.scenarios, "FIXTURE_COVERAGE_LEGS="+tc.covLegs, "BOARD_CI_DB_LEGS="+tc.legs)
+			out := string(run.out)
+			for _, leg := range []string{"sqlite", "postgres"} {
+				want := false
+				for _, w := range tc.wantNamed {
+					want = want || w == leg
+				}
+				if named := strings.Contains(out, "features/ on the "+leg+" leg "+missing); named != want {
+					t.Errorf("failure naming the %s leg = %v, want %v", leg, named, want)
+				}
+			}
+			if len(tc.wantNamed) > 0 && run.err == nil {
+				t.Errorf("ci/suite.sh exited 0 although a leg that ran scenarios left no feature coverage")
+			}
+		})
+	}
+}
