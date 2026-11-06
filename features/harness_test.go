@@ -481,6 +481,13 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 // handles by shutting down and exiting, and a kill only when it does not
 // exit in time.
 func endServer(cmd *exec.Cmd) {
+	endServerWithin(cmd, endServerGrace)
+}
+
+// endServerGrace is how long a server gets to exit on SIGTERM.
+var endServerGrace = 10 * time.Second
+
+func endServerWithin(cmd *exec.Cmd, grace time.Duration) {
 	done := make(chan struct{})
 	go func() {
 		_, _ = cmd.Process.Wait()
@@ -489,7 +496,7 @@ func endServer(cmd *exec.Cmd) {
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(grace):
 		_ = cmd.Process.Kill()
 		<-done
 	}

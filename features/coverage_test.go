@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestBoardBuildArgsFollowsTheCoverSettings pins the build line the suite's
@@ -23,6 +24,8 @@ func TestBoardBuildArgsFollowsTheCoverSettings(t *testing.T) {
 		{"cover dir only: -cover, default mode", "/cov", "", []string{"build", "-o", "/b", "-cover", boardPackage}},
 		{"cover dir and set", "/cov", "set", []string{"build", "-o", "/b", "-cover", "-covermode=set", boardPackage}},
 		{"cover dir and atomic", "/cov", "atomic", []string{"build", "-o", "/b", "-cover", "-covermode=atomic", boardPackage}},
+		{"cover dir and an unusual mode is passed through verbatim", "/cov", "count", []string{"build", "-o", "/b", "-cover", "-covermode=count", boardPackage}},
+		{"the binary path is the -o operand", "/cov", "set", []string{"build", "-o", "/b", "-cover", "-covermode=set", boardPackage}},
 		{"a mode without a cover dir is ignored", "", "atomic", []string{"build", "-o", "/b", boardPackage}},
 	}
 	for _, tc := range cases {
@@ -111,4 +114,53 @@ func TestStoppedServerFlushesItsCoverage(t *testing.T) {
 	if got := counterFiles(t, dir); len(got) == 0 {
 		t.Fatalf("a stopped board serve left no counter data in %s", dir)
 	}
+}
+
+// startShell starts a shell script that prints "ready" once it is set up.
+func startShell(t *testing.T, script string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", script)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 5)
+	if _, err := out.Read(buf); err != nil || string(buf) != "ready" {
+		t.Fatalf("shell not ready: %q %v", buf, err)
+	}
+	return cmd
+}
+
+// TestEndServerStopsWhatItIsGiven covers the ways a scenario's server can be
+// at the end of the scenario: one that exits on SIGTERM is stopped at once
+// (so it can flush counters), one that ignores SIGTERM is killed once the
+// grace period is up, and one that already exited is not waited on.
+func TestEndServerStopsWhatItIsGiven(t *testing.T) {
+	t.Run("exits on SIGTERM without waiting out the grace", func(t *testing.T) {
+		cmd := startShell(t, "trap 'exit 0' TERM; echo ready; while :; do sleep 0.05; done")
+		start := time.Now()
+		endServerWithin(cmd, 30*time.Second)
+		if d := time.Since(start); d > 10*time.Second {
+			t.Fatalf("a server that exits on SIGTERM took %v to end", d)
+		}
+	})
+	t.Run("a server ignoring SIGTERM is killed after the grace", func(t *testing.T) {
+		cmd := startShell(t, "trap '' TERM; echo ready; while :; do sleep 0.05; done")
+		start := time.Now()
+		endServerWithin(cmd, 300*time.Millisecond)
+		if d := time.Since(start); d < 300*time.Millisecond || d > 10*time.Second {
+			t.Fatalf("a SIGTERM-ignoring server ended after %v, want the grace then a kill", d)
+		}
+	})
+	t.Run("an already exited server returns", func(t *testing.T) {
+		cmd := exec.Command("true")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Wait()
+		endServerWithin(cmd, time.Second)
+	})
 }
