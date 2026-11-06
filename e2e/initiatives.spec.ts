@@ -149,6 +149,31 @@ for (const vp of viewports) {
       await expect(page.getByTestId('empty-state')).toBeVisible();
     });
 
+    test('the refresh after a create shows skeleton rows while it is pending, then the list', async ({ page }) => {
+      let held = 0;
+      let holdFrom = Number.POSITIVE_INFINITY;
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      await page.route('**/api/v1/initiatives', async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        held += 1;
+        if (held >= holdFrom) await gate;
+        return route.fetch().then((response) => route.fulfill({ response }));
+      });
+      await page.goto('/');
+      await expect(page.getByTestId('skeleton-row')).toHaveCount(0);
+      holdFrom = held + 1;
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Slug').fill(slug('refresh'));
+      await dialog.getByLabel('Title').fill('Refreshed');
+      await dialog.getByRole('button', { name: 'Create initiative' }).click();
+      await expect(page.getByTestId('skeleton-row')).not.toHaveCount(0);
+      await expect(page.getByTestId('initiative-row')).toHaveCount(0);
+      release();
+      await expect(page.getByTestId('skeleton-row')).toHaveCount(0);
+      await expect(page.locator(`[data-testid=initiative-row][data-slug=${slug('refresh')}]`)).toHaveCount(1);
+    });
+
     test(vp.size.width < 768 ? 'rows are stacked cards and the primary button sits at the bottom edge' : 'rows are table rows under a header', async ({
       page,
       playwright,

@@ -103,16 +103,22 @@ export class KeysStore {
 
   private async run(action: () => Promise<Partial<KeysState>>, field: 'error' | 'formError' = 'error'): Promise<boolean> {
     try {
-      this.set({ ...(await action()), loading: false, [field]: undefined });
+      this.set({ ...(await action()), [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ loading: false, [field]: e instanceof Error ? e.message : String(e) });
+      this.set({ [field]: e instanceof Error ? e.message : String(e) });
       return false;
     }
   }
 
+  /** Every fetch of the list, the first and each refresh, is `loading` while the request is pending and not after it, whether it worked or failed. */
   async load(): Promise<void> {
-    await this.run(async () => ({ keys: await this.api.list() }));
+    this.set({ loading: true });
+    try {
+      this.set({ keys: await this.api.list(), loading: false, error: undefined });
+    } catch (e) {
+      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   /** Makes the key, keeps it for the page to show once, and reloads the list. Whether it worked; on a refusal `formError` says why. */

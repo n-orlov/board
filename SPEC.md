@@ -1063,8 +1063,10 @@ writes exactly that key with the Clipboard API and confirms it with "Copied" (a 
 leaves the key selectable). The key is on the page nowhere else: Done, creating or revoking another key,
 or reloading drops it. Each key that is not revoked has a Revoke button. It asks for confirmation first, in the
 dialog component (a bottom sheet on the phone) that names the key: Cancel (focused first), Escape or the backdrop
-revokes nothing, and confirming posts `POST /api/v1/keys/{name}/revoke`; the list then reloads and shows the key as `revoked`. While the list
-loads it shows skeleton rows, and with no keys an empty state. The page calls the API with the session
+revokes nothing, and confirming posts `POST /api/v1/keys/{name}/revoke`; the list then reloads and shows the key as `revoked`. Every fetch of
+the list is a loading state: the first, and the reload after a create or a revoke. While its request is pending the page shows skeleton rows
+(`aria-busy`, in place of the table; the once-shown key box stays), and the state ends when the request succeeds or fails (a failure shows the
+error). A refused create or revoke makes no fetch. With no keys the page shows an empty state. The page calls the API with the session
 cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from
 its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
@@ -1083,8 +1085,10 @@ optional description and optional comma-separated tags that posts `POST /api/v1/
 dialog component below (a bottom sheet on the phone). A refusal (a bad or taken slug, a bad tag) shows
 the problem document's detail inline in the form and keeps what was typed; success closes the form,
 reloads the list and announces "Initiative <slug> created" in an `aria-live="polite"` toast that clears
-itself. A form that is opened again starts clean. While the list loads it shows skeleton rows
-(`aria-busy`); an empty list shows an empty state whose **New initiative** button opens the same form.
+itself. A form that is opened again starts clean. Every fetch of the list is a loading state: the first,
+and the reload after a create. While its request is pending the page shows skeleton rows (`aria-busy`, in
+place of the table), and the state ends when the request succeeds or fails (a failure shows the error); a
+refused create makes no fetch. An empty list shows an empty state whose **New initiative** button opens the same form.
 The page calls the API with the session cookie, and its write sends the session's `X-CSRF-Token` (§3.2)
 (`e2e/initiatives.spec.ts` at 390x844 and 1440x900).
 

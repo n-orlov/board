@@ -128,7 +128,7 @@ describe('InitiativesStore', () => {
     await s.load();
     expect(s.state.initiatives.map((i) => i.slug)).toEqual(['a']);
     expect(s.state.loading).toBe(false);
-    expect(seen).toHaveLength(1);
+    expect(seen.map((st) => st.loading)).toEqual([true, false]);
   });
 
   it('load keeps the error text when the list fails, and a non-Error is stringified', async () => {
@@ -185,5 +185,86 @@ describe('InitiativesStore', () => {
     const { s } = store({ list: async () => [], create: async () => Promise.reject(new InitiativesError(409, 'slug taken')) });
     expect(await s.create(form)).toBe(false);
     expect(s.state.loading).toBe(true);
+  });
+});
+
+describe('InitiativesStore loading', () => {
+  function gated() {
+    const gates: { resolve: (i: Initiative[]) => void; reject: (e: unknown) => void }[] = [];
+    const list = () => new Promise<Initiative[]>((resolve, reject) => gates.push({ resolve, reject }));
+    return { gates, list };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const make = (list: () => Promise<Initiative[]>, create: () => Promise<Initiative> = async () => initiative('a')) => new InitiativesStore({ list, create } as never, () => undefined);
+
+  it('the first fetch is loading while pending and stops on success', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const done = s.load();
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[0]!.resolve([initiative('a')]);
+    await done;
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['a']);
+  });
+
+  it('the first fetch stops loading when it fails', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const done = s.load();
+    await tick();
+    gates[0]!.reject(new InitiativesError(500, 'boom'));
+    await done;
+    expect(s.state).toMatchObject({ loading: false, error: 'boom' });
+  });
+
+  it('the refresh after a create is loading while pending and stops on success', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    gates[0]!.resolve([]);
+    await first;
+    const done = s.create(form);
+    await tick();
+    expect(s.state.loading).toBe(true);
+    expect(s.state.formError).toBeUndefined();
+    gates[1]!.resolve([initiative('alpha')]);
+    expect(await done).toBe(true);
+    expect(s.state).toMatchObject({ loading: false });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['alpha']);
+  });
+
+  it('the refresh after a create stops loading when it fails, and a refused create starts no fetch', async () => {
+    const { gates, list } = gated();
+    let refuse = true;
+    const s = make(list, async () => (refuse ? Promise.reject(new InitiativesError(409, 'taken')) : initiative('a')));
+    const first = s.load();
+    gates[0]!.resolve([initiative('keep')]);
+    await first;
+    expect(await s.create(form)).toBe(false);
+    expect(s.state.loading).toBe(false);
+    expect(gates).toHaveLength(1);
+    refuse = false;
+    const done = s.create(form);
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[1]!.reject(new InitiativesError(503, 'down'));
+    expect(await done).toBe(true);
+    expect(s.state).toMatchObject({ loading: false, error: 'down' });
+  });
+
+  it('a manual reload is loading while pending', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    gates[0]!.resolve([]);
+    await first;
+    const again = s.load();
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[1]!.resolve([]);
+    await again;
+    expect(s.state.loading).toBe(false);
   });
 });

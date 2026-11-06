@@ -116,16 +116,22 @@ export class InitiativesStore {
 
   private async run(action: () => Promise<Partial<InitiativesState>>, field: 'error' | 'formError'): Promise<boolean> {
     try {
-      this.set({ ...(await action()), loading: false, [field]: undefined });
+      this.set({ ...(await action()), [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ loading: field === 'error' ? false : this.current.loading, [field]: e instanceof Error ? e.message : String(e) });
+      this.set({ [field]: e instanceof Error ? e.message : String(e) });
       return false;
     }
   }
 
+  /** Every fetch of the list, the first and each refresh, is `loading` while the request is pending and not after it, whether it worked or failed. */
   async load(): Promise<void> {
-    await this.run(async () => ({ initiatives: await this.api.list() }), 'error');
+    this.set({ loading: true });
+    try {
+      this.set({ initiatives: await this.api.list(), loading: false, error: undefined });
+    } catch (e) {
+      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   /** Makes the initiative and reloads the list. Whether it worked; on a refusal `error` says why. */

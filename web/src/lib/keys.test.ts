@@ -127,8 +127,9 @@ describe('KeysStore', () => {
     await s.load();
     expect(s.state.keys.map((k) => k.name)).toEqual(['a']);
     expect(s.state.loading).toBe(false);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toBe(s.state);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.loading).toBe(true);
+    expect(seen[1]).toBe(s.state);
   });
 
   it('load shows the error of a failed call and keeps the list it had', async () => {
@@ -261,5 +262,89 @@ describe('KeysStore', () => {
     fail = false;
     await s.load();
     expect(s.state.error).toBeUndefined();
+  });
+});
+
+describe('KeysStore loading', () => {
+  function gated() {
+    const gates: { resolve: (k: Key[]) => void; reject: (e: unknown) => void }[] = [];
+    const list = () => new Promise<Key[]>((resolve, reject) => gates.push({ resolve, reject }));
+    return { gates, list };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('the first fetch is loading while pending and stops on success', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const done = s.load();
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[0]!.resolve([key('a')]);
+    await done;
+    expect(s.state).toMatchObject({ loading: false, keys: [key('a')] });
+  });
+
+  it('the refresh after a create is loading while pending, keeps the key on show, and stops on success', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    gates[0]!.resolve([]);
+    await first;
+    expect(s.state.loading).toBe(false);
+    const done = s.create('ci', '');
+    await tick();
+    expect(s.state.loading).toBe(true);
+    expect(s.state.created?.key).toBe('brd_once');
+    gates[1]!.resolve([key('ci')]);
+    expect(await done).toBe(true);
+    expect(s.state.loading).toBe(false);
+    expect(s.state.keys).toEqual([key('ci')]);
+    expect(s.state.created?.key).toBe('brd_once');
+  });
+
+  it('the refresh after a revoke is loading while pending and stops when it fails', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    gates[0]!.resolve([key('a')]);
+    await first;
+    const done = s.revoke('a');
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[1]!.reject(new KeysError(503, 'down'));
+    expect(await done).toBe(true);
+    expect(s.state).toMatchObject({ loading: false, error: 'down' });
+  });
+
+  it('a revoke or create that rejects with plain text shows that text', async () => {
+    const { s } = store({ revoke: () => Promise.reject('plain') });
+    expect(await s.revoke('a')).toBe(false);
+    expect(s.state.error).toBe('plain');
+  });
+
+  it('a manual reload is loading while pending and a refused create or revoke never starts one', async () => {
+    const { gates, list } = gated();
+    const { s } = store({
+      list,
+      create: async () => {
+        throw new KeysError(409, 'exists');
+      },
+      revoke: async () => {
+        throw new KeysError(404, 'gone');
+      },
+    });
+    const first = s.load();
+    gates[0]!.resolve([key('a')]);
+    await first;
+    await s.create('a', '');
+    await s.revoke('a');
+    expect(s.state.loading).toBe(false);
+    expect(gates).toHaveLength(1);
+    const again = s.load();
+    await tick();
+    expect(s.state.loading).toBe(true);
+    gates[1]!.resolve([key('a')]);
+    await again;
+    expect(s.state.loading).toBe(false);
   });
 });

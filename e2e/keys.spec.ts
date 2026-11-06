@@ -139,6 +139,60 @@ for (const vp of viewports) {
       expect(await overflow(page)).toBeLessThanOrEqual(0);
     });
 
+    test('every list fetch shows skeleton rows while pending: the first, and the refresh after a create and after a revoke', async ({ page }) => {
+      // Holds each GET of the list from the n-th on until released; earlier ones pass through.
+      let held = 0;
+      let holdFrom = Number.POSITIVE_INFINITY;
+      let release: () => void = () => undefined;
+      let gate = Promise.resolve();
+      const hold = () => {
+        gate = new Promise<void>((resolve) => (release = resolve));
+      };
+      await page.route('**/api/v1/keys', async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        held += 1;
+        if (held >= holdFrom) await gate;
+        return route.fetch().then((response) => route.fulfill({ response }));
+      });
+      const skeleton = page.getByTestId('skeleton-row');
+      const rows = page.getByTestId('key-row');
+
+      // The first fetch.
+      holdFrom = 1;
+      hold();
+      await page.goto('/#/settings/keys');
+      await expect(skeleton).not.toHaveCount(0);
+      await expect(rows).toHaveCount(0);
+      release();
+      await expect(skeleton).toHaveCount(0);
+      await expect(rows.first()).toBeVisible();
+
+      // The refresh after a create: the form closed, the once-shown key on the page, the list loading.
+      const name = keyName('loading');
+      holdFrom = held + 1;
+      hold();
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Name').fill(name);
+      await dialog.getByRole('button', { name: 'Create key' }).click();
+      await expect(skeleton).not.toHaveCount(0);
+      await expect(rows).toHaveCount(0);
+      release();
+      await expect(skeleton).toHaveCount(0);
+      const row = page.locator(`[data-testid=key-row][data-name=${name}]`);
+      await expect(row).toHaveCount(1);
+      await expect(page.getByTestId('new-key-value')).toHaveText(/^brd_/);
+
+      // The refresh after a revoke.
+      holdFrom = held + 1;
+      hold();
+      await row.getByRole('button', { name: 'Revoke' }).click();
+      await page.getByRole('dialog', { name: 'Revoke API key' }).getByRole('button', { name: 'Revoke key' }).click();
+      await expect(skeleton).not.toHaveCount(0);
+      release();
+      await expect(skeleton).toHaveCount(0);
+      await expect(row.getByTestId('key-status')).toHaveText('revoked');
+    });
+
     test('a name that is already taken is refused on the page and no key is shown', async ({ page }) => {
       const name = keyName('dup');
       await page.goto('/#/settings/keys');
