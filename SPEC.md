@@ -1103,7 +1103,15 @@ account button opens the account menu (the email and Sign out) in the dialog com
 every width. The first focusable element of the page is a "Skip to content" link that moves focus
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"`. The page never scrolls horizontally (`e2e/shell.spec.ts` at 390x844,
-820x1180 and 1440x900).
+820x1180 and 1440x900), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
+and from 768 px use `table-layout: fixed` with fixed widths for the short columns (status, tags,
+dates, prefix, actions) so a title, slug, tag or key name with no space in it (200, 40, 40 and 64
+characters at most) wraps inside its own cell instead of widening the table; below 768 px the
+cards wrap it the same way. `e2e/overflow.spec.ts` seeds the longest accepted values (wide and
+narrow glyphs, 20 tags of 40 characters, a URL-like title, a 64-character key name) and asserts
+`document.documentElement.scrollWidth <= clientWidth` and that no row, chip, dialog or toast reaches past the
+viewport at 390, 820, 1024 and 1440 px, for both lists, the revoke confirmation, the create toast and
+the once-shown key box.
 
 **Session states.** The page is always in one state of `SessionController` (`web/src/lib/session.ts`):
 *loading* (it asks `GET /auth/session`), *signed-in* (the app shows), *redirecting* (the session answered

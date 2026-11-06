@@ -67,13 +67,13 @@
     </div>
   {:else if view.initiatives.length > 0}
     <!-- One table: from 768 px a dense table, below it each row is a card. -->
-    <table class="block w-full text-left md:table md:border-collapse">
+    <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
           <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Title</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Status</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Tags</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Created</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-24">Status</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/4">Tags</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-32">Created</th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
@@ -84,8 +84,8 @@
             class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
           >
             <td class="w-full min-w-0 md:table-cell md:w-auto md:px-3 md:py-3">
-              <div class="break-words font-medium">{initiative.title}</div>
-              <code class="break-all font-mono text-sm text-text-muted">{initiative.slug}</code>
+              <div class="font-medium">{initiative.title}</div>
+              <code class="font-mono text-sm text-text-muted">{initiative.slug}</code>
             </td>
             <td class="md:table-cell md:px-3 md:py-3" data-testid="initiative-status">
               <span class="inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses(initiativeTone(initiative.status))}">{initiative.status}</span>

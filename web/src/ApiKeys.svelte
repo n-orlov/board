@@ -101,16 +101,16 @@
     </div>
   {:else}
     <!-- One table: from 768 px a dense table, below it each row is a card. -->
-    <table class="block w-full text-left md:table md:border-collapse">
+    <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
           <th scope="col" class={th}>Name</th>
-          <th scope="col" class={th}>Prefix</th>
-          <th scope="col" class={th}>Status</th>
-          <th scope="col" class={th}>Created</th>
-          <th scope="col" class={th}>Last used</th>
-          <th scope="col" class={th}>Expires</th>
-          <th scope="col" class={th}><span class="sr-only">Actions</span></th>
+          <th scope="col" class={`${th} md:w-24`}>Prefix</th>
+          <th scope="col" class={`${th} md:w-24`}>Status</th>
+          <th scope="col" class={`${th} md:w-24`}>Created</th>
+          <th scope="col" class={`${th} md:w-24`}>Last used</th>
+          <th scope="col" class={`${th} md:w-28`}>Expires</th>
+          <th scope="col" class={`${th} md:w-28`}><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
@@ -120,7 +120,7 @@
             data-name={key.name}
             class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
           >
-            <td class="min-w-0 flex-1 break-words font-medium md:table-cell md:px-3 md:py-3">{key.name}</td>
+            <td class="min-w-0 flex-1 font-medium md:table-cell md:px-3 md:py-3">{key.name}</td>
             <td class="md:table-cell md:px-3 md:py-3"><code class="font-mono text-sm text-text-muted">{key.display_prefix}</code></td>
             <td class="md:table-cell md:px-3 md:py-3" data-testid="key-status"
               ><span class="inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses(keyTone(key.status))}">{key.status}</span></td
@@ -146,7 +146,7 @@
             </td>
             <td class="w-full md:table-cell md:w-auto md:px-3 md:py-3 md:text-right">
               {#if key.status !== 'revoked'}
-                <button type="button" class="{secondary} w-full md:w-auto" onclick={() => (revoking = key.name)}>Revoke</button>
+                <button type="button" class="{secondary} w-full md:w-auto md:px-3" onclick={() => (revoking = key.name)}>Revoke</button>
               {/if}
             </td>
           </tr>
