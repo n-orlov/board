@@ -347,4 +347,57 @@ describe('KeysStore loading', () => {
     await again;
     expect(s.state.loading).toBe(false);
   });
+
+  it('a create submitted while the first fetch is pending: its refresh landing first leaves the list loading until the first lands too', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    await tick();
+    const done = s.create('ci', '');
+    await tick();
+    expect(gates).toHaveLength(2);
+    gates[1]!.resolve([key('ci')]);
+    expect(await done).toBe(true);
+    expect(s.state.loading).toBe(true);
+    expect(s.state.created?.key).toBe('brd_once');
+    gates[0]!.resolve([]);
+    await first;
+    // The first fetch's older list is not shown over the refresh's; the key stays on show.
+    expect(s.state).toMatchObject({ loading: false, error: undefined, keys: [key('ci')] });
+    expect(s.state.created?.key).toBe('brd_once');
+  });
+
+  it('a revoke refresh and a create refresh in flight together keep the list loading until both land', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    gates[0]!.resolve([key('a')]);
+    await first;
+    const revoked = s.revoke('a');
+    await tick();
+    const created = s.create('ci', '');
+    await tick();
+    expect(gates).toHaveLength(3);
+    gates[1]!.resolve([{ ...key('a'), status: 'revoked' }]);
+    expect(await revoked).toBe(true);
+    expect(s.state.loading).toBe(true);
+    gates[2]!.reject(new KeysError(503, 'down'));
+    expect(await created).toBe(true);
+    expect(s.state).toMatchObject({ loading: false, error: 'down', keys: [{ ...key('a'), status: 'revoked' }] });
+  });
+
+  it('a first fetch that fails while a create refresh is pending leaves the list loading, and the refresh clears the error', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    await tick();
+    const done = s.create('ci', '');
+    await tick();
+    gates[0]!.reject(new KeysError(500, 'boom'));
+    await first;
+    expect(s.state).toMatchObject({ loading: true, error: 'boom' });
+    gates[1]!.resolve([key('ci')]);
+    expect(await done).toBe(true);
+    expect(s.state).toMatchObject({ loading: false, error: undefined, keys: [key('ci')] });
+  });
 });

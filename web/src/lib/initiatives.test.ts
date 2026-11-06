@@ -267,4 +267,53 @@ describe('InitiativesStore loading', () => {
     await again;
     expect(s.state.loading).toBe(false);
   });
+
+  it('a create submitted while the first fetch is pending: its refresh landing first leaves the list loading until the first lands too', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    await tick();
+    const done = s.create(form);
+    await tick();
+    expect(gates).toHaveLength(2);
+    gates[1]!.resolve([initiative('alpha')]);
+    expect(await done).toBe(true);
+    expect(s.state.loading).toBe(true);
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['alpha']);
+    gates[0]!.resolve([]);
+    await first;
+    // The first fetch's older list is not shown over the refresh's.
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['alpha']);
+  });
+
+  it('a first fetch that fails while a refresh is pending leaves the list loading, and the refresh clears the error', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    await tick();
+    const done = s.create(form);
+    await tick();
+    gates[0]!.reject(new InitiativesError(503, 'down'));
+    await first;
+    expect(s.state).toMatchObject({ loading: true, error: 'down' });
+    gates[1]!.resolve([initiative('alpha')]);
+    expect(await done).toBe(true);
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['alpha']);
+  });
+
+  it('overlapping reloads that both fail leave the list loading until the last lands, then show the newest error', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const a = s.load();
+    const b = s.load();
+    await tick();
+    gates[1]!.reject(new InitiativesError(500, 'newer'));
+    await b;
+    expect(s.state).toMatchObject({ loading: true, error: 'newer' });
+    gates[0]!.reject(new InitiativesError(500, 'older'));
+    await a;
+    expect(s.state).toMatchObject({ loading: false, error: 'newer' });
+  });
 });

@@ -3,6 +3,7 @@
 // `X-CSRF-Token` (SPEC 3.2). `KeysStore` holds what the page shows and is what the page drives:
 // the list, the one-time new key, and the error of the last action.
 import { mountPrefix, problemDetail } from './apibase';
+import { errorText, Fetches } from './fetches';
 import type { components } from './api/schema';
 import type { Browser } from './session';
 
@@ -86,6 +87,7 @@ export class KeysStore {
   private readonly api: Pick<KeysApi, 'list' | 'create' | 'revoke'>;
   private readonly onChange: (state: KeysState) => void;
   private current: KeysState = { keys: [], loading: true, created: undefined, error: undefined, formError: undefined };
+  private readonly fetches = new Fetches();
 
   constructor(api: Pick<KeysApi, 'list' | 'create' | 'revoke'>, onChange: (state: KeysState) => void) {
     this.api = api;
@@ -106,19 +108,27 @@ export class KeysStore {
       this.set({ ...(await action()), [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ [field]: e instanceof Error ? e.message : String(e) });
+      this.set({ [field]: errorText(e) });
       return false;
     }
   }
 
-  /** Every fetch of the list, the first and each refresh, is `loading` while the request is pending and not after it, whether it worked or failed. */
+  /**
+   * Fetches the list. Every fetch, the first and each refresh, makes the list `loading` while it is pending; the
+   * list stops loading only once no fetch is pending, whether each one worked or failed. Of overlapping fetches the
+   * newest outcome to land is shown and an older one landing after it is dropped (`Fetches`).
+   */
   async load(): Promise<void> {
+    const ticket = this.fetches.begin();
     this.set({ loading: true });
+    let outcome: Partial<KeysState>;
     try {
-      this.set({ keys: await this.api.list(), loading: false, error: undefined });
+      outcome = { keys: await this.api.list(), error: undefined };
     } catch (e) {
-      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+      outcome = { error: errorText(e) };
     }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy });
   }
 
   /** Makes the key, keeps it for the page to show once, and reloads the list. Whether it worked; on a refusal `formError` says why. */

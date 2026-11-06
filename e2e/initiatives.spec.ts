@@ -19,6 +19,31 @@ async function openForm(page: Page) {
   return dialog;
 }
 
+// Holds every GET of the list until the test releases it by its order (0 = the first fetch). Each held GET is
+// answered from the server as it stood when the request was made, so a fetch released late carries an older list;
+// `fail` answers it with a 503 problem document instead.
+async function holdListGets(page: Page, pattern: string) {
+  const held: { release: (fail?: boolean) => void }[] = [];
+  await page.route(pattern, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const fail = await new Promise<boolean>((resolve) => held.push({ release: (f = false) => resolve(f) }));
+    if (fail) return route.fulfill({ status: 503, contentType: 'application/problem+json', json: { title: 'Unavailable', status: 503, detail: 'The list is unavailable.' } });
+    return route.fulfill({ response });
+  });
+  return {
+    count: () => held.length,
+    /** Releases GET number `n` and waits until the page has taken its answer in. */
+    release: async (n: number, fail = false) => {
+      const landed = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith(pattern.replace('**', '')));
+      held[n]!.release(fail);
+      await landed;
+      // Lets the page parse the answer and render it before the test looks.
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    },
+  };
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
@@ -172,6 +197,49 @@ for (const vp of viewports) {
       release();
       await expect(page.getByTestId('skeleton-row')).toHaveCount(0);
       await expect(page.locator(`[data-testid=initiative-row][data-slug=${slug('refresh')}]`)).toHaveCount(1);
+    });
+
+    test('a create submitted while the first fetch is pending keeps skeleton rows until both fetches have landed, then shows the newer list', async ({ page }) => {
+      const gets = await holdListGets(page, '**/api/v1/initiatives');
+      const skeleton = page.getByTestId('skeleton-row');
+      await page.goto('/');
+      await expect(skeleton).not.toHaveCount(0);
+      await expect.poll(gets.count).toBe(1);
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Slug').fill(slug('overlap'));
+      await dialog.getByLabel('Title').fill('Overlapping');
+      await dialog.getByRole('button', { name: 'Create initiative' }).click();
+      // The form closes once the create's refresh has landed.
+      await expect.poll(gets.count).toBe(2);
+      // The refresh lands first: the first fetch is still pending, so the list is still loading.
+      await gets.release(1);
+      await expect(skeleton).not.toHaveCount(0);
+      await expect(page.getByTestId('initiatives-skeleton')).toHaveAttribute('aria-busy', 'true');
+      await expect(page.getByTestId('initiative-row')).toHaveCount(0);
+      // The first fetch lands last with the older list: loading ends and the newer list stays.
+      await gets.release(0);
+      await expect(skeleton).toHaveCount(0);
+      await expect(page.locator(`[data-testid=initiative-row][data-slug=${slug('overlap')}]`)).toHaveCount(1);
+    });
+
+    test('a first fetch that fails while the refresh after a create is pending keeps skeleton rows until the refresh lands', async ({ page }) => {
+      const gets = await holdListGets(page, '**/api/v1/initiatives');
+      const skeleton = page.getByTestId('skeleton-row');
+      await page.goto('/');
+      await expect.poll(gets.count).toBe(1);
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Slug').fill(slug('overlap-fail'));
+      await dialog.getByLabel('Title').fill('Overlapping failure');
+      await dialog.getByRole('button', { name: 'Create initiative' }).click();
+      // The form closes once the create's refresh has landed.
+      await expect.poll(gets.count).toBe(2);
+      await gets.release(0, true);
+      await expect(page.getByRole('alert')).toHaveText('The list is unavailable.');
+      await expect(skeleton).not.toHaveCount(0);
+      await gets.release(1);
+      await expect(skeleton).toHaveCount(0);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.locator(`[data-testid=initiative-row][data-slug=${slug('overlap-fail')}]`)).toHaveCount(1);
     });
 
     test(vp.size.width < 768 ? 'rows are stacked cards and the primary button sits at the bottom edge' : 'rows are table rows under a header', async ({

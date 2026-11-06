@@ -22,6 +22,31 @@ async function openForm(page: Page) {
 
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+// Holds every GET of the list until the test releases it by its order (0 = the first fetch). Each held GET is
+// answered from the server as it stood when the request was made, so a fetch released late carries an older list;
+// `fail` answers it with a 503 problem document instead.
+async function holdListGets(page: Page, pattern: string) {
+  const held: { release: (fail?: boolean) => void }[] = [];
+  await page.route(pattern, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const fail = await new Promise<boolean>((resolve) => held.push({ release: (f = false) => resolve(f) }));
+    if (fail) return route.fulfill({ status: 503, contentType: 'application/problem+json', json: { title: 'Unavailable', status: 503, detail: 'The list is unavailable.' } });
+    return route.fulfill({ response });
+  });
+  return {
+    count: () => held.length,
+    /** Releases GET number `n` and waits until the page has taken its answer in. */
+    release: async (n: number, fail = false) => {
+      const landed = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith(pattern.replace('**', '')));
+      held[n]!.release(fail);
+      await landed;
+      // Lets the page parse the answer and render it before the test looks.
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    },
+  };
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size, permissions: ['clipboard-read', 'clipboard-write'] });
@@ -191,6 +216,51 @@ for (const vp of viewports) {
       release();
       await expect(skeleton).toHaveCount(0);
       await expect(row.getByTestId('key-status')).toHaveText('revoked');
+    });
+
+    test('a create submitted while the first fetch is pending keeps skeleton rows and the once-shown key until both fetches have landed', async ({ page }) => {
+      const name = keyName('overlap');
+      const gets = await holdListGets(page, '**/api/v1/keys');
+      const skeleton = page.getByTestId('skeleton-row');
+      await page.goto('/#/settings/keys');
+      await expect(skeleton).not.toHaveCount(0);
+      await expect.poll(gets.count).toBe(1);
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Name').fill(name);
+      await dialog.getByRole('button', { name: 'Create key' }).click();
+      // The form closes once the create's refresh has landed.
+      await expect.poll(gets.count).toBe(2);
+      await expect(page.getByTestId('new-key-value')).toHaveText(/^brd_/);
+      // The refresh lands first: the first fetch is still pending, so the list is still loading.
+      await gets.release(1);
+      await expect(skeleton).not.toHaveCount(0);
+      await expect(page.getByTestId('keys-skeleton')).toHaveAttribute('aria-busy', 'true');
+      await expect(page.getByTestId('key-row')).toHaveCount(0);
+      // The first fetch lands last with the older list: loading ends, the newer list and the key stay.
+      await gets.release(0);
+      await expect(skeleton).toHaveCount(0);
+      await expect(page.locator(`[data-testid=key-row][data-name=${name}]`)).toHaveCount(1);
+      await expect(page.getByTestId('new-key-value')).toHaveText(/^brd_/);
+    });
+
+    test('a first fetch that fails while the refresh after a create is pending keeps skeleton rows until the refresh lands', async ({ page }) => {
+      const name = keyName('overlap-fail');
+      const gets = await holdListGets(page, '**/api/v1/keys');
+      const skeleton = page.getByTestId('skeleton-row');
+      await page.goto('/#/settings/keys');
+      await expect.poll(gets.count).toBe(1);
+      const dialog = await openForm(page);
+      await dialog.getByLabel('Name').fill(name);
+      await dialog.getByRole('button', { name: 'Create key' }).click();
+      // The form closes once the create's refresh has landed.
+      await expect.poll(gets.count).toBe(2);
+      await gets.release(0, true);
+      await expect(page.getByRole('alert')).toHaveText('The list is unavailable.');
+      await expect(skeleton).not.toHaveCount(0);
+      await gets.release(1);
+      await expect(skeleton).toHaveCount(0);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.locator(`[data-testid=key-row][data-name=${name}]`)).toHaveCount(1);
     });
 
     test('a name that is already taken is refused on the page and no key is shown', async ({ page }) => {

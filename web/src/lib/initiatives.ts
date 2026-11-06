@@ -3,6 +3,7 @@
 // session's `X-CSRF-Token` (SPEC 3.2). `InitiativesStore` holds what the page shows: the list
 // and the error of the last action, which is how a server validation error reaches the form.
 import { mountPrefix } from './apibase';
+import { errorText, Fetches } from './fetches';
 import type { components } from './api/schema';
 import { problemText } from './keys';
 import type { Browser } from './session';
@@ -99,6 +100,7 @@ export class InitiativesStore {
   private readonly api: Pick<InitiativesApi, 'list' | 'create'>;
   private readonly onChange: (state: InitiativesState) => void;
   private current: InitiativesState = { initiatives: [], loading: true, error: undefined, formError: undefined };
+  private readonly fetches = new Fetches();
 
   constructor(api: Pick<InitiativesApi, 'list' | 'create'>, onChange: (state: InitiativesState) => void) {
     this.api = api;
@@ -119,19 +121,27 @@ export class InitiativesStore {
       this.set({ ...(await action()), [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ [field]: e instanceof Error ? e.message : String(e) });
+      this.set({ [field]: errorText(e) });
       return false;
     }
   }
 
-  /** Every fetch of the list, the first and each refresh, is `loading` while the request is pending and not after it, whether it worked or failed. */
+  /**
+   * Fetches the list. Every fetch, the first and each refresh, makes the list `loading` while it is pending; the
+   * list stops loading only once no fetch is pending, whether each one worked or failed. Of overlapping fetches the
+   * newest outcome to land is shown and an older one landing after it is dropped (`Fetches`).
+   */
   async load(): Promise<void> {
+    const ticket = this.fetches.begin();
     this.set({ loading: true });
+    let outcome: Partial<InitiativesState>;
     try {
-      this.set({ initiatives: await this.api.list(), loading: false, error: undefined });
+      outcome = { initiatives: await this.api.list(), error: undefined };
     } catch (e) {
-      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+      outcome = { error: errorText(e) };
     }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy });
   }
 
   /** Makes the initiative and reloads the list. Whether it worked; on a refusal `error` says why. */
