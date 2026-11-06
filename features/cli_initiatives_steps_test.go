@@ -42,7 +42,7 @@ func (h *harness) runClient(ctx context.Context, line string, actor, wayBack *st
 	if err := h.requireKey(); err != nil {
 		return err
 	}
-	words := splitQuoted(line)
+	words := splitQuoted(strings.ReplaceAll(line, "<event>", h.eventRef))
 	if len(words) == 0 || words[0] != "board" {
 		return fmt.Errorf("command %q must start with board", line)
 	}

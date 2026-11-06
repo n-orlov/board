@@ -172,7 +172,7 @@ func taskDetail(t task, events []eventView, now time.Time) string {
 		b.WriteString("events:\n")
 	}
 	for _, e := range events {
-		b.WriteString("  " + e.Ref + "  " + ago(now, e.At) + "  " + e.Actor + "  " + e.Summary + "\n")
+		b.WriteString("  " + eventLine(now, e) + "\n")
 	}
 	return b.String()
 }

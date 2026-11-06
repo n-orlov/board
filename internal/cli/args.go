@@ -37,8 +37,15 @@ var (
 	taskDoneFlags   = []flagSpec{{"--json", false}}
 	taskReopenFlags = []flagSpec{{"--json", false}}
 	taskCloseFlags  = []flagSpec{{"--resolution", true}, {"--for", true}, {"--json", false}}
-	whoamiFlags     = []flagSpec{}
-	helpAgentFlags  = []flagSpec{{"--version", false}}
+	taskEventsFlags = []flagSpec{{"--limit", true}, {"--all", false}, {"--json", false}}
+	milestoneFlags  = []flagSpec{{"--json", false}}
+	checkFlags      = []flagSpec{{"--next", true}, {"--json", false}}
+	eventsFlags     = []flagSpec{
+		{"--since", true}, {"--task", true}, {"--initiative", true}, {"--type", true}, {"--actor", true},
+		{"--limit", true}, {"--all", false}, {"--json", false},
+	}
+	whoamiFlags    = []flagSpec{}
+	helpAgentFlags = []flagSpec{{"--version", false}}
 )
 
 // parsedArgs is a command line split into positional arguments and flags.

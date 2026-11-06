@@ -25,7 +25,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|help|whoami|init|task|admin>"
+const usageLine = "usage: board <serve|version|help|whoami|init|task|milestone|check|events|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -102,6 +102,10 @@ type harness struct {
 	// key is the API key a scenario remembered from stdout.
 	key string
 	api apiState
+
+	// eventRef is the event ref a scenario remembered; <event> in a client
+	// command line stands for it.
+	eventRef string
 
 	server *exec.Cmd
 	addr   string

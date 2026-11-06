@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -46,8 +47,47 @@ func (h *harness) stdoutHasTheLine(want string) error {
 	return fmt.Errorf("stdout has no line %q: %q", want, h.stdout)
 }
 
+// eventRefPattern is the ref an event line starts with.
+var eventRefPattern = regexp.MustCompile(`^(E[0-9]+)  `)
+
+// rememberEventRef keeps the E<n> ref that starts line n of stdout; a later
+// client command line may name it as <event>.
+func (h *harness) rememberEventRef(n int) error {
+	lines := strings.Split(strings.TrimSuffix(h.stdout, "\n"), "\n")
+	if n < 1 || n > len(lines) {
+		return fmt.Errorf("stdout %q has %d lines, want a line %d", h.stdout, len(lines), n)
+	}
+	m := eventRefPattern.FindStringSubmatch(lines[n-1])
+	if m == nil {
+		return fmt.Errorf("stdout line %d %q does not start with an event ref", n, lines[n-1])
+	}
+	h.eventRef = m[1]
+	return nil
+}
+
+// stdoutJSONArrayRefs checks stdout is one JSON array whose members' ref
+// fields are the comma-separated refs, in order.
+func (h *harness) stdoutJSONArrayRefs(want string) error {
+	var items []struct {
+		Ref string `json:"ref"`
+	}
+	if err := json.Unmarshal([]byte(h.stdout), &items); err != nil || strings.Count(h.stdout, "\n") != 1 {
+		return fmt.Errorf("stdout %q is not one JSON array line", h.stdout)
+	}
+	refs := make([]string, len(items))
+	for i, it := range items {
+		refs[i] = it.Ref
+	}
+	if got := strings.Join(refs, ","); got != want {
+		return fmt.Errorf("stdout refs %q, want %q", got, want)
+	}
+	return nil
+}
+
 func registerCLITaskSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^(\d+) tasks exist in the initiative "([^"]*)" as actor "([^"]*)"$`, h.tasksExist)
 	sc.Step(`^(\d+) milestones are recorded on the task "([^"]*)" as actor "([^"]*)"$`, h.milestonesRecorded)
+	sc.Step(`^the event ref on line (\d+) of stdout is remembered$`, h.rememberEventRef)
+	sc.Step(`^stdout is a JSON array whose refs are "([^"]*)"$`, h.stdoutJSONArrayRefs)
 	sc.Step(`^stdout has the line "([^"]*)"$`, h.stdoutHasTheLine)
 }

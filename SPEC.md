@@ -996,7 +996,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|help|whoami|init|task|admin>`.
+`usage: board <serve|version|help|whoami|init|task|milestone|check|events|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1014,7 +1014,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|milestone|check|events|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -1099,8 +1099,8 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm`; the other lines
-below arrive with their phases. The client commands (`whoami`, `init …`, `task …`) call the server at `BOARD_URL` with
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `milestone`, `check` and `events`; the other lines
+below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `milestone`, `check`, `events`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
 walks every registered flag and fails on a key-like name). With `BOARD_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
@@ -1112,7 +1112,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move) and `task dep add` (a cycle), which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move) and `task dep add` (a cycle) and `check` (a task that is not an open watch task), which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1188,6 +1188,24 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   aa-1`) and `→ board task show <ref>`; removing a dependency that does not exist exits 4 with `→ board task show <ref>`, an
   unknown task exits 4 with `→ board task ls`, and a task blocked by itself exits 1. A wrong argument count or an unknown
   subcommand is exit 2 with the usage line.
+- `board milestone <task> "<summary>" [--json]` calls `POST /api/v1/tasks/<task>/milestones` and prints `ok task <ref>
+  milestone recorded` (`--json`: the task). It works on a task of any kind and status. An unknown task exits 4 with
+  `→ board task ls`; a summary the server refuses (empty, over 200 characters) exits 1 with its message.
+- `board check <task> "<summary>" [--next D] [--json]` calls `POST /api/v1/tasks/<task>/checks` and prints `ok task <ref>
+  checked` (`--json`: the task). `--next` takes a duration (`24h`) and sends `next_check_at` as that long from now; without
+  it the server moves the next check on by the task's cadence. A task that is not a watch task, or is closed, exits 6 with
+  `<detail> → board task show <ref>`; an unknown task exits 4 with `→ board task ls`; a bad `--next` is exit 2 with `board:
+  --next: invalid duration …`, before any request is sent.
+- `board task events <ref> [--limit N|--all] [--json]` and `board events [--since S] [--task ref] [--initiative slug]
+  [--type t]... [--actor handle] [--limit N|--all] [--json]` call `GET /api/v1/tasks/<ref>/events` and `GET /api/v1/events`
+  and print one line per event, oldest first: `E<n>  <relative time>  <handle>  <summary>` (the line `task show` prints
+  under `events:`), and nothing when there are none. `--since` takes an event ref (`E42`, either letter case), an event id,
+  an RFC 3339 time or a `YYYY-MM-DD` date (midnight UTC), and keeps the events after that event or from that time on;
+  `--type` is repeatable and keeps the events of any of the types given; the filters combine. Both list 20 by default as the
+  other list commands do: `--limit N` changes the cap, `--all` removes it, and when more exist the last line is `+K more →
+  board events … --all` (or `board task events <ref> --all`) repeating every filter. `--json` prints the shown events as one
+  JSON array. An unknown initiative exits 4 with `→ board init ls`, an unknown task with `→ board task ls`; a `--since` the
+  server cannot read exits 1 with its message.
 - Durations (`--cadence`) are a whole number and a unit, `s`, `m`, `h` or `d` (`90s`, `45m`, `2h`, `7d`); a missing unit, a
   sign, a fraction or zero is refused. Times (`--start`, `--end`) are RFC 3339 or `YYYY-MM-DD` (midnight UTC). A malformed
   duration, time, link (`label=url`) or kind is exit 2 with the single line `board: <flag>: invalid <what> …`, before any
@@ -1195,7 +1213,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|admin>`.
+- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|milestone|check|events|admin>`.
 
 ```
 board version | update [--check] [--version vX.Y.Z]

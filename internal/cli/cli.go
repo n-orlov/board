@@ -31,7 +31,7 @@ const (
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
-const Usage = "usage: board <serve|version|help|whoami|init|task|admin>"
+const Usage = "usage: board <serve|version|help|whoami|init|task|milestone|check|events|admin>"
 
 // Env looks up an environment variable.
 type Env func(string) string
@@ -64,9 +64,12 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 
 // clientCommands are the subcommands that call the server at BOARD_URL.
 var clientCommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
-	"whoami": whoami,
-	"init":   initCmd,
-	"task":   taskCmd,
+	"whoami":    whoami,
+	"init":      initCmd,
+	"task":      taskCmd,
+	"milestone": milestoneCmd,
+	"check":     checkCmd,
+	"events":    eventsCmd,
 }
 
 // runClient runs a client subcommand, or reports the usage error.
