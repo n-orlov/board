@@ -3,7 +3,7 @@
 // starts the OIDC flow. The UI covers the other way a session ends, while the page is open
 // (expiry, logout elsewhere): the first API call answers 401, and the page goes to the same
 // login path instead of showing a broken screen.
-import { mountPrefix } from './apibase';
+import { mountPrefix, problemDetail } from './apibase';
 import type { components } from './api/schema';
 
 export type Session = components['schemas']['Session'];
@@ -72,7 +72,8 @@ export async function loadSession(browser: Browser): Promise<SessionState> {
     return { kind: 'redirecting' };
   }
   if (!response.ok) {
-    return { kind: 'error', message: `The session could not be read (HTTP ${response.status}).` };
+    const detail = await problemDetail(response);
+    return { kind: 'error', message: detail ?? `The session could not be read (HTTP ${response.status}).` };
   }
   return { kind: 'signed-in', session: (await response.json()) as Session };
 }

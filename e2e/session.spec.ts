@@ -90,11 +90,15 @@ test('a session that cannot be read shows the problem and a Retry that loads it 
   let failing = true;
   await page.route('**/auth/session', async (route) => {
     if (!failing) return route.continue();
-    await route.fulfill({ status: 503, contentType: 'application/problem+json', body: '{"status":503}' });
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/problem+json',
+      body: JSON.stringify({ status: 503, title: 'Service Unavailable', detail: 'The session store is temporarily unavailable.' }),
+    });
   });
   const visited = recordNavigations(page);
   await page.reload();
-  await expect(page.getByTestId('session-error')).toHaveText('The session could not be read (HTTP 503).');
+  await expect(page.getByTestId('session-error')).toHaveText('The session store is temporarily unavailable.');
   failing = false;
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();

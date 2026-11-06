@@ -27,3 +27,23 @@ export function currentApiBase(loc: { pathname: string } = window.location): str
 export function apiUrl(base: string, path: string): string {
   return base + '/' + path.replace(/^\/+/, '');
 }
+
+/**
+ * The text a problem document (RFC 9457) gives for a failed response: its `detail`,
+ * else its `title`. Undefined when the body is not a problem document or names neither, so the
+ * caller says what failed in its own words.
+ */
+export async function problemDetail(response: Response): Promise<string | undefined> {
+  let problem: unknown;
+  try {
+    problem = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (typeof problem !== 'object' || problem === null) return undefined;
+  const { detail, title } = problem as { detail?: unknown; title?: unknown };
+  for (const text of [detail, title]) {
+    if (typeof text === 'string' && text.trim() !== '') return text;
+  }
+  return undefined;
+}

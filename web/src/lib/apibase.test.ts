@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiBase, apiUrl, currentApiBase, mountPrefix } from './apibase';
+import { apiBase, apiUrl, currentApiBase, mountPrefix, problemDetail } from './apibase';
 
 // An absolute origin is a scheme, or a protocol-relative "//host".
 const absoluteOrigin = /^([a-z][a-z0-9+.-]*:)?\/\//i;
@@ -51,5 +51,37 @@ describe('apiUrl', () => {
     expect(apiUrl('/api', 'initiatives')).toBe('/api/initiatives');
     expect(apiUrl('/api', '/initiatives')).toBe('/api/initiatives');
     expect(apiUrl('/board/api', '//x')).toBe('/board/api/x');
+  });
+});
+
+describe('problemDetail', () => {
+  const doc = (body: string) =>
+    new Response(body, { status: 503, headers: { 'Content-Type': 'application/problem+json' } });
+
+  it('is the detail of a problem document', async () => {
+    expect(await problemDetail(doc('{"detail":"The store is down.","title":"Service Unavailable"}'))).toBe(
+      'The store is down.',
+    );
+  });
+
+  it('falls back to the title when the detail is missing or blank', async () => {
+    expect(await problemDetail(doc('{"title":"Service Unavailable"}'))).toBe('Service Unavailable');
+    expect(await problemDetail(doc('{"detail":"  ","title":"Service Unavailable"}'))).toBe('Service Unavailable');
+  });
+
+  it('ignores a detail or title that is not a string', async () => {
+    expect(await problemDetail(doc('{"detail":5,"title":"Gone"}'))).toBe('Gone');
+    expect(await problemDetail(doc('{"detail":5,"title":["x"]}'))).toBeUndefined();
+  });
+
+  it.each([
+    ['an empty body', ''],
+    ['a body that is not JSON', '<html>bad gateway</html>'],
+    ['a JSON value that is not an object', '"down"'],
+    ['null', 'null'],
+    ['a document with neither detail nor title', '{"status":503}'],
+    ['a blank title', '{"title":""}'],
+  ])('is undefined for %s', async (_name, body) => {
+    expect(await problemDetail(doc(body))).toBeUndefined();
   });
 });

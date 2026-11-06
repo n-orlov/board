@@ -1088,7 +1088,9 @@ to the main region without changing the fragment; the navigation entry of the vi
 *loading* (it asks `GET /auth/session`), *signed-in* (the app shows), *redirecting* (the session answered
 401, so the page goes to `/auth/login`, which starts the OIDC flow), *error* (the session could not be
 read) and *signed-out*. Loading and redirecting show a centred card with the product name and a spinner.
-Error shows a card with the problem detail and a **Retry** button that returns to loading and asks
+Error shows a card with the `detail` of the problem document the session answered with (its `title` when
+there is no detail, else "The session could not be read (HTTP n)."; "The server is not reachable." when no
+answer came) and a **Retry** button that returns to loading and asks
 again; a server that is down never starts a login redirect. **Sign out** (the sidebar foot at 1024 px and
 up, the account menu below it, both showing the signed-in email) posts `POST /auth/logout` with the
 session's `X-CSRF-Token`, then shows the **Signed out** view at `#/signed-out`: a card with a **Sign in**

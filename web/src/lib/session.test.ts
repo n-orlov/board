@@ -63,7 +63,20 @@ describe('loadSession', () => {
     expect(fetchFn.mock.calls[0][0]).toBe('/board/auth/session');
   });
 
-  it('shows an error, and does not redirect, when the server fails', async () => {
+  it('shows the problem detail the server gave, and does not redirect', async () => {
+    const detail = 'The session store is temporarily unavailable.';
+    const { b, assign } = browser(
+      async () =>
+        new Response(JSON.stringify({ status: 503, title: 'Service Unavailable', detail }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/problem+json' },
+        }),
+    );
+    expect(await loadSession(b)).toEqual({ kind: 'error', message: detail });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('shows an error naming the status, and does not redirect, when the failure has no problem detail', async () => {
     const { b, assign } = browser(async () => new Response('{}', { status: 503 }));
     expect(await loadSession(b)).toEqual({ kind: 'error', message: 'The session could not be read (HTTP 503).' });
     expect(assign).not.toHaveBeenCalled();
@@ -204,12 +217,14 @@ describe('SessionController', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it('retry that fails again returns to the error card', async () => {
-    const { c, seen } = controller(async () => new Response('{}', { status: 503 }));
+  it('retry that fails again returns to the error card, with the problem detail of the new answer', async () => {
+    const { c, seen, fetchFn } = controller(async () => new Response('{}', { status: 503 }));
     await c.start();
     seen.length = 0;
+    fetchFn.mockImplementation(async () => Response.json({ detail: 'Still starting up.' }, { status: 503 }));
     await c.retry();
     expect(seen).toEqual(['loading', 'error']);
+    expect(c.state).toEqual({ kind: 'error', message: 'Still starting up.' });
   });
 
   it('retry does nothing when the state is not an error', async () => {

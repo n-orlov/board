@@ -2,7 +2,7 @@
 // operations: every call carries the session cookie, and the writes carry the session's
 // `X-CSRF-Token` (SPEC 3.2). `KeysStore` holds what the page shows and is what the page drives:
 // the list, the one-time new key, and the error of the last action.
-import { mountPrefix } from './apibase';
+import { mountPrefix, problemDetail } from './apibase';
 import type { components } from './api/schema';
 import type { Browser } from './session';
 
@@ -21,14 +21,7 @@ export class KeysError extends Error {
 
 /** The text of a problem document's detail (or title), else a line naming the HTTP status. */
 export async function problemText(response: Response, what: string): Promise<string> {
-  try {
-    const problem = (await response.json()) as { detail?: string; title?: string };
-    const text = problem.detail ?? problem.title;
-    if (text) return text;
-  } catch {
-    // Not a problem document: the status line below says what failed.
-  }
-  return `${what} failed (HTTP ${response.status}).`;
+  return (await problemDetail(response)) ?? `${what} failed (HTTP ${response.status}).`;
 }
 
 export class KeysApi {
