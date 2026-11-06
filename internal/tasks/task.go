@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/n-orlov/board/internal/domain"
@@ -18,6 +19,8 @@ const (
 	EventDone     = "task_done"
 	EventReopened = "task_reopened"
 	EventClosed   = "task_closed"
+	EventDepAdded = "dep_added"
+	EventDepGone  = "dep_removed"
 )
 
 // Errors a caller tells apart.
@@ -53,6 +56,19 @@ func (e ConflictError) Error() string {
 // Is makes errors.Is(err, ErrConflict) true for every ConflictError.
 func (e ConflictError) Is(target error) bool { return target == ErrConflict }
 
+// CycleError is a dependency that would close a cycle. It satisfies
+// errors.Is(err, ErrConflict) and its text names the path, each task blocked by
+// the next.
+type CycleError struct{ Path []string }
+
+// Error names the cycle path.
+func (e CycleError) Error() string {
+	return "dependency would close a cycle: " + strings.Join(e.Path, " is blocked by ")
+}
+
+// Is makes errors.Is(err, ErrConflict) true for every CycleError.
+func (e CycleError) Is(target error) bool { return target == ErrConflict }
+
 // Task is one tasks row. Ref is `<initiative slug>-<seq>`; Initiative is the
 // slug. The people are actor handles.
 type Task struct {
@@ -78,6 +94,8 @@ type Task struct {
 	DoneBy         string
 	ClosedAt       *time.Time
 	ClosedBy       string
+	// Blocked is derived: true while some task it is blocked by is not closed.
+	Blocked bool
 }
 
 // fields are the editable columns of a task.

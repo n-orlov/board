@@ -144,7 +144,9 @@ var taskColumns = []string{"id", "initiative_id", "seq", "title", "description",
 
 const selectTask = `SELECT t.id, i.slug, t.initiative_id, t.seq, t.title, t.description, t.kind, t.status, t.resolution,
 	t.planned_start, t.planned_end, t.cadence_seconds, t.next_check_at, t.external_refs,
-	c.handle, t.created_at, t.updated_at, t.done_at, d.handle, t.closed_at, cl.handle
+	c.handle, t.created_at, t.updated_at, t.done_at, d.handle, t.closed_at, cl.handle,
+	EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
+		WHERE td.task_id = t.id AND b.status <> 'closed')
 	FROM tasks t JOIN initiatives i ON i.id = t.initiative_id JOIN actors c ON c.id = t.created_by
 	LEFT JOIN actors d ON d.id = t.done_by LEFT JOIN actors cl ON cl.id = t.closed_by`
 
@@ -161,7 +163,7 @@ func scan(r rowScanner) (Task, error) {
 		refs                         string
 	)
 	err := r.Scan(&t.ID, &t.Initiative, &t.InitiativeID, &t.Seq, &t.Title, &t.Description, &t.Kind, &t.Status, &resolution,
-		&start, &end, &cadence, &next, &refs, &t.CreatedBy, &created, &updated, &done, &doneBy, &closed, &closedBy)
+		&start, &end, &cadence, &next, &refs, &t.CreatedBy, &created, &updated, &done, &doneBy, &closed, &closedBy, &t.Blocked)
 	if err != nil {
 		return Task{}, err
 	}

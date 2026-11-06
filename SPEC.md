@@ -339,10 +339,19 @@ close on closed) is `ErrConflict`, a `ConflictError` whose text names the task a
 initiative is `ErrInitiativeClosed` and writes nothing. A transition ends nothing else: live leases stay live.
 
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
-open blocking ask), **overdue** (watch with `next_check_at < now`).
+open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is the
+dependency half of **blocked**, computed in the same query that reads the task.
 
 `task_deps(task_id, blocked_by_task_id)`: PK both, no self-reference, cycles rejected on insert.
 A dependency is **open** while the blocking task is not `closed` (done-not-closed still blocks).
+`internal/tasks` `AddDep(ref, blockedByRef)` and `RemoveDep(ref, blockedByRef)` take a ref or a ULID for each task and
+write in one transaction with their event on the dependent task, `dep_added` or `dep_removed`, whose `data` is
+`{ref, blocked_by}` (the blocker's ref). The two tasks may belong to different initiatives, and the dependent and the
+blocker may be in any status. A task depending on itself is `ErrInvalid`. A dependency that would close a cycle of any
+length is a `CycleError` (`errors.Is(err, ErrConflict)`) whose text names the path, each task blocked by the next
+(`aa-3 is blocked by aa-1 is blocked by aa-2 is blocked by aa-3`); the search is `domain.DependencyCycle`, shortest
+path first. Adding a dependency that exists succeeds and writes no row, event or actor. Removing one that does not
+exist, or naming an unknown task, is `ErrNotFound`. Both return the dependent task.
 Both tables exist (migration `00003_tasks`, in both dialects) with the §4.10 indexes; `task_deps` also has an index on
 `blocked_by_task_id` for the `blocking` list, and the database refuses a self-reference (cycle checks are the service's).
 `events.task_id` has no foreign key, so the event log outlives any task row.
