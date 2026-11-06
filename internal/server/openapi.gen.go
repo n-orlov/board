@@ -422,6 +422,25 @@ type InitiativeList struct {
 	NextAfter *string `json:"next_after,omitempty"`
 }
 
+// InitiativePatch The fields to change. A field left out keeps its value. `null` clears `target_start` and `target_end`, and is 400 for the others.
+type InitiativePatch struct {
+	// Description Markdown, at most 20000 characters.
+	Description Maybe[string] `json:"description,omitempty"`
+
+	// Slug Immutable. Sending it, even unchanged, is 400.
+	Slug Maybe[string] `json:"slug,omitempty"`
+
+	// Tags Replaces the set. At most 20 tags, normalised as for a create.
+	Tags Maybe[[]string] `json:"tags,omitempty"`
+
+	// TargetEnd Not before `target_start`.
+	TargetEnd   Maybe[string] `json:"target_end,omitempty"`
+	TargetStart Maybe[string] `json:"target_start,omitempty"`
+
+	// Title 1 to 200 characters.
+	Title Maybe[string] `json:"title,omitempty"`
+}
+
 // Key An API key as the board stores it. It never holds the key itself.
 type Key struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -885,6 +904,9 @@ type PutProtocolSeenJSONRequestBody = ProtocolSeenRequest
 // CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
 type CreateInitiativeJSONRequestBody = InitiativeCreate
 
+// PatchInitiativeJSONRequestBody defines body for PatchInitiative for application/json ContentType.
+type PatchInitiativeJSONRequestBody = InitiativePatch
+
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = KeyCreate
 
@@ -932,6 +954,9 @@ type ServerInterface interface {
 	// GetInitiative Read an initiative
 	// (GET /api/v1/initiatives/{slug})
 	GetInitiative(w http.ResponseWriter, r *http.Request, slug string)
+	// PatchInitiative Edit an initiative
+	// (PATCH /api/v1/initiatives/{slug})
+	PatchInitiative(w http.ResponseWriter, r *http.Request, slug string)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(w http.ResponseWriter, r *http.Request)
@@ -1239,6 +1264,32 @@ func (siw *ServerInterfaceWrapper) GetInitiative(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetInitiative(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchInitiative operation middleware
+func (siw *ServerInterfaceWrapper) PatchInitiative(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchInitiative(w, r, slug)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1843,6 +1894,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives", wrapper.ListInitiatives)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.PatchInitiative)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks", wrapper.CreateTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.GetTask)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.PatchTask)
@@ -2533,6 +2585,93 @@ type GetInitiative503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetInitiative503ApplicationProblemPlusJSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchInitiativeRequestObject struct {
+	Slug string `json:"slug"`
+	Body *PatchInitiativeJSONRequestBody
+}
+
+type PatchInitiativeResponseObject interface {
+	VisitPatchInitiativeResponse(w http.ResponseWriter) error
+}
+
+type PatchInitiative200JSONResponse Initiative
+
+func (response PatchInitiative200JSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchInitiative400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PatchInitiative400ApplicationProblemPlusJSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchInitiative401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PatchInitiative401ApplicationProblemPlusJSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchInitiative404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PatchInitiative404ApplicationProblemPlusJSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchInitiative503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PatchInitiative503ApplicationProblemPlusJSONResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -4333,6 +4472,9 @@ type StrictServerInterface interface {
 	// GetInitiative Read an initiative
 	// (GET /api/v1/initiatives/{slug})
 	GetInitiative(ctx context.Context, request GetInitiativeRequestObject) (GetInitiativeResponseObject, error)
+	// PatchInitiative Edit an initiative
+	// (PATCH /api/v1/initiatives/{slug})
+	PatchInitiative(ctx context.Context, request PatchInitiativeRequestObject) (PatchInitiativeResponseObject, error)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
@@ -4668,6 +4810,39 @@ func (sh *strictHandler) GetInitiative(w http.ResponseWriter, r *http.Request, s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetInitiativeResponseObject); ok {
 		if err := validResponse.VisitGetInitiativeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchInitiative operation middleware
+func (sh *strictHandler) PatchInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+	var request PatchInitiativeRequestObject
+
+	request.Slug = slug
+
+	var body PatchInitiativeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchInitiative(ctx, request.(PatchInitiativeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchInitiative")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PatchInitiativeResponseObject); ok {
+		if err := validResponse.VisitPatchInitiativeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -209,7 +209,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Edit an initiative
+         * @description Changes the fields sent. A field left out keeps its value, `tags` replaces the set, and `null` clears `target_start` and `target_end` and is 400 for the others. The same field rules as a create apply to the initiative as it would be after the patch. `slug` is immutable, and sending it, even unchanged, is 400. A patch that changes nothing, such as `{}`, answers 200 and writes no row, event or actor. A change appends `initiative_updated` whose `data.changed` names the changed fields. An unknown initiative is 404.
+         */
+        patch: operations["patchInitiative"];
         trace?: never;
     };
     "/api/v1/tasks": {
@@ -664,6 +668,24 @@ export interface components {
              * @description Not before `target_start`.
              */
             target_end?: string;
+        };
+        /** @description The fields to change. A field left out keeps its value. `null` clears `target_start` and `target_end`, and is 400 for the others. */
+        InitiativePatch: {
+            /** @description 1 to 200 characters. */
+            title?: string | null;
+            /** @description Markdown, at most 20000 characters. */
+            description?: string | null;
+            /** @description Replaces the set. At most 20 tags, normalised as for a create. */
+            tags?: string[] | null;
+            /** Format: date */
+            target_start?: string | null;
+            /**
+             * Format: date
+             * @description Not before `target_start`.
+             */
+            target_end?: string | null;
+            /** @description Immutable. Sending it, even unchanged, is 400. */
+            slug?: string | null;
         };
         /** @description A link to a ticket, pull request or build. */
         ExternalRef: {
@@ -1324,6 +1346,37 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The initiative. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Initiative"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    patchInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The initiative's slug or ULID. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitiativePatch"];
+            };
+        };
+        responses: {
+            /** @description The initiative after the edit. */
             200: {
                 headers: {
                     [name: string]: unknown;

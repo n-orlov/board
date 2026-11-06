@@ -16,6 +16,9 @@ func (p problemResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) er
 	return p.write(w)
 }
 func (p problemResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error { return p.write(w) }
+func (p problemResponse) VisitPatchInitiativeResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
 
 // initiativeOps is the /api/v1/initiatives operations (SPEC 6.2). Any
 // authenticated principal may use them: v1 has no ACL.
@@ -170,6 +173,12 @@ func (o initiativeOps) CreateInitiative(ctx context.Context, req CreateInitiativ
 	return CreateInitiative201JSONResponse(apiInitiative(created)), nil
 }
 
+// missingInitiative is the 404 for a ref that names no initiative.
+func missingInitiative(ref string) problemResponse {
+	return failure(http.StatusNotFound, "there is no initiative "+ref).
+		withNext("List initiatives with GET /api/v1/initiatives, or create one with POST /api/v1/initiatives.")
+}
+
 // GetInitiative reads one initiative by slug or ULID.
 func (o initiativeOps) GetInitiative(ctx context.Context, req GetInitiativeRequestObject) (GetInitiativeResponseObject, error) {
 	if r, off := o.ready(); off {
@@ -178,10 +187,62 @@ func (o initiativeOps) GetInitiative(ctx context.Context, req GetInitiativeReque
 	got, err := o.inits.Get(ctx, req.Slug)
 	switch {
 	case errors.Is(err, initiatives.ErrNotFound):
-		return failure(http.StatusNotFound, "there is no initiative "+req.Slug).
-			withNext("List initiatives with GET /api/v1/initiatives, or create one with POST /api/v1/initiatives."), nil
+		return missingInitiative(req.Slug), nil
 	case err != nil:
 		return nil, err
 	}
 	return GetInitiative200JSONResponse(apiInitiative(got)), nil
+}
+
+func initiativeField[T any](m Maybe[T]) initiatives.Field[T] {
+	return initiatives.Field[T]{Set: m.Set, Null: m.Null, Value: m.Value}
+}
+
+// initiativePatch is the store's request for a patch body.
+func initiativePatch(b *InitiativePatch) initiatives.Patch {
+	return initiatives.Patch{
+		Title: initiativeField(b.Title), Description: initiativeField(b.Description), Tags: initiativeField(b.Tags),
+		TargetStart: initiativeField(b.TargetStart), TargetEnd: initiativeField(b.TargetEnd),
+	}
+}
+
+// initiativePatchRefusal is the 400 for a patch body that cannot be applied, or
+// nil: no body, or the immutable slug.
+func initiativePatchRefusal(b *InitiativePatch) *problemResponse {
+	if b == nil {
+		r := failure(http.StatusBadRequest, "the request needs a JSON body with the fields to change").
+			withNext("Send the fields to change, such as {\"title\": \"...\"}.")
+		return &r
+	}
+	if b.Slug.Set {
+		r := failure(http.StatusBadRequest, "slug cannot be changed").
+			withNext("Leave slug out. To use another slug, create a new initiative.")
+		return &r
+	}
+	return nil
+}
+
+// PatchInitiative edits an initiative.
+func (o initiativeOps) PatchInitiative(ctx context.Context, req PatchInitiativeRequestObject) (PatchInitiativeResponseObject, error) {
+	if r, off := o.ready(); off {
+		return r, nil
+	}
+	who, r, ok := caller(ctx)
+	if !ok {
+		return r, nil
+	}
+	if refusal := initiativePatchRefusal(req.Body); refusal != nil {
+		return *refusal, nil
+	}
+	got, err := o.inits.Patch(ctx, who.AuditActor(), who.Principal, req.Slug, initiativePatch(req.Body))
+	switch {
+	case errors.Is(err, initiatives.ErrNotFound):
+		return missingInitiative(req.Slug), nil
+	case err != nil:
+		if r, ok := invalid(err); ok {
+			return r, nil
+		}
+		return nil, err
+	}
+	return PatchInitiative200JSONResponse(apiInitiative(got)), nil
 }

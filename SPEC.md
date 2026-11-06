@@ -613,7 +613,7 @@ and CLI can show badges without the lists.
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
-  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the three `/api/v1/initiatives` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the `GET`/`POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
   operations (§6.4) and the RFC 9457 `Problem` schema. The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
@@ -718,8 +718,8 @@ unknown task is **404**.
 
 ### 6.3 Initiatives
 
-`GET/POST /api/v1/initiatives` and `GET /api/v1/initiatives/{slug}` are in `api/openapi.yaml`. The
-list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come with later phases.
+`GET/POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` are in `api/openapi.yaml`. The
+list filters `status` and `closed_within`, close and reopen (§6.2) come with later phases.
 
 - **`POST /api/v1/initiatives`**, body `{slug, title, description?, tags?, target_start?, target_end?}`.
   `slug` matches `[a-z0-9-]{2,40}` (`domain.ValidateSlug`). `title` is 1 to 200 characters,
@@ -736,6 +736,18 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
   resolved against the stored rows (`domain.RefLookups`), never by the shape of its text: a slug is
   any `[a-z0-9-]{2,40}`, including one that also reads as a ULID (26 digits, or a ULID in lowercase),
   and the text as given is tried first as the slug or the id it spells, then in its other case.
+- **`PATCH /api/v1/initiatives/{slug}`**, body any of `title`, `description`, `tags` (which replaces the set),
+  `target_start`, `target_end`. A field left out keeps its value. `null` clears `target_start` and `target_end`, and is
+  **400** for `title`, `description` and `tags`. `slug` is immutable, and a body that names it, even unchanged, is
+  **400** whose `next` says to leave it out. The same field rules as a create apply to the initiative as it would be
+  after the patch (so a new `target_end` is checked against the stored `target_start`). A patch that changes nothing,
+  a `{}` or values equal to the stored ones (tags compared after normalising), answers **200** and writes no row,
+  no event and no actor. A change answers **200** with the initiative, and in one transaction updates the row, replaces
+  the tags when they changed, upserts the actor and appends one `initiative_updated` event whose `principal` and actor
+  are as for a create and whose `data` is `{slug, changed}`, `changed` naming the changed fields in the order `title`,
+  `description`, `tags`, `target_start`, `target_end`. A bad field is **400**, an unknown initiative **404**, and a
+  refusal changes nothing: no row, tag, event or actor. A closed initiative can still be edited. A zero-length body is
+  **400** (the body is required JSON); `{}` is the empty patch.
 - **`GET /api/v1/initiatives`** answers `{items, next_after?}`, items ordered by id (creation order).
   `tag` (repeatable) keeps initiatives carrying every tag given. `limit` is 1 to 1000 (default 100; 0
   is a 400). `after` is a ULID or a slug in either letter case (`domain.ParseCursor`, resolved as above): the

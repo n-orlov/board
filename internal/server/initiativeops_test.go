@@ -139,7 +139,7 @@ func TestListInitiativesPagesFiltersAndRefusesBadParameters(t *testing.T) {
 
 func TestInitiativesAreUnavailableWithoutAStore(t *testing.T) {
 	h := NewHandler(ok, acceptKey, nil, nil)
-	for _, c := range []struct{ method, path string }{{"GET", "/api/v1/initiatives"}, {"POST", "/api/v1/initiatives"}, {"GET", "/api/v1/initiatives/abc"}} {
+	for _, c := range []struct{ method, path string }{{"GET", "/api/v1/initiatives"}, {"POST", "/api/v1/initiatives"}, {"GET", "/api/v1/initiatives/abc"}, {"PATCH", "/api/v1/initiatives/abc"}} {
 		r := httptest.NewRequest(c.method, c.path, strings.NewReader(`{"slug":"abc","title":"t"}`))
 		r.Header.Set("Authorization", "Bearer "+testKey)
 		r.Header.Set(ActorHeader, "tester")
@@ -178,5 +178,71 @@ func TestBindFailedAnswersRequiredAndInvalidParameters(t *testing.T) {
 	var invalid *InvalidParamFormatError
 	if len(seen) != 2 || !errors.As(seen[0], &required) || required.ParamName != "limit" || !errors.As(seen[1], &invalid) || invalid.ParamName != "limit" {
 		t.Errorf("answers = %#v", seen)
+	}
+}
+
+func (s *keyServer) patch(ref, body string) *httptest.ResponseRecorder {
+	s.t.Helper()
+	return s.send(http.MethodPatch, "/api/v1/initiatives/"+ref, body, "editor@host")
+}
+
+func TestPatchInitiativeChangesFieldsAndWritesOneEvent(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", `,"tags":["old"],"target_start":"2026-03-01"`)
+	rec := s.patch("aa", `{"title":"New","tags":["B","a"],"target_start":null,"target_end":"2026-05-01"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d %s", rec.Code, rec.Body)
+	}
+	doc := decode(t, rec)
+	if doc["title"] != "New" || fmt.Sprint(doc["tags"]) != "[a b]" || doc["target_end"] != "2026-05-01" {
+		t.Errorf("document = %v", doc)
+	}
+	if _, has := doc["target_start"]; has {
+		t.Errorf("a cleared date is still there: %v", doc)
+	}
+	ev := s.events()
+	last := ev[len(ev)-1]
+	if len(ev) != 2 || last.typ != "initiative_updated" || last.actor != "editor@host" || last.principal != "key:caller" ||
+		last.data != `{"changed":["title","tags","target_start","target_end"],"slug":"aa"}` {
+		t.Fatalf("events = %+v", ev)
+	}
+}
+
+func TestPatchInitiativeRefusesTheSlugANullTitleAndAMissingBody(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	for name, body := range map[string]string{
+		"slug": `{"slug":"aa"}`, "other slug": `{"slug":"bb","title":"x"}`, "null slug": `{"slug":null}`,
+		"null title": `{"title":null}`, "bad tag": `{"tags":["no way"]}`, "bad dates": `{"target_start":"2026-02-01","target_end":"2026-01-01"}`,
+		"unreadable date": `{"target_end":"soon"}`,
+	} {
+		rec := s.patch("aa", body)
+		doc := decode(t, rec)
+		if rec.Code != http.StatusBadRequest || doc["next"] == nil || doc["detail"] == nil {
+			t.Errorf("%s: %d %v", name, rec.Code, doc)
+		}
+	}
+	if n := len(s.events()); n != 1 {
+		t.Errorf("refusals wrote events: %d", n)
+	}
+	if rec := s.patch("aa", ``); rec.Code != http.StatusBadRequest {
+		t.Errorf("zero-byte body = %d", rec.Code)
+	}
+	if r := initiativePatchRefusal(nil); r == nil || r.status != http.StatusBadRequest || r.next == "" {
+		t.Errorf("no body: %+v", r)
+	}
+}
+
+func TestPatchInitiativeUnknownIsNotFoundAndNoOpIsOK(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	if rec := s.patch("zz", `{"title":"x"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown = %d", rec.Code)
+	}
+	if rec := s.patch("aa", `{}`); rec.Code != http.StatusOK {
+		t.Errorf("no-op = %d", rec.Code)
+	}
+	if n := len(s.events()); n != 1 {
+		t.Errorf("events = %d", n)
 	}
 }

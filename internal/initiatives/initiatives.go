@@ -226,12 +226,17 @@ func scan(r rowScanner) (Initiative, error) {
 // case, or ErrNotFound. The row is found by looking the text up as an id and as
 // a slug (domain.RefLookups), not by guessing its kind from its shape.
 func (s Store) Get(ctx context.Context, ref string) (Initiative, error) {
+	return s.find(ctx, s.Store.Reader(), ref)
+}
+
+// find is Get reading through q, which may be a transaction.
+func (s Store) find(ctx context.Context, q querier, ref string) (Initiative, error) {
 	for _, l := range domain.RefLookups(ref) {
 		column := "i.slug"
 		if l.ByID {
 			column = "i.id"
 		}
-		i, err := s.getBy(ctx, column, l.Value)
+		i, err := s.getVia(ctx, q, column, l.Value)
 		if !errors.Is(err, ErrNotFound) {
 			return i, err
 		}
@@ -239,17 +244,28 @@ func (s Store) Get(ctx context.Context, ref string) (Initiative, error) {
 	return Initiative{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
 }
 
+// querier is the part of *sql.DB and *sql.Tx that reads.
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // getBy reads the one initiative whose column (i.id or i.slug) equals value.
 func (s Store) getBy(ctx context.Context, column, value string) (Initiative, error) {
+	return s.getVia(ctx, s.Store.Reader(), column, value)
+}
+
+// getVia is getBy reading through q, which may be a transaction.
+func (s Store) getVia(ctx context.Context, q querier, column, value string) (Initiative, error) {
 	d := s.Store.Dialect()
-	i, err := scan(s.Store.Reader().QueryRowContext(ctx, d.Rebind(selectInitiative+` WHERE `+column+` = ?`), value))
+	i, err := scan(q.QueryRowContext(ctx, d.Rebind(selectInitiative+` WHERE `+column+` = ?`), value))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Initiative{}, fmt.Errorf("%w: %s", ErrNotFound, value)
 	case err != nil:
 		return Initiative{}, fmt.Errorf("read initiative: %w", err)
 	}
-	tags, err := s.tags(ctx, []string{i.ID})
+	tags, err := s.tagsVia(ctx, q, []string{i.ID})
 	if err != nil {
 		return Initiative{}, err
 	}
@@ -260,6 +276,11 @@ func (s Store) getBy(ctx context.Context, column, value string) (Initiative, err
 // tags returns the sorted tags of each initiative id; an id with none maps to
 // an empty slice.
 func (s Store) tags(ctx context.Context, ids []string) (map[string][]string, error) {
+	return s.tagsVia(ctx, s.Store.Reader(), ids)
+}
+
+// tagsVia is tags reading through q, which may be a transaction.
+func (s Store) tagsVia(ctx context.Context, q querier, ids []string) (map[string][]string, error) {
 	out := make(map[string][]string, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -268,8 +289,8 @@ func (s Store) tags(ctx context.Context, ids []string) (map[string][]string, err
 		out[id] = []string{}
 	}
 	d := s.Store.Dialect()
-	q := `SELECT initiative_id, tag FROM initiative_tags WHERE initiative_id IN (` + marks(len(ids)) + `) ORDER BY initiative_id, tag`
-	rows, err := s.Store.Reader().QueryContext(ctx, d.Rebind(q), anys(ids)...)
+	query := `SELECT initiative_id, tag FROM initiative_tags WHERE initiative_id IN (` + marks(len(ids)) + `) ORDER BY initiative_id, tag`
+	rows, err := q.QueryContext(ctx, d.Rebind(query), anys(ids)...)
 	if err != nil {
 		return nil, fmt.Errorf("read tags: %w", err)
 	}

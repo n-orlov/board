@@ -200,6 +200,7 @@ func (brokenResponse) VisitCreateInitiativeResponse(http.ResponseWriter) error {
 	return errBroken
 }
 func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitPatchInitiativeResponse(http.ResponseWriter) error     { return errBroken }
 func (brokenResponse) VisitCreateTaskResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitGetTaskResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error           { return errBroken }
@@ -313,6 +314,12 @@ func (s stubOperations) CreateInitiative(context.Context, CreateInitiativeReques
 func (s stubOperations) GetInitiative(context.Context, GetInitiativeRequestObject) (GetInitiativeResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetInitiativeResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) PatchInitiative(context.Context, PatchInitiativeRequestObject) (PatchInitiativeResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PatchInitiativeResponseObject)
 	return resp, err
 }
 
@@ -541,6 +548,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get initiative 401", 401, GetInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
 		{"get initiative 404", 404, GetInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
 		{"get initiative 503", 503, GetInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetInitiativeResponse},
+		{"patch initiative 400", 400, PatchInitiative400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
+		{"patch initiative 401", 401, PatchInitiative401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
+		{"patch initiative 404", 404, PatchInitiative404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
+		{"patch initiative 503", 503, PatchInitiative503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPatchInitiativeResponse},
 		{"create task 400", 400, CreateTask400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},
 		{"create task 401", 401, CreateTask401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},
 		{"create task 404", 404, CreateTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitCreateTaskResponse},

@@ -373,6 +373,47 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+    patch:
+      operationId: patchInitiative
+      tags: [initiatives]
+      summary: Edit an initiative
+      description: >-
+        Changes the fields sent. A field left out keeps its value, `tags` replaces the set, and `null` clears
+        `target_start` and `target_end` and is 400 for the others. The same field rules as a create apply to the
+        initiative as it would be after the patch. `slug` is immutable, and sending it, even unchanged, is 400. A
+        patch that changes nothing, such as `{}`, answers 200 and writes no row, event or actor. A change appends
+        `initiative_updated` whose `data.changed` names the changed fields. An unknown initiative is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: The initiative's slug or ULID.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitiativePatch"
+      responses:
+        "200":
+          description: The initiative after the edit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Initiative"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/tasks:
     post:
       operationId: createTask
@@ -1241,6 +1282,45 @@ components:
           type: string
           format: date
           description: Not before `target_start`.
+    InitiativePatch:
+      type: object
+      description: >-
+        The fields to change. A field left out keeps its value. `null` clears `target_start` and `target_end`,
+        and is 400 for the others.
+      properties:
+        title:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: 1 to 200 characters.
+        description:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Markdown, at most 20000 characters.
+        tags:
+          type: [array, "null"]
+          x-go-type: Maybe[[]string]
+          x-go-type-skip-optional-pointer: true
+          description: Replaces the set. At most 20 tags, normalised as for a create.
+          items:
+            type: string
+        target_start:
+          type: [string, "null"]
+          format: date
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+        target_end:
+          type: [string, "null"]
+          format: date
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Not before `target_start`.
+        slug:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Immutable. Sending it, even unchanged, is 400.
     ExternalRef:
       type: object
       description: A link to a ticket, pull request or build.
