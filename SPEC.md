@@ -1099,7 +1099,7 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit`; the other lines
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close`; the other lines
 below arrive with their phases. The client commands (`whoami`, `init …`, `task …`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
@@ -1112,7 +1112,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative) and `task edit` (a closed task or initiative), which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move), which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1170,6 +1170,16 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
   `--link` with `--no-links` are exit 2 with the usage line. An unknown task exits 4 with `→ board task ls`; a closed task
   or a task of a closed initiative exits 6 with `→ board task show <ref>`.
+- `board task done <ref> [--json]`, `board task reopen <ref> [--json]` and `board task close <ref> [--resolution
+  completed|dropped|superseded|duplicate] [--for operator] [--json]` call `POST /api/v1/tasks/<ref>/done|reopen|close` and
+  print `ok task <ref> done`, `ok task <ref> reopened` and `ok task <ref> closed` (`--json`: the task after the move).
+  `close` sends the resolution, `completed` when `--resolution` is not given. `--for operator` sends
+  `Board-On-Behalf-Of: operator`, which the server stores as the `on_behalf_of` of the `task_closed` event; an agent
+  uses it only when the operator told it to close. A resolution outside the four and a `--for` other than `operator` are
+  exit 2 with `board: --resolution: invalid resolution …` or `board: --for: invalid actor …`, before any request is
+  sent; `--resolution` and `--for` belong to `close` alone. A move the task's status does not allow (done on a done or
+  closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → board
+  task show <ref>`; an unknown task exits 4 with `→ board task ls`. Live leases on the task stay live.
 - Durations (`--cadence`) are a whole number and a unit, `s`, `m`, `h` or `d` (`90s`, `45m`, `2h`, `7d`); a missing unit, a
   sign, a fraction or zero is refused. Times (`--start`, `--end`) are RFC 3339 or `YYYY-MM-DD` (midnight UTC). A malformed
   duration, time, link (`label=url`) or kind is exit 2 with the single line `board: <flag>: invalid <what> …`, before any

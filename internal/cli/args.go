@@ -33,8 +33,11 @@ var (
 		{"--title", true}, {"--description", true}, {"--start", true}, {"--end", true}, {"--cadence", true},
 		{"--link", true}, {"--no-links", false}, {"--json", false},
 	}
-	whoamiFlags    = []flagSpec{}
-	helpAgentFlags = []flagSpec{{"--version", false}}
+	taskDoneFlags   = []flagSpec{{"--json", false}}
+	taskReopenFlags = []flagSpec{{"--json", false}}
+	taskCloseFlags  = []flagSpec{{"--resolution", true}, {"--for", true}, {"--json", false}}
+	whoamiFlags     = []flagSpec{}
+	helpAgentFlags  = []flagSpec{{"--version", false}}
 )
 
 // parsedArgs is a command line split into positional arguments and flags.

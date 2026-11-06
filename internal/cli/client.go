@@ -132,6 +132,9 @@ type client struct {
 	key  string
 	id   identity
 	http *http.Client
+	// onBehalf, when not empty, is sent as Board-On-Behalf-Of: the actor a
+	// write is made for.
+	onBehalf string
 }
 
 // newClient checks the environment: BOARD_API_KEY and BOARD_URL. The key comes
@@ -175,6 +178,9 @@ func (c *client) headers(req *http.Request, hasBody bool) {
 	req.Header.Set("Board-Actor", c.id.Actor)
 	if c.id.WayBack != "" {
 		req.Header.Set("Board-Actor-Way-Back", c.id.WayBack)
+	}
+	if c.onBehalf != "" {
+		req.Header.Set("Board-On-Behalf-Of", c.onBehalf)
 	}
 	req.Header.Set("Accept", "application/json")
 	if hasBody {
