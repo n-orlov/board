@@ -58,6 +58,24 @@ func (e InitiativeStatus) Valid() bool {
 	}
 }
 
+// Defines values for InitiativeListItemStatus.
+const (
+	InitiativeListItemStatusClosed InitiativeListItemStatus = "closed"
+	InitiativeListItemStatusOpen   InitiativeListItemStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the InitiativeListItemStatus enum.
+func (e InitiativeListItemStatus) Valid() bool {
+	switch e {
+	case InitiativeListItemStatusClosed:
+		return true
+	case InitiativeListItemStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KeyStatus.
 const (
 	KeyStatusActive  KeyStatus = "active"
@@ -328,6 +346,27 @@ func (e TaskListItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListInitiativesParamsStatus.
+const (
+	ListInitiativesParamsStatusAll    ListInitiativesParamsStatus = "all"
+	ListInitiativesParamsStatusClosed ListInitiativesParamsStatus = "closed"
+	ListInitiativesParamsStatusOpen   ListInitiativesParamsStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the ListInitiativesParamsStatus enum.
+func (e ListInitiativesParamsStatus) Valid() bool {
+	switch e {
+	case ListInitiativesParamsStatusAll:
+		return true
+	case ListInitiativesParamsStatusClosed:
+		return true
+	case ListInitiativesParamsStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListTasksParamsStatus.
 const (
 	ListTasksParamsStatusAll       ListTasksParamsStatus = "all"
@@ -532,11 +571,58 @@ type InitiativeCreate struct {
 // InitiativeList A page of initiatives.
 type InitiativeList struct {
 	// Items The initiatives of the page, ordered by id.
-	Items []Initiative `json:"items"`
+	Items []InitiativeListItem `json:"items"`
 
 	// NextAfter The `after` value that fetches the following page. Absent on the last page.
 	NextAfter *string `json:"next_after,omitempty"`
 }
+
+// InitiativeListItem An initiative of a list, with the counts of its tasks and its live leases.
+type InitiativeListItem struct {
+	// ClosedAt When it was closed. Absent while it is open.
+	ClosedAt *time.Time `json:"closed_at,omitempty"`
+
+	// ClosedBy The handle of the actor that closed it. Absent while it is open.
+	ClosedBy *string `json:"closed_by,omitempty"`
+
+	// Counts How many tasks an initiative holds in each status.
+	Counts    TaskCounts `json:"counts"`
+	CreatedAt time.Time  `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Description Markdown. Empty when none was given.
+	Description string `json:"description"`
+
+	// Id The initiative's ULID.
+	Id string `json:"id"`
+
+	// LiveLeases How many live leases sit on the initiative's tasks.
+	LiveLeases int `json:"live_leases"`
+
+	// Ref The short ref, which is the slug.
+	Ref string `json:"ref"`
+
+	// Slug The unique slug, 2 to 40 characters of `a-z`, `0-9` and `-`.
+	//
+	// Examples: phone-onboard
+	Slug   string                   `json:"slug"`
+	Status InitiativeListItemStatus `json:"status"`
+
+	// Tags The tags, sorted.
+	Tags []string `json:"tags"`
+
+	// TargetEnd The planned end. Absent when none was given.
+	TargetEnd *openapi_types.Date `json:"target_end,omitempty"`
+
+	// TargetStart The planned start. Absent when none was given.
+	TargetStart *openapi_types.Date `json:"target_start,omitempty"`
+	Title       string              `json:"title"`
+}
+
+// InitiativeListItemStatus defines model for InitiativeListItem.Status.
+type InitiativeListItemStatus string
 
 // InitiativePatch The fields to change. A field left out keeps its value. `null` clears `target_start` and `target_end`, and is 400 for the others.
 type InitiativePatch struct {
@@ -853,6 +939,13 @@ type TaskClose struct {
 	Resolution string `json:"resolution"`
 }
 
+// TaskCounts How many tasks an initiative holds in each status.
+type TaskCounts struct {
+	Closed int `json:"closed"`
+	Done   int `json:"done"`
+	Open   int `json:"open"`
+}
+
 // TaskCreate A new task.
 type TaskCreate struct {
 	// BlockedBy Refs or ULIDs of the tasks the new task starts out blocked by.
@@ -1145,12 +1238,21 @@ type ListInitiativesParams struct {
 	// Tag Keep initiatives that carry this tag. Repeatable.
 	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
 
+	// Status Which initiatives to keep. Default `open`.
+	Status *ListInitiativesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`.
+	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
+
 	// Limit The page size, 1 to 1000. Default 100.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// After An initiative ULID or slug, in either letter case. The page starts after it.
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
+
+// ListInitiativesParamsStatus defines parameters for ListInitiatives.
+type ListInitiativesParamsStatus string
 
 // ListLeasesParams defines parameters for ListLeases.
 type ListLeasesParams struct {
@@ -1546,6 +1648,14 @@ func (siw *ServerInterfaceWrapper) ListInitiatives(w http.ResponseWriter, r *htt
 	// ------------- Optional query parameter "tag" -------------
 
 	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "status" -------------
+
+	bind.check("status", runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "closed_within" -------------
+
+	bind.check("closed_within", runtime.BindQueryParameterWithOptions("form", true, false, "closed_within", r.URL.Query(), &params.ClosedWithin, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "limit" -------------
 

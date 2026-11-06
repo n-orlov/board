@@ -354,3 +354,58 @@ func TestUnknownReferencesAreRefusedByShapeNeutralRules(t *testing.T) {
 		t.Errorf("after a well-formed ULID naming no row: %v", err)
 	}
 }
+
+// closeAt marks the initiative closed at the given time.
+func closeAt(t *testing.T, s Store, id string, at time.Time) {
+	t.Helper()
+	if _, err := s.Store.Writer().ExecContext(context.Background(),
+		`UPDATE initiatives SET status = 'closed', closed_at = ?, closed_by = created_by WHERE id = ?`, store.EncodeTime(at), id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListStatusFilterKeepsOpenByDefaultAndClosedOrAllOnRequest(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	mk(t, s, "aa")
+	b := mk(t, s, "bb")
+	mk(t, s, "cc")
+	closeAt(t, s, b.ID, s.now())
+	for status, want := range map[string]string{"": "aa,cc", "open": "aa,cc", "closed": "bb", "all": "aa,bb,cc"} {
+		p, err := s.List(ctx, Query{Status: status})
+		if got := strings.Join(slugs(p), ","); err != nil || got != want {
+			t.Errorf("status %q = %s, %v, want %s", status, got, err, want)
+		}
+	}
+	var bad InvalidError
+	if _, err := s.List(ctx, Query{Status: "done"}); !errors.As(err, &bad) || !errors.Is(err, ErrInvalid) || bad.Next == "" {
+		t.Errorf("status done = %v", err)
+	}
+}
+
+func TestListClosedWithinKeepsTheInitiativesClosedInsideTheWindow(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	now := s.now()
+	recent, mid, old := mk(t, s, "aa"), mk(t, s, "bb"), mk(t, s, "cc")
+	mk(t, s, "dd")
+	closeAt(t, s, recent.ID, now.AddDate(0, 0, -1))
+	closeAt(t, s, mid.ID, now.AddDate(0, 0, -20))
+	closeAt(t, s, old.ID, now.AddDate(0, 0, -60))
+	cases := []struct{ status, within, want string }{
+		{"closed", "7d", "aa"}, {"closed", "30d", "aa,bb"}, {"closed", "90d", "aa,bb,cc"}, {"closed", "25", "aa,bb"},
+		{"all", "7d", "aa,dd"}, {"all", "30d", "aa,bb,dd"}, {"all", "10", "aa,dd"},
+	}
+	for _, c := range cases {
+		p, err := s.List(ctx, Query{Status: c.status, ClosedWithin: c.within})
+		if got := strings.Join(slugs(p), ","); err != nil || got != c.want {
+			t.Errorf("%s within %s = %s, %v, want %s", c.status, c.within, got, err, c.want)
+		}
+	}
+	for _, q := range []Query{{ClosedWithin: "7d"}, {Status: "open", ClosedWithin: "7d"}, {Status: "closed", ClosedWithin: "1w"}, {Status: "all", ClosedWithin: "0"}} {
+		var bad InvalidError
+		if _, err := s.List(ctx, q); !errors.As(err, &bad) || !errors.Is(err, ErrInvalid) || bad.Next != NextClosedWithin {
+			t.Errorf("%+v: %v", q, err)
+		}
+	}
+}

@@ -97,3 +97,23 @@ func TestLiveForGroupsTheLiveLeasesByTaskAndLeavesOutThoseThatRanOut(t *testing.
 		t.Errorf("no ids = %+v, %v", got, err)
 	}
 }
+
+func TestLiveCountsForCountsTheLiveLeasesOfEachInitiativeAndLeavesOutThoseThatRanOut(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", secs(600))
+	e.start(t, bob, "aa-1", secs(60))
+	e.start(t, bob, "aa-2", secs(600))
+	t1, _ := e.Tasks.Get(ctx, "aa-1")
+	got, err := e.S.LiveCountsFor(ctx, []string{t1.InitiativeID})
+	if err != nil || len(got) != 1 || got[t1.InitiativeID] != 3 {
+		t.Fatalf("LiveCountsFor = %+v, %v", got, err)
+	}
+	e.Clock.add(61 * time.Second)
+	got, err = e.S.LiveCountsFor(ctx, []string{t1.InitiativeID, "unknown"})
+	if err != nil || len(got) != 1 || got[t1.InitiativeID] != 2 {
+		t.Errorf("after the short ttl: %+v, %v", got, err)
+	}
+	if got, err := e.S.LiveCountsFor(ctx, nil); err != nil || len(got) != 0 {
+		t.Errorf("no ids = %+v, %v", got, err)
+	}
+}

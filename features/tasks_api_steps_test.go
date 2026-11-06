@@ -306,4 +306,5 @@ func registerTaskAPISteps(sc *godog.ScenarioContext, h *harness) {
 	registerTaskEventSteps(sc, h)
 	registerLeaseSteps(sc, h)
 	registerTaskListSteps(sc, h)
+	registerInitiativeListSteps(sc, h)
 }

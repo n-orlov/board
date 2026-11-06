@@ -2,6 +2,7 @@ package leases
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/n-orlov/board/internal/store"
@@ -42,4 +43,36 @@ func (s Store) LiveFor(ctx context.Context, taskIDs []string) (map[string][]Leas
 		out[l.TaskID] = append(out[l.TaskID], l)
 	}
 	return out, nil
+}
+
+// LiveCountsFor counts the live leases on the tasks of each initiative whose id
+// is in initiativeIDs, in one map by initiative id. An initiative with none has
+// no entry. Like LiveFor it leaves out the leases whose time has run out without
+// expiring them; a caller that wants them marked expired calls ExpireDue first.
+func (s Store) LiveCountsFor(ctx context.Context, initiativeIDs []string) (map[string]int, error) {
+	out := map[string]int{}
+	if len(initiativeIDs) == 0 {
+		return out, nil
+	}
+	args := []any{store.EncodeTime(s.now())}
+	for _, id := range initiativeIDs {
+		args = append(args, id)
+	}
+	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT t.initiative_id, COUNT(*) FROM leases l JOIN tasks t ON t.id = l.task_id
+		 WHERE l.state = 'live' AND l.expires_at >= ? AND t.initiative_id IN (`+
+			strings.TrimSuffix(strings.Repeat("?, ", len(initiativeIDs)), ", ")+`) GROUP BY t.initiative_id`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("count live leases: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("count live leases: %w", err)
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }

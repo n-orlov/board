@@ -90,12 +90,23 @@ const (
 	NextTags = "Send at most 20 tags, each of a-z, 0-9, . _ : and -, starting with a letter or digit."
 )
 
+// The status filters of a list. The empty status is StatusOpen.
+const (
+	StatusOpen   = "open"
+	StatusClosed = "closed"
+	StatusAll    = "all"
+)
+
 // Query selects a page of initiatives. Tags keeps only initiatives that carry
 // every one of them. Limit 0 is the default page size.
 type Query struct {
 	Tags  []string
 	After domain.Cursor
 	Limit int
+	// Status is open (the default when empty), closed or all. ClosedWithin is 7d,
+	// 30d, 90d or an integer of days and needs a Status of closed or all.
+	Status       string
+	ClosedWithin string
 }
 
 // Page is one page of a list. NextAfter is the cursor of the following page,
@@ -352,7 +363,10 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	where, args := filter(tags, after)
+	where, args, err := s.filter(tags, after, q)
+	if err != nil {
+		return Page{}, err
+	}
 	items, err := s.rows(ctx, selectInitiative+where+` ORDER BY i.id LIMIT `+fmt.Sprint(size+1), args)
 	if err != nil {
 		return Page{}, err
@@ -381,9 +395,9 @@ func (s Store) rows(ctx context.Context, query string, args []any) ([]Initiative
 	return items, nil
 }
 
-// filter is the WHERE clause that keeps initiatives after id and carrying every
-// tag, with its arguments.
-func filter(tags []string, after string) (string, []any) {
+// filter is the WHERE clause that keeps initiatives after id, carrying every
+// tag and matching the status filters of q, with its arguments.
+func (s Store) filter(tags []string, after string, q Query) (string, []any, error) {
 	var conds []string
 	var args []any
 	if after != "" {
@@ -395,10 +409,66 @@ func filter(tags []string, after string) (string, []any) {
 		args = append(args, anys(tags)...)
 		args = append(args, len(tags))
 	}
-	if len(conds) == 0 {
-		return "", nil
+	cond, extra, err := s.statusCond(q)
+	if err != nil {
+		return "", nil, err
 	}
-	return ` WHERE ` + strings.Join(conds, ` AND `), args
+	if cond != "" {
+		conds = append(conds, cond)
+		args = append(args, extra...)
+	}
+	if len(conds) == 0 {
+		return "", nil, nil
+	}
+	return ` WHERE ` + strings.Join(conds, ` AND `), args, nil
+}
+
+// NextClosedWithin says how to send closed_within.
+const NextClosedWithin = "Send closed_within as 7d, 30d, 90d or a number of days, with status closed or all."
+
+// statusName is the status filter s, open when empty.
+func statusName(s string) (string, error) {
+	switch s {
+	case "":
+		return StatusOpen, nil
+	case StatusOpen, StatusClosed, StatusAll:
+		return s, nil
+	}
+	return "", InvalidError{Msg: fmt.Sprintf("status %q is not an initiative status filter", s),
+		Next: "Send status open, closed or all, or leave it out for open."}
+}
+
+// statusCond is the condition for the status and closed_within filters, with its
+// arguments; empty for status all without closed_within.
+func (s Store) statusCond(q Query) (string, []any, error) {
+	status, err := statusName(q.Status)
+	if err != nil {
+		return "", nil, err
+	}
+	if q.ClosedWithin != "" {
+		return closedWithinCond(status, q.ClosedWithin, s.now())
+	}
+	if status == StatusAll {
+		return "", nil, nil
+	}
+	return `i.status = ?`, []any{status}, nil
+}
+
+// closedWithinCond is the condition that keeps the initiatives closed in the last
+// window days, and with status all also the ones not closed.
+func closedWithinCond(status, window string, now time.Time) (string, []any, error) {
+	days, err := domain.ParseDays(window)
+	if err != nil {
+		return "", nil, InvalidError{Msg: err.Error(), Next: NextClosedWithin}
+	}
+	since := store.EncodeTime(now.AddDate(0, 0, -days))
+	switch status {
+	case StatusClosed:
+		return `i.closed_at >= ?`, []any{since}, nil
+	case StatusAll:
+		return `(i.status <> 'closed' OR i.closed_at >= ?)`, []any{since}, nil
+	}
+	return "", nil, InvalidError{Msg: "closed_within needs status closed or all", Next: NextClosedWithin}
 }
 
 // page cuts items (read with one row more than size) to the page and fills in

@@ -9,6 +9,7 @@ import (
 
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/tasks"
 )
 
@@ -31,13 +32,23 @@ func (p problemResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) er
 // authenticated principal may use them: v1 has no ACL.
 type initiativeOps struct {
 	inits *initiatives.Store
-	// tasks closes an initiative with the tasks it holds.
+	// tasks closes an initiative with the tasks it holds and counts them.
 	tasks *tasks.Store
+	// leases counts the live leases of an initiative's tasks.
+	leases *leases.Store
 }
 
 // ready answers 503 when the operations have no store behind them.
 func (o initiativeOps) ready() (problemResponse, bool) {
 	return failure(http.StatusServiceUnavailable, "initiatives are not available"), o.inits == nil
+}
+
+// listReady answers 503 when the list has no task or lease store behind it to count with.
+func (o initiativeOps) listReady() (problemResponse, bool) {
+	if r, off := o.ready(); off {
+		return r, true
+	}
+	return failure(http.StatusServiceUnavailable, "initiative counts are not available"), o.tasks == nil || o.leases == nil
 }
 
 // withNext is p with the suggested next action next.
@@ -101,6 +112,10 @@ func listQuery(p ListInitiativesParams) (initiatives.Query, *problemResponse) {
 			q.Limit = -1 // an explicit 0 is out of range, not the default
 		}
 	}
+	if p.Status != nil {
+		q.Status = string(*p.Status)
+	}
+	q.ClosedWithin = text(p.ClosedWithin)
 	if p.After != nil {
 		c, err := domain.ParseCursor(*p.After)
 		if err != nil {
@@ -126,22 +141,59 @@ func listFailure(err error) (ListInitiativesResponseObject, error) {
 	return nil, err
 }
 
-// ListInitiatives lists a page of initiatives.
+// listItem is the list entry of i with the counts of its tasks and its live leases.
+func listItem(i initiatives.Initiative, c tasks.Counts, live int) InitiativeListItem {
+	a := apiInitiative(i)
+	return InitiativeListItem{
+		Id: a.Id, Ref: a.Ref, Slug: a.Slug, Title: a.Title, Description: a.Description,
+		Status: InitiativeListItemStatus(a.Status), Tags: a.Tags, TargetStart: a.TargetStart, TargetEnd: a.TargetEnd,
+		CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt, ClosedAt: a.ClosedAt, ClosedBy: a.ClosedBy,
+		Counts: TaskCounts{Open: c.Open, Done: c.Done, Closed: c.Closed}, LiveLeases: live,
+	}
+}
+
+// listItems is the list entries of page, counting their tasks and live leases.
+func (o initiativeOps) listItems(ctx context.Context, page initiatives.Page) ([]InitiativeListItem, error) {
+	ids := make([]string, len(page.Items))
+	for i, it := range page.Items {
+		ids[i] = it.ID
+	}
+	counts, err := o.tasks.CountsFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	live, err := o.leases.LiveCountsFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]InitiativeListItem, len(page.Items))
+	for i, it := range page.Items {
+		items[i] = listItem(it, counts[it.ID], live[it.ID])
+	}
+	return items, nil
+}
+
+// ListInitiatives lists a page of initiatives with the counts of their tasks and
+// their live leases. It expires the leases that ran out first, so an initiative
+// whose only lease ran out has no live lease.
 func (o initiativeOps) ListInitiatives(ctx context.Context, req ListInitiativesRequestObject) (ListInitiativesResponseObject, error) {
-	if r, off := o.ready(); off {
+	if r, off := o.listReady(); off {
 		return r, nil
 	}
 	q, bad := listQuery(req.Params)
 	if bad != nil {
 		return *bad, nil
 	}
+	if _, err := o.leases.ExpireDue(ctx); err != nil {
+		return nil, err
+	}
 	page, err := o.inits.List(ctx, q)
 	if err != nil {
 		return listFailure(err)
 	}
-	items := make([]Initiative, len(page.Items))
-	for i, it := range page.Items {
-		items[i] = apiInitiative(it)
+	items, err := o.listItems(ctx, page)
+	if err != nil {
+		return nil, err
 	}
 	return ListInitiatives200JSONResponse{Items: items, NextAfter: optionalText(page.NextAfter)}, nil
 }

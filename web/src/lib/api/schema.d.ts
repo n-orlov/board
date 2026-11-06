@@ -177,7 +177,7 @@ export interface paths {
         };
         /**
          * List the initiatives
-         * @description A page of initiatives ordered by id (creation order). `tag` may repeat and keeps the initiatives that carry every tag given. `limit` is 1 to 1000, default 100. `after` is the id or slug of the last initiative of the previous page; the response's `next_after` is the value to send, and is absent on the last page.
+         * @description A page of initiatives ordered by id (creation order). `tag` may repeat and keeps the initiatives that carry every tag given. `limit` is 1 to 1000, default 100. `after` is the id or slug of the last initiative of the previous page; the response's `next_after` is the value to send, and is absent on the last page. `status` is `open` (the default), `closed` or `all`. `closed_within` keeps the initiatives closed in the last 7d, 30d, 90d or an integer of days, and needs `status` `closed` or `all` (with `all` the open initiatives stay); with `open` it is 400. Each item carries the `counts` of its tasks by status and its `live_leases`. Before it reads, the list expires the leases whose `expires_at` has passed.
          */
         get: operations["listInitiatives"];
         put?: never;
@@ -789,10 +789,22 @@ export interface components {
             /** @description The handle of the actor that closed it. Absent while it is open. */
             closed_by?: string;
         };
+        /** @description An initiative of a list, with the counts of its tasks and its live leases. */
+        InitiativeListItem: components["schemas"]["Initiative"] & {
+            counts: components["schemas"]["TaskCounts"];
+            /** @description How many live leases sit on the initiative's tasks. */
+            live_leases: number;
+        };
+        /** @description How many tasks an initiative holds in each status. */
+        TaskCounts: {
+            open: number;
+            done: number;
+            closed: number;
+        };
         /** @description A page of initiatives. */
         InitiativeList: {
             /** @description The initiatives of the page, ordered by id. */
-            items: components["schemas"]["Initiative"][];
+            items: components["schemas"]["InitiativeListItem"][];
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
         };
@@ -1517,6 +1529,10 @@ export interface operations {
             query?: {
                 /** @description Keep initiatives that carry this tag. Repeatable. */
                 tag?: string[];
+                /** @description Which initiatives to keep. Default `open`. */
+                status?: "open" | "closed" | "all";
+                /** @description `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`. */
+                closed_within?: string;
                 /** @description The page size, 1 to 1000. Default 100. */
                 limit?: number;
                 /** @description An initiative ULID or slug, in either letter case. The page starts after it. */

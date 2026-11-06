@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/oapi-codegen/runtime"
+
+	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/initiatives"
 )
 
 func (s *keyServer) create(slug, extra string) *httptest.ResponseRecorder {
@@ -311,5 +314,73 @@ func TestCloseInitiativeRefusesABodyThatIsNotJSON(t *testing.T) {
 	}
 	if got := decode(t, s.send(http.MethodGet, "/api/v1/initiatives/aa", "", "op@host")); got["status"] != "open" {
 		t.Errorf("status = %v", got["status"])
+	}
+}
+
+func TestListInitiativesFiltersByStatusAndCarriesCountsAndLiveLeases(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.create("bb", "")
+	if rec := s.send(http.MethodPost, "/api/v1/tasks", `{"initiative":"aa","title":"t"}`, "a"); rec.Code != 201 {
+		t.Fatalf("task = %d %s", rec.Code, rec.Body)
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work"}`, "a"); rec.Code != 201 {
+		t.Fatalf("lease = %d %s", rec.Code, rec.Body)
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/initiatives/bb/close", "", "a"); rec.Code != 200 {
+		t.Fatalf("close = %d %s", rec.Code, rec.Body)
+	}
+	doc := decode(t, s.send(http.MethodGet, "/api/v1/initiatives", "", "a"))
+	items := doc["items"].([]any)
+	first := items[0].(map[string]any)
+	if len(items) != 1 || first["slug"] != "aa" || first["live_leases"] != float64(1) ||
+		fmt.Sprint(first["counts"]) != "map[closed:0 done:0 open:1]" {
+		t.Fatalf("open list = %v", doc)
+	}
+	doc = decode(t, s.send(http.MethodGet, "/api/v1/initiatives?status=closed&closed_within=7d", "", "a"))
+	if items := doc["items"].([]any); len(items) != 1 || items[0].(map[string]any)["slug"] != "bb" {
+		t.Errorf("closed list = %v", doc)
+	}
+	for _, q := range []string{"status=gone", "closed_within=7d", "status=closed&closed_within=x"} {
+		if rec := s.send(http.MethodGet, "/api/v1/initiatives?"+q, "", "a"); rec.Code != 400 {
+			t.Errorf("?%s = %d", q, rec.Code)
+		}
+	}
+}
+
+func TestListInitiativesNeedsTheTaskAndLeaseStoresToCount(t *testing.T) {
+	s := newKeyServer(t)
+	h := NewHandler(ok, (&auth.Verifier{Store: s.st}).Verify, nil, s.keys, WithInitiatives(&initiatives.Store{Store: s.st}))
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/initiatives", nil)
+	r.Header.Set("Authorization", "Bearer "+s.token)
+	r.Header.Set(ActorHeader, "a")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "counts") {
+		t.Errorf("list without the task store = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestListEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
+	valid := []interface{ Valid() bool }{
+		InitiativeListItemStatusOpen, InitiativeListItemStatusClosed,
+		ListInitiativesParamsStatusOpen, ListInitiativesParamsStatusClosed, ListInitiativesParamsStatusAll,
+		TaskListItemKindWork, TaskListItemKindWatch, TaskListItemStatusOpen, TaskListItemStatusDone, TaskListItemStatusClosed,
+		TaskListItemResolutionCompleted, TaskListItemResolutionDropped, TaskListItemResolutionSuperseded, TaskListItemResolutionDuplicate,
+		ListTasksParamsKindWork, ListTasksParamsKindWatch,
+		ListTasksParamsStatusOpen, ListTasksParamsStatusDone, ListTasksParamsStatusClosed, ListTasksParamsStatusNotClosed, ListTasksParamsStatusAll,
+	}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("%v is declared but reported invalid", v)
+		}
+	}
+	for _, v := range []interface{ Valid() bool }{
+		InitiativeListItemStatus("x"), ListInitiativesParamsStatus("x"), TaskListItemKind("x"), TaskListItemStatus("x"),
+		TaskListItemResolution("x"), ListTasksParamsKind("x"), ListTasksParamsStatus("x"),
+	} {
+		if v.Valid() {
+			t.Errorf("%T: an undeclared value is valid", v)
+		}
 	}
 }

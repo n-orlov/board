@@ -400,3 +400,30 @@ func TestPatchRefusalsChangeNothing(t *testing.T) {
 		t.Errorf("patch in a closed initiative = %v, want ErrInitiativeClosed", err)
 	}
 }
+
+func TestCountsForCountsTheTasksOfEachInitiativeByStatus(t *testing.T) {
+	s := newStore(t)
+	a, b, empty := initiative(t, s, "aa"), initiative(t, s, "bb"), initiative(t, s, "cc")
+	mk(t, s, "aa", "one")
+	two := mk(t, s, "aa", "two")
+	three := mk(t, s, "aa", "three")
+	mk(t, s, "aa", "four")
+	mk(t, s, "bb", "other")
+	if _, err := s.Done(ctx, who, "key:caller", two.Ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close(ctx, who, "key:caller", three.Ref, "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.CountsFor(ctx, []string{a.ID, b.ID, empty.ID})
+	want := map[string]Counts{a.ID: {Open: 2, Done: 1, Closed: 1}, b.ID: {Open: 1}, empty.ID: {}}
+	if err != nil || len(got) != 3 || got[a.ID] != want[a.ID] || got[b.ID] != want[b.ID] || got[empty.ID] != want[empty.ID] {
+		t.Errorf("CountsFor = %+v, %v, want %+v", got, err, want)
+	}
+	if got, err := s.CountsFor(ctx, nil); err != nil || len(got) != 0 {
+		t.Errorf("no ids = %+v, %v", got, err)
+	}
+	if got, err := s.CountsFor(ctx, []string{a.ID}); err != nil || len(got) != 1 {
+		t.Errorf("one id = %+v, %v", got, err)
+	}
+}

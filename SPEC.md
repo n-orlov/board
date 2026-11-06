@@ -728,7 +728,7 @@ unknown task is **404**.
 ### 6.3 Initiatives
 
 `GET/POST /api/v1/initiatives`, `GET`/`PATCH /api/v1/initiatives/{slug}` and `POST /api/v1/initiatives/{slug}/close` and
-`/reopen` are in `api/openapi.yaml`. The list filters `status` and `closed_within` (§6.2) come with later phases.
+`/reopen` are in `api/openapi.yaml`.
 
 - **`POST /api/v1/initiatives`**, body `{slug, title, description?, tags?, target_start?, target_end?}`.
   `slug` matches `[a-z0-9-]{2,40}` (`domain.ValidateSlug`). `title` is 1 to 200 characters,
@@ -776,12 +776,21 @@ unknown task is **404**.
 - A closed initiative refuses task writes with **409**: `POST /api/v1/tasks` naming it, `PATCH /api/v1/tasks/{ref}`
   and `POST /api/v1/tasks/{ref}/reopen` for one of its tasks (§6.4). It can still be edited itself (`PATCH` above).
 - **`GET /api/v1/initiatives`** answers `{items, next_after?}`, items ordered by id (creation order).
-  `tag` (repeatable) keeps initiatives carrying every tag given. `limit` is 1 to 1000 (default 100; 0
+  `tag` (repeatable) keeps initiatives carrying every tag given. `status` is `open` (the default), `closed` or
+  `all`. `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status` `closed`
+  or `all`, keeping the initiatives closed in the last that many days (with `all` the open ones stay); with `open`,
+  explicit or by default, it is a 400, as is any other `status` (letter case matters) or `closed_within`, each with a
+  `next`. `limit` is 1 to 1000 (default 100; 0
   is a 400). `after` is a ULID or a slug in either letter case (`domain.ParseCursor`, resolved as above): the
   page starts after that initiative, a ULID that names no row pages by id, and any other text that
   names none is a 400. `next_after`, the id to send as `after`, is
   present exactly when more initiatives follow the page, so a `limit` equal to the number left is the
-  last page and has none.
+  last page and has none. Before it reads, the list expires the leases whose `expires_at` has passed (§5.1:
+  `lease_expired`, once each), so with the sweeper off an initiative whose only lease ran out already shows
+  `live_leases` 0. It answers **503** without the tasks and leases stores, which it counts with.
+- Each item of the list is an initiative (below) plus `counts` `{open, done, closed}`, how many tasks the initiative
+  holds in each status (all zero for none), and `live_leases`, how many live leases sit on those tasks (a lease past its
+  `expires_at` is not live). The single-initiative reads and writes do not carry them.
 - An initiative is `{id, ref, slug, title, description, status, tags, target_start?, target_end?,
   created_by, created_at, closed_at?, closed_by?}`: `ref` is the slug, `tags` are sorted, `created_by`
   is the creating actor's handle, absent fields are omitted.

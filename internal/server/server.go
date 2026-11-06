@@ -64,6 +64,7 @@ func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 	return func(o *operations) {
 		o.taskOps = taskOps{tasks: st, leases: ls}
 		o.initiativeOps.tasks = st
+		o.initiativeOps.leases = ls
 	}
 }
 
