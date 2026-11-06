@@ -1,0 +1,63 @@
+// The one route table. The hash router and every navigation surface (the phone tab bar, the
+// tablet icon rail, the desktop sidebar) are derived from it, so adding a view is one entry here
+// plus the component that renders it: neither the router nor the navigation names a view.
+//
+// The views are chosen by the URL fragment so a reload and a copied link land on the same view
+// and the server needs no route for it.
+
+export interface Route {
+  /** Stable key: the shell maps it to the component that renders the view. */
+  id: string;
+  /** The URL fragment that selects the view. */
+  hash: string;
+  /** The view's title, shown in the phone top bar. */
+  title: string;
+  /** The navigation label. */
+  label: string;
+  /** SVG path data (24x24 viewBox, stroked) of the navigation icon. */
+  icon: string;
+}
+
+export const ROUTES = [
+  {
+    id: 'initiatives',
+    hash: '#/',
+    title: 'Initiatives',
+    label: 'Initiatives',
+    icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  },
+  {
+    id: 'keys',
+    hash: '#/settings/keys',
+    title: 'API keys',
+    label: 'Settings',
+    icon: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  },
+] as const satisfies readonly Route[];
+
+export type RouteId = (typeof ROUTES)[number]['id'];
+
+/** The route a fragment names; anything the table does not name is its first entry. */
+export function resolveRoute<R extends Route>(hash: string, table: readonly R[]): R {
+  return table.find((route) => route.hash === hash) ?? table[0];
+}
+
+export interface NavEntry {
+  id: string;
+  href: string;
+  label: string;
+  icon: string;
+  /** True for the entry of the view on screen: it gets `aria-current="page"`. */
+  current: boolean;
+}
+
+/** One navigation entry per table entry, the current one flagged. */
+export function navEntries(current: Route, table: readonly Route[]): NavEntry[] {
+  return table.map((route) => ({
+    id: route.id,
+    href: route.hash,
+    label: route.label,
+    icon: route.icon,
+    current: route.id === current.id,
+  }));
+}

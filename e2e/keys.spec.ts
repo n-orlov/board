@@ -6,7 +6,7 @@ const test = base;
 test('a key created on the Settings -> API keys page is shown once and gets 401 once revoked', async ({ page, playwright, baseURL }) => {
   await page.goto('/');
   await expect(page.getByTestId('email')).toHaveText('operator@example.test');
-  await page.getByRole('link', { name: 'Settings → API keys' }).click();
+  await page.getByRole('link', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'API keys' })).toBeVisible();
   // global-setup.ts's own key is already listed; the new one is not.
   await expect(page.getByTestId('key-row').first()).toBeVisible();

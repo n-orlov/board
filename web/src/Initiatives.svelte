@@ -47,6 +47,7 @@
   {:else if view.initiatives.length === 0}
     <p>No initiatives yet.</p>
   {:else}
+    <div class="overflow-x-auto">
     <table>
       <thead>
         <tr><th>Slug</th><th>Title</th><th>Status</th><th>Tags</th><th>Created</th></tr>
@@ -63,5 +64,6 @@
         {/each}
       </tbody>
     </table>
+    </div>
   {/if}
 </section>

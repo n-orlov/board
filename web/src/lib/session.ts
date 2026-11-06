@@ -66,3 +66,20 @@ export async function loadSession(browser: Browser): Promise<SessionState> {
   }
   return { kind: 'signed-in', session: (await response.json()) as Session };
 }
+
+/**
+ * Ends the session: `POST /auth/logout` with the session's CSRF token (SPEC 3.2). True when the
+ * server cleared it; false when the call failed, so the caller keeps showing the signed-in app.
+ */
+export async function logout(browser: Browser, csrf: string): Promise<boolean> {
+  try {
+    const response = await browser.fetch(mountPrefix(browser.pathname) + '/auth/logout', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf },
+      credentials: 'same-origin',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

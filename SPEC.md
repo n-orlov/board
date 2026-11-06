@@ -1067,6 +1067,23 @@ taken slug, a bad tag) shows the problem document's detail on the form and keeps
 it can be corrected. The page calls the API with the session cookie, and its write sends the
 session's `X-CSRF-Token` (§3.2) (`e2e/initiatives.spec.ts`).
 
+**Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
+and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
+view that fragment selects (anything the table does not name is its first entry, Initiatives) and
+its navigation entry, so adding a view is one entry plus its component. The shell
+(`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
+`display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
+fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-bottom)`;
+`web/index.html` sets `viewport-fit=cover`, and the main region is padded so the last row of a
+long list scrolls clear of the bar); from 768 to 1023 px a collapsed icon rail (labels are the
+links' accessible names and tooltips, the account button at its foot); from 1024 px a labelled
+sidebar whose foot shows the signed-in email, a Sign out button and the account button. The
+account button opens the account menu (the email and Sign out) in the dialog component below, at
+every width. The first focusable element of the page is a "Skip to content" link that moves focus
+to the main region without changing the fragment; the navigation entry of the view on screen has
+`aria-current="page"`. The page never scrolls horizontally (`e2e/shell.spec.ts` at 390x844,
+820x1180 and 1440x900).
+
 **Dialogs and sheets.** Every modal surface in the UI is the one `Dialog` component
 (`web/src/Dialog.svelte`); its focus rules are pure functions in `web/src/lib/focustrap.ts`.
 It renders `role="dialog"` and `aria-modal="true"` with an accessible label (`aria-label`).

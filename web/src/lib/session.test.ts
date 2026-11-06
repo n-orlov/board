@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { currentBrowser, loadSession, loginUrl, type Browser, type Session } from './session';
+import { currentBrowser, loadSession, loginUrl, logout, type Browser, type Session } from './session';
 
 const session: Session = { email: 'op@example.test', principal: 'oidc:op@example.test', actor: 'operator', csrf_token: 'tok' };
 
@@ -63,6 +63,36 @@ describe('loadSession', () => {
     });
     expect(await loadSession(b)).toEqual({ kind: 'error', message: 'The server is not reachable.' });
     expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+describe('logout', () => {
+  it('posts the logout with the session CSRF token and reports success', async () => {
+    const { b, fetchFn } = browser(async () => new Response(null, { status: 204 }));
+    expect(await logout(b, 'tok')).toBe(true);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('/auth/logout');
+    expect(init?.method).toBe('POST');
+    expect(init?.credentials).toBe('same-origin');
+    expect(init?.headers).toEqual({ 'X-CSRF-Token': 'tok' });
+  });
+
+  it('posts under the mount prefix', async () => {
+    const { b, fetchFn } = browser(async () => new Response(null, { status: 204 }), '/board/');
+    await logout(b, 'tok');
+    expect(fetchFn.mock.calls[0][0]).toBe('/board/auth/logout');
+  });
+
+  it('reports failure when the server refuses', async () => {
+    const { b } = browser(async () => new Response('{}', { status: 403 }));
+    expect(await logout(b, 'bad')).toBe(false);
+  });
+
+  it('reports failure when the server is unreachable', async () => {
+    const { b } = browser(async () => {
+      throw new TypeError('network');
+    });
+    expect(await logout(b, 'tok')).toBe(false);
   });
 });
 

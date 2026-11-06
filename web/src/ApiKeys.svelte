@@ -51,6 +51,7 @@
   {:else if view.keys.length === 0}
     <p>No API keys yet.</p>
   {:else}
+    <div class="overflow-x-auto">
     <table>
       <thead>
         <tr><th>Name</th><th>Prefix</th><th>Status</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr>
@@ -73,5 +74,6 @@
         {/each}
       </tbody>
     </table>
+    </div>
   {/if}
 </section>
