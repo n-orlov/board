@@ -607,11 +607,15 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
   (`Board-Actor`; a session acts as the operator) and appends an `initiative_created` event whose
   `principal` is `key:<name>` or `oidc:<email>`, whose actor is that handle, whose `initiative_id`
   and `ref_id` are the new id and whose `data` is `{slug, title, tags}`.
-- **`GET /api/v1/initiatives/{slug}`** reads one by slug or ULID; 404 with a `next` otherwise.
+- **`GET /api/v1/initiatives/{slug}`** reads one by slug or ULID, in either letter case; 404 with a `next` otherwise. A reference is
+  resolved against the stored rows (`domain.RefLookups`), never by the shape of its text: a slug is
+  any `[a-z0-9-]{2,40}`, including one that also reads as a ULID (26 digits, or a ULID in lowercase),
+  and the text as given is tried first as the slug or the id it spells, then in its other case.
 - **`GET /api/v1/initiatives`** answers `{items, next_after?}`, items ordered by id (creation order).
   `tag` (repeatable) keeps initiatives carrying every tag given. `limit` is 1 to 1000 (default 100; 0
-  is a 400). `after` is a ULID or a slug (`domain.ParseCursor`): the page starts after that
-  initiative, and a slug that names none is a 400. `next_after`, the id to send as `after`, is
+  is a 400). `after` is a ULID or a slug in either letter case (`domain.ParseCursor`, resolved as above): the
+  page starts after that initiative, a ULID that names no row pages by id, and any other text that
+  names none is a 400. `next_after`, the id to send as `after`, is
   present exactly when more initiatives follow the page, so a `limit` equal to the number left is the
   last page and has none.
 - An initiative is `{id, ref, slug, title, description, status, tags, target_start?, target_end?,

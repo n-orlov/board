@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,17 +151,17 @@ func TestListPaginationBoundary(t *testing.T) {
 	if err != nil || len(p.Items) != 4 || p.NextAfter != all[3].ID {
 		t.Fatalf("limit = count-1: %v %q %v", slugs(p), p.NextAfter, err)
 	}
-	p, err = s.List(ctx, Query{Limit: 4, After: domain.Cursor{ID: p.NextAfter}})
+	p, err = s.List(ctx, Query{Limit: 4, After: domain.Cursor{Ref: p.NextAfter}})
 	if err != nil || !reflect.DeepEqual(slugs(p), []string{"init-5"}) || p.NextAfter != "" {
 		t.Fatalf("second page: %v %q %v", slugs(p), p.NextAfter, err)
 	}
 	// A slug cursor is the same as the id of that initiative.
-	p, err = s.List(ctx, Query{Limit: 2, After: domain.Cursor{Slug: "init-2"}})
+	p, err = s.List(ctx, Query{Limit: 2, After: domain.Cursor{Ref: "init-2"}})
 	if err != nil || !reflect.DeepEqual(slugs(p), []string{"init-3", "init-4"}) || p.NextAfter != all[3].ID {
 		t.Fatalf("after slug: %v %q %v", slugs(p), p.NextAfter, err)
 	}
 	// After the last one there is nothing, and the default size applies.
-	p, err = s.List(ctx, Query{After: domain.Cursor{Slug: "init-5"}})
+	p, err = s.List(ctx, Query{After: domain.Cursor{Ref: "init-5"}})
 	if err != nil || p.Items == nil || len(p.Items) != 0 || p.NextAfter != "" {
 		t.Fatalf("after last: %#v %v", p, err)
 	}
@@ -193,7 +194,7 @@ func TestListFiltersByEveryTagAndReturnsEachInitiativesTags(t *testing.T) {
 	if err != nil || all.Items[2].Tags == nil || len(all.Items[2].Tags) != 0 {
 		t.Fatalf("untagged = %#v %v", all.Items[2].Tags, err)
 	}
-	p, err = s.List(ctx, Query{Tags: []string{"work"}, After: domain.Cursor{Slug: "aa"}, Limit: 1})
+	p, err = s.List(ctx, Query{Tags: []string{"work"}, After: domain.Cursor{Ref: "aa"}, Limit: 1})
 	if err != nil || !reflect.DeepEqual(slugs(p), []string{"bb"}) || p.NextAfter != "" {
 		t.Fatalf("work after aa: %v %q %v", slugs(p), p.NextAfter, err)
 	}
@@ -203,7 +204,7 @@ func TestListRefusesBadQueries(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	mk(t, s, "aa")
-	if _, err := s.List(ctx, Query{After: domain.Cursor{Slug: "missing"}}); !errors.Is(err, ErrBadCursor) {
+	if _, err := s.List(ctx, Query{After: domain.Cursor{Ref: "missing"}}); !errors.Is(err, ErrBadCursor) {
 		t.Errorf("unknown slug cursor = %v", err)
 	}
 	for _, q := range []Query{{Limit: -1}, {Limit: domain.MaxPageSize + 1}, {Tags: []string{"no way"}}} {
@@ -224,5 +225,78 @@ func TestNowDefaultsToTheWallClock(t *testing.T) {
 	i := mk(t, s, "aa")
 	if i.CreatedAt.Before(before) || i.CreatedAt.After(time.Now().Add(time.Second)) || i.CreatedAt.Location() != time.UTC {
 		t.Errorf("created_at = %v", i.CreatedAt)
+	}
+}
+
+func TestSlugsThatReadAsULIDsStayReferences(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	digits := "01234567890123456789012345"
+	lowerULID := "01arz3ndektsv4rrffq69g5fav"
+	d := mk(t, s, digits)
+	l := mk(t, s, lowerULID)
+	z := mk(t, s, "zz-last")
+	if d.Slug != digits || l.Slug != lowerULID {
+		t.Fatalf("create answered %q and %q", d.Slug, l.Slug)
+	}
+	for _, tc := range []struct {
+		ref  string
+		want Initiative
+	}{
+		{digits, d}, {d.ID, d}, {lowerULID, l}, {l.ID, l}, {strings.ToUpper(lowerULID[:10]) + lowerULID[10:], l},
+	} {
+		got, err := s.Get(ctx, tc.ref)
+		if err != nil || got.ID != tc.want.ID {
+			t.Errorf("Get(%q) = %q, %v; want %q", tc.ref, got.ID, err, tc.want.ID)
+		}
+	}
+	p, err := s.List(ctx, Query{After: domain.Cursor{Ref: digits}})
+	if err != nil || !reflect.DeepEqual(slugs(p), []string{lowerULID, "zz-last"}) {
+		t.Fatalf("after %s: %v %v", digits, slugs(p), err)
+	}
+	p, err = s.List(ctx, Query{After: domain.Cursor{Ref: lowerULID}})
+	if err != nil || !reflect.DeepEqual(slugs(p), []string{"zz-last"}) {
+		t.Fatalf("after %s: %v %v", lowerULID, slugs(p), err)
+	}
+	_ = z
+}
+
+func TestReferencesAreCaseInsensitive(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mk(t, s, "phone-onboard")
+	mk(t, s, "next-one")
+	for _, ref := range []string{"Phone-Onboard", "PHONE-ONBOARD", a.ID, strings.ToLower(a.ID)} {
+		if got, err := s.Get(ctx, ref); err != nil || got.ID != a.ID {
+			t.Errorf("Get(%q) = %q, %v", ref, got.ID, err)
+		}
+		p, err := s.List(ctx, Query{After: domain.Cursor{Ref: ref}})
+		if err != nil || !reflect.DeepEqual(slugs(p), []string{"next-one"}) {
+			t.Errorf("after %q: %v %v", ref, slugs(p), err)
+		}
+	}
+}
+
+func TestAnExistingSlugBeatsAnotherRowsLowercaseID(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a := mk(t, s, "aa")
+	// A slug spelled like another initiative's id in lowercase names its own row
+	// when the text is given as is, and the id row when given in capitals.
+	b := mk(t, s, strings.ToLower(a.ID))
+	if got, err := s.Get(ctx, strings.ToLower(a.ID)); err != nil || got.ID != b.ID {
+		t.Errorf("lowercase text = %q, %v; want the slug row %q", got.ID, err, b.ID)
+	}
+	if got, err := s.Get(ctx, a.ID); err != nil || got.ID != a.ID {
+		t.Errorf("capitals = %q, %v; want the id row %q", got.ID, err, a.ID)
+	}
+}
+
+func TestAKeysetULIDThatNamesNoRowStillPages(t *testing.T) {
+	s := newStore(t)
+	mk(t, s, "aa")
+	p, err := s.List(context.Background(), Query{After: domain.Cursor{Ref: "00000000000000000000000000"}})
+	if err != nil || len(p.Items) != 1 {
+		t.Fatalf("%v %v", slugs(p), err)
 	}
 }

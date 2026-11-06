@@ -69,6 +69,18 @@ Feature: Initiatives from the command line
     And stderr is exactly one line containing "usage: board init"
     And neither stdout nor stderr contains the remembered key
 
+  Scenario: init add and init show take a slug that reads as a ULID and a reference in capitals
+    When I run the client 'board init add 01234567890123456789012345 "Digits"' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok initiative 01234567890123456789012345 created"
+    When I run the client 'board init show 01234567890123456789012345' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout line 1 matches "^01234567890123456789012345  open  Digits$"
+    When I run the client 'board init add phone-onboard "Phone"' as actor "claude@laptop"
+    And I run the client 'board init show Phone-Onboard' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout line 1 matches "^phone-onboard  open  Phone$"
+
   Scenario: whoami prints the handle, the way back, the key name and server ok
     When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc"
     Then the exit code is 0

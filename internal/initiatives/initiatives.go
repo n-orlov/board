@@ -152,7 +152,7 @@ func (s Store) Create(ctx context.Context, actor audit.Actor, principal string, 
 	if err != nil {
 		return Initiative{}, err
 	}
-	return s.Get(ctx, in.Slug)
+	return s.getBy(ctx, "i.id", id)
 }
 
 // insert writes the row, the tags and the event of a new initiative in tx.
@@ -222,17 +222,30 @@ func scan(r rowScanner) (Initiative, error) {
 	return i, nil
 }
 
-// Get returns the initiative whose ref (slug) or ULID is ref, or ErrNotFound.
+// Get returns the initiative whose ref (slug) or ULID is ref, in either letter
+// case, or ErrNotFound. The row is found by looking the text up as an id and as
+// a slug (domain.RefLookups), not by guessing its kind from its shape.
 func (s Store) Get(ctx context.Context, ref string) (Initiative, error) {
-	column := "i.slug"
-	if domain.ValidateULID(ref) == nil {
-		column = "i.id"
+	for _, l := range domain.RefLookups(ref) {
+		column := "i.slug"
+		if l.ByID {
+			column = "i.id"
+		}
+		i, err := s.getBy(ctx, column, l.Value)
+		if !errors.Is(err, ErrNotFound) {
+			return i, err
+		}
 	}
+	return Initiative{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
+}
+
+// getBy reads the one initiative whose column (i.id or i.slug) equals value.
+func (s Store) getBy(ctx context.Context, column, value string) (Initiative, error) {
 	d := s.Store.Dialect()
-	i, err := scan(s.Store.Reader().QueryRowContext(ctx, d.Rebind(selectInitiative+` WHERE `+column+` = ?`), ref))
+	i, err := scan(s.Store.Reader().QueryRowContext(ctx, d.Rebind(selectInitiative+` WHERE `+column+` = ?`), value))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return Initiative{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
+		return Initiative{}, fmt.Errorf("%w: %s", ErrNotFound, value)
 	case err != nil:
 		return Initiative{}, fmt.Errorf("read initiative: %w", err)
 	}
@@ -282,20 +295,24 @@ func anys(v []string) []any {
 }
 
 // after resolves a cursor to the id the page starts after, "" for the first
-// page. A slug that names no initiative is ErrBadCursor.
+// page. A reference names the initiative whose id or slug it is; a ULID that
+// names no row still pages (ids are keys, so it starts after that id), and any
+// other text that names no initiative is ErrBadCursor.
 func (s Store) after(ctx context.Context, c domain.Cursor) (string, error) {
-	if c.Slug == "" {
-		return c.ID, nil
+	if c.IsZero() {
+		return "", nil
 	}
-	var id string
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(`SELECT id FROM initiatives WHERE slug = ?`), c.Slug).Scan(&id)
+	got, err := s.Get(ctx, c.Ref)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", fmt.Errorf("%w: there is no initiative %s", ErrBadCursor, c.Slug)
-	case err != nil:
-		return "", fmt.Errorf("read cursor: %w", err)
+	case err == nil:
+		return got.ID, nil
+	case !errors.Is(err, ErrNotFound):
+		return "", err
 	}
-	return id, nil
+	if id, ok := domain.KeysetULID(c.Ref); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("%w: there is no initiative %s", ErrBadCursor, c.Ref)
 }
 
 // List returns one page of initiatives ordered by id, each with its tags. Tags

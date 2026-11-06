@@ -808,7 +808,7 @@ export interface operations {
                 tag?: string[];
                 /** @description The page size, 1 to 1000. Default 100. */
                 limit?: number;
-                /** @description An initiative ULID or slug. The page starts after it. */
+                /** @description An initiative ULID or slug, in either letter case. The page starts after it. */
                 after?: string;
             };
             header?: never;

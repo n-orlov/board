@@ -73,6 +73,14 @@ func (h *harness) getInitiativeByID(ctx context.Context, slug, actor string) err
 	return h.getInitiative(ctx, id, actor)
 }
 
+func (h *harness) getInitiativeByLowercaseID(ctx context.Context, slug, actor string) error {
+	id, ok := h.api.ids[slug]
+	if !ok {
+		return fmt.Errorf("no initiative %q was created", slug)
+	}
+	return h.getInitiative(ctx, strings.ToLower(id), actor)
+}
+
 func (h *harness) listInitiatives(ctx context.Context, query, actor string) error {
 	if err := h.requireKey(); err != nil {
 		return err
@@ -289,6 +297,7 @@ func registerInitiativeAPISteps(sc *godog.ScenarioContext, h *harness) {
 		})
 	sc.Step(`^I request the initiative "([^"]*)" as actor "([^"]*)"$`, h.getInitiative)
 	sc.Step(`^I request the initiative "([^"]*)" by its id as actor "([^"]*)"$`, h.getInitiativeByID)
+	sc.Step(`^I request the initiative "([^"]*)" by its lowercase id as actor "([^"]*)"$`, h.getInitiativeByLowercaseID)
 	sc.Step(`^I request the initiatives list "([^"]*)" as actor "([^"]*)"$`, h.listInitiatives)
 	sc.Step(`^I request the next page with "([^"]*)" as actor "([^"]*)"$`, h.listNextPage)
 	sc.Step(`^the response field "([^"]*)" is "([^"]*)"$`, h.responseFieldIs)

@@ -109,15 +109,17 @@ func TestParseCursor(t *testing.T) {
 		ok   bool
 	}{
 		{"empty is the first page", "", Cursor{}, true},
-		{"a ULID", id, Cursor{ID: id}, true},
-		{"a slug", "phone-onboard", Cursor{Slug: "phone-onboard"}, true},
-		{"a two-character slug", "ab", Cursor{Slug: "ab"}, true},
-		{"a lowercase ULID is no ULID and no slug", strings.ToLower(id)[:25] + "!", Cursor{}, false},
-		{"a ULID with a bad first character", "8" + id[1:], Cursor{}, false},
-		{"a ULID with the letter U", id[:25] + "U", Cursor{}, false},
-		{"a 27-character ULID", id + "0", Cursor{}, false},
-		{"an uppercase slug", "Phone", Cursor{}, false},
+		{"a ULID", id, Cursor{Ref: id}, true},
+		{"a lowercase ULID", strings.ToLower(id), Cursor{Ref: strings.ToLower(id)}, true},
+		{"a slug", "phone-onboard", Cursor{Ref: "phone-onboard"}, true},
+		{"a two-character slug", "ab", Cursor{Ref: "ab"}, true},
+		{"a 26-digit slug", "01234567890123456789012345", Cursor{Ref: "01234567890123456789012345"}, true},
+		{"an uppercase slug", "Phone", Cursor{Ref: "Phone"}, true},
+		{"a ULID-length slug with a hyphen", id[:25] + "-", Cursor{Ref: id[:25] + "-"}, true},
+		{"an underscore", "Not_A_Ref", Cursor{}, false},
+		{"a punctuated ULID", strings.ToLower(id)[:25] + "!", Cursor{}, false},
 		{"one character", "a", Cursor{}, false},
+		{"41 characters", strings.Repeat("a", 41), Cursor{}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,8 +129,48 @@ func TestParseCursor(t *testing.T) {
 			}
 		})
 	}
-	if !(Cursor{}).IsZero() || (Cursor{Slug: "ab"}).IsZero() || (Cursor{ID: id}).IsZero() {
+	if !(Cursor{}).IsZero() || (Cursor{Ref: "ab"}).IsZero() {
 		t.Error("IsZero is wrong")
+	}
+}
+
+func TestRefLookupsTryTheTextAsGivenThenItsOtherCase(t *testing.T) {
+	digits := "01234567890123456789012345"
+	id := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	lower := strings.ToLower(id)
+	tests := []struct {
+		name string
+		in   string
+		want []RefLookup
+	}{
+		{"a slug", "phone-onboard", []RefLookup{{false, "phone-onboard"}}},
+		{"a slug in capitals", "Phone-Onboard", []RefLookup{{false, "phone-onboard"}}},
+		{"a 26-digit slug is both kinds, slug first", digits, []RefLookup{{false, digits}, {true, digits}}},
+		{"a ULID is an id first", id, []RefLookup{{true, id}, {false, lower}}},
+		{"a lowercase ULID is a slug first", lower, []RefLookup{{false, lower}, {true, id}}},
+		{"neither grammar", "no_such", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RefLookups(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("RefLookups(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("RefLookups(%q) = %v, want %v", tc.in, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestKeysetULID(t *testing.T) {
+	if got, ok := KeysetULID("01arz3ndektsv4rrffq69g5fav"); !ok || got != "01ARZ3NDEKTSV4RRFFQ69G5FAV" {
+		t.Errorf("KeysetULID lowercase = %q, %v", got, ok)
+	}
+	if _, ok := KeysetULID("phone-onboard"); ok {
+		t.Error("a slug is no keyset ULID")
 	}
 }
 

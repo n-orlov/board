@@ -103,32 +103,71 @@ func ValidateTargets(start, end string) error {
 	return nil
 }
 
-// Cursor is a parsed `after` value: a ULID, or an initiative ref, which is its
-// slug.
+// Cursor is a parsed `after` value: an initiative reference, a ULID or a slug
+// in either letter case. Which row it names is settled against the stored ids
+// and slugs (RefLookups), never by the text's shape alone.
 type Cursor struct {
-	ID   string
-	Slug string
+	Ref string
 }
 
 // IsZero reports whether the cursor names nothing, which starts at the first
 // page.
-func (c Cursor) IsZero() bool { return c.ID == "" && c.Slug == "" }
+func (c Cursor) IsZero() bool { return c.Ref == "" }
 
-// ParseCursor reads an `after` value. Empty is the zero cursor. A ULID is 26
-// uppercase Crockford base32 characters whose first is at most 7 (the
-// timestamp is 48 bits), and a slug is lowercase, so they differ except for a
-// 26-character slug of digits below 8 first, which reads as a ULID.
+// ParseCursor reads an `after` value. Empty is the zero cursor. Anything else
+// must be readable as a ULID or as a slug, in either letter case (SPEC 8.2): a
+// 26-character slug whose text is also ULID-shaped is both, and
+// the store decides which row it names.
 func ParseCursor(s string) (Cursor, error) {
 	if s == "" {
 		return Cursor{}, nil
 	}
-	if ValidateULID(s) == nil {
-		return Cursor{ID: s}, nil
+	if len(RefLookups(s)) == 0 {
+		return Cursor{}, fmt.Errorf("after %q is neither a ULID nor an initiative slug", s)
 	}
-	if ValidateSlug(s) == nil {
-		return Cursor{Slug: s}, nil
+	return Cursor{Ref: s}, nil
+}
+
+// RefLookup is one way to read an initiative reference: Value is compared with
+// the id column when ByID, else with the slug column.
+type RefLookup struct {
+	ByID  bool
+	Value string
+}
+
+// RefLookups lists, in the order to try them, every row a reference can name.
+// References are case-insensitive on input (SPEC 8.2): ids are stored
+// uppercase and slugs lowercase, so a lookup tries the text as given first,
+// then its other case. A text that is a valid slug and also ULID-shaped (26
+// characters of digits, or a ULID in lowercase) is therefore never taken for
+// one kind by its shape: the first lookup that finds a row wins. An empty list
+// means the text is neither grammar.
+func RefLookups(ref string) []RefLookup {
+	var out []RefLookup
+	add := func(byID bool, v string, valid func(string) error) {
+		l := RefLookup{ByID: byID, Value: v}
+		if valid(v) != nil {
+			return
+		}
+		for _, have := range out {
+			if have == l {
+				return
+			}
+		}
+		out = append(out, l)
 	}
-	return Cursor{}, fmt.Errorf("after %q is neither a ULID nor an initiative slug", s)
+	add(false, ref, ValidateSlug)
+	add(true, ref, ValidateULID)
+	add(true, strings.ToUpper(ref), ValidateULID)
+	add(false, strings.ToLower(ref), ValidateSlug)
+	return out
+}
+
+// KeysetULID returns the ULID a reference reads as when it is ULID-shaped in
+// either case, for paging past an id that names no row.
+func KeysetULID(ref string) (string, bool) {
+	up := strings.ToUpper(ref)
+	return up, ValidateULID(up) == nil
 }
 
 // ValidateULID returns nil when s has the text form NewULID writes.

@@ -124,6 +124,46 @@ Feature: Initiatives over HTTP
     Then the response lists the initiatives ""
     And the response has no next_after
 
+  Scenario: a slug whose text is also a ULID stays a usable reference
+    When I create the initiative "01234567890123456789012345" titled "Digits" with no tags as actor "claude@laptop"
+    Then the response status is 201
+    And the response field "slug" is "01234567890123456789012345"
+    When I create the initiative "01arz3ndektsv4rrffq69g5fav" titled "Lower" with no tags as actor "claude@laptop"
+    Then the response status is 201
+    And the response field "slug" is "01arz3ndektsv4rrffq69g5fav"
+    When I create the initiative "after-both" titled "Last" with no tags as actor "claude@laptop"
+    Then the response status is 201
+    When I request the initiative "01234567890123456789012345" as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "title" is "Digits"
+    When I request the initiative "01arz3ndektsv4rrffq69g5fav" as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "title" is "Lower"
+    When I request the initiative "01ARZ3NDEKTSV4RRFFQ69G5FAV" as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "title" is "Lower"
+    When I request the initiative "01234567890123456789012345" by its id as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "title" is "Digits"
+    When I request the initiatives list "after=01234567890123456789012345" as actor "claude@laptop"
+    Then the response lists the initiatives "01arz3ndektsv4rrffq69g5fav,after-both"
+    When I request the initiatives list "after=01arz3ndektsv4rrffq69g5fav" as actor "claude@laptop"
+    Then the response lists the initiatives "after-both"
+
+  Scenario: references are case-insensitive on input
+    When I create the initiative "phone-onboard" titled "Phone" with no tags as actor "claude@laptop"
+    And I create the initiative "next-one" titled "Next" with no tags as actor "claude@laptop"
+    And I request the initiative "Phone-Onboard" as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "slug" is "phone-onboard"
+    When I request the initiative "phone-onboard" by its lowercase id as actor "claude@laptop"
+    Then the response status is 200
+    And the response field "slug" is "phone-onboard"
+    When I request the initiatives list "after=PHONE-ONBOARD" as actor "claude@laptop"
+    Then the response lists the initiatives "next-one"
+    When I request the initiatives list "after=Phone-Onboard&limit=1" as actor "claude@laptop"
+    Then the response lists the initiatives "next-one"
+
   Scenario Outline: a bad limit or cursor is 400 with a next field
     When I request the initiatives list "<query>" as actor "claude@laptop"
     Then the response status is 400
