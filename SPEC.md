@@ -1047,15 +1047,25 @@ operator. Live via SSE (§7.1).
 | **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
-from `GET /api/v1/keys` (name, display prefix, status, created, last used, expiry) and has a form
-with a name and an optional expiry (`90d`, `12h`; blank for none) that posts `POST /api/v1/keys`.
-The response's key appears once, in a box with a Done button, and is on the page nowhere else:
-dismissing it, creating or revoking another key, or reloading drops it. Each key that is not
-revoked has a Revoke button that posts `POST /api/v1/keys/{name}/revoke`; the list then reloads
-and shows the key as `revoked`. A refusal (a taken name, a bad expiry) shows the problem
-document's detail. The page calls the API with the session cookie, and its writes send the
-session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from its next request
-(`e2e/keys.spec.ts`, `features/ui_keys.feature`).
+from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
+below it (the same rows, so the `key-row`, `key-status`, `new-key` and `new-key-value` test ids keep
+their meaning at every width). A row shows the name, the display prefix in monospace, the status as a
+badge (`active` success, `expired` warning, `revoked` danger, an unknown status neutral), the creation
+and last-use times as relative `<time>` elements (`web/src/lib/format.ts`; the absolute local time in
+the `title`; `never` for a key not yet used), and the expiry as an absolute local time (`never` for none).
+**New API key** (a button beside the heading from 768 px up, a primary button anchored above the tab
+bar below it) opens the create form, a name and an optional expiry (`90d`, `12h`; blank for none) that
+posts `POST /api/v1/keys`, in the dialog component (a bottom sheet on the phone). A refusal (a taken
+name, a bad expiry) shows the problem document's detail inline in the form and keeps what was typed.
+On success the form closes and the response's key appears once, in a highlighted monospace box that
+wraps (the page never scrolls sideways at 390 px) with a **Copy** button and a **Done** button. Copy
+writes exactly that key with the Clipboard API and confirms it with "Copied" (a refused write says so and
+leaves the key selectable). The key is on the page nowhere else: Done, creating or revoking another key,
+or reloading drops it. Each key that is not revoked has a Revoke button that posts
+`POST /api/v1/keys/{name}/revoke`; the list then reloads and shows the key as `revoked`. While the list
+loads it shows skeleton rows, and with no keys an empty state. The page calls the API with the session
+cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from
+its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
 **Phase 0 pages.** The app has two views, chosen by the URL fragment: **Initiatives** (`#/`, the
 default, where a login lands) and **Settings → API keys** (`#/settings/keys`); the other views in

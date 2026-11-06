@@ -76,13 +76,16 @@ export interface KeysState {
   loading: boolean;
   /** The key just created: shown this once, dropped by `dismiss` or by the next action. */
   created: CreatedKey | undefined;
+  /** Why the list or a revoke failed; shown on the page. */
   error: string | undefined;
+  /** Why the last create was refused; shown inside the form, which keeps what was typed. */
+  formError: string | undefined;
 }
 
 export class KeysStore {
   private readonly api: Pick<KeysApi, 'list' | 'create' | 'revoke'>;
   private readonly onChange: (state: KeysState) => void;
-  private current: KeysState = { keys: [], loading: true, created: undefined, error: undefined };
+  private current: KeysState = { keys: [], loading: true, created: undefined, error: undefined, formError: undefined };
 
   constructor(api: Pick<KeysApi, 'list' | 'create' | 'revoke'>, onChange: (state: KeysState) => void) {
     this.api = api;
@@ -98,12 +101,12 @@ export class KeysStore {
     this.onChange(this.current);
   }
 
-  private async run(action: () => Promise<Partial<KeysState>>): Promise<boolean> {
+  private async run(action: () => Promise<Partial<KeysState>>, field: 'error' | 'formError' = 'error'): Promise<boolean> {
     try {
-      this.set({ ...(await action()), loading: false, error: undefined });
+      this.set({ ...(await action()), loading: false, [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+      this.set({ loading: false, [field]: e instanceof Error ? e.message : String(e) });
       return false;
     }
   }
@@ -112,11 +115,16 @@ export class KeysStore {
     await this.run(async () => ({ keys: await this.api.list() }));
   }
 
-  /** Makes the key, keeps it for the page to show once, and reloads the list. Whether it worked. */
+  /** Makes the key, keeps it for the page to show once, and reloads the list. Whether it worked; on a refusal `formError` says why. */
   async create(name: string, expiresIn: string): Promise<boolean> {
-    const ok = await this.run(async () => ({ created: await this.api.create(name.trim(), expiresIn.trim()) }));
+    const ok = await this.run(async () => ({ created: await this.api.create(name.trim(), expiresIn.trim()) }), 'formError');
     if (ok) await this.load();
     return ok;
+  }
+
+  /** Forgets a refusal, for a form that is opened again. */
+  clearFormError(): void {
+    this.set({ formError: undefined });
   }
 
   async revoke(name: string): Promise<boolean> {

@@ -119,7 +119,7 @@ function store(overrides: Partial<{ list: () => Promise<Key[]>; create: (n: stri
 
 describe('KeysStore', () => {
   it('starts loading with nothing to show', () => {
-    expect(store().s.state).toEqual({ keys: [], loading: true, created: undefined, error: undefined });
+    expect(store().s.state).toEqual({ keys: [], loading: true, created: undefined, error: undefined, formError: undefined });
   });
 
   it('load fills the list and stops loading', async () => {
@@ -164,7 +164,7 @@ describe('KeysStore', () => {
     expect(s.state.error).toBeUndefined();
   });
 
-  it('create that is refused keeps no key, shows the error and does not reload', async () => {
+  it('create that is refused keeps no key, shows the reason in the form and does not reload', async () => {
     const { s, fake } = store({
       create: async () => {
         throw new KeysError(409, 'exists');
@@ -172,8 +172,43 @@ describe('KeysStore', () => {
     });
     expect(await s.create('ci', '')).toBe(false);
     expect(s.state.created).toBeUndefined();
-    expect(s.state.error).toBe('exists');
+    expect(s.state.formError).toBe('exists');
+    expect(s.state.error).toBeUndefined();
     expect(fake.list).not.toHaveBeenCalled();
+  });
+
+  it('a refused create keeps the key already on show and a good create clears the refusal', async () => {
+    let refuse = false;
+    const { s } = store({
+      create: async (name: string) => {
+        if (refuse) throw new KeysError(409, 'exists');
+        return { ...key(name), key: 'brd_once' };
+      },
+    });
+    await s.create('a', '');
+    refuse = true;
+    await s.create('a', '');
+    expect(s.state.created?.key).toBe('brd_once');
+    expect(s.state.formError).toBe('exists');
+    refuse = false;
+    await s.create('b', '');
+    expect(s.state.formError).toBeUndefined();
+  });
+
+  it('clearFormError forgets a refusal and only that', async () => {
+    const { s } = store({
+      create: async () => {
+        throw new KeysError(409, 'exists');
+      },
+      list: async () => {
+        throw new KeysError(500, 'boom');
+      },
+    });
+    await s.load();
+    await s.create('a', '');
+    s.clearFormError();
+    expect(s.state.formError).toBeUndefined();
+    expect(s.state.error).toBe('boom');
   });
 
   it('dismiss drops the one-time key', async () => {
