@@ -1060,12 +1060,22 @@ session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from its ne
 **Phase 0 pages.** The app has two views, chosen by the URL fragment: **Initiatives** (`#/`, the
 default, where a login lands) and **Settings → API keys** (`#/settings/keys`); the other views in
 the table are later phases. The Initiatives view lists every initiative from `GET /api/v1/initiatives`
-(slug, title, status, tags, created), following `next_after` through the pages, and has a form with
-a slug, a title, an optional description and optional comma-separated tags that posts
-`POST /api/v1/initiatives`. On success the list reloads and the form is cleared. A refusal (a bad or
-taken slug, a bad tag) shows the problem document's detail on the form and keeps what was typed so
-it can be corrected. The page calls the API with the session cookie, and its write sends the
-session's `X-CSRF-Token` (§3.2) (`e2e/initiatives.spec.ts`).
+(following `next_after` through the pages) as one `<table>` that is a dense table from 768 px up and one
+card per initiative below it (the same rows, so the `initiative-row`, `initiative-status`,
+`initiative-tags` and `email` test ids keep their meaning at every width). A row shows the title with
+the slug beneath it in monospace, the status as a badge (`open` success, `closed` neutral, an unknown
+status neutral), the tags as chips and the creation time as a `<time datetime>` whose text is relative
+(`web/src/lib/format.ts`: just now, minutes, hours, yesterday, days up to 7, then the local date) and
+whose `title` is the absolute local time. **New initiative** (a button beside the heading from 768 px
+up, a primary button anchored above the tab bar below it) opens the create form, a slug, a title, an
+optional description and optional comma-separated tags that posts `POST /api/v1/initiatives`, in the
+dialog component below (a bottom sheet on the phone). A refusal (a bad or taken slug, a bad tag) shows
+the problem document's detail inline in the form and keeps what was typed; success closes the form,
+reloads the list and announces "Initiative <slug> created" in an `aria-live="polite"` toast that clears
+itself. A form that is opened again starts clean. While the list loads it shows skeleton rows
+(`aria-busy`); an empty list shows an empty state whose **New initiative** button opens the same form.
+The page calls the API with the session cookie, and its write sends the session's `X-CSRF-Token` (§3.2)
+(`e2e/initiatives.spec.ts` at 390x844 and 1440x900).
 
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the

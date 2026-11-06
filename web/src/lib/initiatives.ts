@@ -89,13 +89,16 @@ export class InitiativesApi {
 export interface InitiativesState {
   initiatives: Initiative[];
   loading: boolean;
+  /** Why the list could not be read. */
   error: string | undefined;
+  /** Why the last create was refused; shown inside the form, which keeps what was typed. */
+  formError: string | undefined;
 }
 
 export class InitiativesStore {
   private readonly api: Pick<InitiativesApi, 'list' | 'create'>;
   private readonly onChange: (state: InitiativesState) => void;
-  private current: InitiativesState = { initiatives: [], loading: true, error: undefined };
+  private current: InitiativesState = { initiatives: [], loading: true, error: undefined, formError: undefined };
 
   constructor(api: Pick<InitiativesApi, 'list' | 'create'>, onChange: (state: InitiativesState) => void) {
     this.api = api;
@@ -111,18 +114,18 @@ export class InitiativesStore {
     this.onChange(this.current);
   }
 
-  private async run(action: () => Promise<Partial<InitiativesState>>): Promise<boolean> {
+  private async run(action: () => Promise<Partial<InitiativesState>>, field: 'error' | 'formError'): Promise<boolean> {
     try {
-      this.set({ ...(await action()), loading: false, error: undefined });
+      this.set({ ...(await action()), loading: false, [field]: undefined });
       return true;
     } catch (e) {
-      this.set({ loading: false, error: e instanceof Error ? e.message : String(e) });
+      this.set({ loading: field === 'error' ? false : this.current.loading, [field]: e instanceof Error ? e.message : String(e) });
       return false;
     }
   }
 
   async load(): Promise<void> {
-    await this.run(async () => ({ initiatives: await this.api.list() }));
+    await this.run(async () => ({ initiatives: await this.api.list() }), 'error');
   }
 
   /** Makes the initiative and reloads the list. Whether it worked; on a refusal `error` says why. */
@@ -130,8 +133,13 @@ export class InitiativesStore {
     const ok = await this.run(async () => {
       await this.api.create(toCreate(form));
       return {};
-    });
+    }, 'formError');
     if (ok) await this.load();
     return ok;
+  }
+
+  /** Forgets a refusal, for a form that is opened again. */
+  clearFormError(): void {
+    this.set({ formError: undefined });
   }
 }

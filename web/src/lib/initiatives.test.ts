@@ -120,7 +120,7 @@ describe('InitiativesStore', () => {
 
   it('starts loading with nothing to show', () => {
     const { s } = store({ list: async () => [], create: async () => initiative('a') });
-    expect(s.state).toEqual({ initiatives: [], loading: true, error: undefined });
+    expect(s.state).toEqual({ initiatives: [], loading: true, error: undefined, formError: undefined });
   });
 
   it('load shows the list and stops loading', async () => {
@@ -150,6 +150,7 @@ describe('InitiativesStore', () => {
     expect(create).toHaveBeenCalledWith({ slug: 'alpha', title: 'Alpha', tags: ['x', 'y'] });
     expect(s.state.initiatives.map((i) => i.slug)).toEqual(['alpha']);
     expect(s.state.error).toBeUndefined();
+    expect(s.state.formError).toBeUndefined();
   });
 
   it('a refused create shows the server text on the form and does not reload', async () => {
@@ -157,8 +158,32 @@ describe('InitiativesStore', () => {
     const { s } = store({ list, create: async () => Promise.reject(new InitiativesError(400, 'slug must be 2 to 40 characters')) });
     await s.load();
     expect(await s.create({ ...form, slug: 'x' })).toBe(false);
-    expect(s.state.error).toBe('slug must be 2 to 40 characters');
+    expect(s.state.formError).toBe('slug must be 2 to 40 characters');
+    expect(s.state.error).toBeUndefined();
+    expect(s.state.loading).toBe(false);
     expect(s.state.initiatives.map((i) => i.slug)).toEqual(['keep']);
     expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal is dropped by clearFormError and by the next successful create, and a non-Error is stringified', async () => {
+    let refuse = true;
+    const { s } = store({
+      list: async () => [],
+      create: async () => (refuse ? Promise.reject('plain') : initiative('a')),
+    });
+    expect(await s.create(form)).toBe(false);
+    expect(s.state.formError).toBe('plain');
+    s.clearFormError();
+    expect(s.state.formError).toBeUndefined();
+    expect(await s.create(form)).toBe(false);
+    refuse = false;
+    expect(await s.create(form)).toBe(true);
+    expect(s.state.formError).toBeUndefined();
+  });
+
+  it('a refusal while the first load is still running keeps the list loading', async () => {
+    const { s } = store({ list: async () => [], create: async () => Promise.reject(new InitiativesError(409, 'slug taken')) });
+    expect(await s.create(form)).toBe(false);
+    expect(s.state.loading).toBe(true);
   });
 });
