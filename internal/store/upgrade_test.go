@@ -86,8 +86,8 @@ func TestMigratingPhase0RowsToHeadKeepsThemUnchanged(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if latest, _ := s.latest(); latest < 3 {
-		t.Fatalf("head = %d, want at least 3", latest)
+	if latest, _ := s.latest(); latest < 4 {
+		t.Fatalf("head = %d, want at least 4", latest)
 	}
 	if err := s.Ready(ctx); err != nil {
 		t.Fatal(err)
@@ -165,5 +165,58 @@ func TestTasksHaveTheSpecIndexesAndAUniqueSeqPerInitiative(t *testing.T) {
 	}
 	if err := exec("task_deps", depCols, "T1", "T3"); err != nil {
 		t.Errorf("a dependency = %v", err)
+	}
+}
+
+// TestLeasesHaveTheSpecIndexesAndTheirResourcesKeyOnBothColumns checks the SPEC
+// 4.4 and 4.10 indexes on leases and lease_resources, and that a lease holds a
+// resource once, takes only the three states and keeps its ttl within bounds.
+func TestLeasesHaveTheSpecIndexesAndTheirResourcesKeyOnBothColumns(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string][]string{
+		"leases_state_expires_at":            {"state", "expires_at"},
+		"lease_resources_resource":           {"resource"},
+		"sqlite_autoindex_lease_resources_1": {"lease_id", "resource"},
+	} {
+		if got := indexColumns(t, s, name); !reflect.DeepEqual(got, want) {
+			t.Errorf("index %s = %v, want %v", name, got, want)
+		}
+	}
+	d := s.Dialect()
+	exec := func(table string, cols []string, vals ...any) error {
+		_, err := s.Writer().ExecContext(ctx, d.Rebind(d.Insert(table, cols)), vals...)
+		return err
+	}
+	for _, r := range phase0Rows[:2] {
+		if err := exec(r.table, r.cols, r.vals...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := exec("tasks", []string{"id", "initiative_id", "seq", "title", "created_by", "created_at", "updated_at"}, "T1", "INIT1", 1, "t", "ACTOR1", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	cols := []string{"id", "task_id", "actor_id", "intent", "ttl_seconds", "started_at", "renewed_at", "expires_at", "state"}
+	if err := exec("leases", cols, "L1", "T1", "ACTOR1", "i", 60, 1, 1, 2, "live"); err != nil {
+		t.Fatalf("a lease = %v", err)
+	}
+	for name, vals := range map[string][]any{
+		"ttl 59":        {"L2", "T1", "ACTOR1", "i", 59, 1, 1, 2, "live"},
+		"ttl 43201":     {"L3", "T1", "ACTOR1", "i", 43201, 1, 1, 2, "live"},
+		"state revoked": {"L4", "T1", "ACTOR1", "i", 60, 1, 1, 2, "revoked"},
+		"unknown task":  {"L5", "NOPE", "ACTOR1", "i", 60, 1, 1, 2, "live"},
+	} {
+		if err := exec("leases", cols, vals...); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if err := exec("lease_resources", []string{"lease_id", "resource"}, "L1", "repo:a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec("lease_resources", []string{"lease_id", "resource"}, "L1", "repo:a"); err == nil || !d.IsUniqueViolation(err) {
+		t.Errorf("a duplicate resource = %v, want a unique violation", err)
 	}
 }

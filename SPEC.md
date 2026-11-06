@@ -376,11 +376,36 @@ transaction; a patch that changes nothing writes no row, no event and no actor.
 | state | `live` \| `ended` \| `expired` | |
 | ended_at, ended_by | | `ended_by` set when someone other than the holder ends it |
 | outcome | text, nullable | short summary written at end |
+| acked_at, acked_by | ts, fk actor, nullable | the acknowledgement of an expired lease (§5.3); null until acknowledged |
 
 `lease_resources(lease_id, resource)`: PK both, index on `resource`.
 
+Both tables exist (migration `00004_leases`, in both dialects) with `n` (the short ref `L<n>`,
+`domain.FormatLeaseRef`), the indexes `leases(state, expires_at)` and `lease_resources(resource)` (§4.10), and extra indexes
+on `leases(task_id)` and `leases(actor_id)`. The database holds the ttl within [60, 43200] and the state to the three values.
+
 An actor may hold several live leases (different tasks). Starting a lease on a task where the
 same actor already has a live lease **renews** that lease instead (idempotent start).
+
+`internal/leases` (`Store`: `Start`, `Renew`, `End`, `Ack`, `ExpireDue`, `Get`) writes each change in one transaction with its
+event (`lease_started`, `lease_renewed`, `lease_ended`, `lease_acked`, `lease_expired`; `ref_id` is the lease's ULID, `data.ref`
+is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `internal/domain`:
+
+- **ttl** (`domain.ClampLeaseTTL`): clamped to [60, 43200], 7200 when absent. A renewal without a ttl keeps the stored one.
+- **intent** 1 to 200 characters. **Resources** (`domain.NormalizeResources`): duplicates removed (first kept), each 1 to 100
+  characters, at most 20 after deduplication. Violations are `ErrInvalid`, checked before anything is read or written.
+- **Start** on an unknown task is `ErrNotFound`, on a `closed` task `ErrConflict`. When the actor holds a live lease on the task,
+  the start renews it (`Result.Renewed`, event `lease_renewed`, resources kept unless sent); otherwise it is a new lease and
+  `lease_started`. The result carries the conflicts (§5.2).
+- **Renew** pushes `expires_at` to now plus the ttl and may replace intent and resources. A lease past its expiry is `ErrGone`, a
+  `GoneError` carrying `ExpiredAt`, whether or not the sweep has marked it; an ended lease is `ErrConflict`. Any actor may renew.
+- **End** sets `ended_at` and `outcome` (at most 200 characters); `ended_by` is set, and `data.ended_by` written, only when
+  the ending actor is not the holder. A lease that is not live (ended or expired) is `ErrConflict`.
+- **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
+  event. A lease that has not expired is `ErrConflict`.
+- **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
+  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first.
+- **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
 
 ### 4.5 `asks`
 
@@ -424,7 +449,7 @@ Event types (closed set in v1, extended by migration):
 `initiative_created`, `initiative_updated`, `initiative_closed`, `initiative_reopened`,
 `task_created`, `task_updated`, `task_done`, `task_reopened`, `task_closed`,
 `dep_added`, `dep_removed`,
-`lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`,
+`lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`, `lease_acked`,
 `ask_raised`, `ask_answered`, `ask_withdrawn`,
 `check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
 `key_created` and `key_revoked` record an API key being made or revoked over HTTP (§3.3); they have no
@@ -508,7 +533,8 @@ are deleted by the same sweeper as leases. `sessions` has no `n`: it is keyed by
 and is indexed on `expires_at` for that sweep.
 
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
-`tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`). The other tables of this
+`tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
+`lease_resources` (migration `00004_leases`, §4.4). The other tables of this
 section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
