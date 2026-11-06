@@ -117,8 +117,35 @@ func TestUnknownDocsAssetIs404AProblem(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("GET /api/docs/assets/nope.js = %d, want 404", rec.Code)
 	}
-	if doc := problem(t, rec); doc["status"].(float64) != 404 {
+	doc := problem(t, rec)
+	if doc["status"].(float64) != 404 {
 		t.Errorf("problem = %v", doc)
+	}
+	if next, _ := doc["next"].(string); !strings.Contains(next, "/api/docs") {
+		t.Errorf("unknown asset problem next = %q, want advice naming /api/docs", next)
+	}
+}
+
+// TestEveryUnknownDocsAssetNameAnswersAProblemWithNext holds the rule behind the
+// unknown asset: any name the embedded set lacks, however spelled, is a 404
+// problem document that keeps its fields and names a next action.
+func TestEveryUnknownDocsAssetNameAnswersAProblemWithNext(t *testing.T) {
+	for _, name := range []string{"nope.js", "INIT.JS", "init.js.map", "%2e%2e%2fetc", "swagger-ui.css.gz"} {
+		rec := httptest.NewRecorder()
+		NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/docs/assets/"+name))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET assets/%s = %d, want 404", name, rec.Code)
+			continue
+		}
+		doc := problem(t, rec)
+		if next, _ := doc["next"].(string); strings.TrimSpace(next) == "" {
+			t.Errorf("assets/%s: problem %v has no next", name, doc)
+		}
+		for _, f := range []string{"type", "title", "detail"} {
+			if s, _ := doc[f].(string); s == "" {
+				t.Errorf("assets/%s: problem %v lost %s", name, doc, f)
+			}
+		}
 	}
 }
 
@@ -342,6 +369,36 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 	}
 }
 
+// TestAFailingOperationThroughTheHandlerAnswersAProblemWithNext sends the same
+// failing operations through the wrapper NewHandler installs: whatever the
+// operation does wrong, the 500 problem document names a next action.
+func TestAFailingOperationThroughTheHandlerAnswersAProblemWithNext(t *testing.T) {
+	paths := []string{"/healthz", "/api/docs/assets/init.js", "/api/v1/keys", "POST /api/v1/initiatives", "/api/v1/meta"}
+	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
+		mux := http.NewServeMux()
+		HandlerFromMux(strictOperations(stubOperations{mode: mode}, func(next StrictHandlerFunc, _ string) StrictHandlerFunc { return next }), mux)
+		h := withProblemNext(mux)
+		for _, path := range paths {
+			method, target := http.MethodGet, path
+			if m, p, ok := strings.Cut(path, " "); ok {
+				method, target = m, p
+			}
+			req := httptest.NewRequest(method, target, strings.NewReader(`{"name":"x"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusInternalServerError {
+				t.Errorf("%s: %s = %d, want 500", mode, path, rec.Code)
+				continue
+			}
+			doc := problem(t, rec)
+			if next, _ := doc["next"].(string); strings.TrimSpace(next) == "" {
+				t.Errorf("%s: %s: problem %v has no next", mode, path, doc)
+			}
+		}
+	}
+}
+
 // TestDeclaredProblemResponsesWriteAProblemDocument writes every problem
 // response the document declares and checks status, content type and body.
 func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
@@ -415,6 +472,21 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		}
 		if rec.Code != tc.want || rec.Header().Get("Content-Type") != "application/problem+json" {
 			t.Errorf("%s: %d %q, want %d application/problem+json", tc.name, rec.Code, rec.Header().Get("Content-Type"), tc.want)
+		}
+		// The same typed response served through the handler's wrapper gains the
+		// next its value lacked and keeps every other field.
+		wrapped := httptest.NewRecorder()
+		withProblemNext(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _ = tc.write(w) })).ServeHTTP(wrapped, httptest.NewRequest(http.MethodGet, "/", nil))
+		var doc map[string]any
+		if err := json.Unmarshal(wrapped.Body.Bytes(), &doc); err != nil {
+			t.Errorf("%s: wrapped body %q: %v", tc.name, wrapped.Body.String(), err)
+			continue
+		}
+		if next, _ := doc["next"].(string); strings.TrimSpace(next) == "" {
+			t.Errorf("%s: wrapped problem %v has no next", tc.name, doc)
+		}
+		if doc["title"] != problem.Title || doc["type"] != problem.Type || wrapped.Code != tc.want || wrapped.Header().Get("Content-Type") != "application/problem+json" {
+			t.Errorf("%s: wrapped response %d %q %v lost fields", tc.name, wrapped.Code, wrapped.Header().Get("Content-Type"), doc)
 		}
 	}
 }
