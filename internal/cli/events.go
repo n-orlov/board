@@ -176,7 +176,7 @@ func listEvents(p parsedArgs, path string, q url.Values, limit int, cmd string, 
 	}
 	ctx, stop := clientContext()
 	defer stop()
-	items, err := c.allEvents(ctx, path, q)
+	items, err := c.allPages(ctx, path, q)
 	if err != nil {
 		return report(stderr, eventsFailure(err))
 	}
@@ -207,8 +207,8 @@ func eventsFailure(err error) error {
 	return withNext(err, http.StatusNotFound, "board task ls")
 }
 
-// allEvents follows next_after until the last page.
-func (c *client) allEvents(ctx context.Context, path string, q url.Values) ([]json.RawMessage, error) {
+// allPages follows next_after until the last page of the list at path.
+func (c *client) allPages(ctx context.Context, path string, q url.Values) ([]json.RawMessage, error) {
 	items := []json.RawMessage{}
 	after := ""
 	for {

@@ -64,6 +64,8 @@ type apiError struct {
 	Status int
 	Detail string
 	Next   string
+	// ExpiredAt is the `expired_at` of the 410 of an expired lease, when sent.
+	ExpiredAt string
 	// Exit, when not zero, is the exit code this error ends the command with
 	// instead of the one its status maps to.
 	Exit int
@@ -110,6 +112,8 @@ type problem struct {
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
 	Next   string `json:"next"`
+	// ExpiredAt is carried by the 410 of a lease that ran out.
+	ExpiredAt string `json:"expired_at"`
 }
 
 // newAPIError reads the body of a non-2xx answer.
@@ -123,7 +127,7 @@ func newAPIError(status int, body []byte) *apiError {
 	if detail == "" {
 		detail = "server answered " + strconv.Itoa(status)
 	}
-	return &apiError{Status: status, Detail: detail, Next: p.Next}
+	return &apiError{Status: status, Detail: detail, Next: p.Next, ExpiredAt: p.ExpiredAt}
 }
 
 // client calls the board API as one environment and one actor.

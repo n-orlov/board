@@ -50,10 +50,15 @@ type taskLink struct {
 }
 
 type leaseView struct {
-	Ref       string `json:"ref"`
-	Actor     string `json:"actor"`
-	Intent    string `json:"intent"`
-	ExpiresAt string `json:"expires_at"`
+	Ref       string   `json:"ref"`
+	Task      string   `json:"task"`
+	Actor     string   `json:"actor"`
+	Intent    string   `json:"intent"`
+	State     string   `json:"state"`
+	Resources []string `json:"resources"`
+	RenewedAt string   `json:"renewed_at"`
+	ExpiresAt string   `json:"expires_at"`
+	EndedAt   string   `json:"ended_at"`
 }
 
 type eventView struct {
