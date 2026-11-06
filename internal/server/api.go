@@ -85,6 +85,7 @@ func (operations) GetDocsAsset(_ context.Context, req GetDocsAssetRequestObject)
 		return GetDocsAsset404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse{
 			Type: problemType, Title: http.StatusText(http.StatusNotFound), Status: http.StatusNotFound,
 			Detail: ptr("there is no such documentation asset"),
+			Next:   ptr("Open /api/docs and use the asset names that page links."),
 		}}, nil
 	}
 	r, n := bytes.NewReader(body), int64(len(body))

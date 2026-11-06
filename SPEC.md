@@ -546,7 +546,10 @@ and CLI can show badges without the lists.
   document the server writes has `type`, `title`, `status`, `detail` and `next`; an error with no
   operation-specific advice carries a default `next` for its status (401: how to send a key and an
   actor, 404, 409, 5xx, and 400 "Fix the request and send it again."). A path or query parameter the
-  generated router cannot read (`limit=abc`) is a 400 problem document too.
+  generated router cannot read (`limit=abc`) is a 400 problem document too. The guarantee holds for
+  every path, including a problem an operation returns as a typed response (an unknown Swagger asset is a
+  404 with its own `next`): a final step over the whole handler fills the status default into any
+  `application/problem+json` response that arrives without a non-empty `next`.
 - Compact mode: `?view=compact` returns the minimal fields agents need (ids, refs, one-line
   text, times), to keep agent context small.
 

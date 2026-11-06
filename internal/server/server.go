@@ -44,7 +44,7 @@ func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
-	return authenticated(mux, verify, login)
+	return withProblemNext(authenticated(mux, verify, login))
 }
 
 // Option adds an optional part to the handler NewHandler returns.
