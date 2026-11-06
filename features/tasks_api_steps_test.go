@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -283,33 +282,6 @@ func (h *harness) eventDataIs(ctx context.Context, typ, ref, key, want string) e
 	return nil
 }
 
-// closeInDatabase closes the task by the row, standing in for the close
-// operation until it is served.
-func (h *harness) closeInDatabase(ctx context.Context, ref string) error {
-	cut := strings.LastIndex(ref, "-")
-	seq, err := strconv.Atoi(ref[cut+1:])
-	if cut < 0 || err != nil {
-		return errors.New("bad ref " + ref)
-	}
-	db, err := h.openDB()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	q := `UPDATE tasks SET status = 'closed', resolution = 'dropped' WHERE seq = ? AND initiative_id IN (SELECT id FROM initiatives WHERE slug = ?)`
-	if h.leg == "postgres" {
-		q = strings.Replace(strings.Replace(q, "?", "$1", 1), "?", "$2", 1)
-	}
-	res, err := db.ExecContext(ctx, q, seq, ref[:cut])
-	if err != nil {
-		return err
-	}
-	if rows, _ := res.RowsAffected(); rows != 1 {
-		return fmt.Errorf("closed %d rows for %s", rows, ref)
-	}
-	return nil
-}
-
 func registerTaskAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I create the task with body "([^"]*)" as actor "([^"]*)"$`, h.createTaskWithBody)
 	sc.Step(`^I create a task in "([^"]*)" titled "([^"]*)" as actor "([^"]*)"$`, h.createTask)
@@ -329,5 +301,5 @@ func registerTaskAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the counts of tasks, dependencies, events and actors are unchanged$`, h.countsUnchanged)
 	sc.Step(`^exactly (\d+) ([a-z_]+) events? exists? for the task "([^"]*)"$`, h.eventCount)
 	sc.Step(`^the latest ([a-z_]+) event of "([^"]*)" has data.([a-z_]+) "([^"]*)"$`, h.eventDataIs)
-	sc.Step(`^the task "([^"]*)" is closed in the database$`, h.closeInDatabase)
+	registerTaskTransitionSteps(sc, h)
 }

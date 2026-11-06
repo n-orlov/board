@@ -311,7 +311,7 @@ Feature: Tasks over HTTP
 
   Scenario: patching a closed task is 409 and a missing one 404
     Given I create a task in "aa" titled "one" as actor "claude@laptop"
-    And the task "aa-1" is closed in the database
+    And I close the task "aa-1" with body "{'resolution':'dropped'}" as actor "claude@laptop"
     And I note the counts of tasks, dependencies, events and actors
     When I patch the task "aa-1" with body "{'title':'two'}" as actor "refused@laptop"
     Then the response status is 409

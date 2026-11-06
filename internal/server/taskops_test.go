@@ -251,3 +251,68 @@ func TestTaskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 		}
 	}
 }
+
+func TestTransitionsAnswerTheTaskAndRefusalsAnswerAProblemNamingTheStatus(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	for _, tc := range []struct {
+		verb, body string
+		code       int
+		status     string
+	}{
+		{"done", "", 200, "done"},
+		{"done", "", 409, "it is done"},
+		{"close", `{"resolution":"completed"}`, 200, "closed"},
+		{"done", "", 409, "it is closed"},
+		{"close", `{"resolution":"completed"}`, 409, "it is closed"},
+		{"reopen", "", 200, "open"},
+		{"reopen", "", 409, "it is open"},
+		{"close", `{}`, 400, "resolution"},
+		{"close", "", 400, "resolution"},
+		{"done", "", 200, "done"},
+	} {
+		rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/"+tc.verb, tc.body, "claude@host")
+		doc := decode(t, rec)
+		if rec.Code != tc.code || !strings.Contains(fmt.Sprint(doc["status"], doc["detail"]), tc.status) {
+			t.Errorf("%s %s = %d %s, want %d and %q", tc.verb, tc.body, rec.Code, rec.Body, tc.code, tc.status)
+		}
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/close", `{"resolution":`, "claude@host"); rec.Code != http.StatusBadRequest {
+		t.Errorf("close with a body that is not JSON = %d %s, want 400", rec.Code, rec.Body)
+	}
+	for _, verb := range []string{"done", "reopen", "close"} {
+		if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-9/"+verb, `{"resolution":"dropped"}`, "claude@host"); rec.Code != http.StatusNotFound {
+			t.Errorf("%s of an unknown task = %d", verb, rec.Code)
+		}
+	}
+}
+
+func TestCloseRecordsTheBoardOnBehalfOfHeaderAndNoOtherTransitionDoes(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	for _, verb := range []string{"done", "close"} {
+		rec := s.sendWith(http.MethodPost, "/api/v1/tasks/aa-1/"+verb, `{"resolution":"completed"}`, "claude@host", map[string]string{OnBehalfHeader: "operator"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", verb, rec.Code, rec.Body)
+		}
+	}
+	rows, err := s.keys.Store.Reader().QueryContext(context.Background(),
+		`SELECT e.type, COALESCE(ob.handle, '') FROM events e LEFT JOIN actors ob ON ob.id = e.on_behalf_of WHERE e.type IN ('task_done', 'task_closed') ORDER BY e.n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var typ, handle string
+		if err := rows.Scan(&typ, &handle); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, typ+":"+handle)
+	}
+	if fmt.Sprint(got) != "[task_done: task_closed:operator]" {
+		t.Errorf("events = %v", got)
+	}
+}

@@ -22,6 +22,8 @@ type transition struct {
 	args func(actorID string, at int64) []any
 	// data is the extra event data.
 	data map[string]any
+	// behalf is set when the event records the actor the request is made for.
+	behalf bool
 }
 
 // Done marks the open task ref names as done, setting done_at and done_by, and
@@ -64,7 +66,7 @@ func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, res
 		action: "close", event: EventClosed, allowed: []string{"open", "done"},
 		set:  `status = 'closed', resolution = ?, closed_at = ?, closed_by = ?`,
 		args: func(actorID string, at int64) []any { return []any{resolution, at, actorID} },
-		data: map[string]any{"resolution": resolution},
+		data: map[string]any{"resolution": resolution}, behalf: true,
 	})
 }
 
@@ -95,15 +97,27 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 	if err != nil {
 		return Task{}, err
 	}
+	onBehalf, err := behalfOf(ctx, tx, d, actor, now, tr)
+	if err != nil {
+		return Task{}, err
+	}
 	at := store.EncodeTime(now)
 	args := append(tr.args(actorID, at), at, cur.ID)
 	if _, err := tx.ExecContext(ctx, d.Rebind(`UPDATE tasks SET `+tr.set+`, updated_at = ? WHERE id = ?`), args...); err != nil {
 		return Task{}, fmt.Errorf("%s task: %w", tr.action, err)
 	}
-	if err := s.appendTransition(ctx, tx, actorID, principal, cur, now, tr); err != nil {
+	if err := s.appendTransition(ctx, tx, actorID, onBehalf, principal, cur, now, tr); err != nil {
 		return Task{}, err
 	}
 	return s.find(ctx, tx, cur.ID)
+}
+
+// behalfOf is the actor row the transition's event is made on behalf of, or "".
+func behalfOf(ctx context.Context, tx *sql.Tx, d store.Dialect, actor audit.Actor, now time.Time, tr transition) (string, error) {
+	if !tr.behalf {
+		return "", nil
+	}
+	return audit.OnBehalf(ctx, tx, d, actor, now)
 }
 
 // permit returns an error unless the transition may leave the task's current
@@ -118,7 +132,7 @@ func (s Store) permit(ctx context.Context, tx *sql.Tx, cur Task, tr transition) 
 	return s.writable(ctx, tx, Task{InitiativeID: cur.InitiativeID, Initiative: cur.Initiative})
 }
 
-func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Task, now time.Time, tr transition) error {
+func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, onBehalf, principal string, cur Task, now time.Time, tr transition) error {
 	data := map[string]any{"ref": cur.Ref, "from": cur.Status}
 	summary := "task " + cur.Ref + " " + eventVerb[tr.event]
 	if r, ok := tr.data["resolution"]; ok {
@@ -126,7 +140,7 @@ func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, princi
 		summary += " as " + r.(string)
 	}
 	return audit.AppendAs(ctx, tx, s.Store.Dialect(), actorID, now, audit.Event{
-		Principal: principal, Type: tr.event, InitiativeID: cur.InitiativeID, TaskID: cur.ID, RefID: cur.ID,
+		Principal: principal, OnBehalfOfID: onBehalf, Type: tr.event, InitiativeID: cur.InitiativeID, TaskID: cur.ID, RefID: cur.ID,
 		Summary: summary,
 		Data:    data,
 	})

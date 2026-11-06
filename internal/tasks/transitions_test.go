@@ -248,3 +248,59 @@ func TestTransitionsDoNotTouchTheEditableFields(t *testing.T) {
 		t.Errorf("fields changed: %+v", got)
 	}
 }
+
+func onBehalfOf(t *testing.T, s Store, typ string) []string {
+	t.Helper()
+	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT COALESCE(ob.handle, '') FROM events e LEFT JOIN actors ob ON ob.id = e.on_behalf_of WHERE e.type = ? ORDER BY e.n`), typ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+func TestOnlyCloseRecordsTheActorTheRequestIsMadeFor(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	a, b, c := mk(t, s, "aa", "a"), mk(t, s, "aa", "b"), mk(t, s, "aa", "c")
+	behalf := audit.Actor{Handle: "claude@host", OnBehalfOf: "operator"}
+	must(t)(s.Done(ctx, behalf, "key:a", a.Ref))
+	must(t)(s.Close(ctx, behalf, "key:a", b.Ref, "dropped"))
+	must(t)(s.Close(ctx, who, "key:a", c.Ref, "dropped"))
+	must(t)(s.Reopen(ctx, behalf, "key:a", c.Ref))
+	if got := onBehalfOf(t, s, EventClosed); len(got) != 2 || got[0] != "operator" || got[1] != "" {
+		t.Errorf("task_closed on behalf of %q, want [operator \"\"]", got)
+	}
+	for _, typ := range []string{EventDone, EventReopened} {
+		if got := onBehalfOf(t, s, typ); len(got) != 1 || got[0] != "" {
+			t.Errorf("%s on behalf of %q, want none", typ, got)
+		}
+	}
+}
+
+func TestRefusedCloseRecordsNoActorForTheHeader(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	tk := mk(t, s, "aa", "a")
+	behalf := audit.Actor{Handle: "claude@host", OnBehalfOf: "operator"}
+	if _, err := s.Close(ctx, behalf, "key:a", tk.Ref, "wontfix"); err == nil {
+		t.Fatal("close with an unknown resolution succeeded")
+	}
+	must(t)(s.Close(ctx, who, "key:a", tk.Ref, "dropped"))
+	if _, err := s.Close(ctx, behalf, "key:a", tk.Ref, "dropped"); err == nil {
+		t.Fatal("close of a closed task succeeded")
+	}
+	var n int
+	if err := s.Store.Reader().QueryRowContext(ctx, `SELECT count(*) FROM actors WHERE handle = 'operator'`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("operator rows = %d (%v), want 0", n, err)
+	}
+}

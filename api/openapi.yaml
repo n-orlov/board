@@ -476,6 +476,106 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/done:
+    post:
+      operationId: doneTask
+      tags: [tasks]
+      summary: Mark a task done
+      description: >-
+        Moves an open task to `done`, setting `done_at` and `done_by`, and appends `task_done`. A task that is
+        already done or is closed is 409 and the problem names its current status.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      responses:
+        "200":
+          description: The task after the transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/reopen:
+    post:
+      operationId: reopenTask
+      tags: [tasks]
+      summary: Reopen a task
+      description: >-
+        Moves a done or closed task back to `open`, clearing `resolution`, `done_at`, `done_by`, `closed_at` and
+        `closed_by`, and appends `task_reopened`. An open task is 409 and the problem names its status. A task of
+        a closed initiative is 409.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      responses:
+        "200":
+          description: The task after the transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/close:
+    post:
+      operationId: closeTask
+      tags: [tasks]
+      summary: Close a task
+      description: >-
+        Moves an open or done task to `closed` with the `resolution` sent (`completed`, `dropped`, `superseded` or
+        `duplicate`), setting `closed_at` and `closed_by`, and appends `task_closed` whose `data.resolution` is the
+        resolution. A missing or unknown resolution is 400. A closed task is 409 and the problem names its status.
+        A `Board-On-Behalf-Of` header names the actor the close is made for, such as `operator` when an agent
+        closes on instruction, and is stored as the event's `on_behalf_of`.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskClose"
+      responses:
+        "200":
+          description: The task after the transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -1105,6 +1205,14 @@ components:
           description: Refs or ULIDs of the tasks the new task starts out blocked by.
           items:
             type: string
+    TaskClose:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          type: string
+          description: Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
+          examples: [completed]
     TaskPatch:
       type: object
       description: >-

@@ -641,8 +641,9 @@ and CLI can show badges without the lists.
 - Every key-authenticated request names its actor: header `Board-Actor: <handle>` (required), optional
   `Board-Actor-Way-Back`, `Board-Actor-Meta` (a JSON object; anything else is 400, with no actor recorded),
   `Board-On-Behalf-Of`. The actor is upserted on use, where in Phase 0 a use is a write (§4.1); the way back and
-  the meta header are stored on the actor row by that upsert. `Board-On-Behalf-Of` is accepted and ignored in Phase 0
-  (no operation yet records an on-behalf-of actor). Session requests always act as the operator.
+  the meta header are stored on the actor row by that upsert. `Board-On-Behalf-Of` names the actor a write is made for.
+  `POST /api/v1/tasks/{ref}/close` records it as the `on_behalf_of` of the `task_closed` event (§6.4); every other
+  operation accepts the header and ignores it. Session requests always act as the operator.
 - Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
   original response. Agents retry safely.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
@@ -735,8 +736,8 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
 
 ### 6.4 Tasks
 
-`POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}` are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`),
-the transitions, dependencies, checks, milestones and events of §6.2 come with later tasks. Any authenticated
+`POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}` and `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close` are
+in `api/openapi.yaml`. The list (`GET /api/v1/tasks`), dependencies, checks, milestones and events of §6.2 come with later tasks. Any authenticated
 principal may use them. The server answers 503 problem documents when it runs without a store.
 
 - **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
@@ -762,6 +763,21 @@ principal may use them. The server answers 503 problem documents when it runs wi
   no row, no event and no actor. A change writes the row and one `task_updated` event whose `data` is
   `{ref, changed}`, `changed` naming the changed fields in column order, in one transaction. A closed task is **409**
   (`next` says to reopen it) and so is a task of a closed initiative. An unknown ref is **404**.
+- **`POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close`** move a task between `open`, `done` and `closed`, and each
+  answers **200** with the task document after the move. The allowed moves are `done` from `open` (sets `done_at` and
+  `done_by`), `reopen` from `done` or `closed` (back to `open`, clearing `resolution`, `done_at`, `done_by`, `closed_at`
+  and `closed_by`) and `close` from `open` or `done` (sets `closed_at`, `closed_by` and `resolution`; a task that was
+  done keeps its `done_at` and `done_by`). Any other move is **409** and the problem's `detail` names the task and its
+  current status (`cannot mark done task aa-1: it is closed`), which covers `done` on a done or closed task, `reopen`
+  on an open task and `close` on a closed task; reopening a task of a closed initiative is **409** too. An unknown ref
+  is **404**. `/done` and `/reopen` take no body. `/close` takes `{resolution}`, one of `completed`, `dropped`,
+  `superseded` or `duplicate`; a missing body, a missing resolution or any other value (case counts) is **400** and
+  the `next` lists the four. Each move runs in one transaction, upserts the acting actor and appends one event
+  (`task_done`, `task_reopened`, `task_closed`) whose `data` is `{ref, from}` (the status it left), plus `resolution`
+  for a close. A refused request changes nothing, and records no actor. A `Board-On-Behalf-Of` header on `/close`
+  upserts the actor it names and stores it as the `task_closed` event's `on_behalf_of` (`operator` when an agent
+  closes on instruction); without the header, or on a refused close, the event's `on_behalf_of` is null. A closed
+  task is not editable (`PATCH` is **409** until it is reopened).
 - **The task document** (all three answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
   status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,

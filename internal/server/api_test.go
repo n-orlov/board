@@ -203,6 +203,9 @@ func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error { re
 func (brokenResponse) VisitCreateTaskResponse(http.ResponseWriter) error    { return errBroken }
 func (brokenResponse) VisitGetTaskResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error     { return errBroken }
+func (brokenResponse) VisitDoneTaskResponse(http.ResponseWriter) error      { return errBroken }
+func (brokenResponse) VisitReopenTaskResponse(http.ResponseWriter) error    { return errBroken }
+func (brokenResponse) VisitCloseTaskResponse(http.ResponseWriter) error     { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -325,6 +328,24 @@ func (s stubOperations) PatchTask(context.Context, PatchTaskRequestObject) (Patc
 	return resp, err
 }
 
+func (s stubOperations) DoneTask(context.Context, DoneTaskRequestObject) (DoneTaskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(DoneTaskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ReopenTask(context.Context, ReopenTaskRequestObject) (ReopenTaskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ReopenTaskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) CloseTask(context.Context, CloseTaskRequestObject) (CloseTaskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(CloseTaskResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetMeta(context.Context, GetMetaRequestObject) (GetMetaResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetMetaResponseObject)
@@ -354,6 +375,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/api/v1/keys", "POST /api/v1/keys", "POST /api/v1/keys/workstation/revoke",
 		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
 		"POST /api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
+		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
@@ -491,6 +513,21 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"patch task 404", 404, PatchTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPatchTaskResponse},
 		{"patch task 409", 409, PatchTask409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitPatchTaskResponse},
 		{"patch task 503", 503, PatchTask503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPatchTaskResponse},
+		{"done task 400", 400, DoneTask400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitDoneTaskResponse},
+		{"done task 401", 401, DoneTask401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitDoneTaskResponse},
+		{"done task 404", 404, DoneTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitDoneTaskResponse},
+		{"done task 409", 409, DoneTask409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitDoneTaskResponse},
+		{"done task 503", 503, DoneTask503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitDoneTaskResponse},
+		{"reopen task 400", 400, ReopenTask400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitReopenTaskResponse},
+		{"reopen task 401", 401, ReopenTask401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitReopenTaskResponse},
+		{"reopen task 404", 404, ReopenTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitReopenTaskResponse},
+		{"reopen task 409", 409, ReopenTask409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitReopenTaskResponse},
+		{"reopen task 503", 503, ReopenTask503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitReopenTaskResponse},
+		{"close task 400", 400, CloseTask400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
+		{"close task 401", 401, CloseTask401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
+		{"close task 404", 404, CloseTask404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
+		{"close task 409", 409, CloseTask409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
+		{"close task 503", 503, CloseTask503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitCloseTaskResponse},
 		{"meta 401", 401, GetMeta401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetMetaResponse},
 		{"protocol seen 400", 400, PutProtocolSeen400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
 		{"protocol seen 401", 401, PutProtocolSeen401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},

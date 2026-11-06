@@ -256,6 +256,66 @@ export interface paths {
         patch: operations["patchTask"];
         trace?: never;
     };
+    "/api/v1/tasks/{ref}/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a task done
+         * @description Moves an open task to `done`, setting `done_at` and `done_by`, and appends `task_done`. A task that is already done or is closed is 409 and the problem names its current status.
+         */
+        post: operations["doneTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{ref}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a task
+         * @description Moves a done or closed task back to `open`, clearing `resolution`, `done_at`, `done_by`, `closed_at` and `closed_by`, and appends `task_reopened`. An open task is 409 and the problem names its status. A task of a closed initiative is 409.
+         */
+        post: operations["reopenTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{ref}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a task
+         * @description Moves an open or done task to `closed` with the `resolution` sent (`completed`, `dropped`, `superseded` or `duplicate`), setting `closed_at` and `closed_by`, and appends `task_closed` whose `data.resolution` is the resolution. A missing or unknown resolution is 400. A closed task is 409 and the problem names its status. A `Board-On-Behalf-Of` header names the actor the close is made for, such as `operator` when an agent closes on instruction, and is stored as the event's `on_behalf_of`.
+         */
+        post: operations["closeTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -649,6 +709,13 @@ export interface components {
             external_refs?: components["schemas"]["ExternalRef"][];
             /** @description Refs or ULIDs of the tasks the new task starts out blocked by. */
             blocked_by?: string[];
+        };
+        TaskClose: {
+            /**
+             * @description Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
+             * @example completed
+             */
+            resolution: string;
         };
         /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others. */
         TaskPatch: {
@@ -1182,6 +1249,94 @@ export interface operations {
         };
         responses: {
             /** @description The task after the edit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    doneTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task after the transition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    reopenTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task after the transition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    closeTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskClose"];
+            };
+        };
+        responses: {
+            /** @description The task after the transition. */
             200: {
                 headers: {
                     [name: string]: unknown;

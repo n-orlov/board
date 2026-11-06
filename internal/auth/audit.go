@@ -21,6 +21,9 @@ type Identity struct {
 	// Board-Actor-Meta headers of a key request.
 	WayBack string
 	Meta    string
+	// OnBehalfOf is the optional Board-On-Behalf-Of header: the handle of the
+	// actor the write is made for.
+	OnBehalfOf string
 }
 
 // Event types of the key operations.
@@ -38,5 +41,5 @@ func record(ctx context.Context, tx *sql.Tx, d store.Dialect, who Identity, now 
 
 // AuditActor is the actor a write made by who is recorded under.
 func (who Identity) AuditActor() audit.Actor {
-	return audit.Actor{Handle: who.Actor, Operator: who.Operator, WayBack: who.WayBack, Meta: who.Meta}
+	return audit.Actor{Handle: who.Actor, Operator: who.Operator, WayBack: who.WayBack, Meta: who.Meta, OnBehalfOf: who.OnBehalfOf}
 }

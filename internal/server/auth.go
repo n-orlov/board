@@ -25,6 +25,10 @@ const (
 	MetaHeader    = "Board-Actor-Meta"
 )
 
+// OnBehalfHeader names the actor a key-authenticated write is made for, such as
+// `operator` when an agent closes a task on instruction.
+const OnBehalfHeader = "Board-On-Behalf-Of"
+
 const problemType = "about:blank"
 
 // defaultNext is the suggested next action of an error that names none of its own.
@@ -109,10 +113,11 @@ func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.Respon
 		return
 	}
 	who := auth.Identity{
-		Principal: "key:" + name,
-		Actor:     strings.TrimSpace(r.Header.Get(ActorHeader)),
-		WayBack:   strings.TrimSpace(r.Header.Get(WayBackHeader)),
-		Meta:      strings.TrimSpace(r.Header.Get(MetaHeader)),
+		Principal:  "key:" + name,
+		Actor:      strings.TrimSpace(r.Header.Get(ActorHeader)),
+		WayBack:    strings.TrimSpace(r.Header.Get(WayBackHeader)),
+		Meta:       strings.TrimSpace(r.Header.Get(MetaHeader)),
+		OnBehalfOf: strings.TrimSpace(r.Header.Get(OnBehalfHeader)),
 	}
 	next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), who)))
 }

@@ -15,6 +15,9 @@ import (
 func (p problemResponse) VisitCreateTaskResponse(w http.ResponseWriter) error { return p.write(w) }
 func (p problemResponse) VisitGetTaskResponse(w http.ResponseWriter) error    { return p.write(w) }
 func (p problemResponse) VisitPatchTaskResponse(w http.ResponseWriter) error  { return p.write(w) }
+func (p problemResponse) VisitDoneTaskResponse(w http.ResponseWriter) error   { return p.write(w) }
+func (p problemResponse) VisitReopenTaskResponse(w http.ResponseWriter) error { return p.write(w) }
+func (p problemResponse) VisitCloseTaskResponse(w http.ResponseWriter) error  { return p.write(w) }
 
 // taskOps is the /api/v1/tasks operations (SPEC 6.4). Any authenticated
 // principal may use them: v1 has no ACL.
@@ -46,12 +49,16 @@ func taskFailure(err error, missing string) (problemResponse, bool) {
 	case errors.Is(err, tasks.ErrInitiativeClosed):
 		return failure(http.StatusConflict, "the initiative "+afterColon(err)+" is closed").
 			withNext("Use a task of an open initiative."), true
+	case errors.Is(err, tasks.ErrConflict):
+		return failure(http.StatusConflict, err.Error()).withNext(conflictNext), true
 	case errors.Is(err, tasks.ErrClosed):
 		return failure(http.StatusConflict, "task "+afterColon(err)+" is closed").
 			withNext("Reopen it with POST /api/v1/tasks/" + afterColon(err) + "/reopen, then edit it."), true
 	}
 	return problemResponse{}, false
 }
+
+const conflictNext = "Read the task with GET /api/v1/tasks/<ref> to see its status, then send the transition that fits it."
 
 // afterColon is the subject a wrapped store error carries after its sentinel's
 // text, such as the ref in "task not found: aa-9".
@@ -270,4 +277,52 @@ func (o taskOps) PatchTask(ctx context.Context, req PatchTaskRequestObject) (Pat
 		return nil, err
 	}
 	return PatchTask200JSONResponse(doc), nil
+}
+
+// transitioned answers a transition's result: the task document, or the problem.
+func transitioned[R any](ctx context.Context, o taskOps, got tasks.Task, err error, ok func(TaskDetail) R) (R, error) {
+	if err != nil {
+		return taskResult[R](err, "there is no task ")
+	}
+	doc, err := o.detail(ctx, got)
+	if err != nil {
+		var zero R
+		return zero, err
+	}
+	return ok(doc), nil
+}
+
+// DoneTask marks an open task done.
+func (o taskOps) DoneTask(ctx context.Context, req DoneTaskRequestObject) (DoneTaskResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.Done(ctx, who.AuditActor(), who.Principal, req.Ref)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) DoneTaskResponseObject { return DoneTask200JSONResponse(d) })
+}
+
+// ReopenTask moves a done or closed task back to open.
+func (o taskOps) ReopenTask(ctx context.Context, req ReopenTaskRequestObject) (ReopenTaskResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.Reopen(ctx, who.AuditActor(), who.Principal, req.Ref)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) ReopenTaskResponseObject { return ReopenTask200JSONResponse(d) })
+}
+
+// CloseTask closes an open or done task with the resolution in the body. The
+// Board-On-Behalf-Of header, when sent, is recorded on the task_closed event.
+func (o taskOps) CloseTask(ctx context.Context, req CloseTaskRequestObject) (CloseTaskResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	resolution := ""
+	if req.Body != nil {
+		resolution = req.Body.Resolution
+	}
+	got, err := o.tasks.Close(ctx, who.AuditActor(), who.Principal, req.Ref, resolution)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) CloseTaskResponseObject { return CloseTask200JSONResponse(d) })
 }

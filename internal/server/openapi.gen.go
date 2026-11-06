@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -591,6 +592,14 @@ type TaskResolution string
 // TaskStatus defines model for Task.Status.
 type TaskStatus string
 
+// TaskClose defines model for TaskClose.
+type TaskClose struct {
+	// Resolution Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
+	//
+	// Examples: completed
+	Resolution string `json:"resolution"`
+}
+
 // TaskCreate A new task.
 type TaskCreate struct {
 	// BlockedBy Refs or ULIDs of the tasks the new task starts out blocked by.
@@ -783,6 +792,9 @@ type CreateTaskJSONRequestBody = TaskCreate
 // PatchTaskJSONRequestBody defines body for PatchTask for application/json ContentType.
 type PatchTaskJSONRequestBody = TaskPatch
 
+// CloseTaskJSONRequestBody defines body for CloseTask for application/json ContentType.
+type CloseTaskJSONRequestBody = TaskClose
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetDocs Interactive API documentation
@@ -830,6 +842,15 @@ type ServerInterface interface {
 	// PatchTask Edit a task
 	// (PATCH /api/v1/tasks/{ref})
 	PatchTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// CloseTask Close a task
+	// (POST /api/v1/tasks/{ref}/close)
+	CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// DoneTask Mark a task done
+	// (POST /api/v1/tasks/{ref}/done)
+	DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// ReopenTask Reopen a task
+	// (POST /api/v1/tasks/{ref}/reopen)
+	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(w http.ResponseWriter, r *http.Request)
@@ -1159,6 +1180,84 @@ func (siw *ServerInterfaceWrapper) PatchTask(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// CloseTask operation middleware
+func (siw *ServerInterfaceWrapper) CloseTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DoneTask operation middleware
+func (siw *ServerInterfaceWrapper) DoneTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DoneTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReopenTask operation middleware
+func (siw *ServerInterfaceWrapper) ReopenTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReopenTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAuthLogin operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthLogin(w http.ResponseWriter, r *http.Request) {
 
@@ -1378,6 +1477,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks", wrapper.CreateTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.GetTask)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.PatchTask)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/done", wrapper.DoneTask)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/reopen", wrapper.ReopenTask)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/close", wrapper.CloseTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -2550,6 +2652,313 @@ func (response PatchTask503ApplicationProblemPlusJSONResponse) VisitPatchTaskRes
 	return err
 }
 
+type CloseTaskRequestObject struct {
+	Ref  TaskRef `json:"ref"`
+	Body *CloseTaskJSONRequestBody
+}
+
+type CloseTaskResponseObject interface {
+	VisitCloseTaskResponse(w http.ResponseWriter) error
+}
+
+type CloseTask200JSONResponse TaskDetail
+
+func (response CloseTask200JSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask400ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask401ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask404ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask409ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask503ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTaskRequestObject struct {
+	Ref TaskRef `json:"ref"`
+}
+
+type DoneTaskResponseObject interface {
+	VisitDoneTaskResponse(w http.ResponseWriter) error
+}
+
+type DoneTask200JSONResponse TaskDetail
+
+func (response DoneTask200JSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask400ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask401ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask404ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask409ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask503ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTaskRequestObject struct {
+	Ref TaskRef `json:"ref"`
+}
+
+type ReopenTaskResponseObject interface {
+	VisitReopenTaskResponse(w http.ResponseWriter) error
+}
+
+type ReopenTask200JSONResponse TaskDetail
+
+func (response ReopenTask200JSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask400ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask401ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask404ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask409ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask503ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAuthLoginRequestObject struct {
 }
 
@@ -3014,6 +3423,15 @@ type StrictServerInterface interface {
 	// PatchTask Edit a task
 	// (PATCH /api/v1/tasks/{ref})
 	PatchTask(ctx context.Context, request PatchTaskRequestObject) (PatchTaskResponseObject, error)
+	// CloseTask Close a task
+	// (POST /api/v1/tasks/{ref}/close)
+	CloseTask(ctx context.Context, request CloseTaskRequestObject) (CloseTaskResponseObject, error)
+	// DoneTask Mark a task done
+	// (POST /api/v1/tasks/{ref}/done)
+	DoneTask(ctx context.Context, request DoneTaskRequestObject) (DoneTaskResponseObject, error)
+	// ReopenTask Reopen a task
+	// (POST /api/v1/tasks/{ref}/reopen)
+	ReopenTask(ctx context.Context, request ReopenTaskRequestObject) (ReopenTaskResponseObject, error)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
@@ -3473,6 +3891,94 @@ func (sh *strictHandler) PatchTask(w http.ResponseWriter, r *http.Request, ref T
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PatchTaskResponseObject); ok {
 		if err := validResponse.VisitPatchTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseTask operation middleware
+func (sh *strictHandler) CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request CloseTaskRequestObject
+
+	request.Ref = ref
+
+	var body CloseTaskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseTask(ctx, request.(CloseTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseTaskResponseObject); ok {
+		if err := validResponse.VisitCloseTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DoneTask operation middleware
+func (sh *strictHandler) DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request DoneTaskRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DoneTask(ctx, request.(DoneTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DoneTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DoneTaskResponseObject); ok {
+		if err := validResponse.VisitDoneTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReopenTask operation middleware
+func (sh *strictHandler) ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request ReopenTaskRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReopenTask(ctx, request.(ReopenTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReopenTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReopenTaskResponseObject); ok {
+		if err := validResponse.VisitReopenTaskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -14,7 +14,7 @@ import (
 
 var (
 	actorColumns = []string{"id", "handle", "kind", "first_seen_at", "last_seen_at"}
-	eventColumns = []string{"id", "at", "actor_id", "principal", "initiative_id", "task_id", "type", "ref_id", "summary", "data"}
+	eventColumns = []string{"id", "at", "actor_id", "principal", "on_behalf_of", "initiative_id", "task_id", "type", "ref_id", "summary", "data"}
 )
 
 // Actor is who a write acts as: a handle, and whether it is the operator.
@@ -26,12 +26,18 @@ type Actor struct {
 	// one leaves it. Meta is a JSON object.
 	WayBack string
 	Meta    string
+	// OnBehalfOf is the handle of the actor the Board-On-Behalf-Of header names,
+	// or empty. Only the operations that record it read it.
+	OnBehalfOf string
 }
 
 // Event is one row of the append-only events table. InitiativeID, TaskID and
 // RefID are empty when the event has none. Data holds the type-specific fields.
 type Event struct {
-	Principal    string
+	Principal string
+	// OnBehalfOfID is the actors row the event is made on behalf of, or empty;
+	// OnBehalf returns it.
+	OnBehalfOfID string
 	Type         string
 	InitiativeID string
 	TaskID       string
@@ -87,6 +93,17 @@ func setOptional(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID strin
 	return nil
 }
 
+// OnBehalf makes sure the actor a.OnBehalfOf names exists and returns its id, or
+// "" when the write names none. The actor is an ordinary agent row unless an
+// earlier use made it the operator's.
+func OnBehalf(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.Time) (string, error) {
+	handle := strings.TrimSpace(a.OnBehalfOf)
+	if handle == "" {
+		return "", nil
+	}
+	return UpsertActor(ctx, tx, d, Actor{Handle: handle}, now)
+}
+
 // nullable is the column value of an optional text field.
 func nullable(s string) any {
 	if s == "" {
@@ -119,7 +136,7 @@ func AppendAs(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, 
 		return fmt.Errorf("record event: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, d.Rebind(d.Insert("events", eventColumns)),
-		id, store.EncodeTime(now), actorID, e.Principal, nullable(e.InitiativeID), nullable(e.TaskID), e.Type, nullable(e.RefID), e.Summary, string(payload))
+		id, store.EncodeTime(now), actorID, e.Principal, nullable(e.OnBehalfOfID), nullable(e.InitiativeID), nullable(e.TaskID), e.Type, nullable(e.RefID), e.Summary, string(payload))
 	if err != nil {
 		return fmt.Errorf("record event: %w", err)
 	}

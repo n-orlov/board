@@ -196,3 +196,31 @@ func TestPromotionTouchesOnlyTheSessionsHandleAndKeepsOtherAgents(t *testing.T) 
 		t.Errorf("operator rows = %d (%v)", n, err)
 	}
 }
+
+func TestOnBehalfUpsertsTheNamedActorAndAppendStoresItOnTheEvent(t *testing.T) {
+	st := newStore(t)
+	inTx(t, st, func(tx *sql.Tx) {
+		none, err := OnBehalf(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host"}, t0)
+		if err != nil || none != "" {
+			t.Fatalf("no header = %q (%v), want no actor", none, err)
+		}
+		blank, err := OnBehalf(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host", OnBehalfOf: "  "}, t0)
+		if err != nil || blank != "" {
+			t.Fatalf("blank header = %q (%v), want no actor", blank, err)
+		}
+		id, err := OnBehalf(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host", OnBehalfOf: " operator "}, t0)
+		if err != nil || id == "" {
+			t.Fatalf("OnBehalf = %q (%v)", id, err)
+		}
+		if err := Append(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host"}, t0,
+			Event{Principal: "key:k", Type: "ping", Summary: "s", OnBehalfOfID: id}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var handle string
+	err := st.Reader().QueryRowContext(context.Background(),
+		`SELECT ob.handle FROM events e JOIN actors ob ON ob.id = e.on_behalf_of`).Scan(&handle)
+	if err != nil || handle != "operator" {
+		t.Errorf("on_behalf_of = %q (%v), want operator", handle, err)
+	}
+}
