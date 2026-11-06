@@ -86,13 +86,8 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 	if err != nil {
 		return Task{}, err
 	}
-	if !contains(tr.allowed, cur.Status) {
-		return Task{}, ConflictError{Ref: cur.Ref, Status: cur.Status, Action: tr.action}
-	}
-	if tr.event == EventReopened {
-		if err := s.writable(ctx, tx, Task{InitiativeID: cur.InitiativeID, Initiative: cur.Initiative}); err != nil {
-			return Task{}, err
-		}
+	if err := s.permit(ctx, tx, cur, tr); err != nil {
+		return Task{}, err
 	}
 	now := s.now()
 	d := s.Store.Dialect()
@@ -109,6 +104,18 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 		return Task{}, err
 	}
 	return s.find(ctx, tx, cur.ID)
+}
+
+// permit returns an error unless the transition may leave the task's current
+// status, and, for a reopen, unless its initiative is open.
+func (s Store) permit(ctx context.Context, tx *sql.Tx, cur Task, tr transition) error {
+	if !contains(tr.allowed, cur.Status) {
+		return ConflictError{Ref: cur.Ref, Status: cur.Status, Action: tr.action}
+	}
+	if tr.event != EventReopened {
+		return nil
+	}
+	return s.writable(ctx, tx, Task{InitiativeID: cur.InitiativeID, Initiative: cur.Initiative})
 }
 
 func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Task, now time.Time, tr transition) error {
