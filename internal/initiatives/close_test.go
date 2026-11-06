@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-
 func TestReopenOfAnOpenOrUnknownInitiativeIsRefusedAndWritesNothing(t *testing.T) {
 	s := newStore(t)
 	mk(t, s, "aa")
