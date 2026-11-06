@@ -22,6 +22,12 @@ func (p problemResponse) VisitAddTaskDepResponse(w http.ResponseWriter) error { 
 func (p problemResponse) VisitRemoveTaskDepResponse(w http.ResponseWriter) error {
 	return p.write(w)
 }
+func (p problemResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
+func (p problemResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
 
 // taskOps is the /api/v1/tasks operations (SPEC 6.4). Any authenticated
 // principal may use them: v1 has no ACL.
@@ -355,3 +361,37 @@ func (o taskOps) RemoveTaskDep(ctx context.Context, req RemoveTaskDepRequestObje
 	got, err := o.tasks.RemoveDep(ctx, who.AuditActor(), who.Principal, req.Ref, req.BlockedByRef)
 	return transitioned(ctx, o, got, err, func(d TaskDetail) RemoveTaskDepResponseObject { return RemoveTaskDep200JSONResponse(d) })
 }
+
+// RecordTaskCheck records a check on a watch task and moves its next_check_at.
+func (o taskOps) RecordTaskCheck(ctx context.Context, req RecordTaskCheckRequestObject) (RecordTaskCheckResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	if req.Body == nil {
+		return failure(http.StatusBadRequest, "the request needs a JSON body with a summary").withNext(nextSummaryBody), nil
+	}
+	got, err := o.tasks.Check(ctx, who.AuditActor(), who.Principal, req.Ref, req.Body.Summary, req.Body.NextCheckAt)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) RecordTaskCheckResponseObject { return RecordTaskCheck200JSONResponse(d) })
+}
+
+// RecordTaskMilestone records a milestone on a task.
+func (o taskOps) RecordTaskMilestone(ctx context.Context, req RecordTaskMilestoneRequestObject) (RecordTaskMilestoneResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	if req.Body == nil {
+		return failure(http.StatusBadRequest, "the request needs a JSON body with a summary").withNext(nextSummaryBody), nil
+	}
+	var data map[string]any
+	if req.Body.Data != nil {
+		data = *req.Body.Data
+	}
+	got, err := o.tasks.Milestone(ctx, who.AuditActor(), who.Principal, req.Ref, req.Body.Summary, data)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) RecordTaskMilestoneResponseObject {
+		return RecordTaskMilestone200JSONResponse(d)
+	})
+}
+
+const nextSummaryBody = "Send a JSON body such as {\"summary\": \"...\"}, with a summary of 1 to 200 characters."

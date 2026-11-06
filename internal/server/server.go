@@ -10,6 +10,7 @@ import (
 
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/tasks"
@@ -61,6 +62,12 @@ func WithInitiatives(st *initiatives.Store) Option {
 // both the operations answer 503.
 func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 	return func(o *operations) { o.taskOps = taskOps{tasks: st, leases: ls} }
+}
+
+// WithEvents serves GET /api/v1/events and GET /api/v1/tasks/{ref}/events from
+// st; without it they answer 503.
+func WithEvents(st *events.Store) Option {
+	return func(o *operations) { o.eventOps = eventOps{events: st} }
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

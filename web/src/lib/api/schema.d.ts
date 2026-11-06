@@ -340,6 +340,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{ref}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a check on a watch task
+         * @description Appends `check_recorded` on a watch task and moves its `next_check_at` to the time sent, or to now plus the task's cadence when none is sent. Answers 200 with the task. A work task, or a closed watch task, is 409. A `summary` that is empty or longer than 200 characters is 400. An unknown task is 404.
+         */
+        post: operations["recordTaskCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{ref}/milestones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a milestone on a task
+         * @description Appends `milestone` on a task of any kind and status; the task row is not touched. The event's `data` carries the task `ref`, the `summary` and, when sent, the caller's `data` object under the key `data`. Answers 200 with the task. A `summary` that is empty or longer than 200 characters is 400. An unknown task is 404.
+         */
+        post: operations["recordTaskMilestone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{ref}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a task's events
+         * @description A page of the events that name the task, in the order they were written. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous page; the response's `next_after` is the value to send, and is absent on the last page. An unknown task is 404.
+         */
+        get: operations["listTaskEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List events
+         * @description A page of events in the order they were written. Filters combine: `since` keeps the events after an event (its id or `E<n>` ref) or from an RFC 3339 time on, `initiative` (slug or ULID) and `task` (ref or ULID) keep the events that name them, `type` keeps the events of any of the types given and `actor` those of one handle. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous page; the response's `next_after` is the value to send, and is absent on the last page. An initiative or task filter that names nothing is 404.
+         */
+        get: operations["listEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -741,6 +821,58 @@ export interface components {
              */
             resolution: string;
         };
+        TaskCheck: {
+            /** @description Required, 1 to 200 characters. What the check found. */
+            summary: string;
+            /**
+             * Format: date-time
+             * @description When the next check is due. Default is now plus the task's cadence.
+             */
+            next_check_at?: string;
+        };
+        TaskMilestone: {
+            /** @description Required, 1 to 200 characters. */
+            summary: string;
+            /** @description Anything to record with the milestone, kept under the event's `data.data`. */
+            data?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description One row of the audit trail. */
+        Event: {
+            /** @description The event's ULID. */
+            id: string;
+            /**
+             * @description The short ref `E<n>`.
+             * @example E42
+             */
+            ref: string;
+            /** Format: date-time */
+            at: string;
+            /** @example task_done */
+            type: string;
+            /** @description The handle of the actor the event was written as. */
+            actor: string;
+            /** @description The principal that authenticated. */
+            principal: string;
+            /** @description The slug of the initiative the event names. Absent when it names none. */
+            initiative?: string;
+            /** @description The ref of the task the event names. Absent when it names none. */
+            task?: string;
+            /** @description The id of the object the event is about. Absent when it has none. */
+            ref_id?: string;
+            /** @description A one-line description. */
+            summary: string;
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description A page of events. */
+        EventList: {
+            items: components["schemas"]["Event"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others. */
         TaskPatch: {
             /** @description 1 to 200 characters. */
@@ -888,6 +1020,10 @@ export interface components {
         TaskRef: string;
         /** @description The ref or ULID, in either letter case, of the task that blocks. */
         BlockedByRef: string;
+        /** @description The page size, 1 to 1000. Default 100. */
+        EventLimit: number;
+        /** @description An event id or `E<n>` ref. The page starts after it. */
+        EventAfter: string;
     };
     requestBodies: never;
     headers: never;
@@ -1429,6 +1565,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    recordTaskCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCheck"];
+            };
+        };
+        responses: {
+            /** @description The task, with its new `next_check_at` and derived `overdue`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    recordTaskMilestone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskMilestone"];
+            };
+        };
+        responses: {
+            /** @description The task. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listTaskEvents: {
+        parameters: {
+            query?: {
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description An event id or `E<n>` ref. The page starts after it. */
+                after?: components["parameters"]["EventAfter"];
+            };
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listEvents: {
+        parameters: {
+            query?: {
+                /** @description An event id, an `E<n>` ref (either letter case) or an RFC 3339 time. */
+                since?: string;
+                /** @description An initiative slug or ULID. */
+                initiative?: string;
+                /** @description A task ref or ULID. */
+                task?: string;
+                /** @description Keep events of this type. Repeatable. */
+                type?: string[];
+                /** @description Keep the events of this actor handle. */
+                actor?: string;
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description An event id or `E<n>` ref. The page starts after it. */
+                after?: components["parameters"]["EventAfter"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventList"];
                 };
             };
             400: components["responses"]["BadRequest"];

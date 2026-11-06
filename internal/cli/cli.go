@@ -10,6 +10,7 @@ import (
 
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/server"
@@ -153,7 +154,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st})); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st})); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

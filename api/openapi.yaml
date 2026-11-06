@@ -25,6 +25,8 @@ tags:
     description: Initiatives, the groups of tasks, with tags.
   - name: tasks
     description: Tasks, the units of work and the watches, created, read and edited.
+  - name: events
+    description: The audit trail, listed with filters and paging.
   - name: meta
     description: The server's versions, the caller, and the agent protocol the caller has read.
 paths:
@@ -639,6 +641,176 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/checks:
+    post:
+      operationId: recordTaskCheck
+      tags: [tasks]
+      summary: Record a check on a watch task
+      description: >-
+        Appends `check_recorded` on a watch task and moves its `next_check_at` to the time sent, or to now plus the
+        task's cadence when none is sent. Answers 200 with the task. A work task, or a closed watch task, is 409. A
+        `summary` that is empty or longer than 200 characters is 400. An unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCheck"
+      responses:
+        "200":
+          description: The task, with its new `next_check_at` and derived `overdue`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/milestones:
+    post:
+      operationId: recordTaskMilestone
+      tags: [tasks]
+      summary: Record a milestone on a task
+      description: >-
+        Appends `milestone` on a task of any kind and status; the task row is not touched. The event's `data` carries
+        the task `ref`, the `summary` and, when sent, the caller's `data` object under the key `data`. Answers 200
+        with the task. A `summary` that is empty or longer than 200 characters is 400. An unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskMilestone"
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/events:
+    get:
+      operationId: listTaskEvents
+      tags: [tasks]
+      summary: List a task's events
+      description: >-
+        A page of the events that name the task, in the order they were written. `limit` is 1 to 1000, default 100.
+        `after` is the id or `E<n>` ref of the last event of the previous page; the response's `next_after` is the
+        value to send, and is absent on the last page. An unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/EventLimit"
+        - $ref: "#/components/parameters/EventAfter"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      tags: [events]
+      summary: List events
+      description: >-
+        A page of events in the order they were written. Filters combine: `since` keeps the events after an event
+        (its id or `E<n>` ref) or from an RFC 3339 time on, `initiative` (slug or ULID) and `task` (ref or ULID) keep
+        the events that name them, `type` keeps the events of any of the types given and `actor` those of one
+        handle. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous
+        page; the response's `next_after` is the value to send, and is absent on the last page. An initiative or
+        task filter that names nothing is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: An event id, an `E<n>` ref (either letter case) or an RFC 3339 time.
+          schema:
+            type: string
+        - name: initiative
+          in: query
+          required: false
+          description: An initiative slug or ULID.
+          schema:
+            type: string
+        - name: task
+          in: query
+          required: false
+          description: A task ref or ULID.
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          description: Keep events of this type. Repeatable.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: actor
+          in: query
+          required: false
+          description: Keep the events of this actor handle.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/EventLimit"
+        - $ref: "#/components/parameters/EventAfter"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -847,6 +1019,20 @@ components:
       in: path
       required: true
       description: The ref or ULID, in either letter case, of the task that blocks.
+      schema:
+        type: string
+    EventLimit:
+      name: limit
+      in: query
+      required: false
+      description: The page size, 1 to 1000. Default 100.
+      schema:
+        type: integer
+    EventAfter:
+      name: after
+      in: query
+      required: false
+      description: An event id or `E<n>` ref. The page starts after it.
       schema:
         type: string
   responses:
@@ -1283,6 +1469,79 @@ components:
           type: string
           description: Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
           examples: [completed]
+    TaskCheck:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: string
+          description: Required, 1 to 200 characters. What the check found.
+        next_check_at:
+          type: string
+          format: date-time
+          description: When the next check is due. Default is now plus the task's cadence.
+    TaskMilestone:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: string
+          description: Required, 1 to 200 characters.
+        data:
+          type: object
+          additionalProperties: true
+          description: Anything to record with the milestone, kept under the event's `data.data`.
+    Event:
+      type: object
+      description: One row of the audit trail.
+      required: [id, ref, at, type, actor, principal, summary, data]
+      properties:
+        id:
+          type: string
+          description: The event's ULID.
+        ref:
+          type: string
+          description: The short ref `E<n>`.
+          examples: [E42]
+        at:
+          type: string
+          format: date-time
+        type:
+          type: string
+          examples: [task_done]
+        actor:
+          type: string
+          description: The handle of the actor the event was written as.
+        principal:
+          type: string
+          description: The principal that authenticated.
+        initiative:
+          type: string
+          description: The slug of the initiative the event names. Absent when it names none.
+        task:
+          type: string
+          description: The ref of the task the event names. Absent when it names none.
+        ref_id:
+          type: string
+          description: The id of the object the event is about. Absent when it has none.
+        summary:
+          type: string
+          description: A one-line description.
+        data:
+          type: object
+          additionalProperties: true
+    EventList:
+      type: object
+      description: A page of events.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        next_after:
+          type: string
+          description: The `after` value that fetches the following page. Absent on the last page.
     TaskPatch:
       type: object
       description: >-

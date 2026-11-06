@@ -673,9 +673,9 @@ and CLI can show badges without the lists.
 | GET/PATCH | `/tasks/{ref}` | read (with deps, live leases, open asks) / update |
 | POST | `/tasks/{ref}/done`, `/reopen`, `/close` | close takes `resolution` |
 | POST/DELETE | `/tasks/{ref}/deps/{blockedByRef}` | |
-| POST | `/tasks/{ref}/checks` | watch: record a check `{summary, next_check_at?}` |
-| POST | `/tasks/{ref}/milestones` | `{summary, data?}` |
-| GET | `/tasks/{ref}/events` | timeline |
+| POST | `/tasks/{ref}/checks` | watch: record a check `{summary, next_check_at?}`; answers the task (§6.4) |
+| POST | `/tasks/{ref}/milestones` | `{summary, data?}`; answers the task (§6.4) |
+| GET | `/tasks/{ref}/events` | the task's events in order, with `limit`/`after` paging (§6.2 below) |
 | GET/POST | `/leases` | list (filters: state, actor, task, resource) / start |
 | POST | `/leases/{id}/renew`, `/end`, `/ack` | |
 | GET/POST | `/asks` | list (state, actor, task) / raise |
@@ -683,7 +683,7 @@ and CLI can show badges without the lists.
 | POST | `/asks/{id}/answer`, `/withdraw` | |
 | GET/POST | `/notes` | list (filters below) / post |
 | GET | `/notes/{id}` | full body |
-| GET | `/events` | global change log (filters: since, initiative, task, type, actor) |
+| GET | `/events` | global change log (filters: since, initiative, task, type, actor; paging: limit, after; below) |
 | PUT | `/cursors/{stream}` | ack read position |
 | GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
@@ -696,6 +696,21 @@ and CLI can show badges without the lists.
 | GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
 | GET | `/auth/login`, `/auth/oidc/callback`; GET `/auth/session`; POST `/auth/logout` | OIDC (§3.2); outside `/api/v1` |
 | GET | `/metrics` | Prometheus text |
+
+**Events** (`GET /api/v1/events`, `GET /api/v1/tasks/{ref}/events`, in `api/openapi.yaml`): a page of
+`{items, next_after?}` ordered by the order the events were written (the `n` behind `E<n>`). Each item is `{id, ref,
+at, type, actor, principal, initiative?, task?, ref_id?, summary, data}`: `id` the ULID, `ref` the short ref `E<n>`,
+`actor` the handle of the actor it was written as, `principal` the authenticated principal, `initiative` a slug, `task`
+a ref (`<slug>-<seq>`), `ref_id` the id of the object it is about, `summary` the one line of §4.6; the optional keys are
+omitted when the event has none. Filters combine with AND: `initiative` (slug or ULID) and `task` (ref or ULID)
+keep the events that name them, `type` (repeatable, OR among the values) keeps those types, `actor` one handle, and
+`since` the events after an event given as its ULID or `E<n>` ref (either letter case) or from an RFC 3339 time on
+(`at >= since`). An empty `type`, a `since` that is none of the three forms, an `after` that is not an event ULID or
+`E<n>` ref, or a `limit` outside 1 to 1000 (default 100) is **400** with a `next`. An `initiative` or `task` that names
+nothing is **404**; a `type` or `actor` that matches nothing is **200** with `items: []`. `next_after` is the ULID of
+the last item to send as `after` for the following page, and is omitted on the last page (a page that ends exactly at
+the last event has none). `GET /tasks/{ref}/events` is `GET /events?task={ref}` with only `limit` and `after`; an
+unknown task is **404**.
 
 **Note filters**: `since=<ulid|RFC3339|cursor>`, `task=<ref>`, `initiative=<slug>`,
 `resource=<r>` (repeatable), `broadcast=only|exclude`, `mention=<handle>`, `author=<handle>`,
@@ -737,8 +752,9 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
 ### 6.4 Tasks
 
 `POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}`, `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close`, and
-`POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}` are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`),
-checks, milestones and events of §6.2 come with later tasks. Any authenticated
+`POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}`, `POST /api/v1/tasks/{ref}/checks` and `/milestones` and
+`GET /api/v1/tasks/{ref}/events` (the events of §6.2) are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`) comes
+with a later task. Any authenticated
 principal may use them. The server answers 503 problem documents when it runs without a store.
 
 - **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
@@ -792,6 +808,22 @@ principal may use them. The server answers 503 problem documents when it runs wi
   (`detail` says `aa-2 is not blocked by aa-1`), and so is an unknown task; nothing is written then. A dependency is
   open while its blocker is not `closed`, so `blocked` stays true for a blocker that is only `done` and turns false once
   the blocker is closed (and true again if it is reopened); `GET` reads the two lists as `deps` and `blocking`.
+- **`POST /api/v1/tasks/{ref}/checks`**, body `{summary, next_check_at?}`, records a check on a watch task and answers
+  **200** with the task. `summary` is 1 to 200 characters (**400** otherwise, and for a missing body). In one
+  transaction the server upserts the actor, moves `next_check_at` to the time sent, or to now plus `cadence_seconds`
+  when none is sent (a time in the past is accepted, and makes the task overdue), touches `updated_at` and appends
+  `check_recorded`, `data` `{ref, summary, next_check_at}`, summary `check on aa-2: <summary>`. A work task is **409**
+  (`detail` names the task and says it is a work task), and so is a closed watch task; an unknown task is **404**. A
+  refused check changes nothing and records no actor. `overdue` is true only for a watch task that is not closed with
+  `next_check_at` before now, so a later check, or closing the task, clears it.
+- **`POST /api/v1/tasks/{ref}/milestones`**, body `{summary, data?}`, records a milestone on a task of any kind and
+  status (open, done or closed) and answers **200** with the task, which it does not change. `summary` is 1 to 200
+  characters, `data` a JSON object; either wrong, or no body, is **400**, and an unknown task is **404**. It appends
+  `milestone`, `data` `{ref, summary}` plus the caller's object under `data` when one was sent, summary
+  `milestone on aa-2: <summary>`.
+- **`GET /api/v1/tasks/{ref}/events`** lists the events whose task is `ref`, oldest first, so a task that was created,
+  edited, marked done, reopened and closed reads `task_created`, `task_updated`, `task_done`, `task_reopened`,
+  `task_closed`. Events of other tasks and of the initiative itself are not in it. See §6.2 for the item and the paging.
 - **The task document** (all of the above answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
   status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,

@@ -300,6 +300,48 @@ type CreatedKey struct {
 // CreatedKeyStatus The key's state now.
 type CreatedKeyStatus string
 
+// Event One row of the audit trail.
+type Event struct {
+	// Actor The handle of the actor the event was written as.
+	Actor string                 `json:"actor"`
+	At    time.Time              `json:"at"`
+	Data  map[string]interface{} `json:"data"`
+
+	// Id The event's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative the event names. Absent when it names none.
+	Initiative *string `json:"initiative,omitempty"`
+
+	// Principal The principal that authenticated.
+	Principal string `json:"principal"`
+
+	// Ref The short ref `E<n>`.
+	//
+	// Examples: E42
+	Ref string `json:"ref"`
+
+	// RefId The id of the object the event is about. Absent when it has none.
+	RefId *string `json:"ref_id,omitempty"`
+
+	// Summary A one-line description.
+	Summary string `json:"summary"`
+
+	// Task The ref of the task the event names. Absent when it names none.
+	Task *string `json:"task,omitempty"`
+
+	// Type Examples: task_done
+	Type string `json:"type"`
+}
+
+// EventList A page of events.
+type EventList struct {
+	Items []Event `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
 // ExternalRef A link to a ticket, pull request or build.
 type ExternalRef struct {
 	// Label 1 to 80 characters.
@@ -592,6 +634,15 @@ type TaskResolution string
 // TaskStatus defines model for Task.Status.
 type TaskStatus string
 
+// TaskCheck defines model for TaskCheck.
+type TaskCheck struct {
+	// NextCheckAt When the next check is due. Default is now plus the task's cadence.
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+
+	// Summary Required, 1 to 200 characters. What the check found.
+	Summary string `json:"summary"`
+}
+
 // TaskClose defines model for TaskClose.
 type TaskClose struct {
 	// Resolution Required. Why the task is closed. One of `completed`, `dropped`, `superseded` or `duplicate`.
@@ -715,6 +766,15 @@ type TaskLink struct {
 // TaskLinkStatus defines model for TaskLink.Status.
 type TaskLinkStatus string
 
+// TaskMilestone defines model for TaskMilestone.
+type TaskMilestone struct {
+	// Data Anything to record with the milestone, kept under the event's `data.data`.
+	Data *map[string]interface{} `json:"data,omitempty"`
+
+	// Summary Required, 1 to 200 characters.
+	Summary string `json:"summary"`
+}
+
 // TaskPatch The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others.
 type TaskPatch struct {
 	// CadenceSeconds Watch tasks only. 60 to 31536000.
@@ -744,6 +804,12 @@ type TaskPatch struct {
 // BlockedByRef defines model for BlockedByRef.
 type BlockedByRef = string
 
+// EventAfter defines model for EventAfter.
+type EventAfter = string
+
+// EventLimit defines model for EventLimit.
+type EventLimit = int
+
 // TaskRef defines model for TaskRef.
 type TaskRef = string
 
@@ -768,6 +834,30 @@ type Unauthorized = Problem
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
 
+// ListEventsParams defines parameters for ListEvents.
+type ListEventsParams struct {
+	// Since An event id, an `E<n>` ref (either letter case) or an RFC 3339 time.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// Initiative An initiative slug or ULID.
+	Initiative *string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Task A task ref or ULID.
+	Task *string `form:"task,omitempty" json:"task,omitempty"`
+
+	// Type Keep events of this type. Repeatable.
+	Type *[]string `form:"type,omitempty" json:"type,omitempty"`
+
+	// Actor Keep the events of this actor handle.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After An event id or `E<n>` ref. The page starts after it.
+	After *EventAfter `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // ListInitiativesParams defines parameters for ListInitiatives.
 type ListInitiativesParams struct {
 	// Tag Keep initiatives that carry this tag. Repeatable.
@@ -778,6 +868,15 @@ type ListInitiativesParams struct {
 
 	// After An initiative ULID or slug, in either letter case. The page starts after it.
 	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// ListTaskEventsParams defines parameters for ListTaskEvents.
+type ListTaskEventsParams struct {
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After An event id or `E<n>` ref. The page starts after it.
+	After *EventAfter `form:"after,omitempty" json:"after,omitempty"`
 }
 
 // PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
@@ -795,8 +894,14 @@ type CreateTaskJSONRequestBody = TaskCreate
 // PatchTaskJSONRequestBody defines body for PatchTask for application/json ContentType.
 type PatchTaskJSONRequestBody = TaskPatch
 
+// RecordTaskCheckJSONRequestBody defines body for RecordTaskCheck for application/json ContentType.
+type RecordTaskCheckJSONRequestBody = TaskCheck
+
 // CloseTaskJSONRequestBody defines body for CloseTask for application/json ContentType.
 type CloseTaskJSONRequestBody = TaskClose
+
+// RecordTaskMilestoneJSONRequestBody defines body for RecordTaskMilestone for application/json ContentType.
+type RecordTaskMilestoneJSONRequestBody = TaskMilestone
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -815,6 +920,9 @@ type ServerInterface interface {
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(w http.ResponseWriter, r *http.Request)
+	// ListEvents List events
+	// (GET /api/v1/events)
+	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams)
@@ -845,6 +953,9 @@ type ServerInterface interface {
 	// PatchTask Edit a task
 	// (PATCH /api/v1/tasks/{ref})
 	PatchTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// RecordTaskCheck Record a check on a watch task
+	// (POST /api/v1/tasks/{ref}/checks)
+	RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef)
 	// CloseTask Close a task
 	// (POST /api/v1/tasks/{ref}/close)
 	CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
@@ -857,6 +968,12 @@ type ServerInterface interface {
 	// DoneTask Mark a task done
 	// (POST /api/v1/tasks/{ref}/done)
 	DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// ListTaskEvents List a task's events
+	// (GET /api/v1/tasks/{ref}/events)
+	ListTaskEvents(w http.ResponseWriter, r *http.Request, ref TaskRef, params ListTaskEventsParams)
+	// RecordTaskMilestone Record a milestone on a task
+	// (POST /api/v1/tasks/{ref}/milestones)
+	RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef)
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
@@ -962,6 +1079,82 @@ func (siw *ServerInterfaceWrapper) PutProtocolSeen(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutProtocolSeen(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListEventsParams
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "since", err)
+		return
+	}
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "initiative", err)
+		return
+	}
+
+	// ------------- Optional query parameter "task" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "task", err)
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "type", err)
+		return
+	}
+
+	// ------------- Optional query parameter "actor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "actor", err)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "limit", err)
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "after", err)
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1189,6 +1382,32 @@ func (siw *ServerInterfaceWrapper) PatchTask(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// RecordTaskCheck operation middleware
+func (siw *ServerInterfaceWrapper) RecordTaskCheck(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecordTaskCheck(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CloseTask operation middleware
 func (siw *ServerInterfaceWrapper) CloseTask(w http.ResponseWriter, r *http.Request) {
 
@@ -1302,6 +1521,77 @@ func (siw *ServerInterfaceWrapper) DoneTask(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DoneTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTaskEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListTaskEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTaskEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "limit", err)
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.bindFailed(w, r, "after", err)
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTaskEvents(w, r, ref, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RecordTaskMilestone operation middleware
+func (siw *ServerInterfaceWrapper) RecordTaskMilestone(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecordTaskMilestone(w, r, ref)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1561,6 +1851,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/close", wrapper.CloseTask)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tasks/{ref}/deps/{blockedByRef}", wrapper.RemoveTaskDep)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/deps/{blockedByRef}", wrapper.AddTaskDep)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/checks", wrapper.RecordTaskCheck)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/milestones", wrapper.RecordTaskMilestone)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -1911,6 +2205,92 @@ type PutProtocolSeen503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response PutProtocolSeen503ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEventsRequestObject struct {
+	Params ListEventsParams
+}
+
+type ListEventsResponseObject interface {
+	VisitListEventsResponse(w http.ResponseWriter) error
+}
+
+type ListEvents200JSONResponse EventList
+
+func (response ListEvents200JSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvents400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListEvents400ApplicationProblemPlusJSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvents401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListEvents401ApplicationProblemPlusJSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvents404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListEvents404ApplicationProblemPlusJSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEvents503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListEvents503ApplicationProblemPlusJSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2733,6 +3113,109 @@ func (response PatchTask503ApplicationProblemPlusJSONResponse) VisitPatchTaskRes
 	return err
 }
 
+type RecordTaskCheckRequestObject struct {
+	Ref  TaskRef `json:"ref"`
+	Body *RecordTaskCheckJSONRequestBody
+}
+
+type RecordTaskCheckResponseObject interface {
+	VisitRecordTaskCheckResponse(w http.ResponseWriter) error
+}
+
+type RecordTaskCheck200JSONResponse TaskDetail
+
+func (response RecordTaskCheck200JSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskCheck400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck400ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskCheck401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck401ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskCheck404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck404ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskCheck409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck409ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskCheck503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck503ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CloseTaskRequestObject struct {
 	Ref  TaskRef `json:"ref"`
 	Body *CloseTaskJSONRequestBody
@@ -3117,6 +3600,180 @@ type DoneTask503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response DoneTask503ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTaskEventsRequestObject struct {
+	Ref    TaskRef `json:"ref"`
+	Params ListTaskEventsParams
+}
+
+type ListTaskEventsResponseObject interface {
+	VisitListTaskEventsResponse(w http.ResponseWriter) error
+}
+
+type ListTaskEvents200JSONResponse EventList
+
+func (response ListTaskEvents200JSONResponse) VisitListTaskEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTaskEvents400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListTaskEvents400ApplicationProblemPlusJSONResponse) VisitListTaskEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTaskEvents401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListTaskEvents401ApplicationProblemPlusJSONResponse) VisitListTaskEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTaskEvents404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListTaskEvents404ApplicationProblemPlusJSONResponse) VisitListTaskEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTaskEvents503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListTaskEvents503ApplicationProblemPlusJSONResponse) VisitListTaskEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestoneRequestObject struct {
+	Ref  TaskRef `json:"ref"`
+	Body *RecordTaskMilestoneJSONRequestBody
+}
+
+type RecordTaskMilestoneResponseObject interface {
+	VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error
+}
+
+type RecordTaskMilestone200JSONResponse TaskDetail
+
+func (response RecordTaskMilestone200JSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestone400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone400ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestone401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone401ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestone404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone404ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestone503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone503ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -3664,6 +4321,9 @@ type StrictServerInterface interface {
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(ctx context.Context, request PutProtocolSeenRequestObject) (PutProtocolSeenResponseObject, error)
+	// ListEvents List events
+	// (GET /api/v1/events)
+	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(ctx context.Context, request ListInitiativesRequestObject) (ListInitiativesResponseObject, error)
@@ -3694,6 +4354,9 @@ type StrictServerInterface interface {
 	// PatchTask Edit a task
 	// (PATCH /api/v1/tasks/{ref})
 	PatchTask(ctx context.Context, request PatchTaskRequestObject) (PatchTaskResponseObject, error)
+	// RecordTaskCheck Record a check on a watch task
+	// (POST /api/v1/tasks/{ref}/checks)
+	RecordTaskCheck(ctx context.Context, request RecordTaskCheckRequestObject) (RecordTaskCheckResponseObject, error)
 	// CloseTask Close a task
 	// (POST /api/v1/tasks/{ref}/close)
 	CloseTask(ctx context.Context, request CloseTaskRequestObject) (CloseTaskResponseObject, error)
@@ -3706,6 +4369,12 @@ type StrictServerInterface interface {
 	// DoneTask Mark a task done
 	// (POST /api/v1/tasks/{ref}/done)
 	DoneTask(ctx context.Context, request DoneTaskRequestObject) (DoneTaskResponseObject, error)
+	// ListTaskEvents List a task's events
+	// (GET /api/v1/tasks/{ref}/events)
+	ListTaskEvents(ctx context.Context, request ListTaskEventsRequestObject) (ListTaskEventsResponseObject, error)
+	// RecordTaskMilestone Record a milestone on a task
+	// (POST /api/v1/tasks/{ref}/milestones)
+	RecordTaskMilestone(ctx context.Context, request RecordTaskMilestoneRequestObject) (RecordTaskMilestoneResponseObject, error)
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(ctx context.Context, request ReopenTaskRequestObject) (ReopenTaskResponseObject, error)
@@ -3890,6 +4559,32 @@ func (sh *strictHandler) PutProtocolSeen(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutProtocolSeenResponseObject); ok {
 		if err := validResponse.VisitPutProtocolSeenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListEvents operation middleware
+func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
+	var request ListEventsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListEvents(ctx, request.(ListEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListEventsResponseObject); ok {
+		if err := validResponse.VisitListEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4175,6 +4870,39 @@ func (sh *strictHandler) PatchTask(w http.ResponseWriter, r *http.Request, ref T
 	}
 }
 
+// RecordTaskCheck operation middleware
+func (sh *strictHandler) RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request RecordTaskCheckRequestObject
+
+	request.Ref = ref
+
+	var body RecordTaskCheckJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RecordTaskCheck(ctx, request.(RecordTaskCheckRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RecordTaskCheck")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RecordTaskCheckResponseObject); ok {
+		if err := validResponse.VisitRecordTaskCheckResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CloseTask operation middleware
 func (sh *strictHandler) CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
 	var request CloseTaskRequestObject
@@ -4284,6 +5012,66 @@ func (sh *strictHandler) DoneTask(w http.ResponseWriter, r *http.Request, ref Ta
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DoneTaskResponseObject); ok {
 		if err := validResponse.VisitDoneTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTaskEvents operation middleware
+func (sh *strictHandler) ListTaskEvents(w http.ResponseWriter, r *http.Request, ref TaskRef, params ListTaskEventsParams) {
+	var request ListTaskEventsRequestObject
+
+	request.Ref = ref
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTaskEvents(ctx, request.(ListTaskEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTaskEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTaskEventsResponseObject); ok {
+		if err := validResponse.VisitListTaskEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RecordTaskMilestone operation middleware
+func (sh *strictHandler) RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request RecordTaskMilestoneRequestObject
+
+	request.Ref = ref
+
+	var body RecordTaskMilestoneJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RecordTaskMilestone(ctx, request.(RecordTaskMilestoneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RecordTaskMilestone")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RecordTaskMilestoneResponseObject); ok {
+		if err := validResponse.VisitRecordTaskMilestoneResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

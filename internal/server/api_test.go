@@ -199,16 +199,20 @@ func (brokenResponse) VisitListInitiativesResponse(http.ResponseWriter) error {
 func (brokenResponse) VisitCreateInitiativeResponse(http.ResponseWriter) error {
 	return errBroken
 }
-func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error { return errBroken }
-func (brokenResponse) VisitCreateTaskResponse(http.ResponseWriter) error    { return errBroken }
-func (brokenResponse) VisitGetTaskResponse(http.ResponseWriter) error       { return errBroken }
-func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error     { return errBroken }
-func (brokenResponse) VisitDoneTaskResponse(http.ResponseWriter) error      { return errBroken }
-func (brokenResponse) VisitReopenTaskResponse(http.ResponseWriter) error    { return errBroken }
-func (brokenResponse) VisitCloseTaskResponse(http.ResponseWriter) error     { return errBroken }
-func (brokenResponse) VisitAddTaskDepResponse(http.ResponseWriter) error    { return errBroken }
-func (brokenResponse) VisitRemoveTaskDepResponse(http.ResponseWriter) error { return errBroken }
-func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitGetInitiativeResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitCreateTaskResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitGetTaskResponse(http.ResponseWriter) error             { return errBroken }
+func (brokenResponse) VisitPatchTaskResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitDoneTaskResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitReopenTaskResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitCloseTaskResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitAddTaskDepResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitRemoveTaskDepResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitRecordTaskCheckResponse(http.ResponseWriter) error     { return errBroken }
+func (brokenResponse) VisitRecordTaskMilestoneResponse(http.ResponseWriter) error { return errBroken }
+func (brokenResponse) VisitListTaskEventsResponse(http.ResponseWriter) error      { return errBroken }
+func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
 }
@@ -357,6 +361,30 @@ func (s stubOperations) AddTaskDep(context.Context, AddTaskDepRequestObject) (Ad
 func (s stubOperations) RemoveTaskDep(context.Context, RemoveTaskDepRequestObject) (RemoveTaskDepResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(RemoveTaskDepResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) RecordTaskCheck(context.Context, RecordTaskCheckRequestObject) (RecordTaskCheckResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RecordTaskCheckResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) RecordTaskMilestone(context.Context, RecordTaskMilestoneRequestObject) (RecordTaskMilestoneResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RecordTaskMilestoneResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListTaskEvents(context.Context, ListTaskEventsRequestObject) (ListTaskEventsResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListTaskEventsResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListEvents(context.Context, ListEventsRequestObject) (ListEventsResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListEventsResponseObject)
 	return resp, err
 }
 
@@ -551,6 +579,23 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"remove task dep 401", 401, RemoveTaskDep401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
 		{"remove task dep 404", 404, RemoveTaskDep404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
 		{"remove task dep 503", 503, RemoveTaskDep503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
+		{"record task check 400", 400, RecordTaskCheck400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
+		{"record task check 401", 401, RecordTaskCheck401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
+		{"record task check 404", 404, RecordTaskCheck404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
+		{"record task check 409", 409, RecordTaskCheck409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
+		{"record task check 503", 503, RecordTaskCheck503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
+		{"record task milestone 400", 400, RecordTaskMilestone400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
+		{"record task milestone 401", 401, RecordTaskMilestone401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
+		{"record task milestone 404", 404, RecordTaskMilestone404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
+		{"record task milestone 503", 503, RecordTaskMilestone503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
+		{"list task events 400", 400, ListTaskEvents400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
+		{"list task events 401", 401, ListTaskEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
+		{"list task events 404", 404, ListTaskEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
+		{"list task events 503", 503, ListTaskEvents503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
+		{"list events 400", 400, ListEvents400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
+		{"list events 401", 401, ListEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
+		{"list events 404", 404, ListEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
+		{"list events 503", 503, ListEvents503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
 		{"meta 401", 401, GetMeta401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetMetaResponse},
 		{"protocol seen 400", 400, PutProtocolSeen400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
 		{"protocol seen 401", 401, PutProtocolSeen401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
