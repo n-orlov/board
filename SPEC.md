@@ -996,7 +996,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|help|whoami|init|admin>`.
+`usage: board <serve|version|help|whoami|init|task|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1014,7 +1014,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -1065,9 +1065,9 @@ Exit codes:
 | 1 | error (server, network, unexpected) | the server cannot be reached, `BOARD_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
 | 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
 | 3 | timed out waiting (`--poll`), the ask stays open | not yet reachable: arrives with `board ask` |
-| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board admin keys revoke` of an unknown name |
+| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; the rest arrives with leases and tasks (a taken initiative slug is a plain error, exit 1) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | not yet reachable: arrives with leases |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
@@ -1099,8 +1099,8 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami` and `init add|ls|show|edit|close|reopen`; the other lines
-below arrive with their phases. The client commands (`whoami`, `init …`) call the server at `BOARD_URL` with
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit`; the other lines
+below arrive with their phases. The client commands (`whoami`, `init …`, `task …`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
 walks every registered flag and fails on a key-like name). With `BOARD_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
@@ -1112,7 +1112,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else is 1, except a 409 of `init close` and `init reopen`, which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative) and `task edit` (a closed task or initiative), which is 6 (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1144,10 +1144,40 @@ anything else is 1, except a 409 of `init close` and `init reopen`, which is 6 (
   unknown slug exits 4 with `→ board init ls`.
 - `board init reopen <slug> [--json]` prints `ok initiative <slug> reopened`; reopening an open initiative exits 6
   with `<detail> → board init show <slug>`, an unknown slug exits 4 with `→ board init ls`.
+- `board task add <initiative> "<title>" [--description file|-] [--kind work|watch] [--cadence D] [--after <ref>]...
+  [--start T] [--end T] [--link label=url]... [--json]` creates the task and prints `ok task <ref> created`
+  (`--json`: the created object). `--after` (repeatable) names the tasks it starts out blocked by, `--link` (repeatable)
+  an external link, `--description` is read as for `init edit`. A watch task needs `--cadence`; a work task refuses it
+  (exit 1 with the server's message, as for any value the server refuses). An unknown initiative exits 4 with
+  `<detail> → board init ls`, an unknown `--after` task exits 4 with `→ board task ls <initiative>`, a closed initiative
+  exits 6 with `→ board init show <initiative>`.
+- `board task ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked]
+  [--overdue] [--q text] [--limit N|--all] [--json]` prints one line per task in creation order, `<ref>  <status>  <title>`
+  followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. The status is
+  `not_closed` by default; `--active`, `--blocked` and `--overdue` keep the tasks that have a live lease, an open
+  dependency or a missed check; `--q` keeps the tasks whose title or description contains the text, in either case.
+  It shows 20 by default; the last line is `+K more → board task ls … --all` repeating the initiative and every filter.
+  `--json` prints the shown tasks as one JSON array. An unknown initiative exits 4 with `→ board init ls`; a status or
+  kind the server does not know, a `--limit` below 1 and `--all` with `--limit` exit 2.
+- `board task show <ref> [--json]` prints the one-line form, then `initiative:`, `planned: <start> → <end>` when it has
+  either, `cadence: <D>, next check <relative time>` for a watch task, a `link: <label> <url>` line per link,
+  `created by`, `done by` and `closed (<resolution>) by` lines, `blocked by <ref> (<status>) <title>` per open or
+  closed dependency, `blocking <ref> (<status>) <title>` per task it blocks, `lease L<n> by <handle>: <intent> (expires in
+  …)` per live lease, the description, then `events:` and its last 10 events as `  E<n>  <relative time>  <handle>
+  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → board task ls`.
+- `board task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
+  [--no-links] [--json]` sends only the fields given (`PATCH /api/v1/tasks/<ref>`) and prints `ok task <ref> updated`
+  (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
+  `--link` with `--no-links` are exit 2 with the usage line. An unknown task exits 4 with `→ board task ls`; a closed task
+  or a task of a closed initiative exits 6 with `→ board task show <ref>`.
+- Durations (`--cadence`) are a whole number and a unit, `s`, `m`, `h` or `d` (`90s`, `45m`, `2h`, `7d`); a missing unit, a
+  sign, a fraction or zero is refused. Times (`--start`, `--end`) are RFC 3339 or `YYYY-MM-DD` (midnight UTC). A malformed
+  duration, time, link (`label=url`) or kind is exit 2 with the single line `board: <flag>: invalid <what> …`, before any
+  request is sent.
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|admin>`.
+- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|admin>`.
 
 ```
 board version | update [--check] [--version vX.Y.Z]
@@ -1158,8 +1188,10 @@ board attention
 board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
                 | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
                 | close <slug> [--force] | reopen <slug>
-board task add <initiative> "<title>" [--kind watch --cadence 24h] [--after <ref>]...
-board task ls [<initiative>] [--status …] | show|done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
+board task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
+board task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--q text] [--limit N|--all] | show <ref>
+                | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links]
+board task done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
 board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
 board lease renew [<L…>|<task>] [--ttl 4h] [--intent …]      # no argument: all my live leases
 board lease end   [<L…>|<task>] ["<outcome>"]
