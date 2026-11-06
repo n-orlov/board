@@ -7,7 +7,6 @@ import (
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
-	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
 )
@@ -157,7 +156,7 @@ func (o initiativeOps) CreateInitiative(ctx context.Context, req CreateInitiativ
 	if req.Body == nil {
 		return failure(http.StatusBadRequest, "the request needs a JSON body with a slug and a title"), nil
 	}
-	created, err := o.inits.Create(ctx, audit.Actor{Handle: who.Actor, Operator: who.Operator}, who.Principal, newInitiative(req.Body))
+	created, err := o.inits.Create(ctx, who.AuditActor(), who.Principal, newInitiative(req.Body))
 	switch {
 	case errors.Is(err, initiatives.ErrExists):
 		return failure(http.StatusConflict, "an initiative called "+req.Body.Slug+" already exists").

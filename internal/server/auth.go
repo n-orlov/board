@@ -18,6 +18,13 @@ type KeyVerifier func(ctx context.Context, key string) (string, error)
 // ActorHeader names the actor a key-authenticated request acts as.
 const ActorHeader = "Board-Actor"
 
+// WayBackHeader and MetaHeader carry the optional way back and the free-form
+// JSON object of the actor a key-authenticated request acts as.
+const (
+	WayBackHeader = "Board-Actor-Way-Back"
+	MetaHeader    = "Board-Actor-Meta"
+)
+
 const problemType = "about:blank"
 
 // defaultNext is the suggested next action of an error that names none of its own.
@@ -101,7 +108,12 @@ func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.Respon
 		writeProblem(w, status, detail)
 		return
 	}
-	who := auth.Identity{Principal: "key:" + name, Actor: strings.TrimSpace(r.Header.Get(ActorHeader))}
+	who := auth.Identity{
+		Principal: "key:" + name,
+		Actor:     strings.TrimSpace(r.Header.Get(ActorHeader)),
+		WayBack:   strings.TrimSpace(r.Header.Get(WayBackHeader)),
+		Meta:      strings.TrimSpace(r.Header.Get(MetaHeader)),
+	}
 	next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), who)))
 }
 
@@ -155,6 +167,18 @@ func checkKey(r *http.Request, verify KeyVerifier, key string) (string, int, str
 		return "", http.StatusServiceUnavailable, "the key could not be checked"
 	case strings.TrimSpace(r.Header.Get(ActorHeader)) == "":
 		return "", http.StatusBadRequest, ActorHeader + " header is required"
+	case !validMeta(r.Header.Get(MetaHeader)):
+		return "", http.StatusBadRequest, MetaHeader + " header must be a JSON object"
 	}
 	return name, 0, ""
+}
+
+// validMeta reports whether a Board-Actor-Meta header value is absent or a JSON object.
+func validMeta(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return true
+	}
+	var obj map[string]any
+	return json.Unmarshal([]byte(v), &obj) == nil && obj != nil
 }

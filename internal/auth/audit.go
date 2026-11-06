@@ -17,6 +17,10 @@ type Identity struct {
 	Actor     string
 	// Operator is set for a browser session, whose actor is the operator.
 	Operator bool
+	// WayBack and Meta are the optional Board-Actor-Way-Back and
+	// Board-Actor-Meta headers of a key request.
+	WayBack string
+	Meta    string
 }
 
 // Event types of the key operations.
@@ -28,6 +32,11 @@ const (
 // record appends one event about the key keyID, made by who. data holds the
 // type-specific fields; it never holds the key.
 func record(ctx context.Context, tx *sql.Tx, d store.Dialect, who Identity, now time.Time, typ, keyID, summary string, data map[string]any) error {
-	return audit.Append(ctx, tx, d, audit.Actor{Handle: who.Actor, Operator: who.Operator}, now,
+	return audit.Append(ctx, tx, d, who.AuditActor(), now,
 		audit.Event{Principal: who.Principal, Type: typ, RefID: keyID, Summary: summary, Data: data})
+}
+
+// AuditActor is the actor a write made by who is recorded under.
+func (who Identity) AuditActor() audit.Actor {
+	return audit.Actor{Handle: who.Actor, Operator: who.Operator, WayBack: who.WayBack, Meta: who.Meta}
 }

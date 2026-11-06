@@ -237,6 +237,28 @@ func (h *harness) createdEventHas(ctx context.Context, slug, principal, actor st
 	return nil
 }
 
+// nextRequestCarries makes the next API request send one more header.
+func (h *harness) nextRequestCarries(header, value string) {
+	if h.api.headers == nil {
+		h.api.headers = map[string]string{}
+	}
+	h.api.headers[header] = jsonQuotes(value)
+}
+
+// jsonQuotes turns the single quotes a feature uses for JSON strings into double quotes.
+func jsonQuotes(s string) string { return strings.ReplaceAll(s, "'", `"`) }
+
+func (h *harness) actorStores(ctx context.Context, handle, wayBack, meta string) error {
+	got, err := h.scalar(ctx, `SELECT COALESCE(way_back, '') || '|' || meta FROM actors WHERE handle = ?`, handle)
+	if err != nil {
+		return fmt.Errorf("read the actor %q: %w", handle, err)
+	}
+	if want := wayBack + "|" + jsonQuotes(meta); got != want {
+		return fmt.Errorf("actor %q holds way_back|meta %q, want %q", handle, got, want)
+	}
+	return nil
+}
+
 func (h *harness) actorHasOneRow(ctx context.Context, handle string) error {
 	got, err := h.scalar(ctx, `SELECT count(*) FROM actors WHERE handle = ?`, handle)
 	if err != nil {
@@ -278,6 +300,8 @@ func registerInitiativeAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the problem detail contains "([^"]*)"$`, h.problemDetailContains)
 	sc.Step(`^the initiative_created event for "([^"]*)" has principal "([^"]*)" and actor "([^"]*)"$`, h.createdEventHas)
 	sc.Step(`^the actor "([^"]*)" has exactly one row in actors$`, h.actorHasOneRow)
+	sc.Step(`^the next API request carries the header "([^"]*)" with value "([^"]*)"$`, h.nextRequestCarries)
+	sc.Step(`^the actor "([^"]*)" stores the way back "([^"]*)" and the meta "([^"]*)"$`, h.actorStores)
 	sc.Step(`^exactly (\d+) initiative_created event exists$`, h.createdEventCount)
 	sc.Step(`^no initiative_created event exists$`, func(ctx context.Context) error { return h.createdEventCount(ctx, 0) })
 }

@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/n-orlov/board/internal/actors"
-	"github.com/n-orlov/board/internal/audit"
 )
 
 func (p problemResponse) VisitGetMetaResponse(w http.ResponseWriter) error { return p.write(w) }
@@ -51,7 +50,7 @@ func (o metaOps) PutProtocolSeen(ctx context.Context, req PutProtocolSeenRequest
 		return failure(http.StatusBadRequest, "the request needs a JSON body with a version").
 			withNext("Send {\"version\": N}, the number 'board help agent --version' prints."), nil
 	}
-	seen, err := o.actors.RecordProtocolSeen(ctx, audit.Actor{Handle: who.Actor, Operator: who.Operator}, req.Body.Version)
+	seen, err := o.actors.RecordProtocolSeen(ctx, who.AuditActor(), req.Body.Version)
 	switch {
 	case errors.Is(err, actors.ErrNegativeVersion):
 		return failure(http.StatusBadRequest, err.Error()).

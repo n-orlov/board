@@ -91,3 +91,60 @@ func TestAppendFailsOnAnInitiativeThatDoesNotExist(t *testing.T) {
 		t.Error("an event of an unknown initiative is appended")
 	}
 }
+
+func TestUpsertActorKeepsWayBackAndMetaUnlessANewOneIsSent(t *testing.T) {
+	st := newStore(t)
+	d := st.Dialect()
+	for _, a := range []Actor{
+		{Handle: "a@h", WayBack: "cmd one", Meta: `{"k":1}`},
+		{Handle: "a@h"},
+		{Handle: "b@h"},
+		{Handle: "a@h", WayBack: "  "},
+	} {
+		inTx(t, st, func(tx *sql.Tx) {
+			if _, err := UpsertActor(context.Background(), tx, d, a, t0); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for handle, want := range map[string][2]string{"a@h": {"cmd one", `{"k":1}`}, "b@h": {"", "{}"}} {
+		var wb sql.NullString
+		var meta string
+		if err := st.Reader().QueryRowContext(context.Background(), `SELECT way_back, meta FROM actors WHERE handle = ?`, handle).Scan(&wb, &meta); err != nil {
+			t.Fatal(err)
+		}
+		if wb.String != want[0] || wb.Valid != (want[0] != "") || meta != want[1] {
+			t.Errorf("%s way_back=%v meta=%q, want %v", handle, wb, meta, want)
+		}
+	}
+}
+
+func TestOperatorRowIsCreatedByTheFirstOperatorWriteAndOnlyOneExists(t *testing.T) {
+	st := newStore(t)
+	d := st.Dialect()
+	count := func() (n int) {
+		if err := st.Reader().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM actors WHERE kind = 'operator'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count() != 0 {
+		t.Fatal("a fresh database has an operator row before any write")
+	}
+	inTx(t, st, func(tx *sql.Tx) {
+		if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: "operator", Operator: true}, t0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if count() != 1 {
+		t.Fatal("the first operator write did not create the operator row")
+	}
+	tx, err := st.Writer().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: "other-operator", Operator: true}, t0); err == nil {
+		t.Error("a second operator row was accepted")
+	}
+}

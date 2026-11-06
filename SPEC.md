@@ -269,15 +269,20 @@ initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e
 |---|---|---|
 | id | ulid | |
 | handle | text, unique | stable identity string (§9) |
-| kind | `operator` \| `agent` | exactly one `operator` row is seeded |
-| display_name | text | optional |
-| host | text | optional, from the handle |
-| way_back | text | optional: command/URL to reach this actor |
-| meta | json text | free-form environment facts the agent chose to send |
-| first_seen_at, last_seen_at | ts | `last_seen_at` bumps on any API call with this handle (coalesced, §14) |
+| kind | `operator` \| `agent` | at most one `operator` row exists; the full product seeds it at start-up, Phase 0 creates it on the first write made by a session (below) |
+| display_name | text | optional; never set in Phase 0 |
+| host | text | optional, from the handle; never set in Phase 0 |
+| way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
+| meta | json text | free-form environment facts the agent chose to send; a JSON object set from `Board-Actor-Meta` (§6.1), `{}` until one is sent |
+| first_seen_at, last_seen_at | ts | the full product bumps `last_seen_at` on any API call with this handle (coalesced, §14); Phase 0 bumps it on every write that records the actor, uncoalesced, and a read does not |
 | protocol_seen | int, nullable | highest agent protocol version this actor has read (`board help agent`, §8.6) |
 
-An actor row is created on first use of a handle (upsert). Actors are never deleted. A unique partial index
+An actor row is created on first use of a handle (upsert). In Phase 0 a use is a **write**: an operation that
+appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
+A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
+that has only read has no row, and the operator row does not exist until the first write made by a session (its
+actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A write that carries a non-empty `Board-Actor-Way-Back` or
+`Board-Actor-Meta` replaces that column; a write that carries neither leaves the stored values. Actors are never deleted. A unique partial index
 on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 
 ### 4.2 `initiatives`, `initiative_tags`
@@ -528,8 +533,10 @@ and CLI can show badges without the lists.
   (`key expired`) gets 401. A valid key without a `Board-Actor` header gets 400. A presented key
   the store cannot check, because the database is unreachable or unmigrated, gets 503, never a 2xx.
 - Every key-authenticated request names its actor: header `Board-Actor: <handle>` (required), optional
-  `Board-Actor-Way-Back`, `Board-Actor-Meta` (JSON), `Board-On-Behalf-Of`. The actor is
-  upserted on use. Session requests always act as the operator.
+  `Board-Actor-Way-Back`, `Board-Actor-Meta` (a JSON object; anything else is 400, with no actor recorded),
+  `Board-On-Behalf-Of`. The actor is upserted on use, where in Phase 0 a use is a write (§4.1); the way back and
+  the meta header are stored on the actor row by that upsert. `Board-On-Behalf-Of` is accepted and ignored in Phase 0
+  (no operation yet records an on-behalf-of actor). Session requests always act as the operator.
 - Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
   original response. Agents retry safely.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
@@ -1129,7 +1136,7 @@ All configuration is by environment variable:
 | `BOARD_LISTEN` | `:8080` | listen address |
 | `BOARD_DB_URL` | `sqlite:///data/board.db` | §12.2 |
 | `BOARD_MIGRATE` | `auto` | `auto` \| `off` |
-| `BOARD_OPERATOR_HANDLE` | `operator` | the seeded operator actor; the UI acts as this actor |
+| `BOARD_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. Phase 0 does not seed the row at start-up: it is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `BOARD_SWEEP_INTERVAL` | `15s` | lease expiry sweep |
@@ -1171,7 +1178,7 @@ Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
 | sustained load | 200 req/s mixed (80 % reads) without errors; 500 concurrent SSE clients |
 | CLI | `board now` round trip ≤ 100 ms on a LAN; binary start ≤ 20 ms |
 
-Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s);
+Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s; Phase 0 updates it on writes only and does not coalesce, §4.1);
 attention counts are cached and invalidated by the writes that change them; reads never take
 the SQLite writer connection. A benchmark suite (`go test -bench`) with a seeded large dataset
 runs in the extended lane and fails on a regression > 20 % against the committed baseline.

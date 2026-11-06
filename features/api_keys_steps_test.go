@@ -24,6 +24,8 @@ type apiState struct {
 	body    []byte
 	// ids maps the slug of each initiative a scenario created to its ULID.
 	ids map[string]string
+	// headers are extra request headers for the next sendKeyed call only.
+	headers map[string]string
 }
 
 // sendKeyed sends one request to the running server with the given key and actor
@@ -46,6 +48,10 @@ func (h *harness) sendKeyed(ctx context.Context, method, path, key, actor string
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for k, v := range h.api.headers {
+		req.Header.Set(k, v)
+	}
+	h.api.headers = nil
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

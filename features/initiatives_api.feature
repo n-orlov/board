@@ -33,6 +33,18 @@ Feature: Initiatives over HTTP
     Then the response status is 201
     And the actor "claude@laptop" has exactly one row in actors
 
+  Scenario: a write stores the actor's way back and meta headers, and a read stores nothing
+    Given the next API request carries the header "Board-Actor-Way-Back" with value "tmux attach -t ws1"
+    And the next API request carries the header "Board-Actor-Meta" with value "{'cwd':'/src'}"
+    When I create the initiative "with-way-back" titled "Way back" with no tags as actor "claude@laptop"
+    Then the response status is 201
+    And the actor "claude@laptop" stores the way back "tmux attach -t ws1" and the meta "{'cwd':'/src'}"
+    When I create the initiative "no-headers" titled "No headers" with no tags as actor "claude@laptop"
+    Then the actor "claude@laptop" stores the way back "tmux attach -t ws1" and the meta "{'cwd':'/src'}"
+    Given the next API request carries the header "Board-Actor-Way-Back" with value "somewhere"
+    When I request the initiative "with-way-back" as actor "reader@laptop"
+    Then there is no actor row for "reader@laptop"
+
   Scenario: get an initiative by slug and by id
     When I create the initiative "phone-onboard" titled "Onboard the new phone" with tags "work" as actor "claude@laptop"
     And I request the initiative "phone-onboard" as actor "claude@laptop"

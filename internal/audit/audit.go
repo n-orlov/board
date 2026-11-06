@@ -21,6 +21,11 @@ var (
 type Actor struct {
 	Handle   string
 	Operator bool
+	// WayBack and Meta are the optional Board-Actor-Way-Back and Board-Actor-Meta
+	// the request sent. A non-empty value replaces what the row holds; an empty
+	// one leaves it. Meta is a JSON object.
+	WayBack string
+	Meta    string
 }
 
 // Event is one row of the append-only events table. InitiativeID and RefID are
@@ -57,7 +62,20 @@ func UpsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now 
 	if err := tx.QueryRowContext(ctx, d.Rebind(`SELECT id FROM actors WHERE handle = ?`), handle).Scan(&actorID); err != nil {
 		return "", fmt.Errorf("record actor: %w", err)
 	}
-	return actorID, nil
+	return actorID, setOptional(ctx, tx, d, actorID, a)
+}
+
+// setOptional stores the way back and meta a request sent, when it sent any.
+func setOptional(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, a Actor) error {
+	for _, c := range []struct{ column, value string }{{"way_back", strings.TrimSpace(a.WayBack)}, {"meta", strings.TrimSpace(a.Meta)}} {
+		if c.value == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, d.Rebind(`UPDATE actors SET `+c.column+` = ? WHERE id = ?`), c.value, actorID); err != nil {
+			return fmt.Errorf("record actor %s: %w", c.column, err)
+		}
+	}
+	return nil
 }
 
 // nullable is the column value of an optional text field.

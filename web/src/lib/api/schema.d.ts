@@ -508,7 +508,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description A valid key was presented without a `Board-Actor` header, or the request body or a parameter is not acceptable. */
+        /** @description A valid key was presented without a `Board-Actor` header or with a `Board-Actor-Meta` header that is not a JSON object, or the request body or a parameter is not acceptable. */
         BadRequest: {
             headers: {
                 [name: string]: unknown;

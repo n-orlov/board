@@ -567,7 +567,8 @@ components:
   responses:
     BadRequest:
       description: >-
-        A valid key was presented without a `Board-Actor` header, or the request
+        A valid key was presented without a `Board-Actor` header or with a
+        `Board-Actor-Meta` header that is not a JSON object, or the request
         body or a parameter is not acceptable.
       content:
         application/problem+json:
