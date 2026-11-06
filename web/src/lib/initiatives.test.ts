@@ -316,4 +316,41 @@ describe('InitiativesStore loading', () => {
     await a;
     expect(s.state).toMatchObject({ loading: false, error: 'newer' });
   });
+
+  it('three overlapping reloads landing middle, last, first leave the list loading until the third lands and show the newest list', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const a = s.load();
+    const b = s.load();
+    const c = s.load();
+    await tick();
+    gates[1]!.resolve([initiative('b')]);
+    await b;
+    expect(s.state).toMatchObject({ loading: true });
+    gates[2]!.resolve([initiative('c')]);
+    await c;
+    expect(s.state).toMatchObject({ loading: true });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['c']);
+    gates[0]!.resolve([initiative('a')]);
+    await a;
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['c']);
+  });
+
+  it('an older fetch that succeeds after a newer one failed neither hides the error nor replaces the list', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    gates[0]!.resolve([initiative('keep')]);
+    await first;
+    const a = s.load();
+    const b = s.load();
+    await tick();
+    gates[2]!.reject(new InitiativesError(500, 'newer'));
+    await b;
+    gates[1]!.resolve([initiative('stale')]);
+    await a;
+    expect(s.state).toMatchObject({ loading: false, error: 'newer' });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['keep']);
+  });
 });
