@@ -1150,6 +1150,18 @@ theme's surface colour (`#f6f7f9` light, `#14161a` dark), so the first paint is 
 right theme and there is no flash; `theme.test.ts` runs that script against the module's mapping
 (`e2e/theme.spec.ts` emulates a dark system).
 
+**Installable app.** `web/public/` is copied verbatim into the build (so into the embedded files
+and served by the existing static lookup, no Go change): `manifest.json` (`name` and `short_name`
+`board`, `start_url` and `scope` `./`, `display: standalone`, `theme_color` and `background_color`
+`#f6f7f9`, and three icons: `icon.svg`, `icon-192.png`, `icon-512.png`), `favicon.svg` and
+`apple-touch-icon.png` (180 px). `web/index.html` links the manifest, the SVG favicon and the
+apple-touch-icon by relative URLs; the manifest link carries `crossorigin="use-credentials"`,
+because every route except `/healthz` needs the session and browsers fetch a manifest without
+cookies otherwise. No service worker is registered: the app is installable, not offline-capable.
+The PNGs are rendered from `icon.svg`. `e2e/manifest.spec.ts` signs in, reads the three links from
+the page, and checks the manifest is same-origin JSON with those fields and that the five icon
+URLs answer 200 with an `image/*` content type.
+
 Global: tag filter persisted in the URL, keyboard navigation, no external
 network requests (all assets embedded).
 
