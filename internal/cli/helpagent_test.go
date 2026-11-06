@@ -18,8 +18,8 @@ func TestHelpAgentPrintsTheEmbeddedProtocolAndMatchesTheGolden(t *testing.T) {
 	if code != ExitOK || errs != "" {
 		t.Fatalf("got %d %q", code, errs)
 	}
-	if !strings.HasPrefix(out, "board protocol v0\n") {
-		t.Fatalf("the text is not headed board protocol v0: %q", firstLine(out))
+	if !strings.HasPrefix(out, "board protocol v1\n") {
+		t.Fatalf("the text is not headed board protocol v1: %q", firstLine(out))
 	}
 	if *update {
 		if err := os.WriteFile(goldenPath, []byte(out), 0o600); err != nil {
@@ -58,6 +58,15 @@ func TestHelpAgentTextCoversIdentityWhoamiAndInitiatives(t *testing.T) {
 	}
 }
 
+func TestHelpAgentTextCoversTasksLeasesConflictsAndClosing(t *testing.T) {
+	text := ProtocolText()
+	for _, want := range []string{"`board task add ", "`board task done ", "`board lease start ", "`board lease renew`", "`board lease end ", "`board now --resources ", "`board milestone ", "`board check ", "CONFLICT", "exit 7", "`board task close <ref> --for operator`", "never close"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the text does not mention %s", want)
+		}
+	}
+}
+
 func TestHelpAgentTextNamesOnlyCommandsAndFlagsThisBuildHas(t *testing.T) {
 	if p := UnknownReferences(ProtocolText(), Commands()); len(p) != 0 {
 		t.Fatalf("the text names what does not exist: %v", p)
@@ -89,7 +98,7 @@ func TestCommandsListsTheFlagsOfEachCommand(t *testing.T) {
 }
 
 func TestProtocolVersionIsTheNumberInTheHeader(t *testing.T) {
-	if v := ProtocolVersion(); v != 0 {
+	if v := ProtocolVersion(); v != 1 {
 		t.Fatalf("version %d", v)
 	}
 	defer func(old string) { protocolText = old }(protocolText)
@@ -106,7 +115,7 @@ func TestHelpAgentVersionPrintsJustTheNumberAndRecordsNothing(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "help", "agent", "--version")
-	if code != ExitOK || out != "0\n" || errs != "" || len(f.requests) != 0 {
+	if code != ExitOK || out != "1\n" || errs != "" || len(f.requests) != 0 {
 		t.Fatalf("got %d %q %q with %d requests", code, out, errs, len(f.requests))
 	}
 }
@@ -125,7 +134,7 @@ func TestHelpAgentRecordsTheVersionAsRead(t *testing.T) {
 		t.Fatalf("%d requests, want 1", len(f.requests))
 	}
 	r := f.requests[0]
-	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":0}` {
+	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":1}` {
 		t.Fatalf("request %s %s %q", r.Method, r.URL.Path, f.bodies[0])
 	}
 	if r.Header.Get("Board-Actor") != "claude:test" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer brd_") {

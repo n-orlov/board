@@ -14,12 +14,12 @@ Feature: The agent protocol, board help agent
     When I run the client 'board help agent' as actor "claude@laptop"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v0$"
+    And stdout line 1 matches "^board protocol v1$"
     And the stdout text names at least 5 commands
     And every board command and flag the stdout text names exists in the command tree
     When I run the client 'board help agent --version' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout is exactly "0"
+    And stdout is exactly "1"
 
   Scenario: reading the text records protocol_seen through the actors endpoint
     Then there is no actor row for "claude@laptop"
@@ -27,7 +27,7 @@ Feature: The agent protocol, board help agent
     Then there is no actor row for "claude@laptop"
     When I run the client 'board help agent' as actor "claude@laptop"
     Then the exit code is 0
-    And the protocol_seen of the actor "claude@laptop" is 0
+    And the protocol_seen of the actor "claude@laptop" is 1
     When I record protocol version 3 as read as actor "claude@laptop" through the API
     Then the response status is 200
     And the response field "actor" is "claude@laptop"
@@ -42,5 +42,5 @@ Feature: The agent protocol, board help agent
     When I run the client 'board help agent' as actor "claude@laptop" against the address "http://127.0.0.1:1"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v0$"
+    And stdout line 1 matches "^board protocol v1$"
     And every board command and flag the stdout text names exists in the command tree

@@ -1398,13 +1398,32 @@ bump it). `board help agent --version` prints just `N` and records nothing. Runn
 server or a refused key it still prints the text, prints nothing on stderr and exits 0). Any other
 argument to `board help` is the exit-2 usage error `usage: board help agent [--version]`.
 
-**Protocol v0** is the text of Phase 0: it covers only what the build has. It is headed
-`board protocol v0` and holds the identity rules (`BOARD_URL`, `BOARD_API_KEY`, `BOARD_ACTOR`,
-`BOARD_WAY_BACK`, the fallback handle, subagents using their parent's handle, `board whoami`),
-the initiative commands (`board init ls` with `--tag`, `--all` and `--limit`, `board init show`,
-`board init add` with `--tag`, and `--json`), the output and exit-code rules (§8.1) and a note on
-`board help agent` itself. It names no command a Phase 0 build lacks: the sections above
-(start, ping, block, finish, catchup, …) arrive with their commands, each bumping the version.
+**Protocol v0** was the text of Phase 0: identity, `board whoami`, the initiative commands and the
+output rules.
+
+**Protocol v1** is the current text. It is headed `board protocol v1`, fits 45 lines of 100 columns
+(a test holds the budget) and names no command or flag the build lacks (a test and the
+`help_agent.feature` scenario check each `` `board …` `` span against the command tree). On top of
+v0 it covers:
+
+- the tasks: `board task ls`, `board task add`, `board task done` (agents mark done) and
+  `--json`;
+- the leases: `board lease start <task> "<intent>" --res … --ttl …`, `board lease renew` at each
+  milestone and at least every half TTL (with no argument it renews all the actor's leases),
+  `board lease end "<outcome>"`, `board lease ls`, and that an unrenewed lease expires on its own;
+- `board milestone <task> "<summary>"` and `board check <task> "<summary>"` (watch tasks);
+- the shared-resource check `board now --resources …` before a risky action (reboot, deploy,
+  force-push, migration);
+- conflict handling: a `CONFLICT <resources>: L<n> <holder> (<task>) "<intent>" exp <time>` line
+  and exit 7 mean another actor holds a lease on a resource; the lease is started anyway, so read
+  the intent, then wait, coordinate or ask, and never go on through a conflict on a destructive
+  action;
+- closing only when asked: agents never close a task unless the operator asked, and then use
+  `board task close <ref> --for operator`;
+- the exit codes 6 (state conflict) and 7 (conflict) next to those of v0.
+
+The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) and asks arrive with
+their commands, each bumping the version.
 
 **Server side.** `GET /meta` answers `{version, protocol, principal, actor}`: the server binary's
 version (as `board version` prints it), the protocol version its binary embeds, the principal
@@ -1948,7 +1967,7 @@ Everything below exists and the gates measure real code before any product featu
   CLI output rules (§8.1): `ok` confirmation lines, one-line errors with `→ next`, the exit codes,
   list caps.
 - **`board help agent`** (§8.6) with protocol **v0**: only what Phase 0 has (identity,
-  `board whoami`, initiatives), plus `GET /meta`, the `protocol_seen` column, the golden test and
+  `board whoami`, initiatives; Phase 1 publishes v1, see §8.6), plus `GET /meta`, the `protocol_seen` column, the golden test and
   the command/flag existence e2e. Each later phase extends the text with its commands and bumps
   the version, so the cheat sheet never describes commands that do not exist yet.
 - Svelte/Vite shell embedded via `go:embed`.
