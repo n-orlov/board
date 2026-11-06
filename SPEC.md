@@ -1174,6 +1174,15 @@ the Initiatives, Settings -> API keys and Signed out views and the new-initiativ
 sheet, the revoke confirmation and the account menu opened over them, and fails with the offending
 elements named when one is smaller or a field's text is under 16 px.
 
+**Accessibility bar.** axe-core (`@axe-core/playwright`, pinned exactly in `e2e/package.json`) reports
+zero violations of impact `serious` or `critical`, with no rule disabled and no element excluded, on
+every one of seven states: the Initiatives view, the Settings -> API keys view, the Signed out view,
+and the new-initiative sheet, the new-key sheet, the revoke confirmation and the account menu opened
+over them. Each is scanned at 390x844 and 1440x900 in the light and the dark theme (the browser's
+colour scheme drives the System setting): 7 x 2 x 2 = 28 scans, in `e2e/a11y.spec.ts`. A failing
+scan names the rule, the impact and the offending elements. Colour contrast is met by the design
+tokens in both themes, never by a per-element override.
+
 Global: tag filter persisted in the URL, keyboard navigation, no external
 network requests (all assets embedded).
 
