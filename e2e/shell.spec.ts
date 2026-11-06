@@ -24,6 +24,20 @@ async function noHorizontalOverflow(page: Page) {
   expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
 }
 
+// The overflow check must see the longest unbroken text the API takes, not only short titles:
+// seed a 200-character title, a 40-character slug and a 64-character key name before any view loads.
+test.beforeAll(async ({ playwright, baseURL }) => {
+  const seed = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
+  });
+  const created = await seed.post('/api/v1/initiatives', { data: { slug: `shl${'w'.repeat(37)}`, title: 'W'.repeat(200) } });
+  expect([201, 409]).toContain(created.status());
+  const key = await seed.post('/api/v1/keys', { data: { name: `shl${'W'.repeat(61)}` } });
+  expect([201, 409]).toContain(key.status());
+  await seed.dispose();
+});
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
