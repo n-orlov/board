@@ -223,7 +223,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List the tasks
+         * @description A page of tasks ordered by id (creation order), each with its live leases. Filters combine. `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has an open dependency) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`. `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is not active. An initiative that names nothing is 404.
+         */
+        get: operations["listTasks"];
         put?: never;
         /**
          * Create a task
@@ -905,6 +909,18 @@ export interface components {
             /** @description Its live leases, oldest first. */
             live_leases: components["schemas"]["Lease"][];
         };
+        /** @description A task of a list, with its live leases. */
+        TaskListItem: components["schemas"]["Task"] & {
+            /** @description Its live leases, oldest first. */
+            live_leases: components["schemas"]["Lease"][];
+        };
+        /** @description A page of tasks. */
+        TaskList: {
+            /** @description The tasks of the page, ordered by id. */
+            items: components["schemas"]["TaskListItem"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description A new task. */
         TaskCreate: {
             /** @description The slug or ULID of an open initiative. */
@@ -1557,6 +1573,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Initiative"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listTasks: {
+        parameters: {
+            query?: {
+                /** @description Keep tasks of this initiative, by slug or ULID. Repeatable. */
+                initiative?: string[];
+                /** @description Keep tasks whose initiative carries this tag. Repeatable; every tag given must match. */
+                tag?: string[];
+                /** @description The task status to keep. Default `not_closed`. */
+                status?: "open" | "done" | "closed" | "not_closed" | "all";
+                /** @description Keep tasks of this kind. */
+                kind?: "work" | "watch";
+                /** @description `true` keeps tasks with a live lease, `false` those without. */
+                active?: boolean;
+                /** @description `true` keeps tasks with an open dependency, `false` those without. */
+                blocked?: boolean;
+                /** @description `true` keeps overdue watch tasks, `false` the tasks that are not overdue. */
+                overdue?: boolean;
+                /** @description `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`. */
+                closed_within?: string;
+                /** @description A text that the title or the description contains, in either letter case. */
+                q?: string;
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: number;
+                /** @description A task ULID or ref, in either letter case. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskList"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -417,6 +417,117 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: List the tasks
+      description: >-
+        A page of tasks ordered by id (creation order), each with its live leases. Filters combine.
+        `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the
+        initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`,
+        `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has
+        an open dependency) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`.
+        `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the
+        tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose
+        title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is
+        the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is
+        absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is
+        not active. An initiative that names nothing is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: initiative
+          in: query
+          required: false
+          description: Keep tasks of this initiative, by slug or ULID. Repeatable.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: tag
+          in: query
+          required: false
+          description: Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: status
+          in: query
+          required: false
+          description: The task status to keep. Default `not_closed`.
+          schema:
+            type: string
+            enum: [open, done, closed, not_closed, all]
+        - name: kind
+          in: query
+          required: false
+          description: Keep tasks of this kind.
+          schema:
+            type: string
+            enum: [work, watch]
+        - name: active
+          in: query
+          required: false
+          description: "`true` keeps tasks with a live lease, `false` those without."
+          schema:
+            type: boolean
+        - name: blocked
+          in: query
+          required: false
+          description: "`true` keeps tasks with an open dependency, `false` those without."
+          schema:
+            type: boolean
+        - name: overdue
+          in: query
+          required: false
+          description: "`true` keeps overdue watch tasks, `false` the tasks that are not overdue."
+          schema:
+            type: boolean
+        - name: closed_within
+          in: query
+          required: false
+          description: "`7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`."
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          description: A text that the title or the description contains, in either letter case.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: The page size, 1 to 1000. Default 100.
+          schema:
+            type: integer
+        - name: after
+          in: query
+          required: false
+          description: A task ULID or ref, in either letter case. The page starts after it.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
     post:
       operationId: createTask
       tags: [tasks]
@@ -1749,6 +1860,31 @@ components:
               description: Its live leases, oldest first.
               items:
                 $ref: "#/components/schemas/Lease"
+    TaskListItem:
+      description: A task of a list, with its live leases.
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          required: [live_leases]
+          properties:
+            live_leases:
+              type: array
+              description: Its live leases, oldest first.
+              items:
+                $ref: "#/components/schemas/Lease"
+    TaskList:
+      type: object
+      description: A page of tasks.
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: The tasks of the page, ordered by id.
+          items:
+            $ref: "#/components/schemas/TaskListItem"
+        next_after:
+          type: string
+          description: The `after` value that fetches the following page. Absent on the last page.
     TaskCreate:
       type: object
       description: A new task.

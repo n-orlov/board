@@ -212,6 +212,7 @@ func (brokenResponse) VisitRemoveTaskDepResponse(http.ResponseWriter) error     
 func (brokenResponse) VisitRecordTaskCheckResponse(http.ResponseWriter) error     { return errBroken }
 func (brokenResponse) VisitRecordTaskMilestoneResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitListTaskEventsResponse(http.ResponseWriter) error      { return errBroken }
+func (brokenResponse) VisitListTasksResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
@@ -389,6 +390,12 @@ func (s stubOperations) RecordTaskMilestone(context.Context, RecordTaskMilestone
 	return resp, err
 }
 
+func (s stubOperations) ListTasks(context.Context, ListTasksRequestObject) (ListTasksResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListTasksResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) ListTaskEvents(context.Context, ListTaskEventsRequestObject) (ListTaskEventsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(ListTaskEventsResponseObject)
@@ -465,7 +472,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
 		"/api/v1/keys", "POST /api/v1/keys", "POST /api/v1/keys/workstation/revoke",
 		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
-		"POST /api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
+		"POST /api/v1/tasks", "/api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
@@ -642,6 +649,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"record task milestone 401", 401, RecordTaskMilestone401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
 		{"record task milestone 404", 404, RecordTaskMilestone404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
 		{"record task milestone 503", 503, RecordTaskMilestone503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskMilestoneResponse},
+		{"list tasks 400", 400, ListTasks400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListTasksResponse},
+		{"list tasks 401", 401, ListTasks401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListTasksResponse},
+		{"list tasks 404", 404, ListTasks404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListTasksResponse},
+		{"list tasks 503", 503, ListTasks503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListTasksResponse},
 		{"list task events 400", 400, ListTaskEvents400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
 		{"list task events 401", 401, ListTaskEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
 		{"list task events 404", 404, ListTaskEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},

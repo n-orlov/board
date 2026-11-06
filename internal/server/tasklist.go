@@ -1,0 +1,97 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/tasks"
+)
+
+func (p problemResponse) VisitListTasksResponse(w http.ResponseWriter) error { return p.write(w) }
+
+func orEmpty[T any](list *[]T) []T {
+	if list == nil {
+		return nil
+	}
+	return *list
+}
+
+// taskQuery is the store's query for the parameters of GET /api/v1/tasks.
+func taskQuery(p ListTasksParams) tasks.Query {
+	q := tasks.Query{
+		Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag), Active: p.Active, Blocked: p.Blocked, Overdue: p.Overdue,
+		ClosedWithin: text(p.ClosedWithin), Q: text(p.Q), After: text(p.After), Limit: pageLimit(p.Limit),
+	}
+	if p.Status != nil {
+		q.Status = string(*p.Status)
+	}
+	if p.Kind != nil {
+		q.Kind = string(*p.Kind)
+	}
+	return q
+}
+
+func apiTaskListItem(t tasks.Task, live []leases.Lease) TaskListItem {
+	out := TaskListItem{
+		Id: t.ID, Ref: t.Ref, Initiative: t.Initiative, Seq: t.Seq, Title: t.Title, Description: t.Description,
+		Kind: TaskListItemKind(t.Kind), Status: TaskListItemStatus(t.Status),
+		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CadenceSeconds: t.CadenceSeconds, NextCheckAt: t.NextCheckAt,
+		ExternalRefs: apiExternalRefs(t.ExternalRefs),
+		CreatedBy:    t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
+		DoneAt: t.DoneAt, DoneBy: optionalText(t.DoneBy), ClosedAt: t.ClosedAt, ClosedBy: optionalText(t.ClosedBy),
+		Active: len(live) > 0, Blocked: t.Blocked, Overdue: t.Overdue, LiveLeases: make([]Lease, len(live)),
+	}
+	if t.Resolution != "" {
+		r := TaskListItemResolution(t.Resolution)
+		out.Resolution = &r
+	}
+	for i, l := range live {
+		out.LiveLeases[i] = apiLease(l)
+	}
+	return out
+}
+
+const nextTaskCursor = "Leave out 'after' to start at the first page, or send the next_after of the previous page."
+
+// ListTasks lists a page of tasks with their live leases. It expires the leases
+// that ran out first, so a task whose lease ran out is not active.
+func (o taskOps) ListTasks(ctx context.Context, req ListTasksRequestObject) (ListTasksResponseObject, error) {
+	if r, off := o.ready(); off {
+		return r, nil
+	}
+	if _, err := o.leases.ExpireDue(ctx); err != nil {
+		return nil, err
+	}
+	page, err := o.tasks.List(ctx, taskQuery(req.Params))
+	if errors.Is(err, tasks.ErrBadCursor) {
+		return failure(http.StatusBadRequest, err.Error()).withNext(nextTaskCursor), nil
+	}
+	if err != nil {
+		return taskResult[ListTasksResponseObject](err, "there is no task ")
+	}
+	out, err := o.listed(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	return ListTasks200JSONResponse(out), nil
+}
+
+// listed is the document for a page: each task with its live leases, read for
+// the whole page in one query.
+func (o taskOps) listed(ctx context.Context, page tasks.Page) (TaskList, error) {
+	ids := make([]string, len(page.Items))
+	for i, t := range page.Items {
+		ids[i] = t.ID
+	}
+	live, err := o.leases.LiveFor(ctx, ids)
+	if err != nil {
+		return TaskList{}, err
+	}
+	out := TaskList{Items: make([]TaskListItem, len(page.Items)), NextAfter: optionalText(page.NextAfter)}
+	for i, t := range page.Items {
+		out.Items[i] = apiTaskListItem(t, live[t.ID])
+	}
+	return out, nil
+}

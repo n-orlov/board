@@ -265,6 +265,114 @@ func (e TaskLinkStatus) Valid() bool {
 	}
 }
 
+// Defines values for TaskListItemKind.
+const (
+	TaskListItemKindWatch TaskListItemKind = "watch"
+	TaskListItemKindWork  TaskListItemKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the TaskListItemKind enum.
+func (e TaskListItemKind) Valid() bool {
+	switch e {
+	case TaskListItemKindWatch:
+		return true
+	case TaskListItemKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskListItemResolution.
+const (
+	TaskListItemResolutionCompleted  TaskListItemResolution = "completed"
+	TaskListItemResolutionDropped    TaskListItemResolution = "dropped"
+	TaskListItemResolutionDuplicate  TaskListItemResolution = "duplicate"
+	TaskListItemResolutionSuperseded TaskListItemResolution = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TaskListItemResolution enum.
+func (e TaskListItemResolution) Valid() bool {
+	switch e {
+	case TaskListItemResolutionCompleted:
+		return true
+	case TaskListItemResolutionDropped:
+		return true
+	case TaskListItemResolutionDuplicate:
+		return true
+	case TaskListItemResolutionSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskListItemStatus.
+const (
+	TaskListItemStatusClosed TaskListItemStatus = "closed"
+	TaskListItemStatusDone   TaskListItemStatus = "done"
+	TaskListItemStatusOpen   TaskListItemStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the TaskListItemStatus enum.
+func (e TaskListItemStatus) Valid() bool {
+	switch e {
+	case TaskListItemStatusClosed:
+		return true
+	case TaskListItemStatusDone:
+		return true
+	case TaskListItemStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListTasksParamsStatus.
+const (
+	ListTasksParamsStatusAll       ListTasksParamsStatus = "all"
+	ListTasksParamsStatusClosed    ListTasksParamsStatus = "closed"
+	ListTasksParamsStatusDone      ListTasksParamsStatus = "done"
+	ListTasksParamsStatusNotClosed ListTasksParamsStatus = "not_closed"
+	ListTasksParamsStatusOpen      ListTasksParamsStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the ListTasksParamsStatus enum.
+func (e ListTasksParamsStatus) Valid() bool {
+	switch e {
+	case ListTasksParamsStatusAll:
+		return true
+	case ListTasksParamsStatusClosed:
+		return true
+	case ListTasksParamsStatusDone:
+		return true
+	case ListTasksParamsStatusNotClosed:
+		return true
+	case ListTasksParamsStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListTasksParamsKind.
+const (
+	ListTasksParamsKindWatch ListTasksParamsKind = "watch"
+	ListTasksParamsKindWork  ListTasksParamsKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the ListTasksParamsKind enum.
+func (e ListTasksParamsKind) Valid() bool {
+	switch e {
+	case ListTasksParamsKindWatch:
+		return true
+	case ListTasksParamsKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
 // CreatedKey A key just created. `key` is shown this once.
 type CreatedKey struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -852,6 +960,80 @@ type TaskLink struct {
 // TaskLinkStatus defines model for TaskLink.Status.
 type TaskLinkStatus string
 
+// TaskList A page of tasks.
+type TaskList struct {
+	// Items The tasks of the page, ordered by id.
+	Items []TaskListItem `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
+// TaskListItem A task of a list, with its live leases.
+type TaskListItem struct {
+	// Active It has a live lease.
+	Active bool `json:"active"`
+
+	// Blocked It has an open dependency, one whose blocking task is not closed.
+	Blocked bool `json:"blocked"`
+
+	// CadenceSeconds Watch tasks only.
+	CadenceSeconds *int64     `json:"cadence_seconds,omitempty"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	ClosedBy       *string    `json:"closed_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Description Markdown. Empty when none was given.
+	Description  string        `json:"description"`
+	DoneAt       *time.Time    `json:"done_at,omitempty"`
+	DoneBy       *string       `json:"done_by,omitempty"`
+	ExternalRefs []ExternalRef `json:"external_refs"`
+
+	// Id The task's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative it belongs to.
+	Initiative string           `json:"initiative"`
+	Kind       TaskListItemKind `json:"kind"`
+
+	// LiveLeases Its live leases, oldest first.
+	LiveLeases []Lease `json:"live_leases"`
+
+	// NextCheckAt Watch tasks only.
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+
+	// Overdue A watch task, not closed, whose `next_check_at` is before now.
+	Overdue      bool       `json:"overdue"`
+	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
+	PlannedStart *time.Time `json:"planned_start,omitempty"`
+
+	// Ref The short ref, `<initiative slug>-<seq>`.
+	//
+	// Examples: phone-onboard-3
+	Ref string `json:"ref"`
+
+	// Resolution Why it was closed. Absent unless it is closed.
+	Resolution *TaskListItemResolution `json:"resolution,omitempty"`
+
+	// Seq The number within the initiative, from 1.
+	Seq       int                `json:"seq"`
+	Status    TaskListItemStatus `json:"status"`
+	Title     string             `json:"title"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// TaskListItemKind defines model for TaskListItem.Kind.
+type TaskListItemKind string
+
+// TaskListItemResolution Why it was closed. Absent unless it is closed.
+type TaskListItemResolution string
+
+// TaskListItemStatus defines model for TaskListItem.Status.
+type TaskListItemStatus string
+
 // TaskMilestone defines model for TaskMilestone.
 type TaskMilestone struct {
 	// Data Anything to record with the milestone, kept under the event's `data.data`.
@@ -983,6 +1165,48 @@ type ListLeasesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// ListTasksParams defines parameters for ListTasks.
+type ListTasksParams struct {
+	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
+	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Tag Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Status The task status to keep. Default `not_closed`.
+	Status *ListTasksParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Kind Keep tasks of this kind.
+	Kind *ListTasksParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// Active `true` keeps tasks with a live lease, `false` those without.
+	Active *bool `form:"active,omitempty" json:"active,omitempty"`
+
+	// Blocked `true` keeps tasks with an open dependency, `false` those without.
+	Blocked *bool `form:"blocked,omitempty" json:"blocked,omitempty"`
+
+	// Overdue `true` keeps overdue watch tasks, `false` the tasks that are not overdue.
+	Overdue *bool `form:"overdue,omitempty" json:"overdue,omitempty"`
+
+	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`.
+	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
+
+	// Q A text that the title or the description contains, in either letter case.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After A task ULID or ref, in either letter case. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// ListTasksParamsStatus defines parameters for ListTasks.
+type ListTasksParamsStatus string
+
+// ListTasksParamsKind defines parameters for ListTasks.
+type ListTasksParamsKind string
+
 // ListTaskEventsParams defines parameters for ListTaskEvents.
 type ListTaskEventsParams struct {
 	// Limit The page size, 1 to 1000. Default 100.
@@ -1090,6 +1314,9 @@ type ServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
+	// ListTasks List the tasks
+	// (GET /api/v1/tasks)
+	ListTasks(w http.ResponseWriter, r *http.Request, params ListTasksParams)
 	// CreateTask Create a task
 	// (POST /api/v1/tasks)
 	CreateTask(w http.ResponseWriter, r *http.Request)
@@ -1628,6 +1855,76 @@ func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// ListTasks operation middleware
+func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTasksParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "tag" -------------
+
+	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "status" -------------
+
+	bind.check("status", runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "kind" -------------
+
+	bind.check("kind", runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "active" -------------
+
+	bind.check("active", runtime.BindQueryParameterWithOptions("form", true, false, "active", r.URL.Query(), &params.Active, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	// ------------- Optional query parameter "blocked" -------------
+
+	bind.check("blocked", runtime.BindQueryParameterWithOptions("form", true, false, "blocked", r.URL.Query(), &params.Blocked, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	// ------------- Optional query parameter "overdue" -------------
+
+	bind.check("overdue", runtime.BindQueryParameterWithOptions("form", true, false, "overdue", r.URL.Query(), &params.Overdue, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	// ------------- Optional query parameter "closed_within" -------------
+
+	bind.check("closed_within", runtime.BindQueryParameterWithOptions("form", true, false, "closed_within", r.URL.Query(), &params.ClosedWithin, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "q" -------------
+
+	bind.check("q", runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "limit" -------------
+
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "after" -------------
+
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTasks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateTask operation middleware
 func (siw *ServerInterfaceWrapper) CreateTask(w http.ResponseWriter, r *http.Request) {
 
@@ -2154,6 +2451,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.PatchInitiative)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks", wrapper.ListTasks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks", wrapper.CreateTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.GetTask)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.PatchTask)
@@ -3840,6 +4138,92 @@ func (response GetMeta401ApplicationProblemPlusJSONResponse) VisitGetMetaRespons
 	return err
 }
 
+type ListTasksRequestObject struct {
+	Params ListTasksParams
+}
+
+type ListTasksResponseObject interface {
+	VisitListTasksResponse(w http.ResponseWriter) error
+}
+
+type ListTasks200JSONResponse TaskList
+
+func (response ListTasks200JSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTasks400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListTasks400ApplicationProblemPlusJSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTasks401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListTasks401ApplicationProblemPlusJSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTasks404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListTasks404ApplicationProblemPlusJSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTasks503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListTasks503ApplicationProblemPlusJSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateTaskRequestObject struct {
 	Body *CreateTaskJSONRequestBody
 }
@@ -5384,6 +5768,9 @@ type StrictServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
+	// ListTasks List the tasks
+	// (GET /api/v1/tasks)
+	ListTasks(ctx context.Context, request ListTasksRequestObject) (ListTasksResponseObject, error)
 	// CreateTask Create a task
 	// (POST /api/v1/tasks)
 	CreateTask(ctx context.Context, request CreateTaskRequestObject) (CreateTaskResponseObject, error)
@@ -6026,6 +6413,32 @@ func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
 		if err := validResponse.VisitGetMetaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTasks operation middleware
+func (sh *strictHandler) ListTasks(w http.ResponseWriter, r *http.Request, params ListTasksParams) {
+	var request ListTasksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTasks(ctx, request.(ListTasksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTasks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTasksResponseObject); ok {
+		if err := validResponse.VisitListTasksResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

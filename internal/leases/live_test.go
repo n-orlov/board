@@ -70,3 +70,30 @@ func mustGet(t *testing.T, e env, ref string) Lease {
 	}
 	return l
 }
+
+func TestLiveForGroupsTheLiveLeasesByTaskAndLeavesOutThoseThatRanOut(t *testing.T) {
+	e := newEnv(t)
+	first := e.start(t, me, "aa-1", secs(600), "r1")
+	second := e.start(t, bob, "aa-1", secs(60))
+	e.start(t, bob, "aa-2", secs(600))
+	t1, _ := e.Tasks.Get(ctx, "aa-1")
+	t2, _ := e.Tasks.Get(ctx, "aa-2")
+	got, err := e.S.LiveFor(ctx, []string{t1.ID, t2.ID})
+	if err != nil || len(got[t1.ID]) != 2 || len(got[t2.ID]) != 1 || got[t1.ID][0].Ref != first.Lease.Ref || got[t1.ID][1].Ref != second.Lease.Ref {
+		t.Fatalf("LiveFor = %+v, %v", got, err)
+	}
+	if got[t1.ID][0].Resources[0] != "r1" {
+		t.Errorf("resources = %v", got[t1.ID][0].Resources)
+	}
+	e.Clock.add(61 * time.Second)
+	got, err = e.S.LiveFor(ctx, []string{t1.ID, t2.ID})
+	if err != nil || len(got[t1.ID]) != 1 || len(got[t2.ID]) != 1 {
+		t.Errorf("after the short ttl: %+v, %v", got, err)
+	}
+	if st := mustGet(t, e, second.Lease.Ref).State; st != "live" {
+		t.Errorf("LiveFor changed the state to %q; only ExpireDue does", st)
+	}
+	if got, err := e.S.LiveFor(ctx, nil); err != nil || len(got) != 0 {
+		t.Errorf("no ids = %+v, %v", got, err)
+	}
+}

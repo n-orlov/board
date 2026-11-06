@@ -774,8 +774,8 @@ list filters `status` and `closed_within`, close and reopen (§6.2) come with la
 
 `POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}`, `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close`, and
 `POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}`, `POST /api/v1/tasks/{ref}/checks` and `/milestones` and
-`GET /api/v1/tasks/{ref}/events` (the events of §6.2) are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`) comes
-with a later task. Any authenticated
+`GET /api/v1/tasks/{ref}/events` (the events of §6.2) are in `api/openapi.yaml`, and so is the list
+(`GET /api/v1/tasks`, below). Any authenticated
 principal may use them. The server answers 503 problem documents when it runs without a store.
 
 - **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
@@ -790,6 +790,21 @@ principal may use them. The server answers 503 problem documents when it runs wi
   task number is not used up. In one transaction the server upserts the actor, numbers the task `<slug>-<seq>` from the
   initiative's counter, inserts the row and appends `task_created` (`data` is `{ref, initiative, title, kind}`) and then
   one `dep_added` per blocker (§4.3). A new task cannot close a dependency cycle.
+- **`GET /api/v1/tasks`** lists tasks in id order (creation order), a page at a time, each item the task document
+  without `deps` and `blocking` (`TaskListItem`: the fields below plus `live_leases`). Filters combine, and none is
+  needed: `initiative` (slug or ULID, either letter case) and `tag` (an initiative tag) may repeat, a task being kept
+  when it belongs to any initiative given and its initiative carries every tag given (`domain.NormalizeTags` rules);
+  `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`; `kind` is `work` or `watch`; `active`
+  (a live lease, as in the task document), `blocked` and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
+  `true` or `false`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
+  `closed` or `all`, keeping the tasks closed in the last that many days (with `all` the tasks that are not closed stay);
+  `q` keeps the tasks whose title or description contains the text ignoring letter case (`%` and `_` match themselves).
+  `limit` is 1 to 1000, default 100, and `after` is the ULID or ref of the last task of the previous page, in either
+  letter case; `next_after` in the answer is the ULID to send and is absent on the last page. A bad `status`, `kind`,
+  `tag`, `closed_within`, `limit` or `after` (a ref naming no task and not ULID-shaped), or a flag that is not `true` or
+  `false`, is **400** with a `next`; an `initiative` naming nothing is **404**. Before it reads, the list expires the
+  leases whose `expires_at` has passed (§5.1: `lease_expired`, once each), so with the sweeper off a task whose lease ran
+  out is already not `active` and `active=true` leaves it out.
 - **`GET /api/v1/tasks/{ref}`** reads one task by `<slug>-<seq>` or ULID in either letter case; **404** with a `next`
   naming `GET /api/v1/tasks/<ref>` for a ref that names no task, however it is spelled.
 - **`PATCH /api/v1/tasks/{ref}`**, body any of `title`, `description`, `planned_start`, `planned_end`,

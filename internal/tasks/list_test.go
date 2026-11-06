@@ -1,0 +1,142 @@
+package tasks
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func refs(p Page) string {
+	out := make([]string, len(p.Items))
+	for i, t := range p.Items {
+		out[i] = t.Ref
+	}
+	return strings.Join(out, ",")
+}
+
+func yes() *bool { v := true; return &v }
+func no() *bool  { v := false; return &v }
+
+func TestParseDaysReadsTheWindowsAndWholeDays(t *testing.T) {
+	for in, want := range map[string]int{"7d": 7, "30d": 30, "90d": 90, "1": 1, "14": 14, "36500": 36500} {
+		if got, err := ParseDays(in); err != nil || got != want {
+			t.Errorf("ParseDays(%q) = %d, %v, want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "-1", "36501", "1w", "7D", "x", "1.5"} {
+		if _, err := ParseDays(in); err == nil {
+			t.Errorf("ParseDays(%q) = nil error", in)
+		}
+	}
+}
+
+func TestListFiltersByInitiativeStatusKindAndText(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	initiative(t, s, "bb")
+	mk(t, s, "aa", "Water plants")
+	mk(t, s, "bb", "other")
+	done := mk(t, s, "aa", "done one")
+	if _, err := s.Done(ctx, who, "key:c", done.Ref); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		q    Query
+		want string
+	}{
+		{"all by default but closed", Query{}, "aa-1,bb-1,aa-2"},
+		{"one initiative", Query{Initiatives: []string{"bb"}}, "bb-1"},
+		{"two initiatives", Query{Initiatives: []string{"bb", "AA"}}, "aa-1,bb-1,aa-2"},
+		{"open", Query{Status: StatusOpen}, "aa-1,bb-1"},
+		{"done", Query{Status: StatusDone}, "aa-2"},
+		{"closed", Query{Status: StatusClosed}, ""},
+		{"text", Query{Q: "PLANT"}, "aa-1"},
+		{"text with a wildcard", Query{Q: "%"}, ""},
+		{"kind", Query{Kind: "watch"}, ""},
+	}
+	for _, c := range cases {
+		got, err := s.List(ctx, c.q)
+		if err != nil || refs(got) != c.want {
+			t.Errorf("%s: %q, %v, want %q", c.name, refs(got), err, c.want)
+		}
+	}
+}
+
+func TestListPagesByIdAndRefusesWhatItCannotRead(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	for _, title := range []string{"one", "two", "three"} {
+		mk(t, s, "aa", title)
+	}
+	first, err := s.List(ctx, Query{Limit: 2})
+	if err != nil || refs(first) != "aa-1,aa-2" || first.NextAfter != first.Items[1].ID {
+		t.Fatalf("first page = %q %q, %v", refs(first), first.NextAfter, err)
+	}
+	last, err := s.List(ctx, Query{Limit: 2, After: first.NextAfter})
+	if err != nil || refs(last) != "aa-3" || last.NextAfter != "" {
+		t.Fatalf("last page = %q %q, %v", refs(last), last.NextAfter, err)
+	}
+	if got, err := s.List(ctx, Query{After: "AA-1"}); err != nil || refs(got) != "aa-2,aa-3" {
+		t.Errorf("after a ref in capitals = %q, %v", refs(got), err)
+	}
+	if got, err := s.List(ctx, Query{After: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"}); err != nil || len(got.Items) != 0 {
+		t.Errorf("after an id past every task = %q, %v", refs(got), err)
+	}
+	if _, err := s.List(ctx, Query{After: "aa-77"}); !errors.Is(err, ErrBadCursor) {
+		t.Errorf("after an unknown ref: %v, want ErrBadCursor", err)
+	}
+	for name, q := range map[string]Query{
+		"limit":         {Limit: -1},
+		"status":        {Status: "nope"},
+		"kind":          {Kind: "nope"},
+		"tag":           {Tags: []string{"Bad Tag!"}},
+		"closed_within": {Status: StatusClosed, ClosedWithin: "soon"},
+		"window status": {ClosedWithin: "7d"},
+	} {
+		if _, err := s.List(ctx, q); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v, want ErrInvalid", name, err)
+		}
+	}
+	if _, err := s.List(ctx, Query{Initiatives: []string{"zz"}}); !errors.Is(err, ErrNoInitiative) {
+		t.Errorf("unknown initiative: %v, want ErrNoInitiative", err)
+	}
+}
+
+func TestListKeepsTheDerivedStatesApart(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	blocker := mk(t, s, "aa", "blocker")
+	waiting := mk(t, s, "aa", "waiting")
+	late := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	cadence := int64(60)
+	if _, err := s.Create(ctx, who, "key:c", New{Initiative: "aa", Title: "watch", Kind: "watch", CadenceSeconds: &cadence, NextCheckAt: &late}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDep(ctx, who, "key:c", waiting.Ref, blocker.Ref); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		q    Query
+		want string
+	}{
+		"blocked":        {Query{Blocked: yes()}, "aa-2"},
+		"not blocked":    {Query{Blocked: no()}, "aa-1,aa-3"},
+		"overdue":        {Query{Overdue: yes()}, "aa-3"},
+		"not overdue":    {Query{Overdue: no()}, "aa-1,aa-2"},
+		"active":         {Query{Active: yes()}, ""},
+		"not active":     {Query{Active: no()}, "aa-1,aa-2,aa-3"},
+		"watch overdue":  {Query{Kind: "watch", Overdue: yes()}, "aa-3"},
+		"closed in time": {Query{Status: StatusAll, ClosedWithin: "7d"}, "aa-1,aa-2,aa-3"},
+	} {
+		got, err := s.List(ctx, c.q)
+		if err != nil || refs(got) != c.want {
+			t.Errorf("%s: %q, %v, want %q", name, refs(got), err, c.want)
+		}
+	}
+	got, _ := s.List(ctx, Query{Overdue: yes()})
+	if len(got.Items) != 1 || !got.Items[0].Overdue {
+		t.Errorf("overdue item = %+v", got.Items)
+	}
+}
