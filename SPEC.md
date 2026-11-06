@@ -359,7 +359,9 @@ Both tables exist (migration `00003_tasks`, in both dialects) with the §4.10 in
 A task's ref is parsed by `domain.ParseTaskRef`: `<slug>-<seq>` (the text after the last `-` is a positive integer, the
 rest a valid slug) or a ULID, either in upper or lower case. A write through `internal/tasks` (`Create`, `Patch`) appends
 its event (`task_created`, `task_updated` with `data.changed` naming the changed fields in column order) in the same
-transaction; a patch that changes nothing writes no row, no event and no actor.
+transaction; a patch that changes nothing writes no row, no event and no actor. `tasks.New.BlockedBy` makes a new task
+blocked at creation: each blocker gets its `task_deps` row and a `dep_added` event in the creating transaction, and an unknown
+one is `ErrNotFound` with nothing written. `Store.Links` reads a task's `Deps` and `Blocking` (`{Ref, Title, Status}`, by id).
 
 ### 4.4 `leases`, `lease_resources`
 
@@ -406,6 +408,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
   `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
+- **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It only reads.
 
 ### 4.5 `asks`
 
@@ -610,8 +613,8 @@ and CLI can show badges without the lists.
   regenerates them into a scratch directory and exits non-zero when either checked-in file
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
-  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the three `/api/v1/initiatives` operations (§6.3) and the
-  RFC 9457 `Problem` schema. The binary embeds the document and serves it at
+  `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the three `/api/v1/initiatives` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
+  operations (§6.4) and the RFC 9457 `Problem` schema. The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
   or session like any other route.
@@ -729,6 +732,48 @@ list filters `status` and `closed_within`, PATCH, close and reopen (§6.2) come 
   is the creating actor's handle, absent fields are omitted.
 - Not yet served: `?view=compact` and `Idempotency-Key` replays (§6.1) for these operations. The
   server answers 503 problem documents when it runs without a store.
+
+### 6.4 Tasks
+
+`POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}` are in `api/openapi.yaml`. The list (`GET /api/v1/tasks`),
+the transitions, dependencies, checks, milestones and events of §6.2 come with later tasks. Any authenticated
+principal may use them. The server answers 503 problem documents when it runs without a store.
+
+- **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
+  cadence_seconds?, next_check_at?, external_refs?, blocked_by?}`. `initiative` is a slug or ULID, in either letter case.
+  `title` is 1 to 200 characters after trimming, `description` Markdown of at most 20000. `kind` is `work` (the default)
+  or `watch`. A watch task needs `cadence_seconds` (60 to 31536000), and its `next_check_at` defaults to now plus the
+  cadence; either watch field on a work task is **400**. `planned_start` and `planned_end` are RFC 3339 times, the end
+  not before the start. `external_refs` is at most 20 items `{label, url}`, `label` 1 to 80 characters and `url` `http`
+  or `https`. `blocked_by` lists tasks (ref or ULID, either letter case, repeats counted once) the new task starts out
+  blocked by. Answers **201** with the task (below). A bad field is **400**, an unknown initiative or an unknown
+  blocker is **404**, and a closed initiative is **409**. A refusal changes nothing: no row, event, actor, and the
+  task number is not used up. In one transaction the server upserts the actor, numbers the task `<slug>-<seq>` from the
+  initiative's counter, inserts the row and appends `task_created` (`data` is `{ref, initiative, title, kind}`) and then
+  one `dep_added` per blocker (§4.3). A new task cannot close a dependency cycle.
+- **`GET /api/v1/tasks/{ref}`** reads one task by `<slug>-<seq>` or ULID in either letter case; **404** with a `next`
+  naming `GET /api/v1/tasks/<ref>` for a ref that names no task, however it is spelled.
+- **`PATCH /api/v1/tasks/{ref}`**, body any of `title`, `description`, `planned_start`, `planned_end`,
+  `cadence_seconds`, `next_check_at`, `external_refs` (which replaces the list). A field left out keeps its value. `null`
+  clears `planned_start`, `planned_end`, `next_check_at` and `cadence_seconds` (a watch task then fails the cadence rule,
+  **400**), and is **400** for `title`, `description` and `external_refs`. `kind` and `initiative` are immutable, and a
+  body that names either, even unchanged, is **400**. The same field rules as a create apply to the task as it would be
+  after the patch. A patch that changes nothing, a `{}` or values equal to the stored ones, answers **200** and writes
+  no row, no event and no actor. A change writes the row and one `task_updated` event whose `data` is
+  `{ref, changed}`, `changed` naming the changed fields in column order, in one transaction. A closed task is **409**
+  (`next` says to reopen it) and so is a task of a closed initiative. An unknown ref is **404**.
+- **The task document** (all three answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
+  status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
+  created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,
+  live_leases}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
+  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking` and `live_leases` as `[]`.
+  `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
+  status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
+  is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
+  expires_at, state, resources}`, resources sorted); the read does not write. The derived `active` is a non-empty
+  `live_leases`, `blocked` is an open dependency (§4.3) and `overdue` is §4.6's rule at the time of the read.
+- A PATCH body is read with a three-state field (`internal/server` `Maybe`): left out, `null`, or a value. Fields the
+  document does not name are ignored.
 
 ---
 

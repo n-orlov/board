@@ -212,6 +212,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a task
+         * @description Makes a task in an open initiative, numbered `<slug>-<seq>` from 1 within it and never reused. `kind` is `work` (the default) or `watch`. A watch task needs `cadence_seconds` (60 to 31536000) and its `next_check_at` defaults to now plus the cadence. A work task that sends either watch field is 400. `blocked_by` names tasks (ref or ULID) the new task starts out blocked by. A bad field is 400 and writes no row, event or actor. An unknown initiative or blocker is 404 and a closed initiative is 409. Appends `task_created`, and `dep_added` for each blocker.
+         */
+        post: operations["createTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a task
+         * @description The task whose ref (`<slug>-<seq>`) or ULID is given, in either letter case, with the tasks it is blocked by (`deps`), the tasks it blocks (`blocking`), its live leases and the derived `active`, `blocked` and `overdue`.
+         */
+        get: operations["getTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a task
+         * @description Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and `external_refs` replaces the list. `kind` and `initiative` are immutable, and sending either is 400. A patch that changes nothing answers 200 and writes no row, event or actor. A change appends `task_updated` whose `data.changed` names the changed fields. A closed task, or a task of a closed initiative, is 409.
+         */
+        patch: operations["patchTask"];
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -457,6 +501,182 @@ export interface components {
              */
             target_end?: string;
         };
+        /** @description A link to a ticket, pull request or build. */
+        ExternalRef: {
+            /** @description 1 to 80 characters. */
+            label: string;
+            /** @description An `http` or `https` URL. */
+            url: string;
+        };
+        /** @description A task on the other end of a dependency. */
+        TaskLink: {
+            ref: string;
+            title: string;
+            /** @enum {string} */
+            status: "open" | "done" | "closed";
+        };
+        /** @description A lease on a task, with its resources. */
+        Lease: {
+            /** @description The lease's ULID. */
+            id: string;
+            /** @description The short ref, `L<n>`. */
+            ref: string;
+            /** @description The ref of the task it is on. */
+            task: string;
+            /** @description The handle of the actor that holds it. */
+            actor: string;
+            intent: string;
+            /** Format: int64 */
+            ttl_seconds: number;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            renewed_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @enum {string} */
+            state: "live" | "ended" | "expired";
+            /** @description The resources it holds, sorted. */
+            resources: string[];
+            /** Format: date-time */
+            ended_at?: string;
+            /** @description The handle of the actor that ended it, when that was not the holder. */
+            ended_by?: string;
+            outcome?: string;
+            /** Format: date-time */
+            acked_at?: string;
+            acked_by?: string;
+        };
+        /** @description A task. `active`, `blocked` and `overdue` are derived. */
+        Task: {
+            /** @description The task's ULID. */
+            id: string;
+            /**
+             * @description The short ref, `<initiative slug>-<seq>`.
+             * @example phone-onboard-3
+             */
+            ref: string;
+            /** @description The slug of the initiative it belongs to. */
+            initiative: string;
+            /** @description The number within the initiative, from 1. */
+            seq: number;
+            title: string;
+            /** @description Markdown. Empty when none was given. */
+            description: string;
+            /** @enum {string} */
+            kind: "work" | "watch";
+            /** @enum {string} */
+            status: "open" | "done" | "closed";
+            /**
+             * @description Why it was closed. Absent unless it is closed.
+             * @enum {string}
+             */
+            resolution?: "completed" | "dropped" | "superseded" | "duplicate";
+            /** Format: date-time */
+            planned_start?: string;
+            /** Format: date-time */
+            planned_end?: string;
+            /**
+             * Format: int64
+             * @description Watch tasks only.
+             */
+            cadence_seconds?: number;
+            /**
+             * Format: date-time
+             * @description Watch tasks only.
+             */
+            next_check_at?: string;
+            external_refs: components["schemas"]["ExternalRef"][];
+            /** @description The handle of the actor that created it. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            done_at?: string;
+            done_by?: string;
+            /** Format: date-time */
+            closed_at?: string;
+            closed_by?: string;
+            /** @description It has a live lease. */
+            active: boolean;
+            /** @description It has an open dependency, one whose blocking task is not closed. */
+            blocked: boolean;
+            /** @description A watch task, not closed, whose `next_check_at` is before now. */
+            overdue: boolean;
+        };
+        /** @description A task with its dependencies and live leases. */
+        TaskDetail: components["schemas"]["Task"] & {
+            /** @description The tasks it is blocked by, in creation order. */
+            deps: components["schemas"]["TaskLink"][];
+            /** @description The tasks that are blocked by it, in creation order. */
+            blocking: components["schemas"]["TaskLink"][];
+            /** @description Its live leases, oldest first. */
+            live_leases: components["schemas"]["Lease"][];
+        };
+        /** @description A new task. */
+        TaskCreate: {
+            /** @description The slug or ULID of an open initiative. */
+            initiative: string;
+            /** @description 1 to 200 characters. */
+            title: string;
+            /** @description Markdown, at most 20000 characters. */
+            description?: string;
+            /**
+             * @description Default `work`.
+             * @enum {string}
+             */
+            kind?: "work" | "watch";
+            /** Format: date-time */
+            planned_start?: string;
+            /**
+             * Format: date-time
+             * @description Not before `planned_start`.
+             */
+            planned_end?: string;
+            /**
+             * Format: int64
+             * @description Watch tasks only, and required there. 60 to 31536000.
+             */
+            cadence_seconds?: number;
+            /**
+             * Format: date-time
+             * @description Watch tasks only. Default now plus `cadence_seconds`.
+             */
+            next_check_at?: string;
+            /** @description At most 20. */
+            external_refs?: components["schemas"]["ExternalRef"][];
+            /** @description Refs or ULIDs of the tasks the new task starts out blocked by. */
+            blocked_by?: string[];
+        };
+        /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others. */
+        TaskPatch: {
+            /** @description 1 to 200 characters. */
+            title?: string | null;
+            /** @description Markdown, at most 20000 characters. */
+            description?: string | null;
+            /** Format: date-time */
+            planned_start?: string | null;
+            /** Format: date-time */
+            planned_end?: string | null;
+            /**
+             * Format: int64
+             * @description Watch tasks only. 60 to 31536000.
+             */
+            cadence_seconds?: number | null;
+            /**
+             * Format: date-time
+             * @description Watch tasks only.
+             */
+            next_check_at?: string | null;
+            /** @description Replaces the list. At most 20. */
+            external_refs?: components["schemas"]["ExternalRef"][] | null;
+            /** @description Immutable. Sending it, even unchanged, is 400. */
+            kind?: string | null;
+            /** @description Immutable. Sending it, even unchanged, is 400. */
+            initiative?: string | null;
+        };
         /** @description A browser session. */
         Session: {
             /** @description The verified email the session belongs to. */
@@ -572,7 +792,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+        TaskRef: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -883,6 +1106,94 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreate"];
+            };
+        };
+        responses: {
+            /** @description The task was created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    patchTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskPatch"];
+            };
+        };
+        responses: {
+            /** @description The task after the edit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

@@ -26,6 +26,10 @@ type apiState struct {
 	ids map[string]string
 	// headers are extra request headers for the next sendKeyed call only.
 	headers map[string]string
+	// counts is the tasks, events and actors count a scenario noted, and
+	// sentAt and answeredAt bracket the last task request.
+	counts             string
+	sentAt, answeredAt time.Time
 }
 
 // sendKeyed sends one request to the running server with the given key and actor

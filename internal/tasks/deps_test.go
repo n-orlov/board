@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -246,5 +247,74 @@ func TestBlockedIgnoresAClosedBlockerWhenAnotherIsOpen(t *testing.T) {
 	}
 	if got, _ := s.Get(ctx, a.Ref); got.Blocked {
 		t.Error("both blockers closed")
+	}
+}
+
+func TestLinksListTheDependenciesAndTheBlockedTasksWithRefTitleAndStatus(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	initiative(t, s, "bb")
+	a, b, c := mk(t, s, "aa", "first"), mk(t, s, "aa", "second"), mk(t, s, "bb", "third")
+	for _, d := range [][2]string{{a.Ref, b.Ref}, {a.Ref, c.Ref}, {c.Ref, b.Ref}} {
+		if _, err := s.AddDep(ctx, who, "key:dep", d[0], d[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(ctx, who, "key:dep", b.Ref, "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Links(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeps := []Link{{"aa-2", "second", "closed"}, {"bb-1", "third", "open"}}
+	if !reflect.DeepEqual(got.Deps, wantDeps) || got.Blocking == nil || len(got.Blocking) != 0 {
+		t.Errorf("a: %#v", got)
+	}
+	got, err = s.Links(ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBlocking := []Link{{"aa-1", "first", "open"}, {"bb-1", "third", "open"}}
+	if !reflect.DeepEqual(got.Blocking, wantBlocking) || got.Deps == nil || len(got.Deps) != 0 {
+		t.Errorf("b: %#v", got)
+	}
+}
+
+func TestCreateBlockedByStartsBlockedWithOneDepAddedEventPerBlocker(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	initiative(t, s, "bb")
+	a, b := mk(t, s, "aa", "a"), mk(t, s, "bb", "b")
+	got, err := s.Create(ctx, who, "key:caller", New{Initiative: "aa", Title: "c", BlockedBy: []string{"AA-1", b.ID, "bb-1", a.Ref}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Blocked || depRows(t, s) != 2 {
+		t.Errorf("blocked %v, rows %d", got.Blocked, depRows(t, s))
+	}
+	ev := events(t, s, EventDepAdded)
+	if len(ev) != 2 || ev[0].TaskID != got.ID || ev[0].Data["blocked_by"] != "aa-1" || ev[1].Data["blocked_by"] != "bb-1" ||
+		ev[1].Data["ref"] != got.Ref {
+		t.Errorf("events = %+v", ev)
+	}
+}
+
+func TestCreateWithAnUnknownBlockerLeavesNothingBehind(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	mk(t, s, "aa", "a")
+	for _, ref := range []string{"aa-9", "zz-1", "nonsense"} {
+		_, err := s.Create(ctx, who, "key:caller", New{Initiative: "aa", Title: "c", BlockedBy: []string{"aa-1", ref}})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s: err = %v", ref, err)
+		}
+	}
+	if n := count(t, s, `SELECT COUNT(*) FROM tasks`); n != 1 || depRows(t, s) != 0 || len(events(t, s, EventDepAdded)) != 0 {
+		t.Errorf("tasks %d deps %d", n, depRows(t, s))
+	}
+	again := mk(t, s, "aa", "after")
+	if again.Seq != 2 {
+		t.Errorf("a refused create used up a number: seq = %d", again.Seq)
 	}
 }

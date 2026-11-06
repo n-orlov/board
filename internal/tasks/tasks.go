@@ -27,6 +27,9 @@ type New struct {
 	CadenceSeconds *int64
 	NextCheckAt    *time.Time
 	ExternalRefs   []domain.ExternalRef
+	// BlockedBy names (by ref or ULID) the tasks the new task starts out blocked
+	// by. Repeats count once.
+	BlockedBy []string
 }
 
 // Normalize checks every field and returns the request with the kind defaulted,
@@ -296,11 +299,40 @@ func (s Store) insert(ctx context.Context, tx *sql.Tx, actor audit.Actor, princi
 		return fmt.Errorf("create task: %w", err)
 	}
 	ref := domain.FormatTaskRef(ini.Slug, seq)
-	return audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
+	err = audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
 		Principal: principal, Type: EventCreated, InitiativeID: ini.ID, TaskID: id, RefID: id,
 		Summary: "task " + ref + " created",
 		Data:    map[string]any{"ref": ref, "initiative": ini.Slug, "title": in.Title, "kind": in.Kind},
 	})
+	if err != nil {
+		return err
+	}
+	return s.insertBlockers(ctx, tx, actorID, principal, Task{ID: id, Ref: ref, InitiativeID: ini.ID}, in.BlockedBy)
+}
+
+// insertBlockers makes the new task blocked by each task refs names, once each,
+// and appends a dep_added event for it. A new task has no dependents, so none of
+// these can close a cycle. An unknown task is ErrNotFound.
+func (s Store) insertBlockers(ctx context.Context, tx *sql.Tx, actorID, principal string, task Task, refs []string) error {
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		blocker, err := s.find(ctx, tx, ref)
+		if err != nil {
+			return err
+		}
+		if seen[blocker.ID] {
+			continue
+		}
+		seen[blocker.ID] = true
+		_, err = tx.ExecContext(ctx, s.Store.Dialect().Rebind(`INSERT INTO task_deps (task_id, blocked_by_task_id) VALUES (?, ?)`), task.ID, blocker.ID)
+		if err != nil {
+			return fmt.Errorf("write dependency: %w", err)
+		}
+		if err := s.appendDep(ctx, tx, actorID, principal, task, blocker, EventDepAdded, "now blocked by"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Patch applies the edit to the task ref names and returns the task. A patch

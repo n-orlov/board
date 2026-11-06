@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    The document declares the probe, documentation, browser-login, API-key and initiative operations.
+    The document declares the probe, documentation, browser-login, API-key, initiative and task operations.
     Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
@@ -23,6 +23,8 @@ tags:
     description: API keys for agents, created, listed and revoked by any authenticated principal.
   - name: initiatives
     description: Initiatives, the groups of tasks, with tags.
+  - name: tasks
+    description: Tasks, the units of work and the watches, created, read and edited.
   - name: meta
     description: The server's versions, the caller, and the agent protocol the caller has read.
 paths:
@@ -369,6 +371,111 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks:
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Create a task
+      description: >-
+        Makes a task in an open initiative, numbered `<slug>-<seq>` from 1 within it and never reused.
+        `kind` is `work` (the default) or `watch`. A watch task needs `cadence_seconds` (60 to 31536000) and
+        its `next_check_at` defaults to now plus the cadence. A work task that sends either watch field is 400.
+        `blocked_by` names tasks (ref or ULID) the new task starts out blocked by. A bad field is 400 and
+        writes no row, event or actor. An unknown initiative or blocker is 404 and a closed initiative is 409.
+        Appends `task_created`, and `dep_added` for each blocker.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+      responses:
+        "201":
+          description: The task was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}:
+    get:
+      operationId: getTask
+      tags: [tasks]
+      summary: Read a task
+      description: >-
+        The task whose ref (`<slug>-<seq>`) or ULID is given, in either letter case, with the tasks it is blocked
+        by (`deps`), the tasks it blocks (`blocking`), its live leases and the derived `active`, `blocked` and
+        `overdue`.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    patch:
+      operationId: patchTask
+      tags: [tasks]
+      summary: Edit a task
+      description: >-
+        Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end`,
+        `cadence_seconds` and `next_check_at`, and `external_refs` replaces the list. `kind` and `initiative` are
+        immutable, and sending either is 400. A patch that changes nothing answers 200 and writes no row, event or
+        actor. A change appends `task_updated` whose `data.changed` names the changed fields. A closed task, or a
+        task of a closed initiative, is 409.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskPatch"
+      responses:
+        "200":
+          description: The task after the edit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -564,6 +671,14 @@ components:
       in: cookie
       name: board_session
       description: The operator's browser session.
+  parameters:
+    TaskRef:
+      name: ref
+      in: path
+      required: true
+      description: The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case.
+      schema:
+        type: string
   responses:
     BadRequest:
       description: >-
@@ -770,6 +885,281 @@ components:
           type: string
           format: date
           description: Not before `target_start`.
+    ExternalRef:
+      type: object
+      description: A link to a ticket, pull request or build.
+      required: [label, url]
+      properties:
+        label:
+          type: string
+          description: 1 to 80 characters.
+        url:
+          type: string
+          description: An `http` or `https` URL.
+    TaskLink:
+      type: object
+      description: A task on the other end of a dependency.
+      required: [ref, title, status]
+      properties:
+        ref:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, done, closed]
+    Lease:
+      type: object
+      description: A lease on a task, with its resources.
+      required: [id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at, expires_at, state, resources]
+      properties:
+        id:
+          type: string
+          description: The lease's ULID.
+        ref:
+          type: string
+          description: The short ref, `L<n>`.
+        task:
+          type: string
+          description: The ref of the task it is on.
+        actor:
+          type: string
+          description: The handle of the actor that holds it.
+        intent:
+          type: string
+        ttl_seconds:
+          type: integer
+          format: int64
+        started_at:
+          type: string
+          format: date-time
+        renewed_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [live, ended, expired]
+        resources:
+          type: array
+          description: The resources it holds, sorted.
+          items:
+            type: string
+        ended_at:
+          type: string
+          format: date-time
+        ended_by:
+          type: string
+          description: The handle of the actor that ended it, when that was not the holder.
+        outcome:
+          type: string
+        acked_at:
+          type: string
+          format: date-time
+        acked_by:
+          type: string
+    Task:
+      type: object
+      description: A task. `active`, `blocked` and `overdue` are derived.
+      required: [id, ref, initiative, seq, title, description, kind, status, external_refs, created_by, created_at,
+                 updated_at, active, blocked, overdue]
+      properties:
+        id:
+          type: string
+          description: The task's ULID.
+        ref:
+          type: string
+          description: The short ref, `<initiative slug>-<seq>`.
+          examples: [phone-onboard-3]
+        initiative:
+          type: string
+          description: The slug of the initiative it belongs to.
+        seq:
+          type: integer
+          description: The number within the initiative, from 1.
+        title:
+          type: string
+        description:
+          type: string
+          description: Markdown. Empty when none was given.
+        kind:
+          type: string
+          enum: [work, watch]
+        status:
+          type: string
+          enum: [open, done, closed]
+        resolution:
+          type: string
+          enum: [completed, dropped, superseded, duplicate]
+          description: Why it was closed. Absent unless it is closed.
+        planned_start:
+          type: string
+          format: date-time
+        planned_end:
+          type: string
+          format: date-time
+        cadence_seconds:
+          type: integer
+          format: int64
+          description: Watch tasks only.
+        next_check_at:
+          type: string
+          format: date-time
+          description: Watch tasks only.
+        external_refs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalRef"
+        created_by:
+          type: string
+          description: The handle of the actor that created it.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        done_at:
+          type: string
+          format: date-time
+        done_by:
+          type: string
+        closed_at:
+          type: string
+          format: date-time
+        closed_by:
+          type: string
+        active:
+          type: boolean
+          description: It has a live lease.
+        blocked:
+          type: boolean
+          description: It has an open dependency, one whose blocking task is not closed.
+        overdue:
+          type: boolean
+          description: A watch task, not closed, whose `next_check_at` is before now.
+    TaskDetail:
+      description: A task with its dependencies and live leases.
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          required: [deps, blocking, live_leases]
+          properties:
+            deps:
+              type: array
+              description: The tasks it is blocked by, in creation order.
+              items:
+                $ref: "#/components/schemas/TaskLink"
+            blocking:
+              type: array
+              description: The tasks that are blocked by it, in creation order.
+              items:
+                $ref: "#/components/schemas/TaskLink"
+            live_leases:
+              type: array
+              description: Its live leases, oldest first.
+              items:
+                $ref: "#/components/schemas/Lease"
+    TaskCreate:
+      type: object
+      description: A new task.
+      required: [initiative, title]
+      properties:
+        initiative:
+          type: string
+          description: The slug or ULID of an open initiative.
+        title:
+          type: string
+          description: 1 to 200 characters.
+        description:
+          type: string
+          description: Markdown, at most 20000 characters.
+        kind:
+          type: string
+          enum: [work, watch]
+          description: Default `work`.
+        planned_start:
+          type: string
+          format: date-time
+        planned_end:
+          type: string
+          format: date-time
+          description: Not before `planned_start`.
+        cadence_seconds:
+          type: integer
+          format: int64
+          description: Watch tasks only, and required there. 60 to 31536000.
+        next_check_at:
+          type: string
+          format: date-time
+          description: Watch tasks only. Default now plus `cadence_seconds`.
+        external_refs:
+          type: array
+          description: At most 20.
+          items:
+            $ref: "#/components/schemas/ExternalRef"
+        blocked_by:
+          type: array
+          description: Refs or ULIDs of the tasks the new task starts out blocked by.
+          items:
+            type: string
+    TaskPatch:
+      type: object
+      description: >-
+        The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`,
+        `cadence_seconds` and `next_check_at`, and is 400 for the others.
+      properties:
+        title:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: 1 to 200 characters.
+        description:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Markdown, at most 20000 characters.
+        planned_start:
+          type: [string, "null"]
+          format: date-time
+          x-go-type: Maybe[time.Time]
+          x-go-type-skip-optional-pointer: true
+        planned_end:
+          type: [string, "null"]
+          format: date-time
+          x-go-type: Maybe[time.Time]
+          x-go-type-skip-optional-pointer: true
+        cadence_seconds:
+          type: [integer, "null"]
+          format: int64
+          x-go-type: Maybe[int64]
+          x-go-type-skip-optional-pointer: true
+          description: Watch tasks only. 60 to 31536000.
+        next_check_at:
+          type: [string, "null"]
+          format: date-time
+          x-go-type: Maybe[time.Time]
+          x-go-type-skip-optional-pointer: true
+          description: Watch tasks only.
+        external_refs:
+          type: [array, "null"]
+          x-go-type: Maybe[[]ExternalRef]
+          x-go-type-skip-optional-pointer: true
+          description: Replaces the list. At most 20.
+          items:
+            $ref: "#/components/schemas/ExternalRef"
+        kind:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Immutable. Sending it, even unchanged, is 400.
+        initiative:
+          type: [string, "null"]
+          x-go-type: Maybe[string]
+          x-go-type-skip-optional-pointer: true
+          description: Immutable. Sending it, even unchanged, is 400.
     Session:
       type: object
       description: A browser session.

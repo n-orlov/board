@@ -11,6 +11,8 @@ import (
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/tasks"
 	"github.com/n-orlov/board/internal/webui"
 )
 
@@ -53,6 +55,12 @@ type Option func(*operations)
 // WithInitiatives serves /api/v1/initiatives from st.
 func WithInitiatives(st *initiatives.Store) Option {
 	return func(o *operations) { o.inits = st }
+}
+
+// WithTasks serves /api/v1/tasks from st, reading live leases from ls; without
+// both the operations answer 503.
+func WithTasks(st *tasks.Store, ls *leases.Store) Option {
+	return func(o *operations) { o.taskOps = taskOps{tasks: st, leases: ls} }
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

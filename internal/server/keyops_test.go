@@ -13,7 +13,9 @@ import (
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/board/internal/tasks"
 )
 
 // keyServer is a handler over a real migrated store, with a real verifier and
@@ -23,6 +25,7 @@ type keyServer struct {
 	h     http.Handler
 	keys  *auth.Keys
 	token string
+	st    *store.Store
 }
 
 func newKeyServer(t *testing.T) *keyServer {
@@ -41,8 +44,9 @@ func newKeyServer(t *testing.T) *keyServer {
 		t.Fatal(err)
 	}
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
+		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}),
 		WithMeta(Build{Version: "v9.9.9", Protocol: 7}, &actors.Store{Store: st}))
-	return &keyServer{t: t, h: h, keys: keys, token: token}
+	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }
 
 func (s *keyServer) send(method, path, body, actor string) *httptest.ResponseRecorder {

@@ -41,16 +41,16 @@ func (e CreatedKeyStatus) Valid() bool {
 
 // Defines values for InitiativeStatus.
 const (
-	Closed InitiativeStatus = "closed"
-	Open   InitiativeStatus = "open"
+	InitiativeStatusClosed InitiativeStatus = "closed"
+	InitiativeStatusOpen   InitiativeStatus = "open"
 )
 
 // Valid indicates whether the value is a known member of the InitiativeStatus enum.
 func (e InitiativeStatus) Valid() bool {
 	switch e {
-	case Closed:
+	case InitiativeStatusClosed:
 		return true
-	case Open:
+	case InitiativeStatusOpen:
 		return true
 	default:
 		return false
@@ -72,6 +72,192 @@ func (e KeyStatus) Valid() bool {
 	case KeyStatusExpired:
 		return true
 	case KeyStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LeaseState.
+const (
+	LeaseStateEnded   LeaseState = "ended"
+	LeaseStateExpired LeaseState = "expired"
+	LeaseStateLive    LeaseState = "live"
+)
+
+// Valid indicates whether the value is a known member of the LeaseState enum.
+func (e LeaseState) Valid() bool {
+	switch e {
+	case LeaseStateEnded:
+		return true
+	case LeaseStateExpired:
+		return true
+	case LeaseStateLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskKind.
+const (
+	TaskKindWatch TaskKind = "watch"
+	TaskKindWork  TaskKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the TaskKind enum.
+func (e TaskKind) Valid() bool {
+	switch e {
+	case TaskKindWatch:
+		return true
+	case TaskKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskResolution.
+const (
+	TaskResolutionCompleted  TaskResolution = "completed"
+	TaskResolutionDropped    TaskResolution = "dropped"
+	TaskResolutionDuplicate  TaskResolution = "duplicate"
+	TaskResolutionSuperseded TaskResolution = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TaskResolution enum.
+func (e TaskResolution) Valid() bool {
+	switch e {
+	case TaskResolutionCompleted:
+		return true
+	case TaskResolutionDropped:
+		return true
+	case TaskResolutionDuplicate:
+		return true
+	case TaskResolutionSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskStatus.
+const (
+	TaskStatusClosed TaskStatus = "closed"
+	TaskStatusDone   TaskStatus = "done"
+	TaskStatusOpen   TaskStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the TaskStatus enum.
+func (e TaskStatus) Valid() bool {
+	switch e {
+	case TaskStatusClosed:
+		return true
+	case TaskStatusDone:
+		return true
+	case TaskStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskCreateKind.
+const (
+	TaskCreateKindWatch TaskCreateKind = "watch"
+	TaskCreateKindWork  TaskCreateKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the TaskCreateKind enum.
+func (e TaskCreateKind) Valid() bool {
+	switch e {
+	case TaskCreateKindWatch:
+		return true
+	case TaskCreateKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskDetailKind.
+const (
+	TaskDetailKindWatch TaskDetailKind = "watch"
+	TaskDetailKindWork  TaskDetailKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the TaskDetailKind enum.
+func (e TaskDetailKind) Valid() bool {
+	switch e {
+	case TaskDetailKindWatch:
+		return true
+	case TaskDetailKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskDetailResolution.
+const (
+	TaskDetailResolutionCompleted  TaskDetailResolution = "completed"
+	TaskDetailResolutionDropped    TaskDetailResolution = "dropped"
+	TaskDetailResolutionDuplicate  TaskDetailResolution = "duplicate"
+	TaskDetailResolutionSuperseded TaskDetailResolution = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the TaskDetailResolution enum.
+func (e TaskDetailResolution) Valid() bool {
+	switch e {
+	case TaskDetailResolutionCompleted:
+		return true
+	case TaskDetailResolutionDropped:
+		return true
+	case TaskDetailResolutionDuplicate:
+		return true
+	case TaskDetailResolutionSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskDetailStatus.
+const (
+	TaskDetailStatusClosed TaskDetailStatus = "closed"
+	TaskDetailStatusDone   TaskDetailStatus = "done"
+	TaskDetailStatusOpen   TaskDetailStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the TaskDetailStatus enum.
+func (e TaskDetailStatus) Valid() bool {
+	switch e {
+	case TaskDetailStatusClosed:
+		return true
+	case TaskDetailStatusDone:
+		return true
+	case TaskDetailStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskLinkStatus.
+const (
+	TaskLinkStatusClosed TaskLinkStatus = "closed"
+	TaskLinkStatusDone   TaskLinkStatus = "done"
+	TaskLinkStatusOpen   TaskLinkStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the TaskLinkStatus enum.
+func (e TaskLinkStatus) Valid() bool {
+	switch e {
+	case TaskLinkStatusClosed:
+		return true
+	case TaskLinkStatusDone:
+		return true
+	case TaskLinkStatusOpen:
 		return true
 	default:
 		return false
@@ -112,6 +298,15 @@ type CreatedKey struct {
 
 // CreatedKeyStatus The key's state now.
 type CreatedKeyStatus string
+
+// ExternalRef A link to a ticket, pull request or build.
+type ExternalRef struct {
+	// Label 1 to 80 characters.
+	Label string `json:"label"`
+
+	// Url An `http` or `https` URL.
+	Url string `json:"url"`
+}
 
 // Initiative An initiative with its tags.
 type Initiative struct {
@@ -233,6 +428,41 @@ type KeyList struct {
 	Items []Key `json:"items"`
 }
 
+// Lease A lease on a task, with its resources.
+type Lease struct {
+	AckedAt *time.Time `json:"acked_at,omitempty"`
+	AckedBy *string    `json:"acked_by,omitempty"`
+
+	// Actor The handle of the actor that holds it.
+	Actor   string     `json:"actor"`
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+
+	// EndedBy The handle of the actor that ended it, when that was not the holder.
+	EndedBy   *string   `json:"ended_by,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The lease's ULID.
+	Id      string  `json:"id"`
+	Intent  string  `json:"intent"`
+	Outcome *string `json:"outcome,omitempty"`
+
+	// Ref The short ref, `L<n>`.
+	Ref       string    `json:"ref"`
+	RenewedAt time.Time `json:"renewed_at"`
+
+	// Resources The resources it holds, sorted.
+	Resources []string   `json:"resources"`
+	StartedAt time.Time  `json:"started_at"`
+	State     LeaseState `json:"state"`
+
+	// Task The ref of the task it is on.
+	Task       string `json:"task"`
+	TtlSeconds int64  `json:"ttl_seconds"`
+}
+
+// LeaseState defines model for Lease.State.
+type LeaseState string
+
 // Meta The server and the caller.
 type Meta struct {
 	// Actor The actor the request acts as.
@@ -299,6 +529,212 @@ type Session struct {
 	Principal string `json:"principal"`
 }
 
+// Task A task. `active`, `blocked` and `overdue` are derived.
+type Task struct {
+	// Active It has a live lease.
+	Active bool `json:"active"`
+
+	// Blocked It has an open dependency, one whose blocking task is not closed.
+	Blocked bool `json:"blocked"`
+
+	// CadenceSeconds Watch tasks only.
+	CadenceSeconds *int64     `json:"cadence_seconds,omitempty"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	ClosedBy       *string    `json:"closed_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Description Markdown. Empty when none was given.
+	Description  string        `json:"description"`
+	DoneAt       *time.Time    `json:"done_at,omitempty"`
+	DoneBy       *string       `json:"done_by,omitempty"`
+	ExternalRefs []ExternalRef `json:"external_refs"`
+
+	// Id The task's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative it belongs to.
+	Initiative string   `json:"initiative"`
+	Kind       TaskKind `json:"kind"`
+
+	// NextCheckAt Watch tasks only.
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+
+	// Overdue A watch task, not closed, whose `next_check_at` is before now.
+	Overdue      bool       `json:"overdue"`
+	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
+	PlannedStart *time.Time `json:"planned_start,omitempty"`
+
+	// Ref The short ref, `<initiative slug>-<seq>`.
+	//
+	// Examples: phone-onboard-3
+	Ref string `json:"ref"`
+
+	// Resolution Why it was closed. Absent unless it is closed.
+	Resolution *TaskResolution `json:"resolution,omitempty"`
+
+	// Seq The number within the initiative, from 1.
+	Seq       int        `json:"seq"`
+	Status    TaskStatus `json:"status"`
+	Title     string     `json:"title"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// TaskKind defines model for Task.Kind.
+type TaskKind string
+
+// TaskResolution Why it was closed. Absent unless it is closed.
+type TaskResolution string
+
+// TaskStatus defines model for Task.Status.
+type TaskStatus string
+
+// TaskCreate A new task.
+type TaskCreate struct {
+	// BlockedBy Refs or ULIDs of the tasks the new task starts out blocked by.
+	BlockedBy *[]string `json:"blocked_by,omitempty"`
+
+	// CadenceSeconds Watch tasks only, and required there. 60 to 31536000.
+	CadenceSeconds *int64 `json:"cadence_seconds,omitempty"`
+
+	// Description Markdown, at most 20000 characters.
+	Description *string `json:"description,omitempty"`
+
+	// ExternalRefs At most 20.
+	ExternalRefs *[]ExternalRef `json:"external_refs,omitempty"`
+
+	// Initiative The slug or ULID of an open initiative.
+	Initiative string `json:"initiative"`
+
+	// Kind Default `work`.
+	Kind *TaskCreateKind `json:"kind,omitempty"`
+
+	// NextCheckAt Watch tasks only. Default now plus `cadence_seconds`.
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+
+	// PlannedEnd Not before `planned_start`.
+	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
+	PlannedStart *time.Time `json:"planned_start,omitempty"`
+
+	// Title 1 to 200 characters.
+	Title string `json:"title"`
+}
+
+// TaskCreateKind Default `work`.
+type TaskCreateKind string
+
+// TaskDetail A task with its dependencies and live leases.
+type TaskDetail struct {
+	// Active It has a live lease.
+	Active bool `json:"active"`
+
+	// Blocked It has an open dependency, one whose blocking task is not closed.
+	Blocked bool `json:"blocked"`
+
+	// Blocking The tasks that are blocked by it, in creation order.
+	Blocking []TaskLink `json:"blocking"`
+
+	// CadenceSeconds Watch tasks only.
+	CadenceSeconds *int64     `json:"cadence_seconds,omitempty"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	ClosedBy       *string    `json:"closed_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Deps The tasks it is blocked by, in creation order.
+	Deps []TaskLink `json:"deps"`
+
+	// Description Markdown. Empty when none was given.
+	Description  string        `json:"description"`
+	DoneAt       *time.Time    `json:"done_at,omitempty"`
+	DoneBy       *string       `json:"done_by,omitempty"`
+	ExternalRefs []ExternalRef `json:"external_refs"`
+
+	// Id The task's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative it belongs to.
+	Initiative string         `json:"initiative"`
+	Kind       TaskDetailKind `json:"kind"`
+
+	// LiveLeases Its live leases, oldest first.
+	LiveLeases []Lease `json:"live_leases"`
+
+	// NextCheckAt Watch tasks only.
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+
+	// Overdue A watch task, not closed, whose `next_check_at` is before now.
+	Overdue      bool       `json:"overdue"`
+	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
+	PlannedStart *time.Time `json:"planned_start,omitempty"`
+
+	// Ref The short ref, `<initiative slug>-<seq>`.
+	//
+	// Examples: phone-onboard-3
+	Ref string `json:"ref"`
+
+	// Resolution Why it was closed. Absent unless it is closed.
+	Resolution *TaskDetailResolution `json:"resolution,omitempty"`
+
+	// Seq The number within the initiative, from 1.
+	Seq       int              `json:"seq"`
+	Status    TaskDetailStatus `json:"status"`
+	Title     string           `json:"title"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+// TaskDetailKind defines model for TaskDetail.Kind.
+type TaskDetailKind string
+
+// TaskDetailResolution Why it was closed. Absent unless it is closed.
+type TaskDetailResolution string
+
+// TaskDetailStatus defines model for TaskDetail.Status.
+type TaskDetailStatus string
+
+// TaskLink A task on the other end of a dependency.
+type TaskLink struct {
+	Ref    string         `json:"ref"`
+	Status TaskLinkStatus `json:"status"`
+	Title  string         `json:"title"`
+}
+
+// TaskLinkStatus defines model for TaskLink.Status.
+type TaskLinkStatus string
+
+// TaskPatch The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others.
+type TaskPatch struct {
+	// CadenceSeconds Watch tasks only. 60 to 31536000.
+	CadenceSeconds Maybe[int64] `json:"cadence_seconds,omitempty"`
+
+	// Description Markdown, at most 20000 characters.
+	Description Maybe[string] `json:"description,omitempty"`
+
+	// ExternalRefs Replaces the list. At most 20.
+	ExternalRefs Maybe[[]ExternalRef] `json:"external_refs,omitempty"`
+
+	// Initiative Immutable. Sending it, even unchanged, is 400.
+	Initiative Maybe[string] `json:"initiative,omitempty"`
+
+	// Kind Immutable. Sending it, even unchanged, is 400.
+	Kind Maybe[string] `json:"kind,omitempty"`
+
+	// NextCheckAt Watch tasks only.
+	NextCheckAt  Maybe[time.Time] `json:"next_check_at,omitempty"`
+	PlannedEnd   Maybe[time.Time] `json:"planned_end,omitempty"`
+	PlannedStart Maybe[time.Time] `json:"planned_start,omitempty"`
+
+	// Title 1 to 200 characters.
+	Title Maybe[string] `json:"title,omitempty"`
+}
+
+// TaskRef defines model for TaskRef.
+type TaskRef = string
+
 // BadGateway An RFC 9457 problem document.
 type BadGateway = Problem
 
@@ -341,6 +777,12 @@ type CreateInitiativeJSONRequestBody = InitiativeCreate
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = KeyCreate
 
+// CreateTaskJSONRequestBody defines body for CreateTask for application/json ContentType.
+type CreateTaskJSONRequestBody = TaskCreate
+
+// PatchTaskJSONRequestBody defines body for PatchTask for application/json ContentType.
+type PatchTaskJSONRequestBody = TaskPatch
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetDocs Interactive API documentation
@@ -379,6 +821,15 @@ type ServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
+	// CreateTask Create a task
+	// (POST /api/v1/tasks)
+	CreateTask(w http.ResponseWriter, r *http.Request)
+	// GetTask Read a task
+	// (GET /api/v1/tasks/{ref})
+	GetTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// PatchTask Edit a task
+	// (PATCH /api/v1/tasks/{ref})
+	PatchTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(w http.ResponseWriter, r *http.Request)
@@ -642,6 +1093,72 @@ func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// CreateTask operation middleware
+func (siw *ServerInterfaceWrapper) CreateTask(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTask(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTask operation middleware
+func (siw *ServerInterfaceWrapper) GetTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchTask operation middleware
+func (siw *ServerInterfaceWrapper) PatchTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchTask(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAuthLogin operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthLogin(w http.ResponseWriter, r *http.Request) {
 
@@ -858,6 +1375,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives", wrapper.ListInitiatives)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/initiatives", wrapper.CreateInitiative)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/initiatives/{slug}", wrapper.GetInitiative)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks", wrapper.CreateTask)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.GetTask)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/tasks/{ref}", wrapper.PatchTask)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -1739,6 +2259,297 @@ func (response GetMeta401ApplicationProblemPlusJSONResponse) VisitGetMetaRespons
 	return err
 }
 
+type CreateTaskRequestObject struct {
+	Body *CreateTaskJSONRequestBody
+}
+
+type CreateTaskResponseObject interface {
+	VisitCreateTaskResponse(w http.ResponseWriter) error
+}
+
+type CreateTask201JSONResponse TaskDetail
+
+func (response CreateTask201JSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask400ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask401ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask404ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask409ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask503ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTaskRequestObject struct {
+	Ref TaskRef `json:"ref"`
+}
+
+type GetTaskResponseObject interface {
+	VisitGetTaskResponse(w http.ResponseWriter) error
+}
+
+type GetTask200JSONResponse TaskDetail
+
+func (response GetTask200JSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetTask400ApplicationProblemPlusJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetTask401ApplicationProblemPlusJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetTask404ApplicationProblemPlusJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetTask503ApplicationProblemPlusJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTaskRequestObject struct {
+	Ref  TaskRef `json:"ref"`
+	Body *PatchTaskJSONRequestBody
+}
+
+type PatchTaskResponseObject interface {
+	VisitPatchTaskResponse(w http.ResponseWriter) error
+}
+
+type PatchTask200JSONResponse TaskDetail
+
+func (response PatchTask200JSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTask400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PatchTask400ApplicationProblemPlusJSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTask401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PatchTask401ApplicationProblemPlusJSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTask404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PatchTask404ApplicationProblemPlusJSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTask409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response PatchTask409ApplicationProblemPlusJSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchTask503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PatchTask503ApplicationProblemPlusJSONResponse) VisitPatchTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAuthLoginRequestObject struct {
 }
 
@@ -2194,6 +3005,15 @@ type StrictServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
+	// CreateTask Create a task
+	// (POST /api/v1/tasks)
+	CreateTask(ctx context.Context, request CreateTaskRequestObject) (CreateTaskResponseObject, error)
+	// GetTask Read a task
+	// (GET /api/v1/tasks/{ref})
+	GetTask(ctx context.Context, request GetTaskRequestObject) (GetTaskResponseObject, error)
+	// PatchTask Edit a task
+	// (PATCH /api/v1/tasks/{ref})
+	PatchTask(ctx context.Context, request PatchTaskRequestObject) (PatchTaskResponseObject, error)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
@@ -2563,6 +3383,96 @@ func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
 		if err := validResponse.VisitGetMetaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateTask operation middleware
+func (sh *strictHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	var request CreateTaskRequestObject
+
+	var body CreateTaskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateTask(ctx, request.(CreateTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTaskResponseObject); ok {
+		if err := validResponse.VisitCreateTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTask operation middleware
+func (sh *strictHandler) GetTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request GetTaskRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTask(ctx, request.(GetTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTaskResponseObject); ok {
+		if err := validResponse.VisitGetTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchTask operation middleware
+func (sh *strictHandler) PatchTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+	var request PatchTaskRequestObject
+
+	request.Ref = ref
+
+	var body PatchTaskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchTask(ctx, request.(PatchTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PatchTaskResponseObject); ok {
+		if err := validResponse.VisitPatchTaskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

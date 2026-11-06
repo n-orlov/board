@@ -153,7 +153,7 @@ func TestInitiativesAreUnavailableWithoutAStore(t *testing.T) {
 }
 
 func TestInitiativeStatusEnumAcceptsOnlyTheDeclaredStates(t *testing.T) {
-	if !Open.Valid() || !Closed.Valid() || InitiativeStatus("gone").Valid() {
+	if !InitiativeStatusOpen.Valid() || !InitiativeStatusClosed.Valid() || InitiativeStatus("gone").Valid() {
 		t.Error("InitiativeStatus.Valid is wrong")
 	}
 }
