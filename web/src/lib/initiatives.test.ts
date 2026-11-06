@@ -17,7 +17,7 @@ const initiative = (slug: string, extra: Partial<Initiative> = {}): Initiative =
 
 function api(respond: (url: string, init?: RequestInit) => Promise<Response>, pathname = '/') {
   const fetchFn = vi.fn((input: string, init?: RequestInit) => respond(input, init));
-  const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname };
+  const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname, setHash: vi.fn() };
   return { api: new InitiativesApi(browser, () => 'csrf-1'), fetchFn };
 }
 

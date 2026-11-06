@@ -14,7 +14,7 @@ const key = (name: string, extra: Partial<Key> = {}): Key => ({
 
 function api(respond: (url: string, init?: RequestInit) => Promise<Response>, pathname = '/') {
   const fetchFn = vi.fn((input: string, init?: RequestInit) => respond(input, init));
-  const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname };
+  const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname, setHash: vi.fn() };
   return { api: new KeysApi(browser, () => 'csrf-1'), fetchFn };
 }
 

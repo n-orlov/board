@@ -2,57 +2,70 @@
   import type { Component } from 'svelte';
   import ApiKeys from './ApiKeys.svelte';
   import Initiatives from './Initiatives.svelte';
+  import SessionCard from './SessionCard.svelte';
   import Shell from './Shell.svelte';
-  import { loginUrl, currentBrowser, loadSession, logout, type SessionState } from './lib/session';
+  import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
   import { ROUTES, navEntries, resolveRoute, type RouteId } from './lib/routes';
 
   // The component of each view; the table in lib/routes.ts decides which one is on screen.
   const VIEWS: Record<RouteId, Component<{ csrf: string }>> = { initiatives: Initiatives, keys: ApiKeys };
 
-  let auth: SessionState | undefined = $state();
+  const browser = currentBrowser();
+  let auth: SessionState = $state({ kind: 'loading' });
   let route = $state(resolveRoute(window.location.hash, ROUTES));
-  let signedOut = $state(false);
   let signOutFailed = $state(false);
 
-  const browser = currentBrowser();
+  const session = new SessionController(browser, (s) => (auth = s), window.location.hash);
 
   $effect(() => {
-    void loadSession(browser).then((s) => (auth = s));
+    void session.start();
   });
 
-  async function signOut(csrf: string) {
-    signOutFailed = false;
-    if (await logout(browser, csrf)) signedOut = true;
-    else signOutFailed = true;
+  async function signOut() {
+    signOutFailed = (await session.signOut()) === 'failed';
+  }
+
+  function hashChanged() {
+    route = resolveRoute(window.location.hash, ROUTES);
+    void session.hashChanged(window.location.hash);
   }
 
   const View = $derived(VIEWS[route.id]);
 </script>
 
-<svelte:window onhashchange={() => (route = resolveRoute(window.location.hash, ROUTES))} />
+<svelte:window onhashchange={hashChanged} />
 
-{#if auth === undefined || auth.kind === 'redirecting'}
-  <main class="p-4">
-    <h1 class="text-lg font-bold">board</h1>
-    <p>Signing in…</p>
-  </main>
+{#if auth.kind === 'loading' || auth.kind === 'redirecting'}
+  <SessionCard title={auth.kind === 'loading' ? 'Signing in' : 'Redirecting to sign in'}>
+    <div
+      class="mx-auto mb-3 size-8 animate-spin rounded-full border-4 border-border border-t-accent"
+      role="status"
+      aria-label={auth.kind === 'loading' ? 'Signing in' : 'Redirecting to sign in'}
+      data-testid="spinner"
+    ></div>
+    <p class="text-text-muted">{auth.kind === 'loading' ? 'Signing in…' : 'Redirecting to sign in…'}</p>
+  </SessionCard>
 {:else if auth.kind === 'error'}
-  <main class="p-4">
-    <h1 class="text-lg font-bold">board</h1>
-    <p role="alert">{auth.message}</p>
-  </main>
-{:else if signedOut}
-  <main class="p-4">
-    <h1 class="text-lg font-bold">board</h1>
-    <p>You are signed out.</p>
-    <a class="text-accent underline" href={loginUrl(browser.pathname)}>Sign in</a>
-  </main>
+  <SessionCard title="Session error">
+    <p role="alert" class="mb-4" data-testid="session-error">{auth.message}</p>
+    <button
+      type="button"
+      class="min-h-11 rounded-md border border-accent px-4 font-semibold text-accent hover:bg-surface"
+      onclick={() => void session.retry()}>Retry</button
+    >
+  </SessionCard>
+{:else if auth.kind === 'signed-out'}
+  <SessionCard title="Signed out">
+    <p class="mb-4" data-testid="signed-out">You are signed out.</p>
+    <a class="inline-flex min-h-11 items-center rounded-md border border-accent px-4 font-semibold text-accent hover:bg-surface" href={loginUrl(browser.pathname)}
+      >Sign in</a
+    >
+  </SessionCard>
 {:else}
-  {@const csrf = auth.session.csrf_token}
-  <Shell title={route.title} entries={navEntries(route, ROUTES)} email={auth.session.email} onsignout={() => signOut(csrf)}>
+  <Shell title={route.title} entries={navEntries(route, ROUTES)} email={auth.session.email} onsignout={signOut}>
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}
-    <View {csrf} />
+    <View csrf={auth.session.csrf_token} />
   </Shell>
 {/if}

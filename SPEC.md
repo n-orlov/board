@@ -1084,6 +1084,22 @@ to the main region without changing the fragment; the navigation entry of the vi
 `aria-current="page"`. The page never scrolls horizontally (`e2e/shell.spec.ts` at 390x844,
 820x1180 and 1440x900).
 
+**Session states.** The page is always in one state of `SessionController` (`web/src/lib/session.ts`):
+*loading* (it asks `GET /auth/session`), *signed-in* (the app shows), *redirecting* (the session answered
+401, so the page goes to `/auth/login`, which starts the OIDC flow), *error* (the session could not be
+read) and *signed-out*. Loading and redirecting show a centred card with the product name and a spinner.
+Error shows a card with the problem detail and a **Retry** button that returns to loading and asks
+again; a server that is down never starts a login redirect. **Sign out** (the sidebar foot at 1024 px and
+up, the account menu below it, both showing the signed-in email) posts `POST /auth/logout` with the
+session's `X-CSRF-Token`, then shows the **Signed out** view at `#/signed-out`: a card with a **Sign in**
+button, a plain link to `/auth/login`. That view never starts a login redirect by itself: a page opened
+on `#/signed-out` neither loads the session nor follows a 401. Leaving the view with Back loads the
+session again, and a signed-in page that is sent to `#/signed-out` returns to `#/`. A failed logout
+keeps the app and shows "Sign out failed". A reload of `#/signed-out` is answered by the server (the
+fragment never reaches it), which sends an anonymous navigation to the login page (§3.2)
+(`e2e/session.spec.ts`: sign in, Sign out, no navigation to `/auth/login`, the old cookie gets 401,
+Sign in lands on Initiatives).
+
 **Dialogs and sheets.** Every modal surface in the UI is the one `Dialog` component
 (`web/src/Dialog.svelte`); its focus rules are pure functions in `web/src/lib/focustrap.ts`.
 It renders `role="dialog"` and `aria-modal="true"` with an accessible label (`aria-label`).
