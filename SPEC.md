@@ -1162,6 +1162,12 @@ The PNGs are rendered from `icon.svg`. `e2e/manifest.spec.ts` signs in, reads th
 the page, and checks the manifest is same-origin JSON with those fields and that the five icon
 URLs answer 200 with an `image/*` content type.
 
+**Same origin.** The UI requests nothing from another origin: no web font, CDN, remote icon or
+script. `e2e/sameorigin.spec.ts` signs in through the mock provider, then records every request the
+page issues while it loads `#/`, `#/settings/keys` and `#/signed-out` (a full page load each) at
+390x844 and 1440x900 (6 visits), and requires every http(s)/ws(s) URL to have the board server's
+origin. A planted remote image turns the check red.
+
 **Touch and phone ergonomics.** At the phone width (390x844) every visible interactive element
 (`a, button, input, select, textarea, [role=button]`) in the shell, the forms, the lists and the
 dialogs has a hit area of at least 44x44 CSS px, and every visible `input`, `select` and `textarea`
