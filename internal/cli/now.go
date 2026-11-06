@@ -1,0 +1,130 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// NowUsage is the single stderr line for a malformed `board now`.
+const NowUsage = "usage: board now [--resources r1,r2] [--json]"
+
+// nowCap is how many lines each section of `board now` shows (SPEC §8.1).
+const nowCap = 5
+
+// nowView is what GET /api/v1/now answers.
+type nowView struct {
+	Actor        string         `json:"actor"`
+	MyLeases     []nowLease     `json:"my_leases"`
+	OthersLeases []leaseView    `json:"others_leases"`
+	Conflicts    []conflictView `json:"conflicts"`
+}
+
+type nowLease struct {
+	leaseView
+	Title string `json:"title"`
+}
+
+// nowCmd runs `board now [--resources r1,r2]`: the check-in. It exits 7 when a
+// conflict touches one of my live leases or a resource given.
+func nowCmd(args []string, stdout, stderr io.Writer, env Env) int {
+	p, ok := parseArgs(args, nowFlags)
+	if !ok || len(p.pos) != 0 {
+		return usageLine(stderr, NowUsage)
+	}
+	raw, v, err := fetchNow(p, env)
+	if err != nil {
+		return report(stderr, err)
+	}
+	if p.has("--json") {
+		_, _ = fmt.Fprintln(stdout, string(raw))
+	} else {
+		_, _ = fmt.Fprint(stdout, nowText(v, nowFn()))
+	}
+	if len(v.Conflicts) > 0 {
+		return ExitWarning
+	}
+	return ExitOK
+}
+
+// fetchNow asks the server for the check-in, with the resources given, and
+// returns the answer as it came and as read.
+func fetchNow(p parsedArgs, env Env) (json.RawMessage, nowView, error) {
+	var v nowView
+	c, err := newClient(env)
+	if err != nil {
+		return nil, v, err
+	}
+	ctx, stop := clientContext()
+	defer stop()
+	q := url.Values{}
+	if res := strings.Join(p.values["--resources"], ","); res != "" {
+		q.Set("resources", res)
+	}
+	var raw json.RawMessage
+	if err := c.do(ctx, "GET", "/api/v1/now", q, nil, &raw); err != nil {
+		return nil, v, err
+	}
+	return raw, v, json.Unmarshal(raw, &v)
+}
+
+// nowText is the check-in: who I am, then the sections `my leases`, `others`
+// and `conflicts`, each one line per item, `none` for an empty one.
+func nowText(v nowView, now time.Time) string {
+	mine := make([]string, len(v.MyLeases))
+	for i, l := range v.MyLeases {
+		mine[i] = myLeaseLine(l, now)
+	}
+	others := make([]string, len(v.OthersLeases))
+	for i, l := range v.OthersLeases {
+		others[i] = otherLeaseLine(l, now)
+	}
+	conflicts := make([]string, len(v.Conflicts))
+	for i, c := range v.Conflicts {
+		conflicts[i] = conflictLine(c, now)
+	}
+	return "you: " + v.Actor + "\n" +
+		nowSection("my leases", mine, "board lease ls --mine") +
+		nowSection("others", others, "board lease ls") +
+		nowSection("conflicts", conflicts, "board lease ls")
+}
+
+// nowSection is a heading and up to nowCap lines under it, then the
+// `+K more → <command>` line; an empty section is the heading and `none`.
+func nowSection(name string, lines []string, more string) string {
+	if len(lines) == 0 {
+		return name + ": none\n"
+	}
+	var b strings.Builder
+	b.WriteString(name + ":\n")
+	for i, line := range lines {
+		if i == nowCap {
+			b.WriteString("  +" + strconv.Itoa(len(lines)-nowCap) + " more → " + more + "\n")
+			break
+		}
+		b.WriteString("  " + line + "\n")
+	}
+	return b.String()
+}
+
+// myLeaseLine is `L7  <task>  <title>  "<intent>"  res a,b  exp 1h52m`.
+func myLeaseLine(l nowLease, now time.Time) string {
+	return joinLease([]string{l.Ref, l.Task, l.Title, strconv.Quote(l.Intent)}, l.leaseView, now)
+}
+
+// otherLeaseLine is `L5  <task>  <holder>  "<intent>"  res a,b  exp 41m`.
+func otherLeaseLine(l leaseView, now time.Time) string {
+	return joinLease([]string{l.Ref, l.Task, l.Actor, strconv.Quote(l.Intent)}, l, now)
+}
+
+// joinLease ends the parts with the resources and the time left.
+func joinLease(parts []string, l leaseView, now time.Time) string {
+	if len(l.Resources) > 0 {
+		parts = append(parts, "res "+strings.Join(l.Resources, ","))
+	}
+	return strings.Join(append(parts, leaseEnding(l, now)), "  ")
+}

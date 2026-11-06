@@ -51,6 +51,7 @@ var (
 		{"--state", true}, {"--mine", false}, {"--task", true}, {"--res", true},
 		{"--limit", true}, {"--all", false}, {"--json", false},
 	}
+	nowFlags       = []flagSpec{{"--resources", true}, {"--json", false}}
 	whoamiFlags    = []flagSpec{}
 	helpAgentFlags = []flagSpec{{"--version", false}}
 )
