@@ -116,6 +116,9 @@ func TestParseCursor(t *testing.T) {
 		{"a 26-digit slug", "01234567890123456789012345", Cursor{Ref: "01234567890123456789012345"}, true},
 		{"an uppercase slug", "Phone", Cursor{Ref: "Phone"}, true},
 		{"a ULID-length slug with a hyphen", id[:25] + "-", Cursor{Ref: id[:25] + "-"}, true},
+		{"a mixed-case ULID", "01arz3ndEKTSV4RRFFQ69G5FAV", Cursor{Ref: "01arz3ndEKTSV4RRFFQ69G5FAV"}, true},
+		{"a 26-character slug past the ULID range", "81ARZ3NDEKTSV4RRFFQ69G5FAV", Cursor{Ref: "81ARZ3NDEKTSV4RRFFQ69G5FAV"}, true},
+		{"a 40-character slug", strings.Repeat("a", 40), Cursor{Ref: strings.Repeat("a", 40)}, true},
 		{"an underscore", "Not_A_Ref", Cursor{}, false},
 		{"a punctuated ULID", strings.ToLower(id)[:25] + "!", Cursor{}, false},
 		{"one character", "a", Cursor{}, false},
@@ -149,6 +152,12 @@ func TestRefLookupsTryTheTextAsGivenThenItsOtherCase(t *testing.T) {
 		{"a ULID is an id first", id, []RefLookup{{true, id}, {false, lower}}},
 		{"a lowercase ULID is a slug first", lower, []RefLookup{{false, lower}, {true, id}}},
 		{"neither grammar", "no_such", nil},
+		{"a 26-character slug past the ULID timestamp range is only a slug", "81ARZ3NDEKTSV4RRFFQ69G5FAV", []RefLookup{{false, "81arz3ndektsv4rrffq69g5fav"}}},
+		{"a ULID in mixed case reads as an id in capitals then a slug in lowercase", "01arz3ndEKTSV4RRFFQ69G5FAV", []RefLookup{{true, id}, {false, lower}}},
+		{"a two-character slug", "ab", []RefLookup{{false, "ab"}}},
+		{"a 40-character slug in capitals", strings.Repeat("A", 40), []RefLookup{{false, strings.Repeat("a", 40)}}},
+		{"a 26-character slug with a hyphen is a slug only", "01234567890123456789-12345", []RefLookup{{false, "01234567890123456789-12345"}}},
+		{"one character", "a", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
