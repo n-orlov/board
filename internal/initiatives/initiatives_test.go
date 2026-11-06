@@ -300,3 +300,55 @@ func TestAKeysetULIDThatNamesNoRowStillPages(t *testing.T) {
 		t.Fatalf("%v %v", slugs(p), err)
 	}
 }
+
+// A 26-char slug whose first character is past the ULID range, a 40-char slug
+// and a hyphenated 26-char slug are all slugs the grammar accepts: each is
+// created, got and paged after under its own text, in either letter case.
+func TestEveryGrammarSlugOfULIDLengthIsAddressable(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	all := []string{
+		strings.Repeat("z", 26),
+		strings.Repeat("a", 40),
+		"my-initiative-with-26-chr1",
+		"0000000000000000000000000i",
+	}
+	made := make([]Initiative, len(all))
+	for n, slug := range all {
+		made[n] = mk(t, s, slug)
+	}
+	mk(t, s, "zzz-after-all")
+	for n, slug := range all {
+		for _, ref := range []string{slug, strings.ToUpper(slug), made[n].ID} {
+			got, err := s.Get(ctx, ref)
+			if err != nil || got.ID != made[n].ID {
+				t.Errorf("Get(%q) = %q, %v; want %q", ref, got.ID, err, made[n].ID)
+			}
+			p, err := s.List(ctx, Query{After: domain.Cursor{Ref: ref}})
+			if err != nil || len(p.Items) != len(all)-n {
+				t.Errorf("after %q: %v %v", ref, slugs(p), err)
+			}
+		}
+	}
+}
+
+// A reference that names no row is not found, whatever shape it has; as a page
+// cursor only a well-formed ULID still pages, anything else is a bad cursor.
+func TestUnknownReferencesAreRefusedByShapeNeutralRules(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	mk(t, s, "aa")
+	for _, ref := range []string{"nope", strings.Repeat("z", 26), "01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+		if _, err := s.Get(ctx, ref); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get(%q) = %v; want not found", ref, err)
+		}
+	}
+	for _, ref := range []string{"nope", strings.Repeat("z", 26)} {
+		if _, err := s.List(ctx, Query{After: domain.Cursor{Ref: ref}}); !errors.Is(err, ErrBadCursor) {
+			t.Errorf("after %q = %v; want bad cursor", ref, err)
+		}
+	}
+	if _, err := s.List(ctx, Query{After: domain.Cursor{Ref: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}}); err != nil {
+		t.Errorf("after a well-formed ULID naming no row: %v", err)
+	}
+}
