@@ -97,3 +97,61 @@ func TestSuiteRunsPlaywrightUnderRetryOnce(t *testing.T) {
 		t.Errorf("ci/suite.sh: Playwright must run after the web build (build at %d, Playwright at %d)", build, pw)
 	}
 }
+
+// specClaimsScenarioPrecision reports whether a document line describes the
+// Playwright retry as selecting only failed cases. ci/suite.sh repeats the
+// whole `npx playwright test` run, so such a claim is false (R16).
+func specClaimsScenarioPrecision(line string) bool {
+	l := strings.ToLower(line)
+	if !strings.Contains(l, "playwright") {
+		return false
+	}
+	return strings.Contains(l, "scenario-precise") || strings.Contains(l, "only the failed") && !strings.Contains(l, "not only the failed")
+}
+
+func TestSpecClaimsScenarioPrecisionFlagsPreciseWording(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line string
+		want bool
+	}{
+		"deck wording":    {"Playwright (retry-once, scenario-precise like deck's Godog rerun)", true},
+		"only failed":     {"Playwright reruns only the failed specs", true},
+		"whole run":       {"Playwright: a failed run is repeated whole", false},
+		"not only failed": {"Playwright repeats once (every spec runs again, not only the failed ones)", false},
+		"godog elsewhere": {"Godog reruns are scenario-precise", false},
+	} {
+		if got := specClaimsScenarioPrecision(tc.line); got != tc.want {
+			t.Errorf("%s: got %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// TestPlaywrightRetryIsDescribedAsAWholeRun: ci/suite.sh repeats the whole
+// Playwright run, so SPEC.md and docs/ci.md must not call it scenario-precise,
+// and the suite script must not pass a failed-test selection to the repeat.
+func TestPlaywrightRetryIsDescribedAsAWholeRun(t *testing.T) {
+	root, err := repositoryRoot()
+	if err != nil {
+		t.Fatalf("repositoryRoot: %v", err)
+	}
+	for _, doc := range []string{"SPEC.md", filepath.Join("docs", "ci.md")} {
+		raw, err := os.ReadFile(filepath.Join(root, doc))
+		if err != nil {
+			t.Fatalf("read %s: %v", doc, err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if specClaimsScenarioPrecision(line) {
+				t.Errorf("%s:%d claims a scenario-precise Playwright retry the suite does not do", doc, i+1)
+			}
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "ci", "suite.sh"))
+	if err != nil {
+		t.Fatalf("read ci/suite.sh: %v", err)
+	}
+	for _, flag := range []string{"--last-failed", "--grep"} {
+		if strings.Contains(stripCommentLines(string(raw)), flag) {
+			t.Errorf("ci/suite.sh passes %s: the repeat is no longer a whole run, update SPEC and docs/ci.md", flag)
+		}
+	}
+}

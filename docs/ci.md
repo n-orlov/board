@@ -334,7 +334,8 @@ Scripts, each run through `ci/run.sh` unless noted:
   sends it, with a `Board-Actor` header, on every request; every spec imports
   `test` from there. The retry-once is the
   suite's: a failed run is kept as `junit-playwright-run1.xml` and
-  `playwright-run1.log`, repeated once, and a pass on the repeat is recorded in
+  `playwright-run1.log`, repeated once as a whole run (every spec runs again, not only
+  the failed ones, unlike the Go and Godog reruns), and a pass on the repeat is recorded in
   `flaky-playwright.txt`; a second failure fails the suite. `junit-playwright.xml`
   and the HTML, Allure and JSON output (`playwright/`) land in the results
   directory, and `ci/summary.sh` counts the JUnit and flaky files.

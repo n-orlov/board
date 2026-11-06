@@ -1230,8 +1230,8 @@ reporter's output (default `e2e/out/`). One spec runs: `smoke.spec.ts` loads `/`
 shell rendered (the placeholder page fails it). Run one spec with
 `ci/run.sh sh -c 'cd e2e && npx playwright test smoke.spec.ts'` (after `npm ci` in `e2e/`).
 `ci/suite.sh` runs the whole Playwright suite after the web build under the suite-level policy:
-a failed run is repeated once, a pass on the repeat is written to `flaky-playwright.txt`, a
-second failure fails the suite; the JUnit file is `junit-playwright.xml`.
+a failed run is repeated once as a whole (every spec runs again, not only the failed ones), a
+pass on the repeat is written to `flaky-playwright.txt`, a second failure fails the suite; the JUnit file is `junit-playwright.xml`.
 `ci/suitecheck` fails if the config's `retries` is not 0.
 
 Headline scenarios that define the product (must exist from the first iteration):
@@ -1266,7 +1266,7 @@ Identical to deck's `Jenkinsfile` (multibranch job, `@Library('homelab')`, agent
 |---|---|---|
 | CI image | `ci/jenkins-image.sh`, Go cache volume | image also carries Node (frontend build, Vitest, Playwright browsers) |
 | Lint | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
-| Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, JUnit, coverage merged from the unit pass and the Godog scenarios' `-cover` board binary (a leg that ran scenarios without leaving feature counters fails the suite) | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level, scenario-precise like deck's Godog rerun) |
+| Suite | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, JUnit, coverage merged from the unit pass and the Godog scenarios' `-cover` board binary (a leg that ran scenarios without leaving feature counters fails the suite) | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level: a failed run is repeated whole, every spec runs again, unlike the Go and Godog reruns, which select the failed tests by name) |
 | Allure smoke | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
 | Quality | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. The stage first builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, not pushed); the amd64 image feeds the image gates. The two mutation rows are reported as judged by the Mutation stage (`--mutation-deferred`), whose reports exist only after it and not on a branch build |
 | Stability | extended lane only, `ci/stability.sh 3` | same |
