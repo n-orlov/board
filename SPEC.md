@@ -623,7 +623,7 @@ and CLI can show badges without the lists.
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
   `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the `GET`/`POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
-  operations (§6.4), the lease operations (§6.5) and the RFC 9457 `Problem` schema (which carries `expired_at` on the 410 of a lease renewal). The binary embeds the document and serves it at
+  operations (§6.4), the lease operations and `GET /api/v1/now` (§6.5) and the RFC 9457 `Problem` schema (which carries `expired_at` on the 410 of a lease renewal). The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
   or session like any other route.
@@ -673,7 +673,7 @@ and CLI can show badges without the lists.
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. |
+| GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. **Phase 1 ships only the lease and conflict parts** (my leases, others' leases, conflicts); the ask, note and attention parts arrive with Phase 2 (§6.5). |
 | GET | `/attention` | §5.3 |
 | GET/POST | `/initiatives` | list (filters: tag, status, closed_within) / create |
 | GET/PATCH | `/initiatives/{slug}` | read / update (title, description, tags, targets) |
@@ -945,6 +945,20 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   holder's handle, `state` `live`, `ended` or `expired`, and absent optional fields are omitted. The task document
   (§6.4) lists a task's live leases in `live_leases` and is `active` while it has one. Marking the task done or
   closing it leaves its leases live: they end by `/end` or by running out.
+
+- **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller, and **in Phase 1 it ships only its lease and
+  conflict parts**: it answers exactly `{actor, my_leases, others_leases, conflicts}` and carries no ask, note or
+  attention member (those arrive with Phase 2). Like every lease read it expires the due leases first, so a lease
+  past its expiry is left out and its one `lease_expired` event is written, with the sweeper off too; it writes
+  nothing else and does not upsert the actor. `actor` is the caller's handle. `my_leases` are the caller's live leases
+  (`Lease` documents, oldest first) with the task's `title` added beside the task `ref` and `expires_at`;
+  `others_leases` are the live leases of other actors, oldest first. `conflicts` are `{lease, holder, task, intent,
+  expires_at, resources}` (§5.2), each other live lease once in lease-number order, carrying only its shared
+  resources: those that hold a resource of one of the caller's live leases (another of the caller's own leases
+  on a different task included, a lease never conflicting with itself), and those of other actors that hold one of the
+  `resources` asked about. The caller's own leases never conflict with the resources asked about. `resources` is a
+  comma-separated list of at most 20 resources of 1 to 100 characters (repeats dropped); an empty entry or a bad one is **400**
+  with a `next`. Every list is `[]` when empty. It is a 503 without a store.
 
 ---
 

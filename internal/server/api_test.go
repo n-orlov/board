@@ -218,6 +218,7 @@ func (brokenResponse) VisitListTasksResponse(http.ResponseWriter) error         
 func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitGetNowResponse(http.ResponseWriter) error              { return errBroken }
 func (brokenResponse) VisitGetLeaseResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitRenewLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitEndLeaseResponse(http.ResponseWriter) error            { return errBroken }
@@ -428,6 +429,12 @@ func (s stubOperations) StartLease(context.Context, StartLeaseRequestObject) (St
 	return resp, err
 }
 
+func (s stubOperations) GetNow(context.Context, GetNowRequestObject) (GetNowResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetNowResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) ListLeases(context.Context, ListLeasesRequestObject) (ListLeasesResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(ListLeasesResponseObject)
@@ -488,7 +495,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard", "POST /api/v1/initiatives/phone-onboard/close", "POST /api/v1/initiatives/phone-onboard/reopen",
 		"POST /api/v1/tasks", "/api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
-		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack",
+		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack", "/api/v1/now",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
@@ -692,6 +699,9 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list leases 400", 400, ListLeases400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"list leases 401", 401, ListLeases401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"list leases 404", 404, ListLeases404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"get now 400", 400, GetNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
+		{"get now 401", 401, GetNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
+		{"get now 503", 503, GetNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"list leases 503", 503, ListLeases503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"get lease 400", 400, GetLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
 		{"get lease 401", 401, GetLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},

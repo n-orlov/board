@@ -118,6 +118,27 @@ func (e LeaseState) Valid() bool {
 	}
 }
 
+// Defines values for NowLeaseState.
+const (
+	NowLeaseStateEnded   NowLeaseState = "ended"
+	NowLeaseStateExpired NowLeaseState = "expired"
+	NowLeaseStateLive    NowLeaseState = "live"
+)
+
+// Valid indicates whether the value is a known member of the NowLeaseState enum.
+func (e NowLeaseState) Valid() bool {
+	switch e {
+	case NowLeaseStateEnded:
+		return true
+	case NowLeaseStateExpired:
+		return true
+	case NowLeaseStateLive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskKind.
 const (
 	TaskKindWatch TaskKind = "watch"
@@ -806,6 +827,59 @@ type Meta struct {
 	Version string `json:"version"`
 }
 
+// Now The caller's check-in, in its lease and conflict parts.
+type Now struct {
+	// Actor The handle of the caller's actor.
+	Actor string `json:"actor"`
+
+	// Conflicts The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors that hold one of the resources asked about, in lease-number order, each once.
+	Conflicts []LeaseConflict `json:"conflicts"`
+
+	// MyLeases The caller's live leases, oldest first.
+	MyLeases []NowLease `json:"my_leases"`
+
+	// OthersLeases The live leases of other actors, oldest first.
+	OthersLeases []Lease `json:"others_leases"`
+}
+
+// NowLease One of the caller's live leases, with the title of its task.
+type NowLease struct {
+	AckedAt *time.Time `json:"acked_at,omitempty"`
+	AckedBy *string    `json:"acked_by,omitempty"`
+
+	// Actor The handle of the actor that holds it.
+	Actor   string     `json:"actor"`
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+
+	// EndedBy The handle of the actor that ended it, when that was not the holder.
+	EndedBy   *string   `json:"ended_by,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The lease's ULID.
+	Id      string  `json:"id"`
+	Intent  string  `json:"intent"`
+	Outcome *string `json:"outcome,omitempty"`
+
+	// Ref The short ref, `L<n>`.
+	Ref       string    `json:"ref"`
+	RenewedAt time.Time `json:"renewed_at"`
+
+	// Resources The resources it holds, sorted.
+	Resources []string      `json:"resources"`
+	StartedAt time.Time     `json:"started_at"`
+	State     NowLeaseState `json:"state"`
+
+	// Task The ref of the task it is on.
+	Task string `json:"task"`
+
+	// Title The title of the lease's task.
+	Title      string `json:"title"`
+	TtlSeconds int64  `json:"ttl_seconds"`
+}
+
+// NowLeaseState defines model for NowLease.State.
+type NowLeaseState string
+
 // Problem An RFC 9457 problem document.
 type Problem struct {
 	// Detail A human-readable explanation of this occurrence.
@@ -1275,6 +1349,12 @@ type ListLeasesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// GetNowParams defines parameters for GetNow.
+type GetNowParams struct {
+	// Resources Comma-separated resources to check for conflicts before starting.
+	Resources *string `form:"resources,omitempty" json:"resources,omitempty"`
+}
+
 // ListTasksParams defines parameters for ListTasks.
 type ListTasksParams struct {
 	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
@@ -1433,6 +1513,9 @@ type ServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
+	// GetNow Check in
+	// (GET /api/v1/now)
+	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
 	// ListTasks List the tasks
 	// (GET /api/v1/tasks)
 	ListTasks(w http.ResponseWriter, r *http.Request, params ListTasksParams)
@@ -2025,6 +2108,36 @@ func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMeta(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNow operation middleware
+func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNowParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "resources" -------------
+
+	bind.check("resources", runtime.BindQueryParameterWithOptions("form", true, false, "resources", r.URL.Query(), &params.Resources, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNow(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2651,6 +2764,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/renew", wrapper.RenewLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/end", wrapper.EndLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/ack", wrapper.AckLease)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -4508,6 +4622,76 @@ func (response GetMeta401ApplicationProblemPlusJSONResponse) VisitGetMetaRespons
 	return err
 }
 
+type GetNowRequestObject struct {
+	Params GetNowParams
+}
+
+type GetNowResponseObject interface {
+	VisitGetNowResponse(w http.ResponseWriter) error
+}
+
+type GetNow200JSONResponse Now
+
+func (response GetNow200JSONResponse) VisitGetNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNow400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetNow400ApplicationProblemPlusJSONResponse) VisitGetNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNow401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetNow401ApplicationProblemPlusJSONResponse) VisitGetNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNow503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetNow503ApplicationProblemPlusJSONResponse) VisitGetNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTasksRequestObject struct {
 	Params ListTasksParams
 }
@@ -6144,6 +6328,9 @@ type StrictServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
+	// GetNow Check in
+	// (GET /api/v1/now)
+	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
 	// ListTasks List the tasks
 	// (GET /api/v1/tasks)
 	ListTasks(ctx context.Context, request ListTasksRequestObject) (ListTasksResponseObject, error)
@@ -6851,6 +7038,32 @@ func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
 		if err := validResponse.VisitGetMetaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetNow operation middleware
+func (sh *strictHandler) GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams) {
+	var request GetNowRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNow(ctx, request.(GetNowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetNowResponseObject); ok {
+		if err := validResponse.VisitGetNowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

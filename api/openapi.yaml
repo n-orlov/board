@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-
-    The document declares the probe, documentation, browser-login, API-key, initiative, task, event and lease operations.
+    The document declares the probe, documentation, browser-login, API-key, initiative, task, event, lease and check-in operations.
     Every later operation is added here first; the Go server code and the TypeScript client are generated from
     this document and ci/lint.sh fails when either is stale.
   license:
@@ -1297,6 +1297,41 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/now:
+    get:
+      operationId: getNow
+      tags: [leases]
+      summary: Check in
+      description: >-
+        The check-in bundle of the caller, in its lease and conflict parts (the ask, note and attention parts arrive
+        with a later phase). After expiring the leases that are due it answers the `actor`, `my_leases` (the caller's
+        live leases, each with its task ref, `title` and `expires_at`), `others_leases` (the live leases of other
+        actors) and `conflicts`: the live leases that hold a resource of one of the caller's live leases, and those of
+        other actors that hold one of the `resources` given, each with only the shared resources. `resources` is a
+        comma-separated list of at most 20 resources of 1 to 100 characters, to check before starting.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: resources
+          in: query
+          required: false
+          description: Comma-separated resources to check for conflicts before starting.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Now"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -2199,6 +2234,41 @@ components:
           $ref: "#/components/schemas/Lease"
         conflicts:
           type: array
+          items:
+            $ref: "#/components/schemas/LeaseConflict"
+    NowLease:
+      description: One of the caller's live leases, with the title of its task.
+      allOf:
+        - $ref: "#/components/schemas/Lease"
+        - type: object
+          required: [title]
+          properties:
+            title:
+              type: string
+              description: The title of the lease's task.
+    Now:
+      type: object
+      description: The caller's check-in, in its lease and conflict parts.
+      required: [actor, my_leases, others_leases, conflicts]
+      properties:
+        actor:
+          type: string
+          description: The handle of the caller's actor.
+        my_leases:
+          type: array
+          description: The caller's live leases, oldest first.
+          items:
+            $ref: "#/components/schemas/NowLease"
+        others_leases:
+          type: array
+          description: The live leases of other actors, oldest first.
+          items:
+            $ref: "#/components/schemas/Lease"
+        conflicts:
+          type: array
+          description: >-
+            The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors
+            that hold one of the resources asked about, in lease-number order, each once.
           items:
             $ref: "#/components/schemas/LeaseConflict"
     LeaseList:

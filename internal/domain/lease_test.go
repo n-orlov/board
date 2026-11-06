@@ -150,3 +150,63 @@ func TestConflictsDoesNotMutateItsInput(t *testing.T) {
 		t.Fatalf("input mutated: %v", live[0].Resources)
 	}
 }
+
+func nowHolding(lease, holder string, resources ...string) Holding {
+	return Holding{Lease: lease, Holder: holder, Task: "aa-1", Intent: "work", Resources: resources}
+}
+
+func TestNowConflictsListsOthersOnMyResourcesAndOnTheQueriedOnes(t *testing.T) {
+	live := []Holding{
+		nowHolding("L1", "me", "repo:a", "host:x"),
+		nowHolding("L2", "bob", "host:x", "db:y"),
+		nowHolding("L3", "bob", "db:z", "repo:q"),
+		nowHolding("L4", "bob", "unrelated"),
+	}
+	got := NowConflicts("me", live, []string{"db:z", "db:y"})
+	if len(got) != 2 {
+		t.Fatalf("conflicts = %+v, want L2 and L3", got)
+	}
+	if got[0].Lease != "L2" || strings.Join(got[0].Resources, ",") != "host:x,db:y" {
+		t.Errorf("first conflict = %+v, want L2 on host:x and db:y", got[0])
+	}
+	if got[1].Lease != "L3" || len(got[1].Resources) != 1 || got[1].Resources[0] != "db:z" {
+		t.Errorf("second conflict = %+v, want L3 on db:z only", got[1])
+	}
+}
+
+func TestNowConflictsKeepsTheSharedResourcesInTheHoldersOrder(t *testing.T) {
+	live := []Holding{nowHolding("L1", "me", "b", "a"), nowHolding("L2", "bob", "a", "b")}
+	got := NowConflicts("me", live, nil)
+	if len(got) != 1 || got[0].Lease != "L2" || strings.Join(got[0].Resources, ",") != "a,b" {
+		t.Errorf("conflicts = %+v, want L2 on a,b in the holder's own order", got)
+	}
+}
+
+func TestNowConflictsNeverChecksMyLeasesAgainstTheQueriedResources(t *testing.T) {
+	live := []Holding{nowHolding("L1", "me", "repo:a")}
+	if got := NowConflicts("me", live, []string{"repo:a"}); len(got) != 0 {
+		t.Errorf("conflicts = %+v, want none: a lease does not conflict with itself or my query", got)
+	}
+}
+
+func TestNowConflictsCountsTwoLeasesOfMineThatShareAResource(t *testing.T) {
+	live := []Holding{nowHolding("L1", "me", "r"), nowHolding("L2", "me", "r", "s")}
+	got := NowConflicts("me", live, nil)
+	if len(got) != 2 || got[0].Lease != "L1" || got[1].Lease != "L2" || strings.Join(got[1].Resources, ",") != "r" {
+		t.Errorf("conflicts = %+v, want L1 on r and L2 on r only", got)
+	}
+}
+
+func TestNowConflictsWithNothingLiveIsEmptyNotNil(t *testing.T) {
+	if got := NowConflicts("me", nil, []string{"r"}); got == nil || len(got) != 0 {
+		t.Errorf("conflicts = %#v, want an empty non-nil slice", got)
+	}
+}
+
+func TestNowConflictsDoesNotMutateItsInput(t *testing.T) {
+	live := []Holding{nowHolding("L1", "me", "a"), nowHolding("L2", "bob", "a", "b")}
+	NowConflicts("me", live, nil)
+	if len(live[1].Resources) != 2 {
+		t.Errorf("input resources = %v, want both kept", live[1].Resources)
+	}
+}

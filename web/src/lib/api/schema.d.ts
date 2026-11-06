@@ -572,6 +572,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check in
+         * @description The check-in bundle of the caller, in its lease and conflict parts (the ask, note and attention parts arrive with a later phase). After expiring the leases that are due it answers the `actor`, `my_leases` (the caller's live leases, each with its task ref, `title` and `expires_at`), `others_leases` (the live leases of other actors) and `conflicts`: the live leases that hold a resource of one of the caller's live leases, and those of other actors that hold one of the `resources` given, each with only the shared resources. `resources` is a comma-separated list of at most 20 resources of 1 to 100 characters, to check before starting.
+         */
+        get: operations["getNow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -1114,6 +1134,22 @@ export interface components {
         /** @description A lease with the live leases of others that conflict with it. */
         LeaseResult: {
             lease: components["schemas"]["Lease"];
+            conflicts: components["schemas"]["LeaseConflict"][];
+        };
+        /** @description One of the caller's live leases, with the title of its task. */
+        NowLease: components["schemas"]["Lease"] & {
+            /** @description The title of the lease's task. */
+            title: string;
+        };
+        /** @description The caller's check-in, in its lease and conflict parts. */
+        Now: {
+            /** @description The handle of the caller's actor. */
+            actor: string;
+            /** @description The caller's live leases, oldest first. */
+            my_leases: components["schemas"]["NowLease"][];
+            /** @description The live leases of other actors, oldest first. */
+            others_leases: components["schemas"]["Lease"][];
+            /** @description The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors that hold one of the resources asked about, in lease-number order, each once. */
             conflicts: components["schemas"]["LeaseConflict"][];
         };
         /** @description A page of leases. */
@@ -2311,6 +2347,32 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getNow: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated resources to check for conflicts before starting. */
+                resources?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Now"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };

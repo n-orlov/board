@@ -166,6 +166,11 @@ func (h *harness) pathIsTimePlus(path string, seconds int) error {
 // expiredAtIsStored checks the response's expired_at is the expires_at the
 // lease row holds.
 func (h *harness) expiredAtIsStored(ctx context.Context, ref string) error {
+	return h.pathIsStoredExpiry(ctx, "expired_at", ref)
+}
+
+// pathIsStoredExpiry checks the time at path is the expires_at stored for the lease.
+func (h *harness) pathIsStoredExpiry(ctx context.Context, path, ref string) error {
 	n, err := leaseNumber(ref)
 	if err != nil {
 		return err
@@ -178,19 +183,19 @@ func (h *harness) expiredAtIsStored(ctx context.Context, ref string) error {
 	if err != nil {
 		return err
 	}
-	got, ok, err := h.responsePath("expired_at")
+	got, ok, err := h.responsePath(path)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no expired_at in %s", h.api.body)
+		return fmt.Errorf("no %s in %s", path, h.api.body)
 	}
 	at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(got))
 	if err != nil {
 		return err
 	}
 	if at.UnixMilli() != ms {
-		return fmt.Errorf("expired_at %s is not the stored expires_at %d", at, ms)
+		return fmt.Errorf("%s %s is not the stored expires_at %d", path, at, ms)
 	}
 	return nil
 }
@@ -240,5 +245,6 @@ func registerLeaseSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateIs)
 	sc.Step(`^the response path "([^"]*)" is the request time plus (\d+) seconds$`, h.pathIsTimePlus)
 	sc.Step(`^the response expired_at is the expiry stored for the lease "([^"]*)"$`, h.expiredAtIsStored)
+	sc.Step(`^the response path "([^"]*)" is the expiry stored for the lease "([^"]*)"$`, h.pathIsStoredExpiry)
 	sc.Step(`^exactly (\d+) ([a-z_]+) events? exists? for the lease "([^"]*)"$`, h.leaseEventCount)
 }

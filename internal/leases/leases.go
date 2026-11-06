@@ -66,7 +66,7 @@ func (e GoneError) Error() string {
 func (e GoneError) Is(target error) bool { return target == ErrGone }
 
 // Lease is one leases row with its resources. Ref is L<n>; Task is the task's
-// ref, and the people are actor handles. EndedBy is set only when someone other
+// ref, Title its title, and the people are actor handles. EndedBy is set only when someone other
 // than the holder ended the lease.
 type Lease struct {
 	N          int64
@@ -74,6 +74,7 @@ type Lease struct {
 	Ref        string
 	TaskID     string
 	Task       string
+	Title      string
 	Actor      string
 	ActorID    string
 	Intent     string
@@ -116,7 +117,7 @@ func (s Store) now() time.Time {
 }
 
 const selectLease = `SELECT l.n, l.id, l.task_id, i.slug, t.seq, a.handle, l.actor_id, l.intent, l.ttl_seconds,
-	l.started_at, l.renewed_at, l.expires_at, l.state, l.ended_at, eb.handle, l.outcome, l.acked_at, ab.handle
+	l.started_at, l.renewed_at, l.expires_at, l.state, l.ended_at, eb.handle, l.outcome, l.acked_at, ab.handle, t.title
 	FROM leases l JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id
 	JOIN actors a ON a.id = l.actor_id LEFT JOIN actors eb ON eb.id = l.ended_by LEFT JOIN actors ab ON ab.id = l.acked_by`
 
@@ -139,7 +140,7 @@ func scan(r rowScanner) (Lease, error) {
 		endedBy, outcome, ackBy sql.NullString
 	)
 	err := r.Scan(&l.N, &l.ID, &l.TaskID, &slug, &seq, &l.Actor, &l.ActorID, &l.Intent, &l.TTLSeconds,
-		&started, &renewed, &exp, &l.State, &ended, &endedBy, &outcome, &acked, &ackBy)
+		&started, &renewed, &exp, &l.State, &ended, &endedBy, &outcome, &acked, &ackBy, &l.Title)
 	if err != nil {
 		return Lease{}, err
 	}

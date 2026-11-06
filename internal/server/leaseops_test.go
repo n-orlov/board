@@ -22,7 +22,8 @@ func TestLeaseOperationsAnswer503WithoutAStore(t *testing.T) {
 	renew, _ := leaseOps{}.RenewLease(ctx, RenewLeaseRequestObject{Ref: "L1"})
 	end, _ := leaseOps{}.EndLease(ctx, EndLeaseRequestObject{Ref: "L1"})
 	ack, _ := leaseOps{}.AckLease(ctx, AckLeaseRequestObject{Ref: "L1"})
-	for name, got := range map[string]any{"start": start, "list": list, "get": get, "renew": renew, "end": end, "ack": ack} {
+	now, _ := leaseOps{}.GetNow(ctx, GetNowRequestObject{})
+	for name, got := range map[string]any{"start": start, "list": list, "get": get, "renew": renew, "end": end, "ack": ack, "now": now} {
 		if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 			t.Errorf("%s without a store = %#v, want a 503 problem", name, got)
 		}
@@ -154,6 +155,67 @@ func TestRenewAndEndHandlersReadTheirOptionalBodies(t *testing.T) {
 	} {
 		if rec := s.send(http.MethodPost, tc.path, tc.body, "claude@host"); rec.Code != tc.want {
 			t.Errorf("POST %s %q = %d %s, want %d", tc.path, tc.body, rec.Code, rec.Body, tc.want)
+		}
+	}
+}
+
+func TestNowWithoutAPrincipalIs401(t *testing.T) {
+	got, _ := leaseOps{leases: &leases.Store{}}.GetNow(context.Background(), GetNowRequestObject{})
+	if p, ok := got.(problemResponse); !ok || p.status != http.StatusUnauthorized {
+		t.Errorf("now without a principal = %#v, want 401", got)
+	}
+}
+
+func TestQueriedResourcesAreSplitOnCommasAndValidated(t *testing.T) {
+	ptr := func(s string) *string { return &s }
+	for raw, want := range map[string][]string{"a,b": {"a", "b"}, "a,a": {"a"}, "repo:x": {"repo:x"}} {
+		if got, err := queriedResources(ptr(raw)); err != nil || strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("queriedResources(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	for _, raw := range []*string{nil, ptr("")} {
+		if got, err := queriedResources(raw); err != nil || len(got) != 0 {
+			t.Errorf("queriedResources(%v) = %v, %v; want none", raw, got, err)
+		}
+	}
+	for _, raw := range []string{"a,,b", "a,", strings.Repeat("x", 101)} {
+		if _, err := queriedResources(ptr(raw)); err == nil {
+			t.Errorf("queriedResources(%q) was accepted", raw)
+		}
+	}
+}
+
+func TestNowRoundTripThroughTheHandler(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	s.task(`{"initiative":"aa","title":"two"}`)
+	s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work","resources":["db:x"]}`, "claude@host")
+	s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-2","intent":"also","resources":["db:x","db:y"]}`, "codex@host")
+	rec := s.send(http.MethodGet, "/api/v1/now?resources=db:y,db:z", "", "claude@host")
+	doc := decode(t, rec)
+	if rec.Code != http.StatusOK || len(doc) != 4 {
+		t.Fatalf("now = %d %s, want exactly four members", rec.Code, rec.Body)
+	}
+	for _, k := range []string{"actor", "my_leases", "others_leases", "conflicts"} {
+		if doc[k] == nil {
+			t.Errorf("now has no %s: %s", k, rec.Body)
+		}
+	}
+	mine := doc["my_leases"].([]any)[0].(map[string]any)
+	if doc["actor"] != "claude@host" || mine["title"] != "one" || mine["task"] != "aa-1" || mine["expires_at"] == nil {
+		t.Errorf("now = %s", rec.Body)
+	}
+	if c := doc["conflicts"].([]any); len(c) != 1 || c[0].(map[string]any)["lease"] != "L2" {
+		t.Errorf("conflicts = %v, want L2 once", c)
+	}
+	for path, want := range map[string]int{
+		"/api/v1/now?resources=a,,b":          http.StatusBadRequest,
+		"/api/v1/now?resources=a&resources=b": http.StatusBadRequest,
+		"/api/v1/now?resources=":              http.StatusOK,
+	} {
+		if rec := s.send(http.MethodGet, path, "", "claude@host"); rec.Code != want {
+			t.Errorf("GET %s = %d %s, want %d", path, rec.Code, rec.Body, want)
 		}
 	}
 }

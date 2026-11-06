@@ -120,3 +120,48 @@ func Conflicts(lease string, resources []string, live []Holding) []Holding {
 	}
 	return out
 }
+
+// NowConflicts lists the holdings in live that conflict for the actor me: those
+// that share a resource with a live lease of me other than themselves, and those
+// of other actors that share one of the queried resources. Each is listed once,
+// in the order of live, carrying only its shared resources (in its own order).
+// The actor's own leases never conflict on the queried resources, only with
+// each other through a shared resource (SPEC 5.2).
+func NowConflicts(me string, live []Holding, queried []string) []Holding {
+	out := []Holding{}
+	for _, h := range live {
+		target := conflictTarget(me, h, live, queried)
+		var shared []string
+		for _, r := range h.Resources {
+			if target[r] {
+				shared = append(shared, r)
+			}
+		}
+		if len(shared) > 0 {
+			h.Resources = shared
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// conflictTarget is the set of resources the holding h is checked against: the
+// resources of the actor's other live leases and, when h is held by someone else,
+// the queried resources.
+func conflictTarget(me string, h Holding, live []Holding, queried []string) map[string]bool {
+	target := map[string]bool{}
+	if h.Holder != me {
+		for _, r := range queried {
+			target[r] = true
+		}
+	}
+	for _, m := range live {
+		if m.Holder != me || m.Lease == h.Lease {
+			continue
+		}
+		for _, r := range m.Resources {
+			target[r] = true
+		}
+	}
+	return target
+}
