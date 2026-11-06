@@ -1,0 +1,137 @@
+package tasks
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/board/internal/store"
+)
+
+// transition is one status change: the verbs of the three entry points.
+type transition struct {
+	action string
+	event  string
+	// allowed are the statuses the task may be in.
+	allowed []string
+	// set is the UPDATE's SET clause, with its placeholders filled by args.
+	set  string
+	args func(actorID string, at int64) []any
+	// data is the extra event data.
+	data map[string]any
+}
+
+// Done marks the open task ref names as done, setting done_at and done_by, and
+// appends a task_done event, in one transaction. It returns ErrNotFound for an
+// unknown task and ErrConflict (naming the current status) for a task that is
+// not open, and writes no row or event then.
+func (s Store) Done(ctx context.Context, actor audit.Actor, principal, ref string) (Task, error) {
+	return s.transit(ctx, actor, principal, ref, transition{
+		action: "mark done", event: EventDone, allowed: []string{"open"},
+		set:  `status = 'done', done_at = ?, done_by = ?`,
+		args: func(actorID string, at int64) []any { return []any{at, actorID} },
+	})
+}
+
+// Reopen moves a done or closed task back to open, clearing resolution, done_at,
+// done_by, closed_at and closed_by, and appends a task_reopened event. It
+// returns ErrNotFound for an unknown task, ErrConflict (naming the current
+// status) for an open one and ErrInitiativeClosed when its initiative is
+// closed, and writes no row or event then.
+func (s Store) Reopen(ctx context.Context, actor audit.Actor, principal, ref string) (Task, error) {
+	return s.transit(ctx, actor, principal, ref, transition{
+		action: "reopen", event: EventReopened, allowed: []string{"done", "closed"},
+		set:  `status = 'open', resolution = NULL, done_at = NULL, done_by = NULL, closed_at = NULL, closed_by = NULL`,
+		args: func(string, int64) []any { return nil },
+	})
+}
+
+// Close moves an open or done task to closed with the resolution (completed,
+// dropped, superseded or duplicate), setting closed_at and closed_by, and
+// appends a task_closed event whose data.resolution is the resolution. It
+// returns ErrInvalid for a missing or unknown resolution (checked before the
+// task is read), ErrNotFound for an unknown task and ErrConflict (naming the
+// current status) for a closed one, and writes no row or event then. A done
+// task keeps its done_at and done_by.
+func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, resolution string) (Task, error) {
+	if err := domain.ValidateResolution(resolution); err != nil {
+		return Task{}, InvalidError{Msg: err.Error(), Next: "Send resolution completed, dropped, superseded or duplicate."}
+	}
+	return s.transit(ctx, actor, principal, ref, transition{
+		action: "close", event: EventClosed, allowed: []string{"open", "done"},
+		set:  `status = 'closed', resolution = ?, closed_at = ?, closed_by = ?`,
+		args: func(actorID string, at int64) []any { return []any{resolution, at, actorID} },
+		data: map[string]any{"resolution": resolution},
+	})
+}
+
+func (s Store) transit(ctx context.Context, actor audit.Actor, principal, ref string, tr transition) (Task, error) {
+	var out Task
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, err = s.transitInTx(ctx, tx, actor, principal, ref, tr)
+		return err
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	return out, nil
+}
+
+func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref string, tr transition) (Task, error) {
+	cur, err := s.find(ctx, tx, ref)
+	if err != nil {
+		return Task{}, err
+	}
+	if !contains(tr.allowed, cur.Status) {
+		return Task{}, ConflictError{Ref: cur.Ref, Status: cur.Status, Action: tr.action}
+	}
+	if tr.event == EventReopened {
+		if err := s.writable(ctx, tx, Task{InitiativeID: cur.InitiativeID, Initiative: cur.Initiative}); err != nil {
+			return Task{}, err
+		}
+	}
+	now := s.now()
+	d := s.Store.Dialect()
+	actorID, err := audit.UpsertActor(ctx, tx, d, actor, now)
+	if err != nil {
+		return Task{}, err
+	}
+	at := store.EncodeTime(now)
+	args := append(tr.args(actorID, at), at, cur.ID)
+	if _, err := tx.ExecContext(ctx, d.Rebind(`UPDATE tasks SET `+tr.set+`, updated_at = ? WHERE id = ?`), args...); err != nil {
+		return Task{}, fmt.Errorf("%s task: %w", tr.action, err)
+	}
+	if err := s.appendTransition(ctx, tx, actorID, principal, cur, now, tr); err != nil {
+		return Task{}, err
+	}
+	return s.find(ctx, tx, cur.ID)
+}
+
+func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Task, now time.Time, tr transition) error {
+	data := map[string]any{"ref": cur.Ref, "from": cur.Status}
+	summary := "task " + cur.Ref + " " + eventVerb[tr.event]
+	if r, ok := tr.data["resolution"]; ok {
+		data["resolution"] = r
+		summary += " as " + r.(string)
+	}
+	return audit.AppendAs(ctx, tx, s.Store.Dialect(), actorID, now, audit.Event{
+		Principal: principal, Type: tr.event, InitiativeID: cur.InitiativeID, TaskID: cur.ID, RefID: cur.ID,
+		Summary: summary,
+		Data:    data,
+	})
+}
+
+var eventVerb = map[string]string{EventDone: "marked done", EventReopened: "reopened", EventClosed: "closed"}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

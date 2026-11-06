@@ -323,8 +323,20 @@ on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 | external_refs | json text | list of `{label, url}` (tickets, PRs, builds): at most 20, `label` 1-80 characters, `url` http or https; `[]` when none |
 | created_by, created_at, updated_at, done_at, done_by, closed_at, closed_by | | |
 
-Transitions: `open → done`, `done → open` (reopen), `open|done → closed`, `closed → open`
-(reopen from archive). Every transition writes an event.
+Transitions (`internal/tasks`: `Done`, `Reopen`, `Close`), each in one transaction with its event:
+
+| from → to | event | row change |
+|---|---|---|
+| `open → done` | `task_done` | sets `done_at`, `done_by` |
+| `done → open`, `closed → open` | `task_reopened` | clears `resolution`, `done_at`, `done_by`, `closed_at`, `closed_by` |
+| `open → closed`, `done → closed` | `task_closed`, `data.resolution` | sets `resolution`, `closed_at`, `closed_by` (a done task keeps `done_at`, `done_by`) |
+
+Every transition sets `updated_at` and writes `data.ref` and `data.from` (the status it left). The resolution is
+one of `completed`, `dropped`, `superseded`, `duplicate` (`domain.ValidateResolution`): a missing or unknown one is
+`ErrInvalid` and nothing is read or written. Every other transition (done on done, done on closed, reopen on open,
+close on closed) is `ErrConflict`, a `ConflictError` whose text names the task and its current status
+("cannot close task aa-1: it is closed"), and writes no row, event or actor. Reopening a task of a closed
+initiative is `ErrInitiativeClosed` and writes nothing. A transition ends nothing else: live leases stay live.
 
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
 open blocking ask), **overdue** (watch with `next_check_at < now`).

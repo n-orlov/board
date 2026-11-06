@@ -168,3 +168,16 @@ func TestValidateExternalRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateResolution(t *testing.T) {
+	for _, r := range []string{"completed", "dropped", "superseded", "duplicate"} {
+		if err := ValidateResolution(r); err != nil {
+			t.Errorf("%q: %v", r, err)
+		}
+	}
+	for _, r := range []string{"", "Completed", "done", " dropped", "wontfix"} {
+		if ValidateResolution(r) == nil {
+			t.Errorf("%q accepted", r)
+		}
+	}
+}

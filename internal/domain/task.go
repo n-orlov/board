@@ -75,6 +75,24 @@ func parseSeq(s string) (int, error) {
 // slug.
 func FormatTaskRef(slug string, seq int) string { return slug + "-" + strconv.Itoa(seq) }
 
+// The four resolutions a task is closed with.
+const (
+	ResolutionCompleted  = "completed"
+	ResolutionDropped    = "dropped"
+	ResolutionSuperseded = "superseded"
+	ResolutionDuplicate  = "duplicate"
+)
+
+// ValidateResolution returns nil for completed, dropped, superseded and
+// duplicate, and an error for an empty or any other value.
+func ValidateResolution(resolution string) error {
+	switch resolution {
+	case ResolutionCompleted, ResolutionDropped, ResolutionSuperseded, ResolutionDuplicate:
+		return nil
+	}
+	return errors.New("resolution must be completed, dropped, superseded or duplicate")
+}
+
 // ValidateKind returns nil for `work` and `watch`.
 func ValidateKind(kind string) error {
 	if kind != KindWork && kind != KindWatch {

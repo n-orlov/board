@@ -13,8 +13,11 @@ import (
 
 // Event types a task write appends.
 const (
-	EventCreated = "task_created"
-	EventUpdated = "task_updated"
+	EventCreated  = "task_created"
+	EventUpdated  = "task_updated"
+	EventDone     = "task_done"
+	EventReopened = "task_reopened"
+	EventClosed   = "task_closed"
 )
 
 // Errors a caller tells apart.
@@ -24,6 +27,7 @@ var (
 	ErrNoInitiative     = errors.New("initiative not found")
 	ErrInitiativeClosed = errors.New("initiative is closed")
 	ErrClosed           = errors.New("task is closed")
+	ErrConflict         = errors.New("task status conflict")
 )
 
 // InvalidError is a field the request got wrong. It satisfies errors.Is(err,
@@ -36,6 +40,18 @@ func (e InvalidError) Error() string { return e.Msg }
 
 // Is makes errors.Is(err, ErrInvalid) true for every InvalidError.
 func (e InvalidError) Is(target error) bool { return target == ErrInvalid }
+
+// ConflictError is a transition the task's current status does not allow. It
+// satisfies errors.Is(err, ErrConflict) and its text names the current status.
+type ConflictError struct{ Ref, Status, Action string }
+
+// Error names the task, the refused action and the current status.
+func (e ConflictError) Error() string {
+	return fmt.Sprintf("cannot %s task %s: it is %s", e.Action, e.Ref, e.Status)
+}
+
+// Is makes errors.Is(err, ErrConflict) true for every ConflictError.
+func (e ConflictError) Is(target error) bool { return target == ErrConflict }
 
 // Task is one tasks row. Ref is `<initiative slug>-<seq>`; Initiative is the
 // slug. The people are actor handles.
