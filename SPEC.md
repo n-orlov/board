@@ -281,7 +281,12 @@ An actor row is created on first use of a handle (upsert). In Phase 0 a use is a
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
 A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
 that has only read has no row, and the operator row does not exist until the first write made by a session (its
-actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A write that carries a non-empty `Board-Actor-Way-Back` or
+actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `BOARD_OPERATOR_HANDLE`) makes
+that handle's row `operator`, promoting a row an earlier key write created as `agent` under the same handle, and an
+`operator` row is never demoted, so a key write that names the operator's handle after a session write leaves the
+kind `operator` (the event's `principal` still records `key:<name>` or `oidc:<email>`, so the two stay
+distinguishable). Which kind a row has therefore never depends on the order the key and the session arrive in.
+A write that carries a non-empty `Board-Actor-Way-Back` or
 `Board-Actor-Meta` replaces that column; a write that carries neither leaves the stored values. Actors are never deleted. A unique partial index
 on `kind WHERE kind = 'operator'` allows at most one `operator` row.
 

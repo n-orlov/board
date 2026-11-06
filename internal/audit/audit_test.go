@@ -148,3 +148,51 @@ func TestOperatorRowIsCreatedByTheFirstOperatorWriteAndOnlyOneExists(t *testing.
 		t.Error("a second operator row was accepted")
 	}
 }
+
+func kindOf(t *testing.T, st *store.Store, handle string) string {
+	t.Helper()
+	var kind string
+	if err := st.Reader().QueryRowContext(context.Background(), `SELECT kind FROM actors WHERE handle = ?`, handle).Scan(&kind); err != nil {
+		t.Fatal(err)
+	}
+	return kind
+}
+
+func upsertAll(t *testing.T, st *store.Store, as ...Actor) {
+	t.Helper()
+	for i, a := range as {
+		inTx(t, st, func(tx *sql.Tx) {
+			if _, err := UpsertActor(context.Background(), tx, st.Dialect(), a, t0.Add(time.Duration(i)*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSessionWriteAfterKeyWriteOfTheSameHandlePromotesItToOperator(t *testing.T) {
+	st := newStore(t)
+	upsertAll(t, st, Actor{Handle: "operator"}, Actor{Handle: "operator", Operator: true})
+	if got := kindOf(t, st, "operator"); got != "operator" {
+		t.Errorf("kind after key then session = %q", got)
+	}
+}
+
+func TestKeyWriteAfterSessionWriteOfTheSameHandleKeepsOperator(t *testing.T) {
+	st := newStore(t)
+	upsertAll(t, st, Actor{Handle: "operator", Operator: true}, Actor{Handle: "operator"}, Actor{Handle: "operator"})
+	if got := kindOf(t, st, "operator"); got != "operator" {
+		t.Errorf("kind after session then keys = %q", got)
+	}
+}
+
+func TestPromotionTouchesOnlyTheSessionsHandleAndKeepsOtherAgents(t *testing.T) {
+	st := newStore(t)
+	upsertAll(t, st, Actor{Handle: "a1"}, Actor{Handle: "operator"}, Actor{Handle: "operator", Operator: true}, Actor{Handle: "a1"}, Actor{Handle: "operator", Operator: true})
+	if got := kindOf(t, st, "a1"); got != "agent" {
+		t.Errorf("other agent kind = %q", got)
+	}
+	var n int
+	if err := st.Reader().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM actors WHERE kind = 'operator'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("operator rows = %d (%v)", n, err)
+	}
+}

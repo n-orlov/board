@@ -41,7 +41,10 @@ type Event struct {
 
 // UpsertActor makes sure the actor exists and returns its id. The row is
 // created on first use of a handle and last_seen_at moves forward on every
-// use; an existing row keeps its kind.
+// use. A write that acts as the operator (a browser session) makes its row the
+// operator row, promoting an agent row an earlier key write created under the
+// same handle; an operator row is never demoted, so a later key write with the
+// operator's handle leaves it.
 func UpsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.Time) (string, error) {
 	id, err := domain.NewULID(now)
 	if err != nil {
@@ -61,6 +64,11 @@ func UpsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now 
 	var actorID string
 	if err := tx.QueryRowContext(ctx, d.Rebind(`SELECT id FROM actors WHERE handle = ?`), handle).Scan(&actorID); err != nil {
 		return "", fmt.Errorf("record actor: %w", err)
+	}
+	if a.Operator {
+		if _, err := tx.ExecContext(ctx, d.Rebind(`UPDATE actors SET kind = 'operator' WHERE id = ? AND kind <> 'operator'`), actorID); err != nil {
+			return "", fmt.Errorf("record actor kind: %w", err)
+		}
 	}
 	return actorID, setOptional(ctx, tx, d, actorID, a)
 }
