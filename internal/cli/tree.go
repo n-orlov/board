@@ -28,6 +28,8 @@ var commandTree = map[string][]flagSpec{
 	"task done":         taskDoneFlags,
 	"task reopen":       taskReopenFlags,
 	"task close":        taskCloseFlags,
+	"task dep add":      taskDepFlags,
+	"task dep rm":       taskDepFlags,
 	"help agent":        helpAgentFlags,
 	"admin migrate":     nil,
 	"admin keys create": {{"--expires", true}},

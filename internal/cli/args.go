@@ -33,6 +33,7 @@ var (
 		{"--title", true}, {"--description", true}, {"--start", true}, {"--end", true}, {"--cadence", true},
 		{"--link", true}, {"--no-links", false}, {"--json", false},
 	}
+	taskDepFlags    = []flagSpec{{"--json", false}}
 	taskDoneFlags   = []flagSpec{{"--json", false}}
 	taskReopenFlags = []flagSpec{{"--json", false}}
 	taskCloseFlags  = []flagSpec{{"--resolution", true}, {"--for", true}, {"--json", false}}

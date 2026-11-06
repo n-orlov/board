@@ -14,7 +14,7 @@ import (
 )
 
 // TaskUsage is the single stderr line for a malformed `board task` command line.
-const TaskUsage = "usage: board task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json]"
+const TaskUsage = "usage: board task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json]"
 
 // taskCmd runs `board task ...` against the server named by BOARD_URL.
 func taskCmd(args []string, stdout, stderr io.Writer, env Env) int {
@@ -32,6 +32,8 @@ func taskCmd(args []string, stdout, stderr io.Writer, env Env) int {
 		return taskEdit(args[1:], stdout, stderr, env)
 	case "done", "reopen", "close":
 		return taskTransition(args[0], args[1:], stdout, stderr, env)
+	case "dep":
+		return taskDep(args[1:], stdout, stderr, env)
 	default:
 		return usageLine(stderr, TaskUsage)
 	}
