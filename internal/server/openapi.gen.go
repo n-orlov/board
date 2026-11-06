@@ -525,6 +525,70 @@ type Lease struct {
 // LeaseState defines model for Lease.State.
 type LeaseState string
 
+// LeaseConflict A live lease of another that holds a resource of the one asked about.
+type LeaseConflict struct {
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Holder The handle of the actor that holds it.
+	Holder string `json:"holder"`
+	Intent string `json:"intent"`
+
+	// Lease The conflicting lease's ref, `L<n>`.
+	Lease string `json:"lease"`
+
+	// Resources The resources both leases hold.
+	Resources []string `json:"resources"`
+
+	// Task The ref of the task it is on.
+	Task string `json:"task"`
+}
+
+// LeaseEnd How the lease ended.
+type LeaseEnd struct {
+	// Outcome At most 200 characters.
+	Outcome *string `json:"outcome,omitempty"`
+}
+
+// LeaseList A page of leases.
+type LeaseList struct {
+	Items []Lease `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
+// LeaseRenew What to change on a renewal. A field left out keeps its value.
+type LeaseRenew struct {
+	Intent    *string   `json:"intent,omitempty"`
+	Resources *[]string `json:"resources,omitempty"`
+
+	// TtlSeconds Clamped to 60 to 43200. Left out keeps the lease's ttl.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
+// LeaseResult A lease with the live leases of others that conflict with it.
+type LeaseResult struct {
+	Conflicts []LeaseConflict `json:"conflicts"`
+
+	// Lease A lease on a task, with its resources.
+	Lease Lease `json:"lease"`
+}
+
+// LeaseStart The lease to start.
+type LeaseStart struct {
+	// Intent One line on what the actor is doing, 1 to 200 characters.
+	Intent string `json:"intent"`
+
+	// Resources At most 20 strings of 1 to 100 characters, repeats dropped.
+	Resources *[]string `json:"resources,omitempty"`
+
+	// Task The task's ref or ULID.
+	Task string `json:"task"`
+
+	// TtlSeconds Clamped to 60 to 43200. Default 7200.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
 // Meta The server and the caller.
 type Meta struct {
 	// Actor The actor the request acts as.
@@ -544,6 +608,9 @@ type Meta struct {
 type Problem struct {
 	// Detail A human-readable explanation of this occurrence.
 	Detail *string `json:"detail,omitempty"`
+
+	// ExpiredAt On the 410 of a lease renewal, when the lease expired.
+	ExpiredAt *time.Time `json:"expired_at,omitempty"`
 
 	// Instance A URI reference that identifies this occurrence.
 	Instance *string `json:"instance,omitempty"`
@@ -829,6 +896,9 @@ type EventAfter = string
 // EventLimit defines model for EventLimit.
 type EventLimit = int
 
+// LeaseRef defines model for LeaseRef.
+type LeaseRef = string
+
 // TaskRef defines model for TaskRef.
 type TaskRef = string
 
@@ -843,6 +913,9 @@ type Conflict = Problem
 
 // Forbidden An RFC 9457 problem document.
 type Forbidden = Problem
+
+// Gone An RFC 9457 problem document.
+type Gone = Problem
 
 // NotFound An RFC 9457 problem document.
 type NotFound = Problem
@@ -889,6 +962,27 @@ type ListInitiativesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// ListLeasesParams defines parameters for ListLeases.
+type ListLeasesParams struct {
+	// State live (default), ended, expired or all.
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// Actor Keep the leases of this actor handle.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Task A task ref or ULID.
+	Task *string `form:"task,omitempty" json:"task,omitempty"`
+
+	// Resource Keep the leases that hold this resource.
+	Resource *string `form:"resource,omitempty" json:"resource,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After A lease ref (`L<n>`) or id. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // ListTaskEventsParams defines parameters for ListTaskEvents.
 type ListTaskEventsParams struct {
 	// Limit The page size, 1 to 1000. Default 100.
@@ -909,6 +1003,15 @@ type PatchInitiativeJSONRequestBody = InitiativePatch
 
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = KeyCreate
+
+// StartLeaseJSONRequestBody defines body for StartLease for application/json ContentType.
+type StartLeaseJSONRequestBody = LeaseStart
+
+// EndLeaseJSONRequestBody defines body for EndLease for application/json ContentType.
+type EndLeaseJSONRequestBody = LeaseEnd
+
+// RenewLeaseJSONRequestBody defines body for RenewLease for application/json ContentType.
+type RenewLeaseJSONRequestBody = LeaseRenew
 
 // CreateTaskJSONRequestBody defines body for CreateTask for application/json ContentType.
 type CreateTaskJSONRequestBody = TaskCreate
@@ -966,6 +1069,24 @@ type ServerInterface interface {
 	// RevokeKey Revoke an API key
 	// (POST /api/v1/keys/{name}/revoke)
 	RevokeKey(w http.ResponseWriter, r *http.Request, name string)
+	// ListLeases List leases
+	// (GET /api/v1/leases)
+	ListLeases(w http.ResponseWriter, r *http.Request, params ListLeasesParams)
+	// StartLease Start a lease
+	// (POST /api/v1/leases)
+	StartLease(w http.ResponseWriter, r *http.Request)
+	// GetLease Read a lease
+	// (GET /api/v1/leases/{ref})
+	GetLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	// AckLease Acknowledge an expired lease
+	// (POST /api/v1/leases/{ref}/ack)
+	AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	// EndLease End a lease
+	// (POST /api/v1/leases/{ref}/end)
+	EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	// RenewLease Renew a lease
+	// (POST /api/v1/leases/{ref}/renew)
+	RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
@@ -1122,59 +1243,37 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListEventsParams
 
+	bind := siw.queryBinder(w, r)
+
 	// ------------- Optional query parameter "since" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "since", err)
-		return
-	}
+	bind.check("since", runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "initiative" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "initiative", err)
-		return
-	}
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "task" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "task", err)
-		return
-	}
+	bind.check("task", runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "type" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "type", err)
-		return
-	}
+	bind.check("type", runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
 
 	// ------------- Optional query parameter "actor" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "actor", err)
-		return
-	}
+	bind.check("actor", runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "limit" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "limit", err)
-		return
-	}
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
 
 	// ------------- Optional query parameter "after" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "after", err)
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
 		return
 	}
 
@@ -1198,27 +1297,21 @@ func (siw *ServerInterfaceWrapper) ListInitiatives(w http.ResponseWriter, r *htt
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListInitiativesParams
 
+	bind := siw.queryBinder(w, r)
+
 	// ------------- Optional query parameter "tag" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "tag", err)
-		return
-	}
+	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
 
 	// ------------- Optional query parameter "limit" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "limit", err)
-		return
-	}
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
 
 	// ------------- Optional query parameter "after" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "after", err)
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
 		return
 	}
 
@@ -1344,6 +1437,174 @@ func (siw *ServerInterfaceWrapper) RevokeKey(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeKey(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLeases operation middleware
+func (siw *ServerInterfaceWrapper) ListLeases(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLeasesParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "state" -------------
+
+	bind.check("state", runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "actor" -------------
+
+	bind.check("actor", runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "task" -------------
+
+	bind.check("task", runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "resource" -------------
+
+	bind.check("resource", runtime.BindQueryParameterWithOptions("form", true, false, "resource", r.URL.Query(), &params.Resource, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "limit" -------------
+
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "after" -------------
+
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLeases(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartLease operation middleware
+func (siw *ServerInterfaceWrapper) StartLease(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartLease(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLease operation middleware
+func (siw *ServerInterfaceWrapper) GetLease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref LeaseRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLease(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AckLease operation middleware
+func (siw *ServerInterfaceWrapper) AckLease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref LeaseRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AckLease(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndLease operation middleware
+func (siw *ServerInterfaceWrapper) EndLease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref LeaseRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndLease(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenewLease operation middleware
+func (siw *ServerInterfaceWrapper) RenewLease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref LeaseRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenewLease(w, r, ref)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1599,19 +1860,17 @@ func (siw *ServerInterfaceWrapper) ListTaskEvents(w http.ResponseWriter, r *http
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListTaskEventsParams
 
+	bind := siw.queryBinder(w, r)
+
 	// ------------- Optional query parameter "limit" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "limit", err)
-		return
-	}
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
 
 	// ------------- Optional query parameter "after" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.bindFailed(w, r, "after", err)
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
 		return
 	}
 
@@ -1907,6 +2166,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/milestones", wrapper.RecordTaskMilestone)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases", wrapper.ListLeases)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases", wrapper.StartLease)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases/{ref}", wrapper.GetLease)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/renew", wrapper.RenewLease)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/end", wrapper.EndLease)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/ack", wrapper.AckLease)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -1924,6 +2189,8 @@ type BadRequestApplicationProblemPlusJSONResponse Problem
 type ConflictApplicationProblemPlusJSONResponse Problem
 
 type ForbiddenApplicationProblemPlusJSONResponse Problem
+
+type GoneApplicationProblemPlusJSONResponse Problem
 
 type NotFoundApplicationProblemPlusJSONResponse Problem
 
@@ -2913,6 +3180,618 @@ type RevokeKey503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response RevokeKey503ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLeasesRequestObject struct {
+	Params ListLeasesParams
+}
+
+type ListLeasesResponseObject interface {
+	VisitListLeasesResponse(w http.ResponseWriter) error
+}
+
+type ListLeases200JSONResponse LeaseList
+
+func (response ListLeases200JSONResponse) VisitListLeasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLeases400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListLeases400ApplicationProblemPlusJSONResponse) VisitListLeasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLeases401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListLeases401ApplicationProblemPlusJSONResponse) VisitListLeasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLeases404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListLeases404ApplicationProblemPlusJSONResponse) VisitListLeasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLeases503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListLeases503ApplicationProblemPlusJSONResponse) VisitListLeasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLeaseRequestObject struct {
+	Body *StartLeaseJSONRequestBody
+}
+
+type StartLeaseResponseObject interface {
+	VisitStartLeaseResponse(w http.ResponseWriter) error
+}
+
+type StartLease200JSONResponse LeaseResult
+
+func (response StartLease200JSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease201JSONResponse LeaseResult
+
+func (response StartLease201JSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease400ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease401ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease404ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease409ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease503ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLeaseRequestObject struct {
+	Ref LeaseRef `json:"ref"`
+}
+
+type GetLeaseResponseObject interface {
+	VisitGetLeaseResponse(w http.ResponseWriter) error
+}
+
+type GetLease200JSONResponse Lease
+
+func (response GetLease200JSONResponse) VisitGetLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLease400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetLease400ApplicationProblemPlusJSONResponse) VisitGetLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLease401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetLease401ApplicationProblemPlusJSONResponse) VisitGetLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLease404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetLease404ApplicationProblemPlusJSONResponse) VisitGetLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLease503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetLease503ApplicationProblemPlusJSONResponse) VisitGetLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLeaseRequestObject struct {
+	Ref LeaseRef `json:"ref"`
+}
+
+type AckLeaseResponseObject interface {
+	VisitAckLeaseResponse(w http.ResponseWriter) error
+}
+
+type AckLease200JSONResponse Lease
+
+func (response AckLease200JSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLease400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease400ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLease401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease401ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLease404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease404ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLease409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease409ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckLease503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease503ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLeaseRequestObject struct {
+	Ref  LeaseRef `json:"ref"`
+	Body *EndLeaseJSONRequestBody
+}
+
+type EndLeaseResponseObject interface {
+	VisitEndLeaseResponse(w http.ResponseWriter) error
+}
+
+type EndLease200JSONResponse Lease
+
+func (response EndLease200JSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLease400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease400ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLease401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease401ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLease404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease404ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLease409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease409ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EndLease503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease503ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLeaseRequestObject struct {
+	Ref  LeaseRef `json:"ref"`
+	Body *RenewLeaseJSONRequestBody
+}
+
+type RenewLeaseResponseObject interface {
+	VisitRenewLeaseResponse(w http.ResponseWriter) error
+}
+
+type RenewLease200JSONResponse LeaseResult
+
+func (response RenewLease200JSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease400ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease401ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease404ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease409ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease410ApplicationProblemPlusJSONResponse struct {
+	GoneApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease410ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease503ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -4484,6 +5363,24 @@ type StrictServerInterface interface {
 	// RevokeKey Revoke an API key
 	// (POST /api/v1/keys/{name}/revoke)
 	RevokeKey(ctx context.Context, request RevokeKeyRequestObject) (RevokeKeyResponseObject, error)
+	// ListLeases List leases
+	// (GET /api/v1/leases)
+	ListLeases(ctx context.Context, request ListLeasesRequestObject) (ListLeasesResponseObject, error)
+	// StartLease Start a lease
+	// (POST /api/v1/leases)
+	StartLease(ctx context.Context, request StartLeaseRequestObject) (StartLeaseResponseObject, error)
+	// GetLease Read a lease
+	// (GET /api/v1/leases/{ref})
+	GetLease(ctx context.Context, request GetLeaseRequestObject) (GetLeaseResponseObject, error)
+	// AckLease Acknowledge an expired lease
+	// (POST /api/v1/leases/{ref}/ack)
+	AckLease(ctx context.Context, request AckLeaseRequestObject) (AckLeaseResponseObject, error)
+	// EndLease End a lease
+	// (POST /api/v1/leases/{ref}/end)
+	EndLease(ctx context.Context, request EndLeaseRequestObject) (EndLeaseResponseObject, error)
+	// RenewLease Renew a lease
+	// (POST /api/v1/leases/{ref}/renew)
+	RenewLease(ctx context.Context, request RenewLeaseRequestObject) (RenewLeaseResponseObject, error)
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
@@ -4924,6 +5821,187 @@ func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, name 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeKeyResponseObject); ok {
 		if err := validResponse.VisitRevokeKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLeases operation middleware
+func (sh *strictHandler) ListLeases(w http.ResponseWriter, r *http.Request, params ListLeasesParams) {
+	var request ListLeasesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLeases(ctx, request.(ListLeasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLeases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLeasesResponseObject); ok {
+		if err := validResponse.VisitListLeasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartLease operation middleware
+func (sh *strictHandler) StartLease(w http.ResponseWriter, r *http.Request) {
+	var request StartLeaseRequestObject
+
+	var body StartLeaseJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartLease(ctx, request.(StartLeaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartLease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartLeaseResponseObject); ok {
+		if err := validResponse.VisitStartLeaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLease operation middleware
+func (sh *strictHandler) GetLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+	var request GetLeaseRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLease(ctx, request.(GetLeaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLeaseResponseObject); ok {
+		if err := validResponse.VisitGetLeaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AckLease operation middleware
+func (sh *strictHandler) AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+	var request AckLeaseRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AckLease(ctx, request.(AckLeaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AckLease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AckLeaseResponseObject); ok {
+		if err := validResponse.VisitAckLeaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EndLease operation middleware
+func (sh *strictHandler) EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+	var request EndLeaseRequestObject
+
+	request.Ref = ref
+
+	var body EndLeaseJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EndLease(ctx, request.(EndLeaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EndLease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EndLeaseResponseObject); ok {
+		if err := validResponse.VisitEndLeaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenewLease operation middleware
+func (sh *strictHandler) RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+	var request RenewLeaseRequestObject
+
+	request.Ref = ref
+
+	var body RenewLeaseJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenewLease(ctx, request.(RenewLeaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenewLease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenewLeaseResponseObject); ok {
+		if err := validResponse.VisitRenewLeaseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

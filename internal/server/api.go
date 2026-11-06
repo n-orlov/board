@@ -45,6 +45,7 @@ type operations struct {
 	initiativeOps
 	taskOps
 	eventOps
+	leaseOps
 	metaOps
 	ready Readiness
 }

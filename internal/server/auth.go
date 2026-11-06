@@ -55,6 +55,12 @@ func writeProblem(w http.ResponseWriter, status int, detail string) {
 // writeProblemNext writes an RFC 9457 problem document whose `next` field is
 // next, or the default for the status when next is empty.
 func writeProblemNext(w http.ResponseWriter, status int, detail, next string) {
+	writeProblemExtra(w, status, detail, next, nil)
+}
+
+// writeProblemExtra is writeProblemNext with the members of extra added to the
+// document, such as the `expired_at` of a lease that cannot be renewed.
+func writeProblemExtra(w http.ResponseWriter, status int, detail, next string, extra map[string]any) {
 	if next == "" {
 		next = defaultNext(status)
 	}
@@ -63,13 +69,17 @@ func writeProblemNext(w http.ResponseWriter, status int, detail, next string) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	doc := map[string]any{
 		"type":   problemType,
 		"title":  http.StatusText(status),
 		"status": status,
 		"detail": detail,
 		"next":   next,
-	})
+	}
+	for k, v := range extra {
+		doc[k] = v
+	}
+	_ = json.NewEncoder(w).Encode(doc)
 }
 
 // bearerKey returns the key of an "Authorization: Bearer <key>" header.

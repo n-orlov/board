@@ -66,6 +66,17 @@ if grep -q 'var requiredError \*runtime.RequiredParameterError' "$go_out"; then
     exit 1
 fi
 
+# Even one call per parameter leaves one branch per parameter, so an operation with nine filters
+# (listEvents) still scores a cyclomatic complexity above the CRAP ceiling that no test can lower.
+# A run of those blocks is therefore rewritten once more: each becomes a call of
+# (*queryBinder).check, which remembers the first failure and has already answered it, and the run
+# ends in a single `if bind.failed { return }`. queryBinder lives in internal/server/params.go.
+perl -0pi -e 's/((?:\t\/\/ -+ (?:Optional|Required) query parameter "[^"]*" -+\n\n\terr = runtime\.BindQueryParameterWithOptions\(.*\)\n\tif err != nil \{\n\t\tsiw\.bindFailed\(w, r, "[^"]*", err\)\n\t\treturn\n\t\}\n\n)+)/bindRun($1)/ge; sub bindRun { my $run = shift; $run =~ s{\terr = (runtime\.BindQueryParameterWithOptions\(.*\))\n\tif err != nil \{\n\t\tsiw\.bindFailed\(w, r, ("[^"]*"), err\)\n\t\treturn\n\t\}\n}{\tbind.check($2, $1)\n}g; return "\tbind := siw.queryBinder(w, r)\n\n" . $run . "\tif bind.failed {\n\t\treturn\n\t}\n\n"; }' "$go_out"
+if grep -q 'siw\.bindFailed(w, r, "[^"]*", err)' "$go_out"; then
+    echo "ci/openapi-gen.sh: a query parameter block was left unrewritten; update the post-processing" >&2
+    exit 1
+fi
+
 # The rewrite can leave "errors" unused; drop the import then, and only then.
 if ! grep -q 'errors\.' "$go_out"; then
     sed -i '/^\t"errors"$/d' "$go_out"

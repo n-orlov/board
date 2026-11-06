@@ -43,7 +43,7 @@ type taskRow struct {
 	ID, InitiativeID, Ref, Status string
 }
 
-func (s Store) findTask(ctx context.Context, tx *sql.Tx, ref string) (taskRow, error) {
+func (s Store) findTask(ctx context.Context, tx queryer, ref string) (taskRow, error) {
 	parsed, err := domain.ParseTaskRef(ref)
 	if err != nil {
 		return taskRow{}, fmt.Errorf("%w: task %s", ErrNotFound, ref)
@@ -84,8 +84,11 @@ const (
 // is renewed instead (same lease, event lease_renewed, Renewed true); otherwise
 // it is a new lease numbered L<n> and the event is lease_started. It returns
 // ErrInvalid for an intent or resource that is wrong (checked before anything is
-// read), ErrNotFound for an unknown task, and ErrConflict for a closed task, and writes nothing then.
+// read; a missing task is ErrInvalid too), ErrNotFound for an unknown task, and ErrConflict for a closed task, and writes nothing then.
 func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, in Start) (Result, error) {
+	if strings.TrimSpace(in.Task) == "" {
+		return Result{}, InvalidError{Msg: "a lease needs a task", Next: "Send the ref of the task the lease is on, such as aa-1."}
+	}
 	if err := domain.ValidateIntent(in.Intent); err != nil {
 		return Result{}, invalid(err, nextIntent)
 	}

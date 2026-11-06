@@ -573,10 +573,13 @@ an upgrade survive it. `events.task_id` is a plain nullable column with no forei
 
 ### 5.2 Conflicts
 
-Computed on read: resources held by more than one live lease. Starting or renewing a lease
-returns the conflicting live leases (holder handle, task ref, intent, expires_at) in the
-response body, and the CLI prints them prominently. Optional resource prefixes
-(`host:` vs `repo:`) carry no special meaning to the server.
+Computed on read: the live, unexpired leases of **others** that hold any of the same resources as a lease. A
+lease never conflicts with itself, but two leases of one actor on different tasks that share a resource do
+conflict. An ended or expired lease conflicts with nothing. Starting or renewing a lease answers
+`{lease, conflicts}` (§6.5); each conflict is `{lease, holder, task, intent, expires_at, resources}`: the other
+lease's ref `L<n>`, its holder's handle, its task ref, its intent, its expiry, and only the resources both leases
+hold (in the order of the lease asked about), the conflicts in lease-number order. The CLI prints them
+prominently. Optional resource prefixes (`host:` vs `repo:`) carry no special meaning to the server.
 
 ### 5.3 Attention view
 
@@ -614,7 +617,7 @@ and CLI can show badges without the lists.
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
   `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the `GET`/`POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
-  operations (§6.4) and the RFC 9457 `Problem` schema. The binary embeds the document and serves it at
+  operations (§6.4), the lease operations (§6.5) and the RFC 9457 `Problem` schema (which carries `expired_at` on the 410 of a lease renewal). The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
   or session like any other route.
@@ -848,6 +851,52 @@ principal may use them. The server answers 503 problem documents when it runs wi
   `live_leases`, `blocked` is an open dependency (§4.3) and `overdue` is §4.6's rule at the time of the read.
 - A PATCH body is read with a three-state field (`internal/server` `Maybe`): left out, `null`, or a value. Fields the
   document does not name are ignored.
+
+### 6.5 Leases
+
+`POST`/`GET /api/v1/leases`, `GET /api/v1/leases/{ref}` and `POST /api/v1/leases/{ref}/renew`, `/end` and `/ack` are in
+`api/openapi.yaml`. `{ref}` is `L<n>` (either letter case) or the lease's ULID; one that names no lease is **404**
+(`there is no lease L9`). Any authenticated principal may use them. The server answers 503 problem documents when
+it runs without a store. The rules are those of `internal/leases` (§4.4). The sweeper that expires leases in the
+background comes with a later task; every operation here expires the due leases first (§5.1), so none shows a
+lease live past its expiry.
+
+- **`POST /api/v1/leases`**, body `{task, intent, ttl_seconds?, resources?}`. `task` is a task ref or ULID, `intent`
+  1 to 200 characters, `ttl_seconds` an integer clamped to [60, 43200] (7200 when absent), `resources` at most 20
+  strings of 1 to 100 characters, repeats dropped, kept sorted. A missing body, a missing `task`, a bad intent or a
+  bad resource is **400**, an unknown task **404**, and a **closed** task **409** (`cannot start a lease on task aa-1: it is
+  closed`; a done task is allowed). When the caller already holds a live lease on the task, that lease is renewed
+  instead: **200**, the same lease, `lease_renewed`, its intent replaced and its resources replaced only when
+  `resources` was sent. Otherwise it is **201**, a new lease and `lease_started`. The answer is `{lease, conflicts}`
+  (§5.2). A refusal changes nothing: no lease, event or actor. In one transaction the server upserts the actor
+  and writes the lease with its event, whose `data` is `{ref, task, intent, ttl_seconds, expires_at, resources}`.
+- **`POST /api/v1/leases/{ref}/renew`**, body (optional) `{ttl_seconds?, intent?, resources?}`: pushes `expires_at`
+  to now plus the ttl (the one sent, clamped, else the lease's own) and replaces the intent and the resources when
+  they are sent; any actor may renew. Answers **200** with `{lease, conflicts}` and appends `lease_renewed`. An
+  expired lease is **410**, whether or not the sweeper has marked it, and its problem document carries
+  `expired_at`, the time the lease ran out (RFC 3339); an ended lease is **409** (`cannot renew lease L1: it is
+  ended`); a bad intent or resource is **400**.
+- **`POST /api/v1/leases/{ref}/end`**, body (optional) `{outcome?}`, an outcome of at most 200 characters (**400**
+  otherwise): sets `state` `ended`, `ended_at` and `outcome`, and `ended_by` **only when the caller is not the
+  holder**, and appends `lease_ended` whose `data.ended_by` is set under the same condition. Answers **200** with the
+  lease. A lease that is not live, ended or expired, is **409** (`cannot end lease L1: it is ended`).
+- **`POST /api/v1/leases/{ref}/ack`** records the operator's acknowledgement of an expired lease: `acked_at` and
+  `acked_by`, and appends `lease_acked`. Answers **200** with the lease; acknowledging again changes nothing and
+  writes no event. A lease that has not expired, live or ended, is **409** (`cannot acknowledge lease L1: it is
+  live`). A later lease on the same task also counts as acknowledged (derived, §5.3).
+- **`GET /api/v1/leases/{ref}`** reads one lease.
+- **`GET /api/v1/leases`** answers `{items, next_after?}`, items ordered by lease number (oldest first). Filters
+  combine with AND: `state` is `live` (the default, also when empty), `ended`, `expired` or `all` (anything else is
+  **400** with a `next`); `actor` keeps one holder's handle; `task` (ref or ULID) one task's leases, **404** for a task that
+  names nothing; `resource` the leases that hold that resource. A filter that matches nothing is **200** with
+  `items: []`. `limit` is 1 to 1000 (default 100; 0 is **400**). `after` is an `L<n>` ref or a lease ULID: the page
+  starts after that lease; any other text is **400**. `next_after`, the ULID of the last item, is present exactly when
+  more leases follow, so a `limit` equal to the number left is the last page and has none.
+- **The lease document** (`Lease`): `{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at, expires_at,
+  state, resources, ended_at?, ended_by?, outcome?, acked_at?, acked_by?}`. `task` is the task's ref, `actor` the
+  holder's handle, `state` `live`, `ended` or `expired`, and absent optional fields are omitted. The task document
+  (§6.4) lists a task's live leases in `live_leases` and is `active` while it has one. Marking the task done or
+  closing it leaves its leases live: they end by `/end` or by running out.
 
 ---
 

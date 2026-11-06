@@ -18,10 +18,12 @@ type problemResponse struct {
 	detail string
 	// next is the suggested next action; empty means the status's default.
 	next string
+	// extra holds members added to the document, such as expired_at.
+	extra map[string]any
 }
 
 func (p problemResponse) write(w http.ResponseWriter) error {
-	writeProblemNext(w, p.status, p.detail, p.next)
+	writeProblemExtra(w, p.status, p.detail, p.next, p.extra)
 	return nil
 }
 

@@ -424,6 +424,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/leases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List leases
+         * @description A page of leases, oldest first, after expiring the leases that are due. Filters combine: `state` is `live` (the default), `ended`, `expired` or `all`; `actor` keeps the leases of one handle, `task` (ref or ULID) those on one task and `resource` those holding that resource. `limit` is 1 to 1000, default 100. `after` is the `L<n>` ref or id of the last lease of the previous page; `next_after` is the value to send, absent on the last page. A `task` that names nothing is 404.
+         */
+        get: operations["listLeases"];
+        put?: never;
+        /**
+         * Start a lease
+         * @description Starts a lease for the caller on `task` with the `intent` (1 to 200 characters), answering the lease and the conflicts. `ttl_seconds` is clamped to 60 to 43200 and defaults to 7200. `resources` is at most 20 strings of 1 to 100 characters, repeats dropped. A closed task is 409 and an unknown task 404. When the caller already holds a live lease on the task, that lease is renewed instead (same lease, 200, `lease_renewed`); otherwise the answer is 201 and the event `lease_started`. `conflicts` lists the live leases of others that hold one of the same resources, each with only the shared resources.
+         */
+        post: operations["startLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leases/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a lease
+         * @description Reads one lease by `L<n>` ref (either letter case) or ULID, after expiring the leases that are due. 404 for none.
+         */
+        get: operations["getLease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leases/{ref}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew a lease
+         * @description Pushes `expires_at` to now plus the ttl (`ttl_seconds` clamped, or the lease's own) and may replace the `intent` and the `resources`; appends `lease_renewed`. Any actor may renew. An expired lease is 410 and the problem carries `expired_at`; an ended lease is 409. The answer is the lease and its conflicts.
+         */
+        post: operations["renewLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leases/{ref}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a lease
+         * @description Ends a live lease with the optional `outcome` (at most 200 characters) and appends `lease_ended`. `ended_by` is set when the caller is not the holder. A lease that is not live is 409.
+         */
+        post: operations["endLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leases/{ref}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge an expired lease
+         * @description Records the caller's acknowledgement of an expired lease (`acked_at`, `acked_by`) and appends `lease_acked`; acknowledging it again changes nothing. A lease that has not expired is 409.
+         */
+        post: operations["ackLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -889,6 +993,60 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description The lease to start. */
+        LeaseStart: {
+            /** @description The task's ref or ULID. */
+            task: string;
+            /** @description One line on what the actor is doing, 1 to 200 characters. */
+            intent: string;
+            /**
+             * Format: int64
+             * @description Clamped to 60 to 43200. Default 7200.
+             */
+            ttl_seconds?: number;
+            /** @description At most 20 strings of 1 to 100 characters, repeats dropped. */
+            resources?: string[];
+        };
+        /** @description What to change on a renewal. A field left out keeps its value. */
+        LeaseRenew: {
+            /**
+             * Format: int64
+             * @description Clamped to 60 to 43200. Left out keeps the lease's ttl.
+             */
+            ttl_seconds?: number;
+            intent?: string;
+            resources?: string[];
+        };
+        /** @description How the lease ended. */
+        LeaseEnd: {
+            /** @description At most 200 characters. */
+            outcome?: string;
+        };
+        /** @description A live lease of another that holds a resource of the one asked about. */
+        LeaseConflict: {
+            /** @description The conflicting lease's ref, `L<n>`. */
+            lease: string;
+            /** @description The handle of the actor that holds it. */
+            holder: string;
+            /** @description The ref of the task it is on. */
+            task: string;
+            intent: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description The resources both leases hold. */
+            resources: string[];
+        };
+        /** @description A lease with the live leases of others that conflict with it. */
+        LeaseResult: {
+            lease: components["schemas"]["Lease"];
+            conflicts: components["schemas"]["LeaseConflict"][];
+        };
+        /** @description A page of leases. */
+        LeaseList: {
+            items: components["schemas"]["Lease"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description A page of events. */
         EventList: {
             items: components["schemas"]["Event"][];
@@ -970,6 +1128,11 @@ export interface components {
             instance?: string;
             /** @description The suggested next action, a sentence the CLI prints. */
             next?: string;
+            /**
+             * Format: date-time
+             * @description On the 410 of a lease renewal, when the lease expired.
+             */
+            expired_at?: string;
         };
     };
     responses: {
@@ -1002,6 +1165,15 @@ export interface components {
         };
         /** @description The request conflicts with what exists, such as a name already taken. */
         Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The lease has expired. The problem carries `expired_at`. */
+        Gone: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1042,6 +1214,8 @@ export interface components {
         TaskRef: string;
         /** @description The ref or ULID, in either letter case, of the task that blocks. */
         BlockedByRef: string;
+        /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
+        LeaseRef: string;
         /** @description The page size, 1 to 1000. Default 100. */
         EventLimit: number;
         /** @description An event id or `E<n>` ref. The page starts after it. */
@@ -1757,6 +1931,201 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listLeases: {
+        parameters: {
+            query?: {
+                /** @description live (default), ended, expired or all. */
+                state?: string;
+                /** @description Keep the leases of this actor handle. */
+                actor?: string;
+                /** @description A task ref or ULID. */
+                task?: string;
+                /** @description Keep the leases that hold this resource. */
+                resource?: string;
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description A lease ref (`L<n>`) or id. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    startLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseStart"];
+            };
+        };
+        responses: {
+            /** @description The actor already held a live lease on the task, and it was renewed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseResult"];
+                };
+            };
+            /** @description A new lease was started. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["LeaseRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    renewLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["LeaseRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LeaseRenew"];
+            };
+        };
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaseResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            410: components["responses"]["Gone"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    endLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["LeaseRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LeaseEnd"];
+            };
+        };
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    ackLease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["LeaseRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

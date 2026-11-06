@@ -380,8 +380,11 @@ Scripts, each run through `ci/run.sh` unless noted:
   other): the six-line block oapi-codegen repeats for every query parameter
   that cannot be bound becomes one call of `bindFailed` in
   `internal/server/params.go` (the same two answers), and the now unused
-  `errors` import is dropped, so an operation with several filters stays
-  under the ceiling.
+  `errors` import is dropped. A fourth rewrite folds each run of those calls
+  into `bind.check(name, runtime.Bind...)` on a `queryBinder`
+  (`internal/server/params.go`) that answers only the first failure, closed by
+  one `if bind.failed { return }`, so an operation with nine filters
+  (`listEvents`) has the complexity of one branch and stays under the ceiling.
   `ci/openapi-drift.sh` regenerates both into a scratch directory and fails when
   either checked-in file differs or is missing. Run
   `ci/run.sh ci/openapi-gen.sh` after every edit of the document and commit the

@@ -70,6 +70,11 @@ func WithEvents(st *events.Store) Option {
 	return func(o *operations) { o.eventOps = eventOps{events: st} }
 }
 
+// WithLeases serves /api/v1/leases from st; without it the operations answer 503.
+func WithLeases(st *leases.Store) Option {
+	return func(o *operations) { o.leaseOps = leaseOps{leases: st} }
+}
+
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives
 // PUT /api/v1/actors/me/protocol-seen its store; without the store that
 // operation answers 503.

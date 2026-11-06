@@ -45,7 +45,7 @@ func newKeyServer(t *testing.T) *keyServer {
 		t.Fatal(err)
 	}
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
-		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}),
+		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
 		WithMeta(Build{Version: "v9.9.9", Protocol: 7}, &actors.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }

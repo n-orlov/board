@@ -213,6 +213,12 @@ func (brokenResponse) VisitRecordTaskCheckResponse(http.ResponseWriter) error   
 func (brokenResponse) VisitRecordTaskMilestoneResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitListTaskEventsResponse(http.ResponseWriter) error      { return errBroken }
 func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitGetLeaseResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitRenewLeaseResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitEndLeaseResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitAckLeaseResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -395,6 +401,42 @@ func (s stubOperations) ListEvents(context.Context, ListEventsRequestObject) (Li
 	return resp, err
 }
 
+func (s stubOperations) StartLease(context.Context, StartLeaseRequestObject) (StartLeaseResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(StartLeaseResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListLeases(context.Context, ListLeasesRequestObject) (ListLeasesResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListLeasesResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetLease(context.Context, GetLeaseRequestObject) (GetLeaseResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetLeaseResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) RenewLease(context.Context, RenewLeaseRequestObject) (RenewLeaseResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RenewLeaseResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) EndLease(context.Context, EndLeaseRequestObject) (EndLeaseResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(EndLeaseResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) AckLease(context.Context, AckLeaseRequestObject) (AckLeaseResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(AckLeaseResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetMeta(context.Context, GetMetaRequestObject) (GetMetaResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetMetaResponseObject)
@@ -425,6 +467,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"/api/v1/initiatives", "POST /api/v1/initiatives", "/api/v1/initiatives/phone-onboard",
 		"POST /api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
+		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
@@ -607,6 +650,35 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list events 401", 401, ListEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
 		{"list events 404", 404, ListEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
 		{"list events 503", 503, ListEvents503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
+		{"start lease 400", 400, StartLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
+		{"start lease 401", 401, StartLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
+		{"start lease 404", 404, StartLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
+		{"start lease 409", 409, StartLease409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
+		{"start lease 503", 503, StartLease503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
+		{"list leases 400", 400, ListLeases400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"list leases 401", 401, ListLeases401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"list leases 404", 404, ListLeases404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"list leases 503", 503, ListLeases503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"get lease 400", 400, GetLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
+		{"get lease 401", 401, GetLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
+		{"get lease 404", 404, GetLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
+		{"get lease 503", 503, GetLease503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
+		{"renew lease 400", 400, RenewLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"renew lease 401", 401, RenewLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"renew lease 404", 404, RenewLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"renew lease 409", 409, RenewLease409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"renew lease 410", 410, RenewLease410ApplicationProblemPlusJSONResponse{GoneApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"renew lease 503", 503, RenewLease503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRenewLeaseResponse},
+		{"end lease 400", 400, EndLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitEndLeaseResponse},
+		{"end lease 401", 401, EndLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitEndLeaseResponse},
+		{"end lease 404", 404, EndLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitEndLeaseResponse},
+		{"end lease 409", 409, EndLease409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitEndLeaseResponse},
+		{"end lease 503", 503, EndLease503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitEndLeaseResponse},
+		{"ack lease 400", 400, AckLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitAckLeaseResponse},
+		{"ack lease 401", 401, AckLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitAckLeaseResponse},
+		{"ack lease 404", 404, AckLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitAckLeaseResponse},
+		{"ack lease 409", 409, AckLease409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitAckLeaseResponse},
+		{"ack lease 503", 503, AckLease503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitAckLeaseResponse},
 		{"meta 401", 401, GetMeta401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetMetaResponse},
 		{"protocol seen 400", 400, PutProtocolSeen400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},
 		{"protocol seen 401", 401, PutProtocolSeen401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutProtocolSeenResponse},

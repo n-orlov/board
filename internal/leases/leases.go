@@ -184,12 +184,12 @@ func (s Store) find(ctx context.Context, q queryer, ref string) (Lease, error) {
 	} else if up := strings.ToUpper(ref); domain.ValidateULID(up) == nil {
 		where, arg = ` WHERE l.id = ?`, up
 	} else {
-		return Lease{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
+		return Lease{}, fmt.Errorf("%w: lease %s", ErrNotFound, ref)
 	}
 	l, err := scan(q.QueryRowContext(ctx, s.Store.Dialect().Rebind(selectLease+where), arg))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return Lease{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
+		return Lease{}, fmt.Errorf("%w: lease %s", ErrNotFound, ref)
 	case err != nil:
 		return Lease{}, fmt.Errorf("read lease: %w", err)
 	}
@@ -201,6 +201,15 @@ func (s Store) find(ctx context.Context, q queryer, ref string) (Lease, error) {
 // reads the row as stored: ExpireDue and Expired say whether it has run out.
 func (s Store) Get(ctx context.Context, ref string) (Lease, error) {
 	return s.find(ctx, s.Store.Reader(), ref)
+}
+
+// Current expires the leases that are due, then returns the lease ref names, so
+// the answer is never live past its expiry. It returns ErrNotFound for none.
+func (s Store) Current(ctx context.Context, ref string) (Lease, error) {
+	if _, err := s.ExpireDue(ctx); err != nil {
+		return Lease{}, err
+	}
+	return s.Get(ctx, ref)
 }
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
