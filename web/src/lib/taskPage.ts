@@ -6,7 +6,9 @@ import { errorText } from './fetches';
 import { absoluteTime, relativeTime } from './format';
 import { toTaskPatch, type TaskEditForm } from './taskEdit';
 import { targetsText } from './initiativePage';
-import type { Resolution, TaskDetail, TasksApi, TaskEvent } from './tasks';
+import { pickerOptions } from './newTask';
+import type { Lease, Resolution, TaskDetail, TasksApi, TaskEvent } from './tasks';
+import type { TaskListItem } from './initiatives';
 
 export const RESOLUTIONS: readonly { value: Resolution; label: string }[] = [
   { value: 'completed', label: 'Completed' },
@@ -50,6 +52,48 @@ export function leaseRows(task: Pick<TaskDetail, 'live_leases'>, now: Date): Lea
   }));
 }
 
+/** The longest summary or outcome the API takes. */
+export const NOTE_LIMIT = 200;
+
+/** Why a summary (a milestone's or a check's) cannot be sent: empty after trimming, or over the API's limit. Undefined when it can. */
+export function summaryProblem(text: string): string | undefined {
+  const length = [...text.trim()].length;
+  if (length === 0) return 'Write a summary.';
+  return length > NOTE_LIMIT ? `A summary is at most ${NOTE_LIMIT} characters; this one has ${length}.` : undefined;
+}
+
+/** Why an outcome cannot be sent (it may be empty). */
+export function outcomeProblem(text: string): string | undefined {
+  const length = [...text.trim()].length;
+  return length > NOTE_LIMIT ? `An outcome is at most ${NOTE_LIMIT} characters; this one has ${length}.` : undefined;
+}
+
+/** The open tasks a dependency can be added on for the typed text: not the task itself and not one it already waits for. */
+export function depOptions(candidates: readonly TaskListItem[], task: Pick<TaskDetail, 'ref' | 'deps'>, text: string): TaskListItem[] {
+  return pickerOptions(candidates, text, [task.ref, ...task.deps.map((dep) => dep.ref)]);
+}
+
+export interface ExpiredRow {
+  ref: string;
+  holder: string;
+  intent: string;
+  resources: string;
+  expired: string;
+}
+
+/** The leases of the task that ran out and nobody acknowledged yet, in the order given (oldest first). */
+export function expiredRows(leases: readonly Lease[], now: Date): ExpiredRow[] {
+  return leases
+    .filter((lease) => lease.acked_at === undefined)
+    .map((lease) => ({
+      ref: lease.ref,
+      holder: lease.actor,
+      intent: lease.intent,
+      resources: lease.resources.join(', '),
+      expired: expiresIn(lease.expires_at, now),
+    }));
+}
+
 export interface EventRow {
   id: string;
   ref: string;
@@ -81,19 +125,26 @@ export interface TaskPageState {
   task: TaskDetail | undefined;
   /** In the order they were written. */
   events: TaskEvent[];
+  /** The leases of the task that ran out. */
+  expired: Lease[];
   loading: boolean;
   /** Why the page could not be read. */
   error: string | undefined;
   /** Why the last action was refused; shown inline (inside the dialog when one is open). */
   actionError: string | undefined;
+  /** The open tasks a dependency can be added on; read when the Add dependency dialog opens. */
+  candidates: TaskListItem[];
 }
 
-type PageApi = Pick<TasksApi, 'get' | 'events' | 'patch' | 'done' | 'reopen' | 'close'>;
+type PageApi = Pick<
+  TasksApi,
+  'get' | 'events' | 'expiredLeases' | 'openTasks' | 'patch' | 'done' | 'reopen' | 'close' | 'addDep' | 'removeDep' | 'milestone' | 'recordCheck' | 'endLease' | 'ackLease'
+>;
 
 export class TaskPageStore {
   private readonly api: PageApi;
   private readonly onChange: (state: TaskPageState) => void;
-  private current: TaskPageState = { task: undefined, events: [], loading: true, error: undefined, actionError: undefined };
+  private current: TaskPageState = { task: undefined, events: [], expired: [], loading: true, error: undefined, actionError: undefined, candidates: [] };
 
   constructor(api: PageApi, onChange: (state: TaskPageState) => void) {
     this.api = api;
@@ -117,10 +168,10 @@ export class TaskPageStore {
 
   private async read(ref: string): Promise<void> {
     try {
-      const [task, events] = await Promise.all([this.api.get(ref), this.api.events(ref)]);
-      this.set({ task, events, loading: false, error: undefined });
+      const [task, events, expired] = await Promise.all([this.api.get(ref), this.api.events(ref), this.api.expiredLeases(ref)]);
+      this.set({ task, events, expired, loading: false, error: undefined });
     } catch (e) {
-      this.set({ task: undefined, events: [], loading: false, error: errorText(e) });
+      this.set({ task: undefined, events: [], expired: [], loading: false, error: errorText(e) });
     }
   }
 
@@ -157,6 +208,46 @@ export class TaskPageStore {
 
   close(ref: string, resolution: Resolution): Promise<boolean> {
     return this.write(ref, () => this.api.close(ref, resolution));
+  }
+
+  /** A write whose input is checked first: a problem with it is a refusal too, and nothing is sent. */
+  private checked(ref: string, problem: string | undefined, action: () => Promise<unknown>): Promise<boolean> {
+    if (problem === undefined) return this.write(ref, action);
+    this.set({ actionError: problem });
+    return Promise.resolve(false);
+  }
+
+  addDep(ref: string, blockedBy: string): Promise<boolean> {
+    return this.write(ref, () => this.api.addDep(ref, blockedBy));
+  }
+
+  removeDep(ref: string, blockedBy: string): Promise<boolean> {
+    return this.write(ref, () => this.api.removeDep(ref, blockedBy));
+  }
+
+  milestone(ref: string, summary: string): Promise<boolean> {
+    return this.checked(ref, summaryProblem(summary), () => this.api.milestone(ref, summary.trim()));
+  }
+
+  recordCheck(ref: string, summary: string): Promise<boolean> {
+    return this.checked(ref, summaryProblem(summary), () => this.api.recordCheck(ref, summary.trim()));
+  }
+
+  endLease(ref: string, lease: string, outcome: string): Promise<boolean> {
+    return this.checked(ref, outcomeProblem(outcome), () => this.api.endLease(lease, outcome.trim()));
+  }
+
+  ackLease(ref: string, lease: string): Promise<boolean> {
+    return this.write(ref, () => this.api.ackLease(lease));
+  }
+
+  /** Reads the open tasks the Add dependency dialog offers; a failure is a refusal shown in the dialog. */
+  async loadCandidates(): Promise<void> {
+    try {
+      this.set({ candidates: await this.api.openTasks() });
+    } catch (e) {
+      this.set({ actionError: errorText(e) });
+    }
   }
 
   /** Forgets a refusal, for a dialog that is opened or an action that is tried again. */

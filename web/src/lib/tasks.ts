@@ -13,6 +13,7 @@ import type { Browser } from './session';
 export type TaskDetail = components['schemas']['TaskDetail'];
 export type TaskPatch = components['schemas']['TaskPatch'];
 export type TaskEvent = components['schemas']['Event'];
+export type Lease = components['schemas']['Lease'];
 export type Resolution = 'completed' | 'dropped' | 'superseded' | 'duplicate';
 
 /** A page of a task's events is as large as the API allows, so a busy task takes few requests. */
@@ -64,12 +65,12 @@ export class TasksApi {
     return this.listQuery(new URLSearchParams({ status: 'open' }));
   }
 
-  /** A write: JSON in (when there is a body), the task out. */
-  private async write(method: string, path: string, what: string, body?: object): Promise<TaskDetail> {
+  /** A write: JSON in (when there is a body), the answer out. */
+  private async write<T = TaskDetail>(method: string, path: string, what: string, body?: object): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json', 'X-CSRF-Token': this.csrf() };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const response = await this.call(path, what, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    return (await response.json()) as TaskDetail;
+    return (await response.json()) as T;
   }
 
   create(body: TaskCreate): Promise<TaskDetail> {
@@ -113,6 +114,50 @@ export class TasksApi {
 
   close(ref: string, resolution: Resolution): Promise<TaskDetail> {
     return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/close`, 'Closing the task', { resolution });
+  }
+
+  private depPath(ref: string, blockedBy: string): string {
+    return `/api/v1/tasks/${encodeURIComponent(ref)}/deps/${encodeURIComponent(blockedBy)}`;
+  }
+
+  addDep(ref: string, blockedBy: string): Promise<TaskDetail> {
+    return this.write('POST', this.depPath(ref, blockedBy), 'Adding the dependency');
+  }
+
+  removeDep(ref: string, blockedBy: string): Promise<TaskDetail> {
+    return this.write('DELETE', this.depPath(ref, blockedBy), 'Removing the dependency');
+  }
+
+  milestone(ref: string, summary: string): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/milestones`, 'Recording the milestone', { summary });
+  }
+
+  recordCheck(ref: string, summary: string): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/checks`, 'Recording the check', { summary });
+  }
+
+  /** Every lease of the task that ran out (acknowledged or not), following `next_after` through the pages. */
+  async expiredLeases(ref: string): Promise<Lease[]> {
+    const items: Lease[] = [];
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ task: ref, state: 'expired', limit: EVENT_PAGE });
+      if (after !== undefined) query.set('after', after);
+      const response = await this.call(`/api/v1/leases?${query.toString()}`, 'Reading the expired leases', { headers: { Accept: 'application/json' } });
+      const page = (await response.json()) as components['schemas']['LeaseList'];
+      items.push(...page.items);
+      after = page.next_after;
+    } while (after !== undefined);
+    return items;
+  }
+
+  /** Ends a live lease; the outcome is sent only when there is one. */
+  endLease(lease: string, outcome: string): Promise<Lease> {
+    return this.write<Lease>('POST', `/api/v1/leases/${encodeURIComponent(lease)}/end`, 'Ending the lease', outcome === '' ? undefined : { outcome });
+  }
+
+  ackLease(lease: string): Promise<Lease> {
+    return this.write<Lease>('POST', `/api/v1/leases/${encodeURIComponent(lease)}/ack`, 'Acknowledging the lease');
   }
 }
 

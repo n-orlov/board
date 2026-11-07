@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError } from './initiatives';
-import { eventRows, kindText, leaseRows, plannedText, RESOLUTIONS, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
-import type { TaskDetail, TaskEvent } from './tasks';
+import { depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
+import type { TaskListItem } from './initiatives';
+import type { Lease, TaskDetail, TaskEvent } from './tasks';
 
 const NOW = new Date('2026-01-10T12:00:00Z');
 
@@ -73,6 +74,14 @@ function harness(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   const api = {
     get: vi.fn(async () => detail()),
     events: vi.fn(async () => [event(1)]),
+    expiredLeases: vi.fn(async () => [] as Lease[]),
+    openTasks: vi.fn(async () => [] as TaskListItem[]),
+    addDep: vi.fn(async () => detail()),
+    removeDep: vi.fn(async () => detail()),
+    milestone: vi.fn(async () => detail()),
+    recordCheck: vi.fn(async () => detail()),
+    endLease: vi.fn(async () => ({}) as Lease),
+    ackLease: vi.fn(async () => ({}) as Lease),
     patch: vi.fn(async () => detail()),
     done: vi.fn(async () => detail('done')),
     reopen: vi.fn(async () => detail()),
@@ -89,7 +98,7 @@ const initial = { title: 'T', description: '', plannedStart: '', plannedEnd: '',
 describe('TaskPageStore', () => {
   it('starts loading, then holds the task and its events', async () => {
     const { store, states } = harness();
-    expect(store.state).toMatchObject({ task: undefined, events: [], loading: true, error: undefined, actionError: undefined });
+    expect(store.state).toMatchObject({ task: undefined, events: [], expired: [], candidates: [], loading: true, error: undefined, actionError: undefined });
     await store.load('aa-1');
     expect(states[0]).toMatchObject({ loading: true });
     expect(store.state.task?.ref).toBe('aa-1');
@@ -151,5 +160,138 @@ describe('TaskPageStore', () => {
     expect(await store.edit('aa-1', { ...initial, cadence: 'soon' }, { ...initial, cadence: '5m' }, 'watch')).toBe(false);
     expect(store.state.actionError).toContain('15m');
     expect(api.patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('summaryProblem and outcomeProblem', () => {
+  it('wants a summary of 1 to 200 characters, counted after trimming', () => {
+    expect(summaryProblem('')).toBe('Write a summary.');
+    expect(summaryProblem('   ')).toBe('Write a summary.');
+    expect(summaryProblem('a')).toBeUndefined();
+    expect(summaryProblem(' ' + 'a'.repeat(200) + ' ')).toBeUndefined();
+    expect(summaryProblem('a'.repeat(201))).toBe('A summary is at most 200 characters; this one has 201.');
+  });
+
+  it('counts characters, not bytes, and lets an outcome be empty', () => {
+    expect(summaryProblem('é'.repeat(200))).toBeUndefined();
+    expect(outcomeProblem('')).toBeUndefined();
+    expect(outcomeProblem('a'.repeat(200))).toBeUndefined();
+    expect(outcomeProblem('a'.repeat(201))).toBe('An outcome is at most 200 characters; this one has 201.');
+  });
+});
+
+describe('depOptions', () => {
+  const item = (ref: string, title: string) => ({ id: 'id-' + ref, ref, title }) as TaskListItem;
+  const candidates = [item('aa-1', 'Self'), item('aa-2', 'Already a blocker'), item('aa-3', 'Write docs'), item('bb-1', 'Docs review')];
+  const task = { ref: 'aa-1', deps: [{ ref: 'aa-2', title: '', status: 'open' }] } as TaskDetail;
+
+  it('leaves out the task itself and the tasks it already waits for', () => {
+    expect(depOptions(candidates, task, '').map((t) => t.ref)).toEqual(['aa-3', 'bb-1']);
+  });
+
+  it('narrows by the typed text over ref and title', () => {
+    expect(depOptions(candidates, task, 'REVIEW').map((t) => t.ref)).toEqual(['bb-1']);
+    expect(depOptions(candidates, task, 'aa-').map((t) => t.ref)).toEqual(['aa-3']);
+  });
+});
+
+describe('expiredRows', () => {
+  const lease = (ref: string, extra: Partial<Lease> = {}) =>
+    ({ ref, actor: 'ann', intent: 'edit', resources: ['b', 'a'], expires_at: '2026-01-10T11:50:00Z', ...extra }) as Lease;
+
+  it('lists the expired leases nobody acknowledged, with how long ago they ran out', () => {
+    const rows = expiredRows([lease('L1'), lease('L2', { acked_at: '2026-01-10T11:55:00Z', acked_by: 'bob' }), lease('L3', { resources: [] })], NOW);
+    expect(rows).toEqual([
+      { ref: 'L1', holder: 'ann', intent: 'edit', resources: 'b, a', expired: 'expired 10m ago' },
+      { ref: 'L3', holder: 'ann', intent: 'edit', resources: '', expired: 'expired 10m ago' },
+    ]);
+    expect(expiredRows([], NOW)).toEqual([]);
+  });
+});
+
+describe('TaskPageStore: dependencies, milestones, checks and leases', () => {
+  it('reads the expired leases with the page', async () => {
+    const { store } = harness({ expiredLeases: vi.fn(async () => [{ ref: 'L1' } as Lease]) });
+    await store.load('aa-1');
+    expect(store.state.expired.map((l) => l.ref)).toEqual(['L1']);
+  });
+
+  it('shows one error and no expired leases when that read fails', async () => {
+    const { store } = harness({ expiredLeases: vi.fn(async () => Promise.reject(new InitiativesError(500, 'down'))) });
+    await store.load('aa-1');
+    expect(store.state).toMatchObject({ task: undefined, expired: [], error: 'down' });
+  });
+
+  it('adds and removes a dependency, then reads the page again', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.addDep('aa-1', 'bb-2')).toBe(true);
+    expect(await store.removeDep('aa-1', 'bb-2')).toBe(true);
+    expect(api.addDep).toHaveBeenCalledWith('aa-1', 'bb-2');
+    expect(api.removeDep).toHaveBeenCalledWith('aa-1', 'bb-2');
+    expect(api.get).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the refusal of a dependency (a cycle, say) for the dialog', async () => {
+    const { store } = harness({ addDep: vi.fn(async () => Promise.reject(new InitiativesError(409, 'would close a cycle'))) });
+    await store.load('aa-1');
+    expect(await store.addDep('aa-1', 'bb-2')).toBe(false);
+    expect(store.state.actionError).toBe('would close a cycle');
+  });
+
+  it('sends the trimmed summary of a milestone and of a check', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.milestone('aa-1', '  shipped  ')).toBe(true);
+    expect(await store.recordCheck('aa-1', ' still green ')).toBe(true);
+    expect(api.milestone).toHaveBeenCalledWith('aa-1', 'shipped');
+    expect(api.recordCheck).toHaveBeenCalledWith('aa-1', 'still green');
+  });
+
+  it('refuses an empty or over-long summary without a request', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.milestone('aa-1', ' ')).toBe(false);
+    expect(store.state.actionError).toBe('Write a summary.');
+    expect(await store.recordCheck('aa-1', 'x'.repeat(201))).toBe(false);
+    expect(store.state.actionError).toContain('at most 200');
+    expect(api.milestone).not.toHaveBeenCalled();
+    expect(api.recordCheck).not.toHaveBeenCalled();
+  });
+
+  it('keeps the refusal of a check on a task that is not a watch task', async () => {
+    const { store } = harness({ recordCheck: vi.fn(async () => Promise.reject(new InitiativesError(409, 'not a watch task'))) });
+    await store.load('aa-1');
+    expect(await store.recordCheck('aa-1', 'ok')).toBe(false);
+    expect(store.state.actionError).toBe('not a watch task');
+  });
+
+  it('ends a lease with its trimmed outcome and acknowledges an expired one', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.endLease('aa-1', 'L1', ' done ')).toBe(true);
+    expect(await store.endLease('aa-1', 'L2', '')).toBe(true);
+    expect(await store.ackLease('aa-1', 'L3')).toBe(true);
+    expect(api.endLease.mock.calls).toEqual([['L1', 'done'], ['L2', '']]);
+    expect(api.ackLease).toHaveBeenCalledWith('L3');
+  });
+
+  it('refuses an over-long outcome without a request and keeps the refusal of a stale lease', async () => {
+    const { api, store } = harness({ ackLease: vi.fn(async () => Promise.reject(new InitiativesError(409, 'lease has not expired'))) });
+    await store.load('aa-1');
+    expect(await store.endLease('aa-1', 'L1', 'x'.repeat(201))).toBe(false);
+    expect(api.endLease).not.toHaveBeenCalled();
+    expect(await store.ackLease('aa-1', 'L1')).toBe(false);
+    expect(store.state.actionError).toBe('lease has not expired');
+  });
+
+  it('reads the open tasks a dependency can be added on, or says why it could not', async () => {
+    const open = [{ ref: 'bb-1' } as TaskListItem];
+    const { store } = harness({ openTasks: vi.fn(async () => open) });
+    await store.loadCandidates();
+    expect(store.state.candidates).toEqual(open);
+    const failing = harness({ openTasks: vi.fn(async () => Promise.reject(new InitiativesError(500, 'down'))) });
+    await failing.store.loadCandidates();
+    expect(failing.store.state).toMatchObject({ candidates: [], actionError: 'down' });
   });
 });

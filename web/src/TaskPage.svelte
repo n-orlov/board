@@ -1,8 +1,11 @@
 <script lang="ts">
   import Dialog from './Dialog.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
+  import TaskDepForm from './TaskDepForm.svelte';
   import TaskEditForm from './TaskEditForm.svelte';
+  import TaskNoteForm from './TaskNoteForm.svelte';
   import Toast from './Toast.svelte';
+  import { nextCheckText } from './lib/durations';
   import { absoluteTime, relativeTime } from './lib/format';
   import { taskBadges } from './lib/initiativePage';
   import { isSafeUrl, renderMarkdown } from './lib/markdown';
@@ -10,13 +13,13 @@
   import { currentBrowser } from './lib/session';
   import { taskActions } from './lib/taskActions';
   import { toTaskEditForm, type TaskEditForm as EditForm } from './lib/taskEdit';
-  import { eventRows, kindText, leaseRows, plannedText, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
+  import { eventRows, expiredRows, kindText, leaseRows, plannedText, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
   import { TasksApi, type Resolution } from './lib/tasks';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
-  let view: TaskPageState = $state({ task: undefined, events: [], loading: true, error: undefined, actionError: undefined });
-  let dialog: 'edit' | 'close' | undefined = $state(undefined);
+  let view: TaskPageState = $state({ task: undefined, events: [], expired: [], loading: true, error: undefined, actionError: undefined, candidates: [] });
+  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | { endLease: string } | undefined = $state(undefined);
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
 
@@ -40,6 +43,17 @@
     dialog = 'close';
   }
 
+  function openDep() {
+    store.clearActionError();
+    dialog = 'dep';
+    void store.loadCandidates();
+  }
+
+  function openNote(kind: 'milestone' | 'check' | { endLease: string }) {
+    store.clearActionError();
+    dialog = kind;
+  }
+
   async function finish(done: Promise<boolean>, message: string) {
     if (await done) {
       dialog = undefined;
@@ -52,15 +66,25 @@
   const save = (form: EditForm, kind: string) => finish(store.edit(ref, form, editInitial ?? form, kind), `Task ${ref} saved`);
   const closeIt = (resolution: Resolution) => finish(store.close(ref, resolution), `Task ${ref} closed as ${resolution}`);
 
+  const addDep = (blocker: string) => finish(store.addDep(ref, blocker), `Task ${ref} is now blocked by ${blocker}`);
+  const removeDep = (blocker: string) => finish(store.removeDep(ref, blocker), `Task ${ref} no longer waits for ${blocker}`);
+  const milestone = (text: string) => finish(store.milestone(ref, text), `Milestone recorded on ${ref}`);
+  const check = (text: string) => finish(store.recordCheck(ref, text), `Check recorded on ${ref}`);
+  const endLease = (lease: string, outcome: string) => finish(store.endLease(ref, lease, outcome), `Lease ${lease} ended`);
+  const ack = (lease: string) => finish(store.ackLease(ref, lease), `Lease ${lease} acknowledged`);
+
   const now = new Date();
   const actions = $derived(view.task === undefined ? undefined : taskActions(view.task.status, view.task.kind));
   const leases = $derived(view.task === undefined ? [] : leaseRows(view.task, now));
+  const expired = $derived(expiredRows(view.expired, now));
   const timeline = $derived(eventRows(view.events, now));
+  const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const action = 'min-h-11 flex-1 rounded-md border border-border bg-surface-raised px-4 text-sm font-medium text-text md:flex-none';
   const back = 'inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline';
   const link = 'inline-flex min-h-11 flex-wrap items-center gap-x-2 text-accent hover:underline';
-  const heading = 'mb-2 mt-6 text-lg font-bold';
+  const heading = 'text-lg font-bold';
+  const headingRow = 'mb-2 mt-6 flex flex-wrap items-center justify-between gap-2';
 </script>
 
 <section aria-labelledby="task-heading" class="pb-20 md:pb-0" data-testid="task-page">
@@ -138,11 +162,11 @@
       {/if}
       {#if task.next_check_at !== undefined}
         <dt class="text-text-muted">Next check</dt>
-        <dd data-testid="task-next-check"><time datetime={task.next_check_at} title={absoluteTime(task.next_check_at)}>{relativeTime(task.next_check_at, now)}</time></dd>
+        <dd data-testid="task-next-check"><time datetime={task.next_check_at} title={absoluteTime(task.next_check_at)}>{nextCheckText(task.next_check_at, now)}</time></dd>
       {/if}
     </dl>
 
-    <h3 class={heading}>Links</h3>
+    <div class={headingRow}><h3 class={heading}>Links</h3></div>
     {#if task.external_refs.length === 0}
       <p class="text-sm text-text-muted" data-testid="no-links">No links.</p>
     {:else}
@@ -159,7 +183,10 @@
       </ul>
     {/if}
 
-    <h3 class={heading}>Blocked by</h3>
+    <div class={headingRow}>
+      <h3 class={heading}>Blocked by</h3>
+      <button type="button" class={small} onclick={openDep}>Add dependency</button>
+    </div>
     {#if task.deps.length === 0}
       <p class="text-sm text-text-muted" data-testid="no-deps">Nothing blocks this task.</p>
     {:else}
@@ -168,12 +195,13 @@
           <li class="wrap-anywhere" data-ref={dep.ref}>
             <a class={link} href={taskHref(dep.ref)}><code class="font-mono">{dep.ref}</code><span>{dep.title}</span></a>
             <span class="{badge} border-border text-text-muted">{dep.status}</span>
+            <button type="button" class={small} aria-label="Remove dependency on {dep.ref}" onclick={() => removeDep(dep.ref)}>Remove</button>
           </li>
         {/each}
       </ul>
     {/if}
 
-    <h3 class={heading}>Blocking</h3>
+    <div class={headingRow}><h3 class={heading}>Blocking</h3></div>
     {#if task.blocking.length === 0}
       <p class="text-sm text-text-muted" data-testid="no-blocking">This task blocks nothing.</p>
     {:else}
@@ -187,7 +215,7 @@
       </ul>
     {/if}
 
-    <h3 class={heading}>Live leases</h3>
+    <div class={headingRow}><h3 class={heading}>Live leases</h3></div>
     {#if leases.length === 0}
       <p class="text-sm text-text-muted" data-testid="no-leases">No live lease.</p>
     {:else}
@@ -198,12 +226,34 @@
             <p data-testid="lease-intent">{lease.intent}</p>
             {#if lease.resources !== ''}<p class="font-mono text-text-muted" data-testid="lease-resources">{lease.resources}</p>{/if}
             <p class="text-text-muted" data-testid="lease-expires">{lease.expires}</p>
+            <button type="button" class="{small} mt-2" aria-label="End lease {lease.ref}" onclick={() => openNote({ endLease: lease.ref })}>End lease</button>
           </li>
         {/each}
       </ul>
     {/if}
 
-    <h3 class={heading}>Timeline</h3>
+    {#if expired.length > 0}
+      <div class={headingRow}><h3 class={heading}>Expired leases</h3></div>
+      <ul class="flex flex-col gap-2" data-testid="task-expired">
+        {#each expired as lease (lease.ref)}
+          <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="expired-lease" data-ref={lease.ref}>
+            <p><span class="font-medium">{lease.holder}</span> <span class="text-text-muted">{lease.ref}</span></p>
+            <p>{lease.intent}</p>
+            {#if lease.resources !== ''}<p class="font-mono text-text-muted">{lease.resources}</p>{/if}
+            <p class="text-text-muted" data-testid="expired-when">{lease.expired}</p>
+            <button type="button" class="{small} mt-2" aria-label="Acknowledge lease {lease.ref}" onclick={() => ack(lease.ref)}>Acknowledge</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <div class={headingRow}>
+      <h3 class={heading}>Timeline</h3>
+      <div class="flex gap-2">
+        <button type="button" class={small} onclick={() => openNote('milestone')}>Milestone</button>
+        {#if actions.recordCheck}<button type="button" class={small} onclick={() => openNote('check')}>Record check</button>{/if}
+      </div>
+    </div>
     {#if timeline.length === 0}
       <p class="text-sm text-text-muted" data-testid="no-events">No events.</p>
     {:else}
@@ -229,6 +279,23 @@
   {#if dialog === 'edit' && editInitial !== undefined}
     <Dialog label="Edit task" onclose={() => (dialog = undefined)} initialFocus="input[name=title]">
       <TaskEditForm initial={editInitial} watch={task.kind === 'watch'} error={view.actionError} onsave={(form) => save(form, task.kind)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'dep'}
+    <Dialog label="Add dependency" onclose={() => (dialog = undefined)} initialFocus="input[name=blocker_search]">
+      <TaskDepForm {task} candidates={view.candidates} error={view.actionError} onpick={addDep} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'milestone'}
+    <Dialog label="Record milestone" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Record milestone" label="Summary" hint="What happened, in up to 200 characters." submitLabel="Record milestone" error={view.actionError} onsubmit={milestone} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'check'}
+    <Dialog label="Record check" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Record check" label="Summary" hint="What the check found, in up to 200 characters. The next check is due one cadence from now." submitLabel="Record check" error={view.actionError} onsubmit={check} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object'}
+    {@const lease = dialog.endLease}
+    <Dialog label="End lease" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
+      <TaskNoteForm heading="End lease {lease}" label="Outcome (optional)" hint="How it went, in up to 200 characters." submitLabel="End lease" error={view.actionError} onsubmit={(text) => endLease(lease, text)} oncancel={() => (dialog = undefined)} />
     </Dialog>
   {:else if dialog === 'close'}
     <Dialog label="Close task" onclose={() => (dialog = undefined)} initialFocus="select[name=resolution]">

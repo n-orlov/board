@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cadenceText, durationText, expiresIn } from './durations';
+import { cadenceText, durationText, expiresIn, nextCheckText } from './durations';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
 const from = (seconds: number): string => new Date(NOW.getTime() + seconds * 1000).toISOString();
@@ -54,5 +54,24 @@ describe('expiresIn', () => {
   });
   it('gives nothing for an unparseable instant', () => {
     expect(expiresIn('soon', NOW)).toBe('');
+  });
+});
+
+describe('nextCheckText', () => {
+  it('counts the time until the next check', () => {
+    expect(nextCheckText(from(14 * 60), NOW)).toBe('due in 14m');
+    expect(nextCheckText(from(2 * 3600), NOW)).toBe('due in 2h');
+    expect(nextCheckText(from(60), NOW)).toBe('due in 1m');
+  });
+  it('says under a minute below 60 seconds, 0 seconds included', () => {
+    expect(nextCheckText(from(59), NOW)).toBe('due in under a minute');
+    expect(nextCheckText(from(0), NOW)).toBe('due in under a minute');
+  });
+  it('says overdue and by how much for a check that is late', () => {
+    expect(nextCheckText(from(-1), NOW)).toBe('overdue by 1s');
+    expect(nextCheckText(from(-(3600 + 5 * 60)), NOW)).toBe('overdue by 1h 5m');
+  });
+  it('gives nothing for an unparseable instant', () => {
+    expect(nextCheckText('soon', NOW)).toBe('');
   });
 });

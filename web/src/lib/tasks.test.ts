@@ -239,3 +239,60 @@ describe('TasksApi task page calls', () => {
     await expect(a.done('aa-1')).rejects.toMatchObject({ status: 500, message: 'Marking the task done failed (HTTP 500).' });
   });
 });
+
+describe('TasksApi dependency, note and lease calls', () => {
+  const calls = (fetchFn: { mock: { calls: unknown[][] } }) => fetchFn.mock.calls.map((c) => [c[0], (c[1] as RequestInit).method, (c[1] as RequestInit).body]);
+
+  it('adds and removes a dependency on the encoded refs, without a body', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.addDep('aa-1', 'bb-2');
+    await a.removeDep('aa-1', 'b/b');
+    expect(calls(fetchFn)).toEqual([
+      ['/api/v1/tasks/aa-1/deps/bb-2', 'POST', undefined],
+      ['/api/v1/tasks/aa-1/deps/b%2Fb', 'DELETE', undefined],
+    ]);
+    expect(fetchFn.mock.calls[1]![1]!.headers).toEqual({ Accept: 'application/json', 'X-CSRF-Token': 'csrf-1' });
+  });
+
+  it('posts a milestone and a check with their summary', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.milestone('aa-1', 'shipped');
+    await a.recordCheck('aa-1', 'green');
+    expect(calls(fetchFn)).toEqual([
+      ['/api/v1/tasks/aa-1/milestones', 'POST', '{"summary":"shipped"}'],
+      ['/api/v1/tasks/aa-1/checks', 'POST', '{"summary":"green"}'],
+    ]);
+  });
+
+  it('reads the expired leases of a task, following next_after through the pages', async () => {
+    const { api: a, fetchFn } = api(async (url) => (url.includes('after=') ? json({ items: [{ ref: 'L2' }] }) : json({ items: [{ ref: 'L1' }], next_after: 'L1' })));
+    expect((await a.expiredLeases('aa-1')).map((l) => l.ref)).toEqual(['L1', 'L2']);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual([
+      '/api/v1/leases?task=aa-1&state=expired&limit=1000',
+      '/api/v1/leases?task=aa-1&state=expired&limit=1000&after=L1',
+    ]);
+  });
+
+  it('ends a lease with its outcome only when there is one, and acknowledges an expired lease', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'L1' }));
+    expect((await a.endLease('L1', 'done')).ref).toBe('L1');
+    await a.endLease('L1', '');
+    await a.ackLease('L1');
+    expect(calls(fetchFn)).toEqual([
+      ['/api/v1/leases/L1/end', 'POST', '{"outcome":"done"}'],
+      ['/api/v1/leases/L1/end', 'POST', undefined],
+      ['/api/v1/leases/L1/ack', 'POST', undefined],
+    ]);
+  });
+
+  it('names the failed action when a lease write is refused without a detail', async () => {
+    const { api: a } = api(async () => new Response('', { status: 500 }));
+    await expect(a.endLease('L1', '')).rejects.toMatchObject({ message: 'Ending the lease failed (HTTP 500).' });
+    await expect(a.ackLease('L1')).rejects.toMatchObject({ message: 'Acknowledging the lease failed (HTTP 500).' });
+    await expect(a.addDep('aa-1', 'bb-1')).rejects.toMatchObject({ message: 'Adding the dependency failed (HTTP 500).' });
+    await expect(a.removeDep('aa-1', 'bb-1')).rejects.toMatchObject({ message: 'Removing the dependency failed (HTTP 500).' });
+    await expect(a.milestone('aa-1', 's')).rejects.toMatchObject({ message: 'Recording the milestone failed (HTTP 500).' });
+    await expect(a.recordCheck('aa-1', 's')).rejects.toMatchObject({ message: 'Recording the check failed (HTTP 500).' });
+    await expect(a.expiredLeases('aa-1')).rejects.toMatchObject({ message: 'Reading the expired leases failed (HTTP 500).' });
+  });
+});

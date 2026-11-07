@@ -1676,7 +1676,8 @@ turned into the `GET /tasks` query (the default status is sent as `not_closed`).
 action table of the task page: Edit is offered unless the task is closed, Done on an open task, Reopen on a done or
 closed one, Close unless closed, Milestone always, and Record check on a watch task that is not closed.
 `web/src/lib/durations.ts` writes a cadence as "every 5 minutes" (the largest unit that divides it exactly) and a
-lease's expiry as "expires in 41m", "expires in under a minute" (under 60 seconds left) or "expired 2m ago".
+lease's expiry as "expires in 41m", "expires in under a minute" (under 60 seconds left) or "expired 2m ago"; a watch
+task's next check is "due in 14m", "due in under a minute" or "overdue by 2h" (`nextCheckText`).
 `web/src/lib/conflicts.ts` groups the live leases (state `live` and not yet past `expires_at`) for the Now panel and the
 task page. A conflict is a resource held by two or more live leases (§5.2): one actor's two leases on different tasks
 that share a resource conflict too, and an ended or lapsed lease conflicts with nothing. `resourceConflicts` lists the
@@ -1707,11 +1708,32 @@ page, an empty title) shows its problem detail inline, in the dialog when one is
 typed) and as an alert under the header otherwise. A success closes the dialog, shows a toast ("Task aa-1 marked done",
 "... reopened", "... saved", "... closed as dropped") and reads the task and its events again without the skeleton, so
 the new event is the first row of the timeline. On the phone the actions sit in a bar fixed above the tab bar (44 px
-buttons, always visible, never hover-only); from 768 px they are part of the header. Milestone, Record check,
-dependency editing and ending or acknowledging a lease are not on the page yet. The specs are `e2e/task_page.spec.ts`
-(the page's content and links, the action bar, Edit with a refused then a good save, a watch task's cadence, Done and Reopen
-with a stale refused Done, Close with each of the four resolutions followed by Reopen, a refused Close) at 390x844
-and 1440x900.
+buttons, always visible, never hover-only); from 768 px they are part of the header.
+
+The page also reads the task's expired leases (`GET /api/v1/leases?task=<ref>&state=expired`, every page) and carries
+the rest of the R10 actions next to the section they change, so the phone's action bar stays four buttons wide.
+**Add dependency** (button beside the Blocked by heading) opens a sheet with a search field over the open tasks of every
+initiative (ref or title, case-insensitively, at most 8 shown; the task itself and the tasks it already waits for are
+left out; `depOptions`); picking one sends `POST /tasks/<ref>/deps/<blocker>`. A refusal such as a cycle (409) shows in the
+sheet, which stays open. Each task under Blocked by has a **Remove** button (`DELETE /tasks/<ref>/deps/<blocker>`, at once,
+no confirmation); `blocked` is re-read from the API, so the badge appears and disappears with the dependency. **Milestone**
+(beside the Timeline heading, on a task of any status) and **Record check** (same place, only on a watch task that is not
+closed, from `taskActions`) open a sheet with one Summary field (1 to 200 characters after trimming; an empty or over-long
+one is refused in the sheet before any request, `summaryProblem`) and post `POST /tasks/<ref>/milestones` or `/checks`;
+a check moves the task's next check to now plus its cadence, which the page prints as "due in 14m" or "overdue by 2h"
+(`nextCheckText`). Each live lease has an **End lease** button: a sheet with an optional Outcome (at most 200 characters)
+that posts `POST /leases/<lease>/end`; a lease that is not live any more (409) is refused in the sheet. An
+**Expired leases** section appears when a lease of the task ran out and nobody acknowledged it (`expiredRows`: holder,
+lease ref, intent, resources, "expired 2m ago"); its **Acknowledge** button posts `POST /leases/<lease>/ack` at once. Each
+of the six actions toasts ("Task aa-1 is now blocked by bb-1", "Task aa-1 no longer waits for bb-1", "Milestone recorded
+on aa-1", "Check recorded on aa-1", "Lease L3 ended", "Lease L3 acknowledged") and reads the task, its events and its
+expired leases again, so `dep_added`, `dep_removed`, `milestone`, `check_recorded`, `lease_ended` and `lease_acked`
+appear at the top of the timeline. The specs are `e2e/task_page.spec.ts` (the page's content and links, the action bar,
+Edit with a refused then a good save, a watch task's cadence, Done and Reopen with a stale refused Done, Close with each
+of the four resolutions followed by Reopen, a refused Close, Add dependency and Remove with a refused cycle and a stale
+removal, Milestone with refused summaries, Record check, End lease with a stale refusal, and Acknowledge on a lease whose
+expiry is moved into the past in the e2e store) at 390x844 and 1440x900; `a11y.spec.ts` scans the page and the three
+sheets, and `touch.spec.ts` measures them on the phone.
 
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the

@@ -30,15 +30,32 @@ function span(totalSeconds: number): string {
   return `${totalSeconds}s`;
 }
 
+/** Whole seconds from `now` to the instant (negative when it has passed); undefined for an unparseable instant. */
+function secondsUntil(instant: string, now: Date): number | undefined {
+  const at = new Date(instant).getTime();
+  return Number.isNaN(at) ? undefined : Math.floor((at - now.getTime()) / 1000);
+}
+
 /**
  * When a lease runs out relative to `now`: "expires in 41m", "expires in under a minute" (less than 60 seconds
  * left) or "expired 2m ago". An unparseable instant gives the empty string.
  */
 export function expiresIn(expiresAt: string, now: Date): string {
-  const at = new Date(expiresAt).getTime();
-  if (Number.isNaN(at)) return '';
-  const left = Math.floor((at - now.getTime()) / 1000);
+  const left = secondsUntil(expiresAt, now);
+  if (left === undefined) return '';
   if (left < 0) return `expired ${span(-left)} ago`;
   if (left < MINUTE) return 'expires in under a minute';
   return `expires in ${span(left)}`;
+}
+
+/**
+ * When a watch task's next check is due relative to `now`: "due in 14m", "due in under a minute" or "overdue by 2h".
+ * An unparseable instant gives the empty string.
+ */
+export function nextCheckText(nextCheckAt: string, now: Date): string {
+  const left = secondsUntil(nextCheckAt, now);
+  if (left === undefined) return '';
+  if (left < 0) return `overdue by ${span(-left)}`;
+  if (left < MINUTE) return 'due in under a minute';
+  return `due in ${span(left)}`;
 }

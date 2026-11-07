@@ -1,8 +1,11 @@
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The task page `#/t/<ref>` at the phone and the desktop size: what it shows (header, description, planned window,
 // links, dependencies, live leases, the event timeline) and the Edit, Done, Reopen and Close actions, each leaving its
-// event in the timeline. Every test works on an initiative of its own.
+// event in the timeline; then the dependency, Milestone, Record check, End lease and Acknowledge actions. Every test
+// works on an initiative of its own.
 const test = base;
 
 const viewports = [
@@ -29,6 +32,22 @@ async function apiContext(playwright: PlaywrightTestArgs['playwright'], baseURL:
 async function seedTask(api: APIRequestContext, slug: string, extra: object = {}) {
   await post(api, '/api/v1/initiatives', { slug, title: `Page ${slug}` }, 201);
   return (await post(api, '/api/v1/tasks', { initiative: slug, title: 'Write the plan', ...extra }, 201)).ref;
+}
+
+// Runs a lease out the way the Go scenarios do: its expiry is moved into the past in the e2e store, then an API read
+// expires the leases that are due (the page's own read would race the timeline), so nothing sleeps.
+async function expireLease(api: APIRequestContext, ref: string) {
+  const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const changed = db.prepare('UPDATE leases SET expires_at = ? WHERE n = ?').run(Date.now() - 30_000, Number(ref.slice(1)));
+    expect(changed.changes).toBe(1);
+  } finally {
+    db.close();
+  }
+  const listed = await api.get('/api/v1/leases?state=expired');
+  expect(listed.status()).toBe(200);
+  expect(JSON.stringify(await listed.json())).toContain(`"${ref}"`);
 }
 
 const events = (page: Page) => page.getByTestId('event');
@@ -220,6 +239,167 @@ for (const vp of viewports) {
       await expect(page.getByTestId('action-error')).toBeVisible();
       await expect(page.getByTestId('action-error')).toContainText('done');
       await expect(page.getByTestId('task-status')).toHaveText('open');
+      await api.dispose();
+    });
+
+    test('Add dependency picks an open task and Remove drops it, with blocked changing and both events in the timeline', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-tp-dep-${vp.name}`;
+      const task = await seedTask(api, slug);
+      const blocker = (await post(api, '/api/v1/tasks', { initiative: slug, title: `Review the plan ${vp.name}` }, 201)).ref;
+      await page.goto(`/#/t/${task}`);
+      await expect(page.getByTestId('no-deps')).toBeVisible();
+      await expect(page.getByTestId('flag-blocked')).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Add dependency' }).click();
+      const add = dialog(page, 'Add dependency');
+      await expect(add).toBeVisible();
+      await expect(add.locator(`[data-ref=${task}]`)).toHaveCount(0); // a task is not offered as its own blocker
+      await add.getByLabel('Find an open task').fill(`review the plan ${vp.name}`);
+      await expect(add.getByTestId('dep-options').getByRole('button')).toHaveCount(1);
+      await add.locator(`[data-ref=${blocker}]`).click();
+
+      await expect(add).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Task ${task} is now blocked by ${blocker}`);
+      await expect(page.getByTestId('flag-blocked')).toHaveText('blocked');
+      await expect(page.getByTestId('task-deps').locator(`[data-ref=${blocker}]`)).toContainText(`Review the plan ${vp.name}`);
+      await expect(eventTypes(page)).resolves.toEqual(['dep_added', 'task_created']);
+
+      // The blocker's page shows the other side, and a dependency back onto it would close a cycle: refused, inline.
+      await page.goto(`/#/t/${blocker}`);
+      await expect(page.getByTestId('task-ref')).toHaveText(blocker);
+      await expect(page.getByTestId('task-blocking').locator(`[data-ref=${task}]`)).toBeVisible();
+      await page.getByRole('button', { name: 'Add dependency' }).click();
+      const cycle = dialog(page, 'Add dependency');
+      await cycle.getByLabel('Find an open task').fill(task);
+      await cycle.locator(`[data-ref=${task}]`).click();
+      await expect(cycle.getByTestId('dialog-error')).toBeVisible();
+      await expect(cycle).toBeVisible();
+      await cycle.getByRole('button', { name: 'Cancel' }).click();
+      await expect(cycle).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Add dependency' })).toBeFocused();
+
+      await page.goto(`/#/t/${task}`);
+      await expect(page.getByTestId('task-ref')).toHaveText(task);
+      await page.getByRole('button', { name: `Remove dependency on ${blocker}` }).click();
+      await expect(page.getByTestId('toast')).toContainText(`Task ${task} no longer waits for ${blocker}`);
+      await expect(page.getByTestId('no-deps')).toBeVisible();
+      await expect(page.getByTestId('flag-blocked')).toHaveCount(0);
+      await expect(eventTypes(page)).resolves.toEqual(['dep_removed', 'dep_added', 'task_created']);
+
+      // A removal that is stale (the dependency went already) is refused inline.
+      await page.getByRole('button', { name: 'Add dependency' }).click();
+      const again = dialog(page, 'Add dependency');
+      await again.getByLabel('Find an open task').fill(blocker);
+      await again.locator(`[data-ref=${blocker}]`).click();
+      await expect(again).toHaveCount(0);
+      expect((await api.delete(`/api/v1/tasks/${task}/deps/${blocker}`)).status()).toBe(200);
+      await page.getByRole('button', { name: `Remove dependency on ${blocker}` }).click();
+      await expect(page.getByTestId('action-error')).toBeVisible();
+      await api.dispose();
+    });
+
+    test('Milestone records a summary on any task, and an empty or over-long summary is refused inline', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-mile-${vp.name}`);
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByRole('button', { name: 'Record check' })).toHaveCount(0); // a work task has no checks
+
+      await page.getByRole('button', { name: 'Milestone' }).click();
+      const mile = dialog(page, 'Record milestone');
+      await expect(mile).toBeVisible();
+      await mile.getByRole('button', { name: 'Record milestone' }).click();
+      await expect(mile.getByTestId('dialog-error')).toBeVisible();
+      await mile.getByLabel('Summary').fill('x'.repeat(201));
+      await mile.getByRole('button', { name: 'Record milestone' }).click();
+      await expect(mile.getByTestId('dialog-error')).toContainText('200');
+      await mile.getByLabel('Summary').fill('Plan approved');
+      await mile.getByRole('button', { name: 'Record milestone' }).click();
+
+      await expect(mile).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Milestone recorded on ${ref}`);
+      await expect(eventTypes(page)).resolves.toEqual(['milestone', 'task_created']);
+      await expect(events(page).first().getByTestId('event-summary')).toContainText('Plan approved');
+      await expect(page.getByRole('button', { name: 'Milestone' })).toBeFocused();
+      await api.dispose();
+    });
+
+    test('Record check is offered on a watch task, moves the next check and leaves its event', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-check-${vp.name}`, { kind: 'watch', cadence_seconds: 900 });
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('task-next-check')).toBeVisible();
+
+      await page.getByRole('button', { name: 'Record check' }).click();
+      const check = dialog(page, 'Record check');
+      await check.getByRole('button', { name: 'Record check' }).click();
+      await expect(check.getByTestId('dialog-error')).toBeVisible();
+      await check.getByLabel('Summary').fill('Build is still green');
+      await check.getByRole('button', { name: 'Record check' }).click();
+
+      await expect(check).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Check recorded on ${ref}`);
+      await expect(eventTypes(page)).resolves.toEqual(['check_recorded', 'task_created']);
+      await expect(events(page).first().getByTestId('event-summary')).toContainText('Build is still green');
+      await expect(page.getByTestId('task-next-check')).toHaveText(/^due in (14|15)m$/);
+
+      // A closed watch task takes no more checks.
+      expect((await api.post(`/api/v1/tasks/${ref}/close`, { data: { resolution: 'dropped' } })).status()).toBe(200);
+      await page.reload();
+      await expect(page.getByTestId('task-status')).toHaveText('closed');
+      await expect(page.getByRole('button', { name: 'Record check' })).toHaveCount(0);
+      await api.dispose();
+    });
+
+    test('End lease ends a live lease with its outcome, and a lease that is gone already is refused inline', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-end-${vp.name}`);
+      const first = (await post(api, '/api/v1/leases', { task: ref, intent: 'drafting' }, 201).then((l) => (l as unknown as { lease: { ref: string } }).lease)).ref;
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('lease')).toHaveCount(1);
+
+      await page.getByRole('button', { name: `End lease ${first}` }).click();
+      const end = dialog(page, 'End lease');
+      await expect(end).toBeVisible();
+      await end.getByLabel('Outcome (optional)').fill('Draft is in review');
+      await end.getByRole('button', { name: 'End lease' }).click();
+      await expect(end).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Lease ${first} ended`);
+      await expect(page.getByTestId('no-leases')).toBeVisible();
+      await expect(eventTypes(page)).resolves.toEqual(['lease_ended', 'lease_started', 'task_created']);
+      await expect(events(page).first().getByTestId('event-summary')).toContainText('Draft is in review');
+
+      // The lease is ended through the API while the dialog is open: the refusal shows in the dialog.
+      const second = (await post(api, '/api/v1/leases', { task: ref, intent: 'again' }, 201).then((l) => (l as unknown as { lease: { ref: string } }).lease)).ref;
+      await page.reload();
+      await page.getByRole('button', { name: `End lease ${second}` }).click();
+      const stale = dialog(page, 'End lease');
+      expect((await api.post(`/api/v1/leases/${second}/end`, { data: {} })).status()).toBe(200);
+      await stale.getByRole('button', { name: 'End lease' }).click();
+      await expect(stale.getByTestId('dialog-error')).toBeVisible();
+      await expect(stale).toBeVisible();
+      await stale.getByRole('button', { name: 'Cancel' }).click();
+      await api.dispose();
+    });
+
+    test('Acknowledge clears an expired lease from the page and leaves its event', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-ack-${vp.name}`);
+      const lease = (await post(api, '/api/v1/leases', { task: ref, intent: 'forgotten work' }, 201).then((l) => (l as unknown as { lease: { ref: string } }).lease)).ref;
+      await expireLease(api, lease);
+      await page.goto(`/#/t/${ref}`);
+
+      await expect(page.getByTestId('no-leases')).toBeVisible();
+      const expired = page.getByTestId('expired-lease');
+      await expect(expired).toHaveCount(1);
+      await expect(expired).toContainText('forgotten work');
+      await expect(expired.getByTestId('expired-when')).toHaveText(/^expired \d+s ago$/);
+      await expect(eventTypes(page)).resolves.toEqual(['lease_expired', 'lease_started', 'task_created']);
+
+      await page.getByRole('button', { name: `Acknowledge lease ${lease}` }).click();
+      await expect(page.getByTestId('toast')).toContainText(`Lease ${lease} acknowledged`);
+      await expect(page.getByTestId('expired-lease')).toHaveCount(0);
+      await expect(eventTypes(page)).resolves.toEqual(['lease_acked', 'lease_expired', 'lease_started', 'task_created']);
       await api.dispose();
     });
 

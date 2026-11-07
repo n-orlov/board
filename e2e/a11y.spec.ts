@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type Page } from '@playwright/test';
 
-// R9/R12: axe-core over the five views, the four dialogs/sheets of the R4 set, the initiative page's Edit and Close dialogs and the New task sheet, at the phone and the desktop
+// R9/R12: axe-core over the five views, the four dialogs/sheets of the R4 set, the initiative page's Edit and Close dialogs, the New task sheet, the task page and its Add dependency, Milestone and End lease sheets, at the phone and the desktop
 // viewport, in the light and the dark theme: 12 states x 2 viewports x 2 themes = 48 scans. No rule is
 // disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
@@ -86,6 +86,47 @@ const states: State[] = [
     },
   },
   {
+    name: 'task page',
+    open: async (page) => {
+      await page.goto('/#/t/e2e-a11y-1');
+      await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
+      await expect(page.getByRole('button', { name: /^End lease L\d+$/ })).toBeVisible(); // the live lease and its End lease button
+    },
+  },
+  {
+    name: 'add-dependency sheet',
+    open: async (page) => {
+      await page.goto('/#/t/e2e-a11y-1');
+      await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
+      await page.getByRole('button', { name: 'Add dependency' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Add dependency' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel('Find an open task').fill('possible blocker');
+      await expect(dialog.getByTestId('dep-options')).toBeVisible();
+    },
+  },
+  {
+    name: 'milestone sheet',
+    open: async (page) => {
+      await page.goto('/#/t/e2e-a11y-1');
+      await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
+      await page.getByRole('button', { name: 'Milestone' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Record milestone' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: 'Record milestone' }).click(); // the refusal shows in the sheet
+      await expect(dialog.getByTestId('dialog-error')).toBeVisible();
+    },
+  },
+  {
+    name: 'end-lease sheet',
+    open: async (page) => {
+      await page.goto('/#/t/e2e-a11y-1');
+      await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
+      await page.getByRole('button', { name: /^End lease L\d+$/ }).click();
+      await expect(page.getByRole('dialog', { name: 'End lease' })).toBeVisible();
+    },
+  },
+  {
     name: 'Settings -> API keys view',
     open: async (page) => {
       await page.goto('/#/settings/keys');
@@ -154,6 +195,9 @@ for (const vp of viewports) {
           expect(task.status()).toBe(201);
           const { ref } = (await task.json()) as { ref: string };
           expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning' } })).status()).toBe(201);
+          // Something the Add dependency sheet can offer as a blocker.
+          expect((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-a11y-blockers', title: 'Blockers' } })).status()).toBe(201);
+          expect((await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y-blockers', title: 'Possible blocker' } })).status()).toBe(201);
         }
         await seed.dispose();
         await page.goto('/');
