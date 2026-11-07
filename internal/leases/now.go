@@ -2,6 +2,7 @@ package leases
 
 import (
 	"context"
+	"time"
 
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/store"
@@ -17,9 +18,12 @@ type Now struct {
 
 // Live lists every live lease whose expires_at is not before now, oldest first.
 // Like LiveFor it leaves out the leases that have run out without expiring them.
-func (s Store) Live(ctx context.Context) ([]Lease, error) {
+func (s Store) Live(ctx context.Context) ([]Lease, error) { return s.liveAt(ctx, s.now()) }
+
+// liveAt is Live judged at the instant now.
+func (s Store) liveAt(ctx context.Context, now time.Time) ([]Lease, error) {
 	return s.readLeases(ctx, selectLease+` WHERE l.state = 'live' AND l.expires_at >= ? ORDER BY l.n`,
-		[]any{store.EncodeTime(s.now())})
+		[]any{store.EncodeBound(now)})
 }
 
 // CheckIn answers the check-in of the actor with the handle me. It expires the due
@@ -28,10 +32,11 @@ func (s Store) Live(ctx context.Context) ([]Lease, error) {
 // leases of others that hold one are conflicts too (domain.NowConflicts). Every
 // list is empty, never nil.
 func (s Store) CheckIn(ctx context.Context, me string, queried []string) (Now, error) {
-	if _, err := s.ExpireDue(ctx); err != nil {
+	now := s.now()
+	if _, err := s.expireAt(ctx, now); err != nil {
 		return Now{}, err
 	}
-	live, err := s.Live(ctx)
+	live, err := s.liveAt(ctx, now)
 	if err != nil {
 		return Now{}, err
 	}

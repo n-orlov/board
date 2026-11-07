@@ -14,11 +14,12 @@ import (
 // its one lease_expired event, and left out; the list is empty, never nil, when
 // the task has none.
 func (s Store) LiveOf(ctx context.Context, taskID string) ([]Lease, error) {
-	if _, err := s.ExpireDue(ctx); err != nil {
+	now := s.now()
+	if _, err := s.expireAt(ctx, now); err != nil {
 		return nil, err
 	}
 	return s.readLeases(ctx, selectLease+` WHERE l.task_id = ? AND l.state = 'live' AND l.expires_at >= ? ORDER BY l.n`,
-		[]any{taskID, store.EncodeTime(s.now())})
+		[]any{taskID, store.EncodeBound(now)})
 }
 
 // LiveFor lists the live leases on each of the tasks whose ids are taskIDs, in
@@ -30,7 +31,7 @@ func (s Store) LiveFor(ctx context.Context, taskIDs []string) (map[string][]Leas
 	if len(taskIDs) == 0 {
 		return out, nil
 	}
-	args := []any{store.EncodeTime(s.now())}
+	args := []any{store.EncodeBound(s.now())}
 	for _, id := range taskIDs {
 		args = append(args, id)
 	}
@@ -54,7 +55,7 @@ func (s Store) LiveCountsFor(ctx context.Context, initiativeIDs []string) (map[s
 	if len(initiativeIDs) == 0 {
 		return out, nil
 	}
-	args := []any{store.EncodeTime(s.now())}
+	args := []any{store.EncodeBound(s.now())}
 	for _, id := range initiativeIDs {
 		args = append(args, id)
 	}

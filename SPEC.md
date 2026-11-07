@@ -255,7 +255,7 @@ The server records **who** did everything (§4.6), so misuse is visible after th
 ## 4. Data model
 
 All timestamps are UTC, stored with millisecond precision as a `BIGINT` of milliseconds since the Unix epoch
-in every dialect (`store.EncodeTime` / `store.DecodeTime`); dates (`target_start`, `target_end`) are
+in every dialect (`store.EncodeTime` / `store.DecodeTime`). A stored instant is compared with the clock by the strict rule *stored < clock* (a lease is expired, a watch task overdue, only when its instant is strictly earlier than the clock), and the clock keeps its sub-millisecond part: the SQL predicates bind `store.EncodeBound(clock)` (the clock rounded up to a whole millisecond), so they answer exactly as the derived fields do. Equality never expires or makes overdue; dates (`target_start`, `target_end`) are
 `YYYY-MM-DD` text; JSON columns are text. IDs are ULIDs (sortable by creation time, text in every dialect). Within one server process a ULID always sorts after the one made before it, even in the same millisecond, so ids order objects by creation.
 Every table except the join tables and `sessions` also has an integer identity column `n` (unique, never
 reused: SQLite `AUTOINCREMENT`, Postgres `GENERATED ALWAYS AS IDENTITY`) from which the **short ref** is
@@ -477,7 +477,8 @@ on task aa-1: it is a work task"). A milestone is accepted on a task of any kind
 and `ref_id` (the task id).
 
 **Overdue** is derived (`domain.Overdue`, `Task.Overdue`): kind `watch`, status not `closed` (a done watch task still
-counts) and `next_check_at` strictly before the store's clock when the task is read.
+counts) and `next_check_at` strictly before the store's clock when the task is read. The `overdue` and `active` list filters use the same
+clock instant and rule as the derived fields, so a task selected by `overdue=true` has `overdue: true`, down to a clock a fraction of a millisecond past the stored value.
 
 **Reads** (`internal/events`: `Store.List(Query)`, `Store.ForTask(ref, after, limit)`). Events are returned in
 insertion order (`n`) as `Event{N, ID, Ref, At, Type, Actor, Principal, OnBehalfOf, Initiative, InitiativeID, Task,

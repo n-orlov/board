@@ -158,7 +158,7 @@ func ttlOf(requested *int64) *int64 {
 func (s Store) liveOf(ctx context.Context, tx *sql.Tx, taskID, actorID string, now time.Time) (string, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, s.Store.Dialect().Rebind(`SELECT id FROM leases WHERE task_id = ? AND actor_id = ?
-		AND state = 'live' AND expires_at >= ?`), taskID, actorID, store.EncodeTime(now)).Scan(&id)
+		AND state = 'live' AND expires_at >= ?`), taskID, actorID, store.EncodeBound(now)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

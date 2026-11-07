@@ -69,7 +69,7 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 		return Page{}, err
 	}
 	query := selectTask + f.where() + ` ORDER BY t.id LIMIT ` + fmt.Sprint(size+1)
-	items, err := s.rows(ctx, query, f.args)
+	items, err := s.rows(ctx, query, f.args, f.now)
 	if err != nil {
 		return Page{}, err
 	}
@@ -82,7 +82,7 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 }
 
 // rows runs a query of selectTask's columns and scans every row.
-func (s Store) rows(ctx context.Context, query string, args []any) ([]Task, error) {
+func (s Store) rows(ctx context.Context, query string, args []any, now time.Time) ([]Task, error) {
 	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
@@ -94,7 +94,7 @@ func (s Store) rows(ctx context.Context, query string, args []any) ([]Task, erro
 		if err != nil {
 			return nil, fmt.Errorf("list tasks: %w", err)
 		}
-		t.Overdue = domain.Overdue(t.Kind, t.Status, t.NextCheckAt, s.now())
+		t.Overdue = domain.Overdue(t.Kind, t.Status, t.NextCheckAt, now)
 		items = append(items, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -152,10 +152,10 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 	if err := f.statusAndKind(q); err != nil {
 		return err
 	}
-	f.flag(q.Active, `EXISTS (SELECT 1 FROM leases l WHERE l.task_id = t.id AND l.state = 'live' AND l.expires_at >= ?)`, store.EncodeTime(f.now))
+	f.flag(q.Active, `EXISTS (SELECT 1 FROM leases l WHERE l.task_id = t.id AND l.state = 'live' AND l.expires_at >= ?)`, store.EncodeBound(f.now))
 	f.flag(q.Blocked, `EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
 		WHERE td.task_id = t.id AND b.status <> 'closed')`)
-	f.flag(q.Overdue, `(t.kind = 'watch' AND t.status <> 'closed' AND t.next_check_at IS NOT NULL AND t.next_check_at < ?)`, store.EncodeTime(f.now))
+	f.flag(q.Overdue, `(t.kind = 'watch' AND t.status <> 'closed' AND t.next_check_at IS NOT NULL AND t.next_check_at < ?)`, store.EncodeBound(f.now))
 	f.text(q.Q)
 	return s.afterFilter(ctx, f, q.After)
 }

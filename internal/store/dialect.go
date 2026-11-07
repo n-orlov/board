@@ -47,6 +47,22 @@ type Dialect interface {
 // milliseconds since the Unix epoch.
 func EncodeTime(t time.Time) int64 { return t.UTC().UnixMilli() }
 
+// EncodeBound is the stored form of an instant that a stored timestamp is
+// compared with: the smallest whole millisecond not before t. A stored value s
+// is strictly earlier than t exactly when s < EncodeBound(t), and not earlier
+// exactly when s >= EncodeBound(t). EncodeTime floors, so using it for that
+// comparison would call a value stored one millisecond before t "not earlier"
+// whenever t holds a sub-millisecond part. The stored precision stays one
+// millisecond.
+func EncodeBound(t time.Time) int64 {
+	t = t.UTC()
+	ms := t.UnixMilli()
+	if time.UnixMilli(ms).Before(t) {
+		ms++
+	}
+	return ms
+}
+
 // DecodeTime is the inverse of EncodeTime.
 func DecodeTime(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 

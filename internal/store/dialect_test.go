@@ -121,3 +121,27 @@ func TestErrorClassification(t *testing.T) {
 		t.Error("sqlite IsUniqueViolation matches by text, want by result code")
 	}
 }
+
+func TestEncodeBoundIsTheSmallestMillisecondNotBeforeTheInstant(t *testing.T) {
+	base := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	for name, c := range map[string]struct {
+		at   time.Time
+		want int64
+	}{
+		"whole millisecond":     {base, base.UnixMilli()},
+		"one nanosecond after":  {base.Add(time.Nanosecond), base.UnixMilli() + 1},
+		"half a millisecond":    {base.Add(500 * time.Microsecond), base.UnixMilli() + 1},
+		"just under the next":   {base.Add(time.Millisecond - time.Nanosecond), base.UnixMilli() + 1},
+		"the next millisecond":  {base.Add(time.Millisecond), base.UnixMilli() + 1},
+		"another zone":          {base.In(time.FixedZone("x", 3600)).Add(time.Microsecond), base.UnixMilli() + 1},
+		"before the epoch":      {time.UnixMilli(-5).UTC().Add(time.Microsecond), -4},
+		"whole ms before epoch": {time.UnixMilli(-5).UTC(), -5},
+	} {
+		if got := EncodeBound(c.at); got != c.want {
+			t.Errorf("%s: EncodeBound = %d, want %d", name, got, c.want)
+		}
+		if EncodeTime(c.at) > EncodeBound(c.at) || EncodeBound(c.at)-EncodeTime(c.at) > 1 {
+			t.Errorf("%s: bound and floor differ by more than one millisecond", name)
+		}
+	}
+}

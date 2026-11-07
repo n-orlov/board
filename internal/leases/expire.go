@@ -25,11 +25,15 @@ type due struct {
 // many it expired. The update is conditional on the lease still being live, so
 // a second caller (another server on the same database) finds nothing to do and
 // writes no event.
-func (s Store) ExpireDue(ctx context.Context) (int, error) {
+func (s Store) ExpireDue(ctx context.Context) (int, error) { return s.expireAt(ctx, s.now()) }
+
+// expireAt is ExpireDue judged at the instant now, so a read can expire and
+// then list at one and the same instant.
+func (s Store) expireAt(ctx context.Context, now time.Time) (int, error) {
 	var n int
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		n, err = s.expireDue(ctx, tx, s.now())
+		n, err = s.expireDue(ctx, tx, now)
 		return err
 	})
 	return n, err
@@ -43,7 +47,7 @@ func (s Store) expireDue(ctx context.Context, tx *sql.Tx, now time.Time) (int, e
 	n := 0
 	for _, l := range list {
 		res, err := tx.ExecContext(ctx, s.Store.Dialect().Rebind(`UPDATE leases SET state = 'expired' WHERE id = ? AND state = 'live' AND expires_at < ?`),
-			l.ID, store.EncodeTime(now))
+			l.ID, store.EncodeBound(now))
 		if err != nil {
 			return n, fmt.Errorf("expire lease: %w", err)
 		}
@@ -62,7 +66,7 @@ func (s Store) expireDue(ctx context.Context, tx *sql.Tx, now time.Time) (int, e
 func (s Store) dueAt(ctx context.Context, tx *sql.Tx, now time.Time) ([]due, error) {
 	rows, err := tx.QueryContext(ctx, s.Store.Dialect().Rebind(`SELECT l.id, l.n, l.actor_id, l.task_id, t.initiative_id, i.slug, t.seq, l.expires_at
 		FROM leases l JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id
-		WHERE l.state = 'live' AND l.expires_at < ? ORDER BY l.expires_at, l.n`), store.EncodeTime(now))
+		WHERE l.state = 'live' AND l.expires_at < ? ORDER BY l.expires_at, l.n`), store.EncodeBound(now))
 	if err != nil {
 		return nil, fmt.Errorf("read expired leases: %w", err)
 	}

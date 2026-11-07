@@ -254,7 +254,7 @@ func (s Store) sharing(ctx context.Context, q queryer, l Lease, now time.Time) (
 		return nil, nil
 	}
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(l.Resources)), ", ")
-	args := []any{store.EncodeTime(now), l.ID}
+	args := []any{store.EncodeBound(now), l.ID}
 	for _, r := range l.Resources {
 		args = append(args, r)
 	}
