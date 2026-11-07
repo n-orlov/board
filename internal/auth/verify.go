@@ -69,31 +69,23 @@ func (v *Verifier) Verify(ctx context.Context, plain string) (string, error) {
 	case "expired":
 		return "", ErrKeyExpired
 	}
-	if u := usageFrom(ctx); u != nil {
-		u.add(v, key, now)
-		return key.Name, nil
-	}
-	v.touch(ctx, key, now)
+	later(ctx, func(ctx context.Context) { v.touch(ctx, key, now) })
 	return key.Name, nil
 }
 
 type usageContextKey struct{}
 
-// Usage holds the last_used_at writes of the keys a request verified, so that
-// they commit only if the request succeeds: a refused request changes no row.
+// Usage holds the writes authentication makes for one request (a key's
+// last_used_at, a session's last_seen_at, the removal of a dead session), so
+// that they commit only if the request succeeds: a refused request changes no
+// row.
 type Usage struct {
 	mu      sync.Mutex
-	pending []pendingUse
+	pending []func(context.Context)
 }
 
-type pendingUse struct {
-	v   *Verifier
-	key Key
-	at  time.Time
-}
-
-// WithDeferredUsage returns ctx in which Verify records the last_used_at
-// write instead of making it, and the Usage that makes the writes on Commit.
+// WithDeferredUsage returns ctx in which authentication records its writes
+// instead of making them, and the Usage that makes the writes on Commit.
 func WithDeferredUsage(ctx context.Context) (context.Context, *Usage) {
 	u := &Usage{}
 	return context.WithValue(ctx, usageContextKey{}, u), u
@@ -104,21 +96,28 @@ func usageFrom(ctx context.Context) *Usage {
 	return u
 }
 
-func (u *Usage) add(v *Verifier, key Key, at time.Time) {
+// later makes write now, or, when ctx came from WithDeferredUsage, records it
+// for Commit.
+func later(ctx context.Context, write func(context.Context)) {
+	u := usageFrom(ctx)
+	if u == nil {
+		write(ctx)
+		return
+	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.pending = append(u.pending, pendingUse{v: v, key: key, at: at})
+	u.pending = append(u.pending, write)
 }
 
-// Commit makes the recorded writes, each subject to its key's coalescing
-// interval, and forgets them. A failed write is not a failed request.
+// Commit makes the recorded writes, in order, and forgets them. A failed
+// write is not a failed request.
 func (u *Usage) Commit(ctx context.Context) {
 	u.mu.Lock()
 	pending := u.pending
 	u.pending = nil
 	u.mu.Unlock()
-	for _, p := range pending {
-		p.v.touch(ctx, p.key, p.at)
+	for _, write := range pending {
+		write(ctx)
 	}
 }
 

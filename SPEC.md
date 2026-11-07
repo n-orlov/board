@@ -149,10 +149,18 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie `board_session`, path
   `/`, `Max-Age` = the absolute lifetime; stored server-side as SHA-256 hash (§4.9), so logout and
   expiry are real. The cookie value is never stored. Two expiries end a session, both enforced
-  on the server whatever the cookie says, and both delete its row:
+  on the server whatever the cookie says, and both delete its row (on the next request presenting
+  it that is not refused, or by the sweeper, see below):
   - **absolute**: `BOARD_SESSION_TTL` (default `168h`, 7 days) after login; activity does not extend it;
   - **idle**: `BOARD_SESSION_IDLE` (default `24h`) since the session was last used (a request
     refreshes its last-seen time, written at most once per tenth of the idle timeout).
+  - Like a key's `last_used_at` bump (§3.3), both session writes a lookup makes (the last-seen
+    time, the deletion of a session found dead) commit only with a request that succeeds (a
+    response status below 400, written just before that status goes out). A refused request (400
+    and up: a failed CSRF or Origin check, an invalid, unknown or conflicting write, or a 401 for
+    a dead session) leaves `sessions` as it was, and the session's next successful request still
+    makes the write. A navigation redirected to `/auth/login` is not refused, so it removes a
+    dead session's row.
   After either, and after logout, the old cookie is as good as none: an API call gets 401, a
   navigation is redirected to `/auth/login`. The expiry scenarios (`features/oidc_session.feature`)
   start the server with lifetimes of a few seconds, so no step sleeps longer than 5 s.
@@ -205,7 +213,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail); a key
   that is not shaped like a key or that no row holds gets 401 (`key unknown`).
 - The server checks a presented key against `api_keys` on every request (no cache, so a revocation
-  takes effect at once) and bumps `last_used_at` at most once per key per 30 s. The bump is the only write authentication makes, and it commits only with a request that succeeds (a response status below 400, written just before that status goes out): a refused request (400 and up, whatever the reason) leaves `api_keys` as it was, and does not use up the 30 s window, so the key's next successful request still makes the bump.
+  takes effect at once) and bumps `last_used_at` at most once per key per 30 s. The bump is the only write key authentication makes, and it commits only with a request that succeeds (a response status below 400, written just before that status goes out): a refused request (400 and up, whatever the reason) leaves `api_keys` as it was, and does not use up the 30 s window, so the key's next successful request still makes the bump.
 - The checks run in this order: a request with no `Authorization: Bearer` credential gets 401 and the
   store is not touched; a key the store refuses gets 401; a key the store cannot check, because it is
   unreachable or not migrated, gets 503 and never a 2xx; a valid key without a `Board-Actor` header
@@ -406,7 +414,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
   event. A lease that has not expired is `ErrConflict`.
 - **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
-  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, and the authenticating key's `last_used_at`), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
+  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, the authenticating key's `last_used_at`, and the authenticating session's row, §3.2), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
 - **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It first runs `ExpireDue` (§5.1), so a lease past its expiry is marked expired and left out.
 
@@ -534,7 +542,7 @@ verifier answers 401 `key expired` from that instant on.
 
 `sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Rows past
 `expires_at` are deleted by the same sweeper as leases (§5.1), on the same `BOARD_SWEEP_INTERVAL` tick; a session
-that only the idle timeout has ended is deleted when it is next looked up. `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
+that only the idle timeout has ended is deleted when it is next looked up by a request that is not refused (§3.2). `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
 and is indexed on `expires_at` for that sweep.
 
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds

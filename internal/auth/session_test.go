@@ -148,3 +148,37 @@ func TestDeleteExpiredRemovesOnlySessionsPastTheirAbsoluteExpiry(t *testing.T) {
 		t.Fatal("DeleteExpired on a closed store succeeded")
 	}
 }
+
+func TestDeferredSessionWritesWaitForTheCommit(t *testing.T) {
+	c := &clock{t0}
+	s := newSessions(t, c, time.Hour, 10*time.Minute)
+	ctx := context.Background()
+	id, _, _ := s.Create(ctx, "a@example.com")
+	seen := func() int64 {
+		var at int64 = -1
+		_ = s.Store.Reader().QueryRowContext(ctx, `SELECT last_seen_at FROM sessions WHERE id_hash = ?`, HashKey(id)).Scan(&at)
+		return at
+	}
+	c.now = t0.Add(2 * time.Minute)
+	dropped, _ := WithDeferredUsage(ctx)
+	if _, err := s.Lookup(dropped, id); err != nil || seen() != store.EncodeTime(t0) {
+		t.Fatalf("a lookup with no commit: err %v, last_seen_at %d", err, seen())
+	}
+	kept, usage := WithDeferredUsage(ctx)
+	if _, err := s.Lookup(kept, id); err != nil || seen() != store.EncodeTime(t0) {
+		t.Fatalf("a deferred lookup wrote before its commit: err %v", err)
+	}
+	usage.Commit(ctx)
+	if seen() != store.EncodeTime(c.now) {
+		t.Fatalf("Commit wrote last_seen_at %d, want %d", seen(), store.EncodeTime(c.now))
+	}
+	c.now = c.now.Add(11 * time.Minute) // idle past the timeout
+	dead, usage := WithDeferredUsage(ctx)
+	if _, err := s.Lookup(dead, id); !errors.Is(err, ErrNoSession) || seen() < 0 {
+		t.Fatalf("a deferred lookup of a dead session: err %v, row left %v", err, seen() >= 0)
+	}
+	usage.Commit(ctx)
+	if seen() >= 0 {
+		t.Fatal("Commit did not delete the dead session")
+	}
+}

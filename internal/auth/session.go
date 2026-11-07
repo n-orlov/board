@@ -80,7 +80,9 @@ func (s Sessions) Create(ctx context.Context, email string) (string, Session, er
 
 // Lookup returns the live session id names and records that it was just used.
 // A session past its absolute expiry, or idle for longer than the idle
-// timeout, is deleted and reported as ErrNoSession.
+// timeout, is deleted and reported as ErrNoSession. When ctx came from
+// WithDeferredUsage, the last-seen write and the deletion wait for
+// Usage.Commit, so a request that is refused changes no row.
 func (s Sessions) Lookup(ctx context.Context, id string) (Session, error) {
 	d := s.Store.Dialect()
 	var sess Session
@@ -97,14 +99,21 @@ func (s Sessions) Lookup(ctx context.Context, id string) (Session, error) {
 	sess.CreatedAt, sess.ExpiresAt = store.DecodeTime(created), store.DecodeTime(expires)
 	now, idle := s.now(), orDefault(s.Idle, DefaultSessionIdle)
 	if !now.Before(sess.ExpiresAt) || !now.Before(store.DecodeTime(seen).Add(idle)) {
-		_ = s.Delete(ctx, id)
+		later(ctx, func(ctx context.Context) { _ = s.Delete(ctx, id) })
 		return Session{}, ErrNoSession
 	}
 	if now.Sub(store.DecodeTime(seen)) >= idle/10 {
-		_, _ = s.Store.Writer().ExecContext(ctx,
-			d.Rebind(`UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?`), store.EncodeTime(now), HashKey(id))
+		later(ctx, func(ctx context.Context) { s.touch(ctx, id, now) })
 	}
 	return sess, nil
+}
+
+// touch records that the session id names was used at now. A failed write is
+// not a failed request: the next use tries again.
+func (s Sessions) touch(ctx context.Context, id string, now time.Time) {
+	d := s.Store.Dialect()
+	_, _ = s.Store.Writer().ExecContext(ctx,
+		d.Rebind(`UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?`), store.EncodeTime(now), HashKey(id))
 }
 
 // Delete ends the session id names. Ending one that does not exist is not an
@@ -120,7 +129,8 @@ func (s Sessions) Delete(ctx context.Context, id string) error {
 
 // DeleteExpired removes every session past its absolute expiry and returns how
 // many it removed. A session only the idle timeout has ended is removed when it
-// is next looked up (Lookup), since the idle clock is not indexed.
+// is next looked up (Lookup) by a request that is not refused, since the idle
+// clock is not indexed.
 func (s Sessions) DeleteExpired(ctx context.Context) (int, error) {
 	d := s.Store.Dialect()
 	res, err := s.Store.Writer().ExecContext(ctx, d.Rebind(`DELETE FROM sessions WHERE expires_at <= ?`), store.EncodeTime(s.now()))

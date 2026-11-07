@@ -134,10 +134,11 @@ func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.Respon
 	next.ServeHTTP(&usageWriter{ResponseWriter: w, usage: usage, ctx: r.Context()}, r.WithContext(withIdentity(r.Context(), who)))
 }
 
-// usageWriter commits the key's last_used_at bump just before the first
+// usageWriter commits the writes authentication deferred (a key's
+// last_used_at, a session's last_seen_at or removal) just before the first
 // success status goes out. A refused request (status 400 and up) never
-// commits it, so it leaves every row as it was, and the key's next successful
-// request still bumps it.
+// commits them, so it leaves every row as it was, and the next successful
+// request still makes them.
 type usageWriter struct {
 	http.ResponseWriter
 	usage *auth.Usage
@@ -166,8 +167,13 @@ func (u *usageWriter) Write(b []byte) (int, error) {
 func (u *usageWriter) Unwrap() http.ResponseWriter { return u.ResponseWriter }
 
 // serveBrowser serves r on the strength of its session cookie, or answers a
-// request that has none.
+// request that has none. The session writes the lookup makes (its last-seen
+// time, the removal of a dead session) commit only with a response below 400,
+// like a key's usage bump.
 func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *http.Request) {
+	ctx, usage := auth.WithDeferredUsage(r.Context())
+	r = r.WithContext(ctx)
+	w = &usageWriter{ResponseWriter: w, usage: usage, ctx: ctx}
 	id, ok := sessionCookie(r)
 	if !ok {
 		serveAnonymous(next, w, r)

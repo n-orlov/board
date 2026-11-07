@@ -79,10 +79,18 @@ func (h *harness) browse(ctx context.Context, target string) error {
 // send sends method target as the browser, with its cookies, the Accept header
 // and extra headers, and records the response.
 func (h *harness) send(ctx context.Context, method, target, accept string, headers map[string]string) error {
+	return h.sendBody(ctx, method, target, accept, headers, "")
+}
+
+// sendBody is send with a JSON request payload, none when payload is empty.
+func (h *harness) sendBody(ctx context.Context, method, target, accept string, headers map[string]string, payload string) error {
 	target = h.resolve(target)
-	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	req, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(payload))
 	if err != nil {
 		return err
+	}
+	if payload != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", accept)
 	for name, value := range headers {
@@ -360,7 +368,7 @@ func (h *harness) sessionsStoredHashed(ctx context.Context, n int) error {
 func registerOIDCSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the mock OIDC provider signs in "([^"]*)" with (a verified|an unverified) email$`, h.providerSignsIn)
 	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)"$`, h.serverWithOIDC)
-	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE) set to "([^"]*)"$`, h.serverWithOIDCSetting)
+	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE|BOARD_SWEEP_INTERVAL) set to "([^"]*)"$`, h.serverWithOIDCSetting)
 	registerSessionSteps(sc, h)
 	sc.Step(`^the browser opens "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser requests GET "([^"]*)"$`, h.browserOpens)
