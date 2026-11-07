@@ -1572,6 +1572,16 @@ dropped (`web/src/lib/fetches.ts`); a refused create makes no fetch. An empty li
 The page calls the API with the session cookie, and its write sends the session's `X-CSRF-Token` (§3.2)
 (`e2e/initiatives.spec.ts` at 390x844 and 1440x900).
 
+**Initiative view libraries** (R9; the views that use them come in later tasks). `web/src/lib/markdown.ts` renders
+a description as safe HTML: every character is escaped first, so raw HTML shows as text; paragraphs, headings (two
+levels down), lists, quotes, fenced code, inline code, bold, italic and links are the only markup; a link whose
+scheme is not http, https or mailto (after whitespace and control characters are ignored, as a browser does) is
+dropped to its text, and a kept link carries `rel="noopener noreferrer"`. `web/src/lib/initiativeFilters.ts` holds the
+list's status filter (open, closed, all; open by default; sent as the `status` query) and the initiative page's task
+filter (not closed = open and done, done, closed, all; not closed by default). `web/src/lib/counts.ts` turns a
+task `counts` object into the badges and the line "2 open · 1 done · 3 closed" ("No tasks" when empty), and a live
+lease count into "no live leases", "1 live lease" or "3 live leases".
+
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Initiatives) and
