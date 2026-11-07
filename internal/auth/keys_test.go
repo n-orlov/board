@@ -219,3 +219,31 @@ func TestVerifyCoalescesLastUsedAt(t *testing.T) {
 		}
 	}
 }
+
+func TestDeferredUsageWritesNothingUntilCommitted(t *testing.T) {
+	ctx := context.Background()
+	k := newKeys(t, t0)
+	plain, _, _ := k.Create(ctx, "w", "t", 0)
+	v := &Verifier{Store: k.Store, Now: func() time.Time { return t0.Add(time.Minute) }}
+	used := func() bool {
+		var n int
+		if err := k.Store.Reader().QueryRowContext(ctx, `SELECT count(last_used_at) FROM api_keys WHERE name = 'w'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	dropped, _ := WithDeferredUsage(ctx)
+	if _, err := v.Verify(dropped, plain); err != nil || used() {
+		t.Fatalf("a verified request with no commit: err %v, used %v", err, used())
+	}
+	// the dropped request does not hold back the next one's bump
+	kept, usage := WithDeferredUsage(ctx)
+	if _, err := v.Verify(kept, plain); err != nil || used() {
+		t.Fatalf("a deferred verify wrote before its commit: err %v", err)
+	}
+	usage.Commit(ctx)
+	if !used() {
+		t.Fatal("Commit did not write last_used_at")
+	}
+	usage.Commit(ctx) // a second commit has nothing left to write
+}

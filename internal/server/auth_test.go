@@ -129,3 +129,41 @@ func TestValidKeyAndActorReachTheRoute(t *testing.T) {
 		t.Fatalf("status %d, want 200", rec.Code)
 	}
 }
+
+func (s *keyServer) lastUsed() bool {
+	s.t.Helper()
+	var n int
+	if err := s.st.Reader().QueryRowContext(context.Background(), `SELECT count(last_used_at) FROM api_keys WHERE name = 'caller'`).Scan(&n); err != nil {
+		s.t.Fatal(err)
+	}
+	return n == 1
+}
+
+func TestAKeyIsMarkedUsedOnlyByARequestThatSucceeds(t *testing.T) {
+	s := newKeyServer(t)
+	refused := []struct {
+		method, path, body string
+		status             int
+	}{
+		{http.MethodPost, "/api/v1/leases", `{"task":"aa-9","intent":"x"}`, http.StatusNotFound},
+		{http.MethodPost, "/api/v1/leases/L9/renew", "", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/leases/L9/end", "", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/leases/L9/ack", "", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/leases", `{`, http.StatusBadRequest},
+		{http.MethodGet, "/api/v1/tasks/aa-9", "", http.StatusNotFound},
+	}
+	for _, tc := range refused {
+		if rec := s.send(tc.method, tc.path, tc.body, "a@b"); rec.Code != tc.status {
+			t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.status)
+		}
+		if s.lastUsed() {
+			t.Fatalf("%s %s, answered %d, marked the key used", tc.method, tc.path, tc.status)
+		}
+	}
+	if rec := s.send(http.MethodGet, "/api/v1/leases", "", ""); rec.Code != http.StatusBadRequest || s.lastUsed() {
+		t.Fatalf("a request with no actor = %d, used %v; want 400, unused", rec.Code, s.lastUsed())
+	}
+	if rec := s.send(http.MethodGet, "/api/v1/leases", "", "a@b"); rec.Code != http.StatusOK || !s.lastUsed() {
+		t.Fatalf("a successful read = %d, used %v; want 200, used", rec.Code, s.lastUsed())
+	}
+}

@@ -30,7 +30,9 @@ type apiState struct {
 	// sentAt and answeredAt bracket the last task request.
 	counts string
 	// leaseRows is the leases table a scenario noted.
-	leaseRows          string
+	leaseRows string
+	// allRows is every row of every table a scenario noted.
+	allRows            string
 	sentAt, answeredAt time.Time
 }
 

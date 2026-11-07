@@ -117,6 +117,8 @@ func authenticated(next http.Handler, verify KeyVerifier, login *Login) http.Han
 
 // serveKeyed serves r when key is valid and the request names its actor.
 func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.ResponseWriter, r *http.Request) {
+	ctx, usage := auth.WithDeferredUsage(r.Context())
+	r = r.WithContext(ctx)
 	name, status, detail := checkKey(r, verify, key)
 	if status != 0 {
 		writeProblem(w, status, detail)
@@ -129,8 +131,39 @@ func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.Respon
 		Meta:       strings.TrimSpace(r.Header.Get(MetaHeader)),
 		OnBehalfOf: strings.TrimSpace(r.Header.Get(OnBehalfHeader)),
 	}
-	next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), who)))
+	next.ServeHTTP(&usageWriter{ResponseWriter: w, usage: usage, ctx: r.Context()}, r.WithContext(withIdentity(r.Context(), who)))
 }
+
+// usageWriter commits the key's last_used_at bump just before the first
+// success status goes out. A refused request (status 400 and up) never
+// commits it, so it leaves every row as it was, and the key's next successful
+// request still bumps it.
+type usageWriter struct {
+	http.ResponseWriter
+	usage *auth.Usage
+	ctx   context.Context
+	sent  bool
+}
+
+func (u *usageWriter) WriteHeader(status int) {
+	if !u.sent && status >= 200 && status < 400 {
+		u.usage.Commit(u.ctx)
+	}
+	if status >= 200 {
+		u.sent = true
+	}
+	u.ResponseWriter.WriteHeader(status)
+}
+
+func (u *usageWriter) Write(b []byte) (int, error) {
+	if !u.sent {
+		u.WriteHeader(http.StatusOK)
+	}
+	return u.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (u *usageWriter) Unwrap() http.ResponseWriter { return u.ResponseWriter }
 
 // serveBrowser serves r on the strength of its session cookie, or answers a
 // request that has none.

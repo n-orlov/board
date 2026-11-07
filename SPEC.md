@@ -205,7 +205,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail); a key
   that is not shaped like a key or that no row holds gets 401 (`key unknown`).
 - The server checks a presented key against `api_keys` on every request (no cache, so a revocation
-  takes effect at once) and bumps `last_used_at` at most once per key per 30 s.
+  takes effect at once) and bumps `last_used_at` at most once per key per 30 s. The bump is the only write authentication makes, and it commits only with a request that succeeds (a response status below 400, written just before that status goes out): a refused request (400 and up, whatever the reason) leaves `api_keys` as it was, and does not use up the 30 s window, so the key's next successful request still makes the bump.
 - The checks run in this order: a request with no `Authorization: Bearer` credential gets 401 and the
   store is not touched; a key the store refuses gets 401; a key the store cannot check, because it is
   unreachable or not migrated, gets 503 and never a 2xx; a valid key without a `Board-Actor` header
@@ -406,7 +406,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
   event. A lease that has not expired is `ErrConflict`.
 - **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
-  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no lease row, actor or event, even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
+  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, and the authenticating key's `last_used_at`), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
 - **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It first runs `ExpireDue` (§5.1), so a lease past its expiry is marked expired and left out.
 

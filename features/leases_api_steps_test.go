@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -161,6 +162,105 @@ func (h *harness) leaseRowsUnchanged(ctx context.Context) error {
 	return nil
 }
 
+// tableNames lists the scenario database's own tables.
+func (h *harness) tableNames(ctx context.Context, db *sql.DB) ([]string, error) {
+	q := `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+	if h.leg == "postgres" {
+		q = `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name`
+	}
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
+// allRowsDump is every column of every row of every table, as text, one sorted
+// line per row under a heading per table: raw row equality, nothing summarised.
+func (h *harness) allRowsDump(ctx context.Context) (string, error) {
+	db, err := h.openDB()
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	tables, err := h.tableNames(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	for _, t := range tables {
+		lines, err := tableLines(ctx, db, t)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&out, "== %s (%d rows)\n%s", t, len(lines), strings.Join(lines, ""))
+	}
+	return out.String(), nil
+}
+
+func tableLines(ctx context.Context, db *sql.DB, table string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT * FROM `+table) //nolint:gosec // table is a name read from the database catalog, never input
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		lines = append(lines, fmt.Sprintf("%q\n", fmt.Sprintf("%v", vals)))
+	}
+	sort.Strings(lines)
+	return lines, rows.Err()
+}
+
+func (h *harness) noteAllRows(ctx context.Context) error {
+	got, err := h.allRowsDump(ctx)
+	h.api.allRows = got
+	return err
+}
+
+func (h *harness) allRowsUnchanged(ctx context.Context) error {
+	got, err := h.allRowsDump(ctx)
+	if err != nil {
+		return err
+	}
+	if h.api.allRows == "" || got != h.api.allRows {
+		return fmt.Errorf("the database rows are\n%s\nwere\n%s", got, h.api.allRows)
+	}
+	return nil
+}
+
+func (h *harness) keyLastUsed(ctx context.Context, name string, used bool) error {
+	got, err := h.scalar(ctx, `SELECT count(last_used_at) FROM api_keys WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	if want := map[bool]string{true: "1", false: "0"}[used]; got != want {
+		return fmt.Errorf("the key %q has last_used_at set = %s, want %s", name, got, want)
+	}
+	return nil
+}
+
 func (h *harness) leaseCount(ctx context.Context, want int) error {
 	got, err := h.scalar(ctx, `SELECT count(*) FROM leases`)
 	if err != nil {
@@ -286,6 +386,10 @@ func registerLeaseSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I request the next leases page with "([^"]*)" as actor "([^"]*)"$`, h.nextLeasesPage)
 	sc.Step(`^the lease "([^"]*)" ran out (\d+) seconds ago$`, h.expireLease)
 	sc.Step(`^within (\d+) seconds the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateWithin)
+	sc.Step(`^I note every row of every table$`, h.noteAllRows)
+	sc.Step(`^every row of every table is unchanged$`, h.allRowsUnchanged)
+	sc.Step(`^the key "([^"]*)" has never been used$`, func(ctx context.Context, n string) error { return h.keyLastUsed(ctx, n, false) })
+	sc.Step(`^the key "([^"]*)" has been used$`, func(ctx context.Context, n string) error { return h.keyLastUsed(ctx, n, true) })
 	sc.Step(`^I note the lease rows$`, h.noteLeaseRows)
 	sc.Step(`^the lease rows are unchanged$`, h.leaseRowsUnchanged)
 	sc.Step(`^there are (\d+) leases in the database$`, h.leaseCount)

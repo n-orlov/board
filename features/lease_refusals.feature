@@ -159,3 +159,53 @@ Feature: A refused lease write changes nothing
     When I request the lease "L1" as actor "claude@laptop"
     Then the response path "state" is "expired"
     And exactly 1 lease_expired event exists for the lease "L1"
+
+  # The key a refused request authenticates with is never used before it: the usage metadata
+  # authentication keeps (api_keys.last_used_at) commits only with a request that succeeds.
+
+  Scenario Outline: a refused <what> with a never-used key changes no row in any table
+    Given I end the lease "L2" without a body as actor "claude@laptop"
+    And the lease "L1" ran out 30 seconds ago
+    And I run "board admin keys create fresh"
+    And I remember the key stdout printed
+    And the key "fresh" has never been used
+    And I note every row of every table
+    When <request>
+    Then the response status is <status>
+    And every row of every table is unchanged
+    And the key "fresh" has never been used
+    And the lease "L1" is "live" in the database
+    And exactly 0 lease_expired events exist for the lease "L1"
+
+    Examples:
+      | what                              | request                                                                | status |
+      | start on an unknown task          | I start a lease with body "{'task':'aa-9','intent':'x'}" as actor "codex@laptop" | 404    |
+      | renewal of an ended lease         | I renew the lease "L2" without a body as actor "codex@laptop"          | 409    |
+      | renewal of an unknown lease       | I renew the lease "L9" without a body as actor "codex@laptop"          | 404    |
+      | end of an ended lease             | I end the lease "L2" without a body as actor "codex@laptop"            | 409    |
+      | end of an unknown lease           | I end the lease "L9" without a body as actor "codex@laptop"            | 404    |
+      | acknowledgement of an ended lease | I acknowledge the lease "L2" as actor "operator@laptop"                | 409    |
+      | acknowledgement of an unknown lease | I acknowledge the lease "L9" as actor "operator@laptop"              | 404    |
+
+  Scenario: a refused start on a closed task with a never-used key changes no row
+    Given I close the task "aa-3" with body "{'resolution':'dropped'}" as actor "claude@laptop"
+    And the lease "L1" ran out 30 seconds ago
+    And I run "board admin keys create fresh"
+    And I remember the key stdout printed
+    And I note every row of every table
+    When I start a lease with body "{'task':'aa-3','intent':'x'}" as actor "codex@laptop"
+    Then the response status is 409
+    And every row of every table is unchanged
+
+  Scenario: a refusal does not suppress the key's usage bump on its next successful request
+    Given the lease "L1" ran out 30 seconds ago
+    And I run "board admin keys create fresh"
+    And I remember the key stdout printed
+    When I renew the lease "L9" without a body as actor "codex@laptop"
+    Then the response status is 404
+    And the key "fresh" has never been used
+    When I renew the lease "L2" without a body as actor "claude@laptop"
+    Then the response status is 200
+    And the key "fresh" has been used
+    And the lease "L1" is "expired" in the database
+    And exactly 1 lease_expired event exists for the lease "L1"
