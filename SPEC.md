@@ -1630,6 +1630,16 @@ filter (not closed = open and done, done, closed, all; not closed by default). `
 task `counts` object into the badges and the line "2 open · 1 done · 3 closed" ("No tasks" when empty), and a live
 lease count into "no live leases", "1 live lease" or "3 live leases".
 
+**Task view libraries** (R10). `web/src/lib/taskFilters.ts` holds the Tasks view's filter (status, kind, initiative,
+active, blocked, overdue and text) and its encoding in the URL fragment's query: `#/tasks` is the default filter
+(status not closed), and a field that differs adds `status=`, `kind=`, `initiative=`, `active=`, `blocked=`,
+`overdue=` (`true` or `false`) or `q=`, in that order, so a reload reads the same filter back. The same filter is
+turned into the `GET /tasks` query (the default status is sent as `not_closed`). `web/src/lib/taskActions.ts` is the
+action table of the task page: Edit is offered unless the task is closed, Done on an open task, Reopen on a done or
+closed one, Close unless closed, Milestone always, and Record check on a watch task that is not closed.
+`web/src/lib/durations.ts` writes a cadence as "every 5 minutes" (the largest unit that divides it exactly) and a
+lease's expiry as "expires in 41m", "expires in under a minute" (under 60 seconds left) or "expired 2m ago".
+
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Initiatives) and
