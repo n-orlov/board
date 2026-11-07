@@ -1677,6 +1677,12 @@ action table of the task page: Edit is offered unless the task is closed, Done o
 closed one, Close unless closed, Milestone always, and Record check on a watch task that is not closed.
 `web/src/lib/durations.ts` writes a cadence as "every 5 minutes" (the largest unit that divides it exactly) and a
 lease's expiry as "expires in 41m", "expires in under a minute" (under 60 seconds left) or "expired 2m ago".
+`web/src/lib/conflicts.ts` groups the live leases (state `live` and not yet past `expires_at`) for the Now panel and the
+task page. A conflict is a resource held by two or more live leases (§5.2): one actor's two leases on different tasks
+that share a resource conflict too, and an ended or lapsed lease conflicts with nothing. `resourceConflicts` lists the
+contested resources by name with every holder, `nowPanel` gives one row per live lease (flagged when it is in a
+conflict), the conflicts and a summary such as "2 live leases, 1 conflict", and `taskConflicts` gives, per contested
+resource a live lease of one task holds, the other holders (printed "repo:board: also held by bob on bb-1").
 
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
