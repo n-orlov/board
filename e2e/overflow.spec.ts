@@ -61,6 +61,11 @@ const P1_SLUG = `ovp${'w'.repeat(37)}`; // a 40-character slug
 const P1_RESOURCE = `repo:${'r'.repeat(95)}`; // a 100-character resource
 const P1_ACTOR = `ovfactor${'W'.repeat(32)}`;
 const longUrl = `https://example.invalid/${'a'.repeat(170)}`;
+const MAX_DESCRIPTION = 20000; // internal/domain MaxDescription, the longest accepted initiative or task description
+// A description of exactly the longest accepted length: one unbroken run of wide letters, then a long URL.
+const longDescription = (ch: string, url: string) => `${wide(MAX_DESCRIPTION - url.length - 1, ch)} ${url}`;
+const INITIATIVE_DESCRIPTION = longDescription('W', `https://example.invalid/${'b'.repeat(400)}`);
+const TASK_DESCRIPTION = longDescription('M', `https://example.invalid/${'c'.repeat(400)}`);
 
 type Seed = { watch: string; blocker: string; dependent: string; lease: string };
 let seeded: Promise<Seed> | undefined;
@@ -91,15 +96,15 @@ async function expireLease(api: APIRequestContext, ref: string) {
   expect((await api.get('/api/v1/leases?state=expired')).status()).toBe(200);
 }
 
-// One initiative with the longest slug, title, description and tags and four tasks: a watch task (the subject) with a
-// 200-character title, a long description, two long links, a blocker and a dependent (both with 200-character titles), a
+// One initiative with the longest slug, title, description (20000 characters) and tags and four tasks: a watch task (the subject) with a
+// 200-character title, a description of the longest accepted length, two long links, a blocker and a dependent (both with 200-character titles), a
 // milestone and a check of 200 characters, an expired lease and a live lease with a 200-character intent and 20
 // resources of 100 characters; a second actor holds the same resource on the dependent, so the page shows a conflict.
 async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed> {
   const api = await apiContext(playwright, baseURL);
   const other = await apiContext(playwright, baseURL, P1_ACTOR);
   const created = await api.post('/api/v1/initiatives', {
-    data: { slug: P1_SLUG, title: wide(200), description: `${wide(3000)} https://example.invalid/${'b'.repeat(400)}`, tags },
+    data: { slug: P1_SLUG, title: wide(200), description: INITIATIVE_DESCRIPTION, tags },
   });
   expect([201, 409], `seed ${P1_SLUG}: ${created.status()}`).toContain(created.status());
   const task = async (title: string, extra: object = {}) =>
@@ -107,7 +112,7 @@ async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL:
   const watch = await task(wide(200), {
     kind: 'watch',
     cadence_seconds: 900,
-    description: `${wide(4000)} https://example.invalid/${'c'.repeat(400)}`,
+    description: TASK_DESCRIPTION,
     external_refs: [
       { label: wide(80), url: longUrl },
       { label: wide(80, 'i'), url: `https://example.invalid/${'i'.repeat(170)}` },
@@ -159,7 +164,7 @@ const PHASE1_STATES: Phase1State[] = [
     open: async (page, seed) => {
       await page.goto(`/#/i/${P1_SLUG}`);
       await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
-      await expect(page.getByTestId('initiative-description')).toContainText(wide(3000));
+      await expect(page.getByTestId('initiative-description')).toContainText(INITIATIVE_DESCRIPTION);
     },
   },
   {
@@ -173,6 +178,7 @@ const PHASE1_STATES: Phase1State[] = [
       await expect(page.getByTestId('expired-lease')).toHaveCount(1);
       await expect(page.getByTestId('task-links').getByRole('link')).toHaveCount(2);
       await expect(page.getByTestId('event')).toHaveCount(7);
+      await expect(page.getByTestId('task-description')).toContainText(TASK_DESCRIPTION);
     },
   },
   {
@@ -183,7 +189,8 @@ const PHASE1_STATES: Phase1State[] = [
       await button(page, 'Edit', true).click();
       const dialog = await openDialog(page, 'Edit initiative');
       await dialog.getByRole('textbox', { name: 'Title' }).fill(wide(200));
-      await dialog.getByLabel('Description').fill(wide(3000));
+      await dialog.getByLabel('Description').fill(wide(MAX_DESCRIPTION));
+      await expect(dialog.getByLabel('Description')).toHaveValue(wide(MAX_DESCRIPTION));
       await dialog.getByLabel('Tags').fill(tags.join(', '));
     },
   },
@@ -208,7 +215,8 @@ const PHASE1_STATES: Phase1State[] = [
       await dialog.getByLabel('Initiative').selectOption(P1_SLUG);
       await dialog.getByLabel('Kind').selectOption('watch');
       await dialog.getByRole('textbox', { name: 'Title' }).fill(wide(200));
-      await dialog.getByLabel('Description').fill(wide(3000));
+      await dialog.getByLabel('Description').fill(TASK_DESCRIPTION);
+      await expect(dialog.getByLabel('Description')).toHaveValue(TASK_DESCRIPTION);
       await dialog.getByLabel('Cadence').fill('1d');
       await dialog.getByLabel('Find an open task').fill(seed.blocker);
       await dialog.getByTestId('blocker-options').getByRole('button').first().click();
@@ -228,7 +236,9 @@ const PHASE1_STATES: Phase1State[] = [
       await button(page, 'Edit', true).click();
       const dialog = await openDialog(page, 'Edit task');
       await dialog.getByRole('textbox', { name: 'Title' }).fill(wide(200));
-      await dialog.getByLabel('Description').fill(wide(4000));
+      await expect(dialog.getByLabel('Description')).toHaveValue(TASK_DESCRIPTION);
+      await dialog.getByLabel('Description').fill(wide(MAX_DESCRIPTION, 'M'));
+      await expect(dialog.getByLabel('Description')).toHaveValue(wide(MAX_DESCRIPTION, 'M'));
       await dialog.getByLabel('Cadence').fill('365d');
     },
   },

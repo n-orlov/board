@@ -1783,7 +1783,7 @@ The same spec holds a finite list of Phase 1 states to the same bar, named in `P
 `#/tasks` (with the Now panel open), `#/i/<slug>` and `#/t/<ref>`, and the nine dialogs edit initiative, close
 initiative, new task, edit task, close task, milestone, record check, add dependency and end lease. They are
 filled with the longest accepted values (a 40-character slug, 200-character titles of wide and narrow
-glyphs, long unbroken descriptions, 80-character link labels, 200-character summaries, intents and outcomes,
+glyphs, descriptions of 20000 characters (the longest accepted) with long unbroken runs, 80-character link labels, 200-character summaries, intents and outcomes,
 20 resources of 100 characters, a conflict and an expired lease on the same task), and no state scrolls
 sideways or reaches past the viewport at the four widths.
 
