@@ -94,7 +94,7 @@ function harness(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   return { api, store, states };
 }
 
-const initial = { title: 'T', description: '', plannedStart: '', plannedEnd: '', cadence: '' };
+const initial = { title: 'T', description: '', plannedStart: '', plannedEnd: '', cadence: '', nextCheck: '', links: [], linkLabel: '', linkUrl: '' };
 
 describe('TaskPageStore', () => {
   it('starts loading, then holds the task and its events', async () => {

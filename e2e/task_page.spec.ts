@@ -215,6 +215,106 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('Edit adds, replaces and removes links, a refused link keeps what was typed, and the saved links and event show', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const pr = { label: 'PR 12', url: 'https://example.com/pr/12' };
+      const ci = { label: 'CI run', url: 'https://example.com/ci/9' };
+      const ref = await seedTask(api, `e2e-tp-links-${vp.name}`, { external_refs: [pr, ci] });
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('task-links').getByRole('link')).toHaveText(['PR 12', 'CI run']);
+
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      const edit = dialog(page, 'Edit task');
+      await expect(edit.getByLabel('Label of link 1')).toHaveValue('PR 12');
+      await expect(edit.getByLabel('URL of link 2')).toHaveValue(ci.url);
+
+      // A URL the API refuses shows inline, keeps the dialog open and every typed value.
+      await edit.getByLabel('URL of link 1').fill('ftp://example.com/pr/12');
+      await edit.getByLabel('New link label').fill('Docs');
+      await edit.getByLabel('New link URL').fill('https://example.com/docs');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit.getByTestId('dialog-error')).toBeVisible();
+      await expect(edit.getByLabel('URL of link 1')).toHaveValue('ftp://example.com/pr/12');
+      await expect(edit.getByLabel('New link label')).toHaveValue('Docs');
+      await expect(page.getByTestId('task-links').getByRole('link')).toHaveText(['PR 12', 'CI run']); // nothing was saved
+
+      // Replace the first link, remove the second, and the typed Docs link is added by Save.
+      await edit.getByLabel('Label of link 1').fill('PR 13');
+      await edit.getByLabel('URL of link 1').fill('https://example.com/pr/13');
+      await edit.getByRole('button', { name: 'Remove link 2' }).click();
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Task ${ref} saved`);
+      const links = page.getByTestId('task-links').getByRole('link');
+      await expect(links).toHaveText(['PR 13', 'Docs']);
+      await expect(links.first()).toHaveAttribute('href', 'https://example.com/pr/13');
+      await expect(links.last()).toHaveAttribute('href', 'https://example.com/docs');
+      await expect(events(page).first().getByTestId('event-summary')).toHaveText(`task ${ref} updated: external_refs`);
+      await expect(eventTypes(page)).resolves.toEqual(['task_updated', 'task_created']);
+      const stored = await (await api.get(`/api/v1/tasks/${ref}`)).json();
+      expect(stored.external_refs).toEqual([{ label: 'PR 13', url: 'https://example.com/pr/13' }, { label: 'Docs', url: 'https://example.com/docs' }]);
+
+      // Removing every link leaves none; a link typed with only a label is refused before anything is sent.
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      await edit.getByRole('button', { name: 'Remove link 1' }).click();
+      await edit.getByRole('button', { name: 'Remove link 1' }).click();
+      await edit.getByLabel('New link label').fill('Half');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit.getByTestId('dialog-error')).toContainText('label and a URL');
+      await edit.getByLabel('New link label').fill('');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('no-links')).toBeVisible();
+      await expect(eventTypes(page)).resolves.toEqual(['task_updated', 'task_updated', 'task_created']);
+      await api.dispose();
+    });
+
+    test('Edit sets, moves and clears the next check of a watch task, and the page shows the new check time and event', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-nxt-${vp.name}`, { kind: 'watch', cadence_seconds: 900, next_check_at: '2099-01-02T03:04:05Z' });
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('task-next-check').locator('time')).toHaveAttribute('datetime', '2099-01-02T03:04:05Z');
+
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      const edit = dialog(page, 'Edit task');
+      await expect(edit.getByLabel('Next check (UTC)')).toHaveValue('2099-01-02T03:04');
+      await edit.getByLabel('Next check (UTC)').fill('2099-02-03T10:20');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('task-next-check').locator('time')).toHaveAttribute('datetime', '2099-02-03T10:20:00Z');
+      await expect(events(page).first().getByTestId('event-summary')).toHaveText(`task ${ref} updated: next_check_at`);
+      expect((await (await api.get(`/api/v1/tasks/${ref}`)).json()).next_check_at).toBe('2099-02-03T10:20:00Z');
+
+      // A check time in the past makes the watch task overdue.
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      await edit.getByLabel('Next check (UTC)').fill('2020-01-01T00:00');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('task-next-check')).toContainText('overdue');
+      await expect(page.getByTestId('flag-overdue')).toBeVisible();
+
+      // Clearing the field clears the check time.
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      await edit.getByLabel('Next check (UTC)').fill('');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('task-next-check')).toHaveCount(0);
+      await expect(eventTypes(page)).resolves.toEqual(['task_updated', 'task_updated', 'task_updated', 'task_created']);
+      await api.dispose();
+    });
+
+    test('Edit on a work task has no next check field', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-nocheck-${vp.name}`);
+      await page.goto(`/#/t/${ref}`);
+      await actions(page).getByRole('button', { name: 'Edit' }).click();
+      const edit = dialog(page, 'Edit task');
+      await expect(edit.getByLabel('Title')).toBeVisible();
+      await expect(edit.getByLabel('Next check (UTC)')).toHaveCount(0);
+      await expect(edit.getByRole('button', { name: 'Add link' })).toBeVisible();
+      await api.dispose();
+    });
+
     test('Done and Reopen move the task and leave their events, and a refused Done shows inline', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const ref = await seedTask(api, `e2e-tp-done-${vp.name}`);

@@ -1703,10 +1703,16 @@ lease ref, intent, resources, "expires in 41m" from `expiresIn`); and the **time
 first, each with its summary, a relative time (the absolute local time in its `title`), the actor and the event type
 (`data-type`). The actions come from `taskActions`: **Edit** (not on a closed task), **Done** (open), **Reopen** (done or
 closed), **Close** (not closed). Done and Reopen act at once; **Edit** opens the one `Dialog` (a bottom sheet on the
-phone) with Title, Description, Planned start and end, and for a watch task Cadence, and sends only the fields that
-differ from the task as it was shown (`toTaskPatch`: an emptied planned date is `null`, which clears it; a
-cadence cannot be cleared, so an emptied cadence, like one that is not a number and a unit, is refused in the form and nothing
-is sent); **Close** opens a confirmation with a Resolution select
+phone) with Title, Description, Planned start and end, Links, and for a watch task Cadence and Next check (UTC), and sends
+only the fields that differ from the task as it was shown (`toTaskPatch`: an emptied planned date or next check is `null`,
+which clears it; a cadence cannot be cleared, so an emptied cadence, like one that is not a number and a unit, is refused in
+the form and nothing is sent). Every `PATCH`-able field of R2 is editable there: the Links section lists the task's links
+as editable label and URL rows with a Remove button each, plus a New link row (Add link, or Save adds a complete one), and
+the whole list is sent as `external_refs` when it differs (replace, add and remove are all that one field); a half-typed
+link or more than 20 links is refused in the form, and a URL the API refuses (not http or https) shows inline with
+everything typed kept. The Next check field is a `datetime-local` read as UTC to the minute and sent as that instant
+(`2099-02-03T10:20:00Z`); the page then shows the new check time and `task_updated` names `next_check_at` or
+`external_refs`; **Close** opens a confirmation with a Resolution select
 (completed, dropped, superseded, duplicate; completed first) and posts the chosen one. A refusal from the API (a stale
 page, an empty title) shows its problem detail inline, in the dialog when one is open (which stays open with what was
 typed) and as an alert under the header otherwise. A success closes the dialog, shows a toast ("Task aa-1 marked done",
@@ -1733,7 +1739,8 @@ of the six actions toasts ("Task aa-1 is now blocked by bb-1", "Task aa-1 no lon
 on aa-1", "Check recorded on aa-1", "Lease L3 ended", "Lease L3 acknowledged") and reads the task, its events and its
 expired leases again, so `dep_added`, `dep_removed`, `milestone`, `check_recorded`, `lease_ended` and `lease_acked`
 appear at the top of the timeline. The specs are `e2e/task_page.spec.ts` (the page's content and links, the action bar,
-Edit with a refused then a good save, a watch task's cadence, Done and Reopen with a stale refused Done, Close with each
+Edit with a refused then a good save, a watch task's cadence, Edit's links (replace, add, remove, a refused URL) and next
+check (set, move, overdue, clear), Done and Reopen with a stale refused Done, Close with each
 of the four resolutions followed by Reopen, a refused Close, Add dependency and Remove with a refused cycle and a stale
 removal, Milestone with refused summaries, Record check, End lease with a stale refusal, and Acknowledge on a lease whose
 expiry is moved into the past in the e2e store) at 390x844 and 1440x900; `a11y.spec.ts` scans the page and the three
