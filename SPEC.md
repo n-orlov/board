@@ -1769,8 +1769,11 @@ sidebar whose foot shows the signed-in email, a Sign out button and the account 
 account button opens the account menu (the email and Sign out) in the dialog component below, at
 every width. The first focusable element of the page is a "Skip to content" link that moves focus
 to the main region without changing the fragment; the navigation entry of the view on screen has
-`aria-current="page"`. The page never scrolls horizontally (`e2e/shell.spec.ts` at 390x844,
-820x1180 and 1440x900), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
+`aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:
+Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>` and
+`#/settings/keys` as states and, at 390x844, 820x1180 and 1440x900, asserts the nav links are
+exactly the route table's (imported, not copied), the right entry carries `aria-current`, and
+navigating by nav click moves it. The page never scrolls horizontally (the same spec), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
 and from 768 px use `table-layout: fixed` with fixed widths for the short columns (status, tags,
 dates, prefix, actions) so a title, slug, tag or key name with no space in it (200, 40, 40 and 64
 characters at most) wraps inside its own cell instead of widening the table; below 768 px the

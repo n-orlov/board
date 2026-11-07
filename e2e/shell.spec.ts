@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { ROUTES } from '../web/src/lib/routes';
 
 // The responsive shell: one navigation surface per viewport (phone tab bar, tablet icon rail,
 // desktop sidebar), the skip link, the account menu. Signs in through the mock provider, so no
@@ -11,10 +12,30 @@ const viewports = [
   { name: 'desktop', size: { width: 1440, height: 900 }, nav: 'nav-sidebar' },
 ] as const;
 const allNavs = ['nav-tabbar', 'nav-rail', 'nav-sidebar'];
-const routes = [
-  { hash: '#/', label: 'Initiatives', other: 'Settings', otherHash: '#/settings/keys' },
-  { hash: '#/settings/keys', label: 'Settings', other: 'Initiatives', otherHash: '#/' },
+
+// The route table the shell is built from: the navs must list exactly its entries that are not pages inside another view.
+const navRoutes = ROUTES.filter((route) => !('parent' in route));
+const SEED_SLUG = `shl${'w'.repeat(37)}`; // the longest slug, with a 200-character title
+const seeded = { taskRef: '' };
+
+// The listed states: every view of the table, the two parameter views at a real slug and a real ref. `view` is the
+// route-table id the fragment must select, `loaded` a test id that exists only once the view has its content (so the
+// overflow check sees the long seeded text); its nav entry (the view itself, or its parent) is the one marked current.
+const states = [
+  { name: '#/', hash: () => '#/', view: 'initiatives', loaded: 'initiative-row' },
+  { name: '#/tasks', hash: () => '#/tasks', view: 'tasks', loaded: 'task-row' },
+  { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
+  { name: '#/t/<ref>', hash: () => `#/t/${seeded.taskRef}`, view: 'task', loaded: 'task-title' },
+  { name: '#/settings/keys', hash: () => '#/settings/keys', view: 'keys', loaded: 'key-row' },
 ] as const;
+
+function viewOf(id: string) {
+  const route = ROUTES.find((r) => r.id === id);
+  if (route === undefined) throw new Error(`no route ${id} in the table`);
+  return route;
+}
+// The nav entry of a view: the view itself, or the view it is a page of.
+const navIdOf = (id: string): string => ('parent' in viewOf(id) ? (viewOf(id) as { parent: string }).parent : id);
 
 async function noHorizontalOverflow(page: Page) {
   const { scrollWidth, clientWidth } = await page.evaluate(() => ({
@@ -31,8 +52,18 @@ test.beforeAll(async ({ playwright, baseURL }) => {
     baseURL,
     extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
   });
-  const created = await seed.post('/api/v1/initiatives', { data: { slug: `shl${'w'.repeat(37)}`, title: 'W'.repeat(200) } });
+  const created = await seed.post('/api/v1/initiatives', { data: { slug: SEED_SLUG, title: 'W'.repeat(200) } });
   expect([201, 409]).toContain(created.status());
+  // One task with the longest title for `#/t/<ref>`; a re-run finds it by its title instead of adding another.
+  const title = 'T'.repeat(200);
+  const tasks = (await (await seed.get(`/api/v1/tasks?initiative=${SEED_SLUG}`)).json()) as { items: { ref: string; title: string }[] };
+  const found = tasks.items.find((task) => task.title === title);
+  if (found !== undefined) seeded.taskRef = found.ref;
+  else {
+    const task = await seed.post('/api/v1/tasks', { data: { initiative: SEED_SLUG, title } });
+    expect(task.status()).toBe(201);
+    seeded.taskRef = ((await task.json()) as { ref: string }).ref;
+  }
   const key = await seed.post('/api/v1/keys', { data: { name: `shl${'W'.repeat(61)}` } });
   expect([201, 409]).toContain(key.status());
   await seed.dispose();
@@ -42,24 +73,39 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    for (const route of routes) {
-      test(`on ${route.hash} only the ${vp.nav} navigation is shown, a nav click moves aria-current, nothing overflows`, async ({ page }) => {
-        await page.goto('/' + route.hash);
+    for (const state of states) {
+      test(`on ${state.name} only the ${vp.nav} navigation is shown, its entries are the route table's, aria-current marks the view's entry, nothing overflows`, async ({ page }) => {
+        await page.goto('/' + state.hash());
         const nav = page.getByTestId(vp.nav);
         await expect(nav).toBeVisible();
         for (const other of allNavs.filter((id) => id !== vp.nav)) await expect(page.getByTestId(other)).toBeHidden();
-        await expect(nav.getByRole('link')).toHaveCount(3);
 
+        // The route table drives the nav: one link per entry that is not a page inside another view, in table order.
+        const links = nav.getByRole('link');
+        await expect(links).toHaveCount(navRoutes.length);
+        expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(navRoutes.map((route) => route.hash));
         await expect(nav.locator('[aria-current=page]')).toHaveCount(1);
-        await expect(nav.getByRole('link', { name: route.label })).toHaveAttribute('aria-current', 'page');
-        await expect(nav.getByRole('link', { name: route.other })).not.toHaveAttribute('aria-current', /.*/);
+        const current = navIdOf(state.view);
+        for (const route of navRoutes) {
+          const link = nav.getByRole('link', { name: route.label });
+          if (route.id === current) await expect(link).toHaveAttribute('aria-current', 'page');
+          else await expect(link).not.toHaveAttribute('aria-current', /.*/);
+        }
+        await expect(page.getByTestId(state.loaded).first()).toBeVisible();
+        if (vp.name === 'phone') await expect(page.getByTestId('topbar-title')).toHaveText(viewOf(state.view).title);
         await noHorizontalOverflow(page);
 
-        await nav.getByRole('link', { name: route.other }).click();
-        await expect(page).toHaveURL(new RegExp(`${route.otherHash}$`));
-        await expect(nav.getByRole('link', { name: route.other })).toHaveAttribute('aria-current', 'page');
-        await expect(nav.getByRole('link', { name: route.label })).not.toHaveAttribute('aria-current', /.*/);
-        await noHorizontalOverflow(page);
+        // A nav click moves aria-current to the clicked entry; then back to this state through the fragment.
+        for (const target of navRoutes.filter((route) => route.id !== current)) {
+          await nav.getByRole('link', { name: target.label }).click();
+          await expect(page).toHaveURL(new RegExp(`${target.hash}$`));
+          await expect(nav.locator('[aria-current=page]')).toHaveCount(1);
+          await expect(nav.getByRole('link', { name: target.label })).toHaveAttribute('aria-current', 'page');
+          await noHorizontalOverflow(page);
+          await page.goto('/' + state.hash());
+          await expect(page.getByTestId(state.loaded).first()).toBeVisible();
+          await expect(nav.getByRole('link', { name: viewOf(current).label })).toHaveAttribute('aria-current', 'page');
+        }
       });
     }
 
