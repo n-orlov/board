@@ -1,9 +1,14 @@
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// R9/R12: axe-core over the five views, the four dialogs/sheets of the R4 set, the initiative page's Edit and Close dialogs, the New task sheet, the task page and its Add dependency, Milestone and End lease sheets, at the phone and the desktop
-// viewport, in the light and the dark theme: 14 states x 2 viewports x 2 themes = 56 scans. No rule is
-// disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
+// R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
+// theme. `states` holds the 18 earlier states; R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
+// `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
+// milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
+// expired and a live lease, a blocker, a dependent and a conflict. 30 states x 2 viewports x 2 themes = 120 scans. No
+// rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
 
@@ -194,6 +199,200 @@ const states: State[] = [
   },
 ];
 
+// ---- Phase 1 (R12) -------------------------------------------------------------------------------------------------
+
+const P1_SLUG = 'e2e-a11y-p1';
+const P1_RESOURCE = 'repo:a11y-p1';
+
+type Seed = { watch: string; blocker: string; lease: string };
+let seeded: Promise<Seed> | undefined;
+
+async function apiContext(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, actor = 'playwright') {
+  return playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor },
+  });
+}
+
+async function send(api: APIRequestContext, path: string, data: object, status: number) {
+  const res = await api.post(path, { data });
+  expect(res.status(), `${path} ${await res.text()}`).toBe(status);
+  return (await res.json()) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- seed responses are read for one field each
+}
+
+// Runs a lease out the way the Go scenarios do: its expiry moves into the past in the e2e store, then an API read expires it.
+async function expireLease(api: APIRequestContext, ref: string) {
+  const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const changed = db.prepare('UPDATE leases SET expires_at = ? WHERE n = ?').run(Date.now() - 30_000, Number(ref.slice(1)));
+    expect(changed.changes).toBe(1);
+  } finally {
+    db.close();
+  }
+  expect((await api.get('/api/v1/leases?state=expired')).status()).toBe(200);
+}
+
+// One initiative with a watch task (the subject: a link, a blocker, a dependent, a milestone, a check, an expired lease and a
+// live lease) and a second actor holding the same resource on the dependent, so the views show a conflict.
+async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed> {
+  const api = await apiContext(playwright, baseURL);
+  const other = await apiContext(playwright, baseURL, 'a11y-p1-other');
+  const created = await api.post('/api/v1/initiatives', {
+    data: { slug: P1_SLUG, title: 'Phase 1 axe sweep', description: '## Scope\n\nSee [the docs](https://example.com/docs).', tags: ['a11y', 'axe'] },
+  });
+  expect([201, 409], `seed ${P1_SLUG}: ${created.status()}`).toContain(created.status());
+  const task = async (title: string, extra: object = {}) => (await send(api, '/api/v1/tasks', { initiative: P1_SLUG, title, ...extra }, 201)).ref as string;
+  const watch = await task('A11y watch', {
+    kind: 'watch',
+    cadence_seconds: 900,
+    description: 'A watch task to scan.\n\n- one\n- two with [a link](https://example.com/x)',
+    external_refs: [{ label: 'PR', url: 'https://example.com/pr/1' }],
+  });
+  const blocker = await task('A11y p1 blocker');
+  const dependent = await task('A11y p1 dependent');
+  await send(api, `/api/v1/tasks/${watch}/deps/${blocker}`, {}, 200);
+  await send(api, `/api/v1/tasks/${dependent}/deps/${watch}`, {}, 200);
+  await send(api, `/api/v1/tasks/${watch}/milestones`, { summary: 'Halfway there' }, 200);
+  await send(api, `/api/v1/tasks/${watch}/checks`, { summary: 'Nothing changed' }, 200);
+  const old = await send(api, '/api/v1/leases', { task: watch, intent: 'first try', resources: [P1_RESOURCE] }, 201);
+  await expireLease(api, old.lease.ref);
+  const live = await send(api, '/api/v1/leases', { task: watch, intent: 'second try', resources: [P1_RESOURCE, 'repo:a11y-p1-b'] }, 201);
+  await send(other, '/api/v1/leases', { task: dependent, intent: 'also here', resources: [P1_RESOURCE] }, 201);
+  await api.dispose();
+  await other.dispose();
+  return { watch, blocker, lease: live.lease.ref as string };
+}
+
+// A visible button of the page: on the phone the action bar sits above the tab bar.
+const button = (page: Page, name: string | RegExp, exact = false) => page.getByRole('button', { name, exact }).locator('visible=true').first();
+
+const openDialog = async (page: Page, name: string) => {
+  const dialog = page.getByRole('dialog', { name });
+  await expect(dialog).toBeVisible();
+  return dialog;
+};
+
+const taskPage = async (page: Page, seed: Seed) => {
+  await page.goto(`/#/t/${seed.watch}`);
+  await expect(page.getByTestId('task-title')).toHaveText('A11y watch');
+  await expect(page.getByTestId('lease')).toHaveCount(1);
+  await expect(page.getByTestId('expired-lease')).toHaveCount(1);
+  await expect(page.getByTestId('conflict').first()).toBeVisible(); // the second actor holds the same resource
+};
+
+const initiativePage = async (page: Page) => {
+  await page.goto(`/#/i/${P1_SLUG}`);
+  await expect(page.getByTestId('initiative-title')).toHaveText('Phase 1 axe sweep');
+};
+
+type Phase1State = { name: string; open: (page: Page, seed: Seed) => Promise<void> };
+
+// The finite list of Phase 1 states this spec scans: 3 views and 9 dialogs.
+const PHASE1_STATES: Phase1State[] = [
+  {
+    name: 'view #/tasks',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+    },
+  },
+  {
+    name: 'view #/i/<slug>',
+    open: async (page, seed) => {
+      await initiativePage(page);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+    },
+  },
+  { name: 'view #/t/<ref>', open: taskPage },
+  {
+    name: 'dialog edit initiative',
+    open: async (page) => {
+      await initiativePage(page);
+      await button(page, 'Edit', true).click();
+      await openDialog(page, 'Edit initiative');
+    },
+  },
+  {
+    name: 'dialog close initiative',
+    open: async (page) => {
+      await initiativePage(page);
+      await button(page, 'Close', true).click();
+      await openDialog(page, 'Close initiative');
+    },
+  },
+  {
+    name: 'dialog new task',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+      await button(page, 'New task').click();
+      const dialog = await openDialog(page, 'New task');
+      await dialog.getByLabel('Kind').selectOption('watch'); // the longest form: the cadence field shows
+      await expect(dialog.getByLabel('Cadence')).toBeVisible();
+      await dialog.getByLabel('Find an open task').fill(seed.blocker);
+      await dialog.getByTestId('blocker-options').getByRole('button').first().click(); // a chosen blocker has its remove button
+      await expect(dialog.getByTestId('blockers')).toBeVisible();
+      await dialog.getByLabel('Link label').fill('PR');
+      await dialog.getByLabel('Link URL').fill('https://example.com/1');
+      await dialog.getByRole('button', { name: 'Add link' }).click();
+      await expect(dialog.getByTestId('links')).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog edit task',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, 'Edit', true).click();
+      await openDialog(page, 'Edit task');
+    },
+  },
+  {
+    name: 'dialog close task',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, 'Close', true).click();
+      await openDialog(page, 'Close task');
+    },
+  },
+  {
+    name: 'dialog milestone',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, 'Milestone', true).click();
+      const dialog = await openDialog(page, 'Record milestone');
+      await dialog.getByRole('button', { name: 'Record milestone' }).click(); // the refusal shows in the sheet
+      await expect(dialog.getByTestId('dialog-error')).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog record check',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, 'Record check', true).click();
+      await openDialog(page, 'Record check');
+    },
+  },
+  {
+    name: 'dialog add dependency',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, 'Add dependency', true).click();
+      const dialog = await openDialog(page, 'Add dependency');
+      await dialog.getByLabel('Find an open task').fill(P1_SLUG);
+      await expect(dialog.getByTestId('dep-options')).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog end lease',
+    open: async (page, seed) => {
+      await taskPage(page, seed);
+      await button(page, `End lease ${seed.lease}`, true).click();
+      await openDialog(page, 'End lease');
+    },
+  },
+];
+
 for (const vp of viewports) {
   for (const theme of themes) {
     test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}, ${theme} theme`, () => {
@@ -236,6 +435,30 @@ for (const vp of viewports) {
           await scan(page, theme);
         });
       }
+
+      for (const state of PHASE1_STATES) {
+        test(`${state.name} has no serious or critical axe violation`, async ({ page, playwright, baseURL }) => {
+          seeded ??= seedPhase1(playwright, baseURL);
+          await state.open(page, await seeded);
+          await scan(page, theme);
+        });
+      }
     });
   }
 }
+
+test('the Phase 1 list names the 3 views and the 9 dialogs', () => {
+  const names = PHASE1_STATES.map((s) => s.name);
+  expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/tasks', 'view #/i/<slug>', 'view #/t/<ref>']);
+  expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
+    'edit initiative',
+    'close initiative',
+    'new task',
+    'edit task',
+    'close task',
+    'milestone',
+    'record check',
+    'add dependency',
+    'end lease',
+  ]);
+});

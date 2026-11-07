@@ -1871,8 +1871,12 @@ zero violations of impact `serious` or `critical`, with no rule disabled and no 
 every one of ten states: the Initiatives view, the initiative page, the Settings -> API keys view, the Signed out view,
 the new-initiative sheet, the new-key sheet, the revoke confirmation, the account menu and the initiative
 page's Edit and Close sheets opened over them. Each is scanned at 390x844 and 1440x900 in the light and the dark theme (the browser's
-colour scheme drives the System setting): 10 x 2 x 2 = 40 scans, in `e2e/a11y.spec.ts`. A failing
-scan names the rule, the impact and the offending elements. Colour contrast is met by the design
+colour scheme drives the System setting), in `e2e/a11y.spec.ts`. The same spec holds the Phase 1 views and
+dialogs to the bar as a finite, named list (`PHASE1_STATES`): the views `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, and the
+9 dialogs edit initiative, close initiative, new task, edit task, close task, milestone, record check, add dependency and
+end lease, each opened over a seeded initiative with a watch task, a link, a dependency, a milestone, a check, an
+expired and a live lease and a conflict. A test names the 3 views and the 9 dialogs, so a state cannot drop out of the
+list unnoticed. A failing scan names the rule, the impact and the offending elements. Colour contrast is met by the design
 tokens in both themes, never by a per-element override.
 
 Global: tag filter persisted in the URL, keyboard navigation, no external
