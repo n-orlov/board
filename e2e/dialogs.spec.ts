@@ -1,4 +1,4 @@
-import { expect, test as base, type Locator, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R8: the four dialogs/sheets of the R4 set (new initiative, new API key, revoke confirmation, account menu),
 // opened by keyboard only, at the phone and the desktop viewport. Signs in through the mock provider, so no API
@@ -134,6 +134,148 @@ for (const vp of viewports) {
     }
   });
 }
+
+// R12: the nine Phase 1 dialogs, each opened by keyboard only from its own opener on the page that owns it. For each:
+// focus moves inside on open, Tab and Shift+Tab never leave the dialog and come round to where they started, and Escape
+// closes it with focus back on the opener. Forms here have more tab stops than the four above, so the cycle runs until
+// the first stop comes round again (bounded) instead of for a fixed number of presses.
+const P1_SLUG = 'e2e-dlg-p1';
+
+type P1Seed = { watch: string; lease: string };
+
+async function apiAs(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined) {
+  return playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
+  });
+}
+
+async function post(api: Awaited<ReturnType<typeof apiAs>>, path: string, data: object, status: number) {
+  const res = await api.post(path, { data });
+  expect(res.status(), `${path} ${await res.text()}`).toBe(status);
+  return (await res.json()) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- seed responses are read for one field each
+}
+
+// An open initiative with an open watch task that has a live lease, so every opener of the nine dialogs exists.
+async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<P1Seed> {
+  const api = await apiAs(playwright, baseURL);
+  const created = await api.post('/api/v1/initiatives', { data: { slug: P1_SLUG, title: 'Phase 1 dialog keyboard', tags: ['kbd'] } });
+  expect([201, 409], `seed ${P1_SLUG}: ${created.status()}`).toContain(created.status());
+  const watch = (await post(api, '/api/v1/tasks', { initiative: P1_SLUG, title: 'Dialog watch', kind: 'watch', cadence_seconds: 900 }, 201)).ref as string;
+  const lease = (await post(api, '/api/v1/leases', { task: watch, intent: 'keyboard', resources: ['repo:dlg-p1'] }, 201)).lease.ref as string;
+  await api.dispose();
+  return { watch, lease };
+}
+let seededP1: Promise<P1Seed> | undefined;
+
+type P1Dialog = {
+  name: string;
+  /** The dialog's accessible name. */
+  dialog: string;
+  /** Goes to the page that owns the opener and returns the opener. */
+  go: (page: Page, seed: P1Seed) => Promise<Locator>;
+};
+
+const visibleButton = (page: Page, name: string, exact = true) => page.getByRole('button', { name, exact }).locator('visible=true').first();
+
+const onInitiative = async (page: Page) => {
+  await page.goto(`/#/i/${P1_SLUG}`);
+  await expect(page.getByTestId('initiative-title')).toHaveText('Phase 1 dialog keyboard');
+};
+const onTask = async (page: Page, seed: P1Seed) => {
+  await page.goto(`/#/t/${seed.watch}`);
+  await expect(page.getByTestId('task-title')).toHaveText('Dialog watch');
+  await expect(page.getByTestId('lease').first()).toBeVisible();
+};
+
+// The finite list of Phase 1 dialogs this spec holds to the keyboard bar.
+const PHASE1_DIALOGS: P1Dialog[] = [
+  { name: 'edit initiative', dialog: 'Edit initiative', go: async (page) => (await onInitiative(page), visibleButton(page, 'Edit')) },
+  { name: 'close initiative', dialog: 'Close initiative', go: async (page) => (await onInitiative(page), visibleButton(page, 'Close')) },
+  {
+    name: 'new task',
+    dialog: 'New task',
+    go: async (page) => {
+      await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
+      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      return visibleButton(page, 'New task');
+    },
+  },
+  { name: 'edit task', dialog: 'Edit task', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, 'Edit')) },
+  { name: 'close task', dialog: 'Close task', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, 'Close')) },
+  { name: 'milestone', dialog: 'Record milestone', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, 'Milestone')) },
+  { name: 'record check', dialog: 'Record check', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, 'Record check')) },
+  { name: 'add dependency', dialog: 'Add dependency', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, 'Add dependency')) },
+  { name: 'end lease', dialog: 'End lease', go: async (page, seed) => (await onTask(page, seed), visibleButton(page, `End lease ${seed.lease}`)) },
+];
+
+/** Press `key` until the first stop comes round again (at most 80 presses); every press must leave focus inside the dialog. */
+async function wrapAround(page: Page, key: 'Tab' | 'Shift+Tab') {
+  const start = await focused(page);
+  const stops: string[] = [start];
+  for (let i = 0; i < 80; i++) {
+    await page.keyboard.press(key);
+    expect(await focusIsInside(page), `${key} press ${i + 1} keeps focus inside the dialog (on ${await focused(page)})`).toBe(true);
+    const now = await focused(page);
+    if (now === start) {
+      expect(new Set(stops).size, `${key} visits more than one stop before it wraps`).toBeGreaterThan(1);
+      return;
+    }
+    stops.push(now);
+  }
+  throw new Error(`${key} never came back to ${start}: ${stops.join(' > ')}`);
+}
+
+for (const vp of viewports) {
+  test.describe(`Phase 1 dialogs at ${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const d of PHASE1_DIALOGS) {
+      test(`the ${d.name} dialog: keyboard opens it, focus is trapped inside, Escape returns focus to the opener`, async ({ page, playwright, baseURL }) => {
+        seededP1 ??= seedPhase1(playwright, baseURL);
+        const seed = await seededP1;
+        await page.goto('/');
+        await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+        const opener = await d.go(page, seed);
+        await expect(opener).toBeVisible();
+        const dialog = page.getByRole('dialog', { name: d.dialog });
+        await expect(dialog).toBeHidden();
+
+        // Reach the opener with Tab only, open it with Enter.
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await tabTo(page, opener);
+        await page.keyboard.press('Enter');
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toHaveAttribute('aria-modal', 'true');
+        expect(await focusIsInside(page), `focus is inside the dialog on open (on ${await focused(page)})`).toBe(true);
+        await expect(opener).not.toBeFocused();
+
+        // Tab and Shift+Tab stay inside and wrap at both ends.
+        await wrapAround(page, 'Tab');
+        await wrapAround(page, 'Shift+Tab');
+
+        // Escape closes it, focus is back on the opener.
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(opener).toBeFocused();
+      });
+    }
+  });
+}
+
+test('the Phase 1 dialog list names the 9 dialogs', () => {
+  expect(PHASE1_DIALOGS.map((d) => d.name)).toEqual([
+    'edit initiative',
+    'close initiative',
+    'new task',
+    'edit task',
+    'close task',
+    'milestone',
+    'record check',
+    'add dependency',
+    'end lease',
+  ]);
+});
 
 // Every interactive element has a visible :focus-visible ring: read from computed style after keyboard focus.
 async function expectRing(target: Locator) {

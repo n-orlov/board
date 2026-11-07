@@ -1818,6 +1818,12 @@ in (and the sheet slides up); under `prefers-reduced-motion: reduce` every anima
 transition is off. Interactive elements show a visible `:focus-visible` ring from the token
 stylesheet.
 
+R12 holds the nine Phase 1 dialogs to the same bar in `e2e/dialogs.spec.ts`, as a finite, named list: edit
+initiative, close initiative, new task, edit task, close task, milestone, record check, add dependency and end
+lease. For each, at 390x844 and 1440x900, the keyboard alone (Tab to the opener, Enter) opens it, focus moves
+inside, Tab and Shift+Tab never leave the dialog and come round to the stop they started on, and Escape closes
+it with focus back on the opener.
+
 **Theme.** The account menu has a Theme control with three settings: **System** (the default),
 **Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
 it; the effective theme is `light` or `dark` and is the `data-theme` attribute of `<html>`, which
