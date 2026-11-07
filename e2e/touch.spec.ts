@@ -89,6 +89,28 @@ test.describe('phone 390x844', () => {
     await expectTouchFriendly(page, 8);
   });
 
+  test('the Tasks view with the Now panel open and a conflict', async ({ page, playwright, baseURL }) => {
+    const seed = await playwright.request.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'touch-a' },
+    });
+    expect((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-touch-now', title: 'Touch Now' } })).status()).toBe(201);
+    for (const [actor, title] of [['touch-a', 'Now one'], ['touch-b', 'Now two']]) {
+      const made = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-touch-now', title } });
+      expect(made.status()).toBe(201);
+      const { ref } = (await made.json()) as { ref: string };
+      const lease = await seed.post('/api/v1/leases', { data: { task: ref, intent: 'touching', resources: ['repo:touch'] }, headers: { 'Board-Actor': actor! } });
+      expect(lease.status()).toBe(201);
+    }
+    await seed.dispose();
+
+    await page.goto('/#/tasks?initiative=e2e-touch-now');
+    await expect(page.getByTestId('task-row').first()).toBeVisible();
+    await page.getByTestId('now-toggle').click();
+    await expect(page.locator('[data-testid=now-conflict][data-resource="repo:touch"]')).toBeVisible();
+    await expectTouchFriendly(page, 10);
+  });
+
   test('the new-task sheet', async ({ page }) => {
     await page.goto('/#/tasks?initiative=e2e-touch');
     await expect(page.getByTestId('task-row').first()).toBeVisible();

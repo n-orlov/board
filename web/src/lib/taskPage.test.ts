@@ -75,6 +75,7 @@ function harness(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
     get: vi.fn(async () => detail()),
     events: vi.fn(async () => [event(1)]),
     expiredLeases: vi.fn(async () => [] as Lease[]),
+    liveLeases: vi.fn(async () => [] as Lease[]),
     openTasks: vi.fn(async () => [] as TaskListItem[]),
     addDep: vi.fn(async () => detail()),
     removeDep: vi.fn(async () => detail()),
@@ -98,7 +99,7 @@ const initial = { title: 'T', description: '', plannedStart: '', plannedEnd: '',
 describe('TaskPageStore', () => {
   it('starts loading, then holds the task and its events', async () => {
     const { store, states } = harness();
-    expect(store.state).toMatchObject({ task: undefined, events: [], expired: [], candidates: [], loading: true, error: undefined, actionError: undefined });
+    expect(store.state).toMatchObject({ task: undefined, events: [], expired: [], live: [], candidates: [], loading: true, error: undefined, actionError: undefined });
     await store.load('aa-1');
     expect(states[0]).toMatchObject({ loading: true });
     expect(store.state.task?.ref).toBe('aa-1');
@@ -214,6 +215,18 @@ describe('TaskPageStore: dependencies, milestones, checks and leases', () => {
     const { store } = harness({ expiredLeases: vi.fn(async () => [{ ref: 'L1' } as Lease]) });
     await store.load('aa-1');
     expect(store.state.expired.map((l) => l.ref)).toEqual(['L1']);
+  });
+
+  it('reads the live leases of the board with the page', async () => {
+    const { store } = harness({ liveLeases: vi.fn(async () => [{ ref: 'L2' } as Lease]) });
+    await store.load('aa-1');
+    expect(store.state.live.map((l) => l.ref)).toEqual(['L2']);
+  });
+
+  it('shows one error and no live leases when that read fails', async () => {
+    const { store } = harness({ liveLeases: vi.fn(async () => Promise.reject(new InitiativesError(500, 'down'))) });
+    await store.load('aa-1');
+    expect(store.state).toMatchObject({ task: undefined, live: [], error: 'down' });
   });
 
   it('shows one error and no expired leases when that read fails', async () => {

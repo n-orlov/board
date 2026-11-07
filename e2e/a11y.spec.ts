@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type Page } from '@playwright/test';
 
 // R9/R12: axe-core over the five views, the four dialogs/sheets of the R4 set, the initiative page's Edit and Close dialogs, the New task sheet, the task page and its Add dependency, Milestone and End lease sheets, at the phone and the desktop
-// viewport, in the light and the dark theme: 12 states x 2 viewports x 2 themes = 48 scans. No rule is
+// viewport, in the light and the dark theme: 14 states x 2 viewports x 2 themes = 56 scans. No rule is
 // disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -72,6 +72,16 @@ const states: State[] = [
     },
   },
   {
+    name: 'Tasks view with the Now panel open and a conflict',
+    open: async (page) => {
+      await page.goto('/#/tasks?initiative=e2e-a11y');
+      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      const toggle = page.getByTestId('now-toggle');
+      if (await toggle.isVisible()) await toggle.click();
+      await expect(page.locator('[data-testid=now-conflict][data-resource="repo:a11y"]')).toBeVisible();
+    },
+  },
+  {
     name: 'new-task sheet',
     open: async (page) => {
       await page.goto('/#/tasks?initiative=e2e-a11y');
@@ -91,6 +101,14 @@ const states: State[] = [
       await page.goto('/#/t/e2e-a11y-1');
       await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
       await expect(page.getByRole('button', { name: /^End lease L\d+$/ })).toBeVisible(); // the live lease and its End lease button
+    },
+  },
+  {
+    name: 'task page with a conflict',
+    open: async (page) => {
+      await page.goto('/#/t/e2e-a11y-1');
+      await expect(page.getByTestId('task-title')).toHaveText('Scan the page');
+      await expect(page.getByTestId('conflict')).toHaveCount(1);
     },
   },
   {
@@ -194,10 +212,18 @@ for (const vp of viewports) {
           const task = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y', title: 'Scan the page' } });
           expect(task.status()).toBe(201);
           const { ref } = (await task.json()) as { ref: string };
-          expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning' } })).status()).toBe(201);
+          expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning', resources: ['repo:a11y'] } })).status()).toBe(201);
           // Something the Add dependency sheet can offer as a blocker.
           expect((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-a11y-blockers', title: 'Blockers' } })).status()).toBe(201);
-          expect((await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y-blockers', title: 'Possible blocker' } })).status()).toBe(201);
+          const blocker = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y-blockers', title: 'Possible blocker' } });
+          expect(blocker.status()).toBe(201);
+          // A second actor holds the same resource, so the Now panel and the task page show a conflict.
+          const other = ((await blocker.json()) as { ref: string }).ref;
+          const lease = await seed.post('/api/v1/leases', {
+            data: { task: other, intent: 'also scanning', resources: ['repo:a11y'] },
+            headers: { 'Board-Actor': 'a11y-other' },
+          });
+          expect(lease.status()).toBe(201);
         }
         await seed.dispose();
         await page.goto('/');

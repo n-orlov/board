@@ -1735,6 +1735,26 @@ removal, Milestone with refused summaries, Record check, End lease with a stale 
 expiry is moved into the past in the e2e store) at 390x844 and 1440x900; `a11y.spec.ts` scans the page and the three
 sheets, and `touch.spec.ts` measures them on the phone.
 
+**Live leases and conflicts in the UI** (R11). The Initiatives list and the initiative page already print the live lease
+count of an initiative ("2 live leases", `leasesText`), and the Tasks view and the initiative page print the holder of each
+task's live lease. Two more places read every live lease of the board (`GET /api/v1/leases?state=live`, every page,
+`TasksApi.liveLeases`) and apply `web/src/lib/conflicts.ts` to it; the conflicts are computed in the browser from those
+leases, so they need no `/now` call and no actor. **Task page**: a **Conflicts** section appears under Live leases
+when a live lease of the task shares a resource with another live lease (`taskConflicts`; the section is absent
+otherwise). Each conflict is one line, "repo:board: also held by bob on bb-1" (resource, the other holder, the other task),
+with a link to the page of every other task. **Now panel** (`web/src/NowPanel.svelte`, `NowStore` in `web/src/lib/nowPanel.ts`),
+on top of the Tasks view above the filters, whatever filter is set: a heading, a summary ("2 live leases, 1 conflict" or
+"no live leases", `nowPanel`), the conflicts (per contested resource, "Conflict repo:board: held by alice on aa-1, bob on bb-1"
+with a link to each task) and one row per live lease (holder, lease ref, a link to its task, intent, resources, "expires in
+41m", and a `conflict` flag when the lease is in a conflict). A **Refresh** button reads the leases again; the panel loads
+with the view. A failed read shows an alert in the panel. On the phone the panel is folded to its heading and summary with a
+44 px **Show** / **Hide** toggle (`aria-expanded`); from 768 px it is always open and the toggle is hidden. A conflict is a
+warning in the warning colour, never a lock. `e2e/conflicts.spec.ts` starts two leases on one resource through the API as
+two actors and checks the conflict on both task pages (the link from one to the other included) and in the Now panel,
+then ends one lease and checks that it is gone from the panel after Refresh and from the task page after a reload, and that
+the panel folds on the phone and stays open on the desktop, at 390x844 and 1440x900; `a11y.spec.ts` scans the Tasks view
+with the Now panel open and a conflict, and the task page with a conflict, and `touch.spec.ts` measures the open panel.
+
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Initiatives) and
@@ -2148,7 +2168,7 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 
 | phase | scope |
 |---|---|
-| 1 | Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
+| 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
 | 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page). |
 | 3 | Timeline UI (`vis-timeline`, archive window, filters), SSE live feed, remaining UI views. |
 | 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |

@@ -136,19 +136,29 @@ export class TasksApi {
     return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/checks`, 'Recording the check', { summary });
   }
 
-  /** Every lease of the task that ran out (acknowledged or not), following `next_after` through the pages. */
-  async expiredLeases(ref: string): Promise<Lease[]> {
+  /** Every lease a query keeps, following `next_after` through the pages. */
+  private async leasePages(query: URLSearchParams, what: string): Promise<Lease[]> {
     const items: Lease[] = [];
     let after: string | undefined;
     do {
-      const query = new URLSearchParams({ task: ref, state: 'expired', limit: EVENT_PAGE });
-      if (after !== undefined) query.set('after', after);
-      const response = await this.call(`/api/v1/leases?${query.toString()}`, 'Reading the expired leases', { headers: { Accept: 'application/json' } });
-      const page = (await response.json()) as components['schemas']['LeaseList'];
-      items.push(...page.items);
-      after = page.next_after;
+      const page = new URLSearchParams(query);
+      if (after !== undefined) page.set('after', after);
+      const response = await this.call(`/api/v1/leases?${page.toString()}`, what, { headers: { Accept: 'application/json' } });
+      const body = (await response.json()) as components['schemas']['LeaseList'];
+      items.push(...body.items);
+      after = body.next_after;
     } while (after !== undefined);
     return items;
+  }
+
+  /** Every lease of the task that ran out (acknowledged or not). */
+  expiredLeases(ref: string): Promise<Lease[]> {
+    return this.leasePages(new URLSearchParams({ task: ref, state: 'expired', limit: EVENT_PAGE }), 'Reading the expired leases');
+  }
+
+  /** Every live lease on the board, for the Now panel and the conflicts of the task page. */
+  liveLeases(): Promise<Lease[]> {
+    return this.leasePages(new URLSearchParams({ state: 'live', limit: EVENT_PAGE }), 'Reading the live leases');
   }
 
   /** Ends a live lease; the outcome is sent only when there is one. */

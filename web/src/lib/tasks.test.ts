@@ -273,6 +273,12 @@ describe('TasksApi dependency, note and lease calls', () => {
     ]);
   });
 
+  it('reads every live lease of the board, following next_after through the pages', async () => {
+    const { api: a, fetchFn } = api(async (url) => (url.includes('after=') ? json({ items: [{ ref: 'L2' }] }) : json({ items: [{ ref: 'L1' }], next_after: 'L1' })));
+    expect((await a.liveLeases()).map((l) => l.ref)).toEqual(['L1', 'L2']);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/leases?state=live&limit=1000', '/api/v1/leases?state=live&limit=1000&after=L1']);
+  });
+
   it('ends a lease with its outcome only when there is one, and acknowledges an expired lease', async () => {
     const { api: a, fetchFn } = api(async () => json({ ref: 'L1' }));
     expect((await a.endLease('L1', 'done')).ref).toBe('L1');
@@ -294,5 +300,6 @@ describe('TasksApi dependency, note and lease calls', () => {
     await expect(a.milestone('aa-1', 's')).rejects.toMatchObject({ message: 'Recording the milestone failed (HTTP 500).' });
     await expect(a.recordCheck('aa-1', 's')).rejects.toMatchObject({ message: 'Recording the check failed (HTTP 500).' });
     await expect(a.expiredLeases('aa-1')).rejects.toMatchObject({ message: 'Reading the expired leases failed (HTTP 500).' });
+    await expect(a.liveLeases()).rejects.toMatchObject({ message: 'Reading the live leases failed (HTTP 500).' });
   });
 });

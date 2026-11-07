@@ -2,6 +2,7 @@
   import { taskHref } from './lib/taskPage';
   import FilterSelect from './FilterSelect.svelte';
   import NewTaskDialog from './NewTaskDialog.svelte';
+  import NowPanel from './NowPanel.svelte';
   import Toast from './Toast.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { taskRows } from './lib/initiativePage';
@@ -75,6 +76,8 @@
     <h2 id="tasks-heading" class="text-xl font-bold">Tasks</h2>
     <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={() => (formOpen = true)}>New task</button>
   </div>
+
+  <NowPanel {csrf} />
 
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="task-filters">
     <FilterSelect label="Status" options={STATUS_OPTIONS} value={view.filter.status} onchange={(v) => apply({ ...view.filter, status: v })} testid="status-filter" />

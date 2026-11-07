@@ -1,0 +1,55 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Lease } from './conflicts';
+import { InitiativesError } from './initiatives';
+import { NowStore, type NowState } from './nowPanel';
+
+const lease = (ref: string) => ({ ref }) as Lease;
+
+function harness(liveLeases: () => Promise<Lease[]>) {
+  const states: NowState[] = [];
+  const store = new NowStore({ liveLeases }, (s) => states.push(s));
+  return { store, states };
+}
+
+describe('NowStore', () => {
+  it('starts loading, then holds the live leases', async () => {
+    const { store, states } = harness(async () => [lease('L1'), lease('L2')]);
+    expect(store.state).toEqual({ leases: [], loading: true, error: undefined });
+    await store.load();
+    expect(states[0]).toMatchObject({ loading: true });
+    expect(store.state.leases.map((l) => l.ref)).toEqual(['L1', 'L2']);
+    expect(store.state).toMatchObject({ loading: false, error: undefined });
+  });
+
+  it('says why a read failed and keeps the leases it had', async () => {
+    const reads = [vi.fn(async () => [lease('L1')]), vi.fn(async () => Promise.reject(new InitiativesError(500, 'down')))];
+    const { store } = harness(() => reads.shift()!());
+    await store.load();
+    await store.load();
+    expect(store.state).toMatchObject({ error: 'down', loading: false });
+    expect(store.state.leases.map((l) => l.ref)).toEqual(['L1']);
+  });
+
+  it('clears the error when a later read works', async () => {
+    const answers = [() => Promise.reject(new InitiativesError(500, 'down')), async () => [lease('L3')]];
+    const { store } = harness(() => answers.shift()!());
+    await store.load();
+    expect(store.state.error).toBe('down');
+    await store.load();
+    expect(store.state).toMatchObject({ error: undefined });
+    expect(store.state.leases).toHaveLength(1);
+  });
+
+  it('shows the newest outcome when reads overlap and land out of order', async () => {
+    const resolvers: ((l: Lease[]) => void)[] = [];
+    const { store } = harness(() => new Promise<Lease[]>((resolve) => resolvers.push(resolve)));
+    const first = store.load();
+    const second = store.load();
+    resolvers[1]!([lease('L2')]);
+    await second;
+    resolvers[0]!([lease('L1')]);
+    await first;
+    expect(store.state.leases.map((l) => l.ref)).toEqual(['L2']);
+    expect(store.state.loading).toBe(false);
+  });
+});

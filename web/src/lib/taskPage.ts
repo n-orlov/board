@@ -127,6 +127,8 @@ export interface TaskPageState {
   events: TaskEvent[];
   /** The leases of the task that ran out. */
   expired: Lease[];
+  /** Every live lease on the board, the conflicts of the task's leases are read from them. */
+  live: Lease[];
   loading: boolean;
   /** Why the page could not be read. */
   error: string | undefined;
@@ -138,13 +140,13 @@ export interface TaskPageState {
 
 type PageApi = Pick<
   TasksApi,
-  'get' | 'events' | 'expiredLeases' | 'openTasks' | 'patch' | 'done' | 'reopen' | 'close' | 'addDep' | 'removeDep' | 'milestone' | 'recordCheck' | 'endLease' | 'ackLease'
+  'get' | 'events' | 'expiredLeases' | 'liveLeases' | 'openTasks' | 'patch' | 'done' | 'reopen' | 'close' | 'addDep' | 'removeDep' | 'milestone' | 'recordCheck' | 'endLease' | 'ackLease'
 >;
 
 export class TaskPageStore {
   private readonly api: PageApi;
   private readonly onChange: (state: TaskPageState) => void;
-  private current: TaskPageState = { task: undefined, events: [], expired: [], loading: true, error: undefined, actionError: undefined, candidates: [] };
+  private current: TaskPageState = { task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [] };
 
   constructor(api: PageApi, onChange: (state: TaskPageState) => void) {
     this.api = api;
@@ -168,10 +170,10 @@ export class TaskPageStore {
 
   private async read(ref: string): Promise<void> {
     try {
-      const [task, events, expired] = await Promise.all([this.api.get(ref), this.api.events(ref), this.api.expiredLeases(ref)]);
-      this.set({ task, events, expired, loading: false, error: undefined });
+      const [task, events, expired, live] = await Promise.all([this.api.get(ref), this.api.events(ref), this.api.expiredLeases(ref), this.api.liveLeases()]);
+      this.set({ task, events, expired, live, loading: false, error: undefined });
     } catch (e) {
-      this.set({ task: undefined, events: [], expired: [], loading: false, error: errorText(e) });
+      this.set({ task: undefined, events: [], expired: [], live: [], loading: false, error: errorText(e) });
     }
   }
 

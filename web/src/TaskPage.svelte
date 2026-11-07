@@ -5,6 +5,7 @@
   import TaskEditForm from './TaskEditForm.svelte';
   import TaskNoteForm from './TaskNoteForm.svelte';
   import Toast from './Toast.svelte';
+  import { taskConflictText, taskConflicts } from './lib/conflicts';
   import { nextCheckText } from './lib/durations';
   import { absoluteTime, relativeTime } from './lib/format';
   import { taskBadges } from './lib/initiativePage';
@@ -18,7 +19,7 @@
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
-  let view: TaskPageState = $state({ task: undefined, events: [], expired: [], loading: true, error: undefined, actionError: undefined, candidates: [] });
+  let view: TaskPageState = $state({ task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [] });
   let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | { endLease: string } | undefined = $state(undefined);
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
@@ -77,6 +78,7 @@
   const actions = $derived(view.task === undefined ? undefined : taskActions(view.task.status, view.task.kind));
   const leases = $derived(view.task === undefined ? [] : leaseRows(view.task, now));
   const expired = $derived(expiredRows(view.expired, now));
+  const conflicts = $derived(view.task === undefined ? [] : taskConflicts(view.task.ref, view.live, new Date()));
   const timeline = $derived(eventRows(view.events, now));
   const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
@@ -227,6 +229,22 @@
             {#if lease.resources !== ''}<p class="font-mono text-text-muted" data-testid="lease-resources">{lease.resources}</p>{/if}
             <p class="text-text-muted" data-testid="lease-expires">{lease.expires}</p>
             <button type="button" class="{small} mt-2" aria-label="End lease {lease.ref}" onclick={() => openNote({ endLease: lease.ref })}>End lease</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if conflicts.length > 0}
+      <div class={headingRow}><h3 class={heading}>Conflicts</h3></div>
+      <ul class="flex flex-col gap-2" data-testid="task-conflicts">
+        {#each conflicts as conflict (conflict.resource)}
+          <li class="rounded-md border border-warning p-3 text-sm wrap-anywhere" data-testid="conflict" data-resource={conflict.resource}>
+            <p data-testid="conflict-text">{taskConflictText(conflict)}</p>
+            <p class="flex flex-wrap gap-x-3">
+              {#each conflict.others as other (other.lease)}
+                <a class={link} href={taskHref(other.task)} data-testid="conflict-task" data-ref={other.task}>{other.task}</a>
+              {/each}
+            </p>
           </li>
         {/each}
       </ul>
