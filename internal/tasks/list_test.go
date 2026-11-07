@@ -127,3 +127,40 @@ func TestListKeepsTheDerivedStatesApart(t *testing.T) {
 		t.Errorf("overdue item = %+v", got.Items)
 	}
 }
+
+func TestListTextFoldsNonASCIICaseAndKeepsPatternCharactersLiteral(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	mk(t, s, "aa", "Äpfel ernten")
+	mk(t, s, "aa", "ΟΔΥΣΣΕΑΣ lesen")
+	mk(t, s, "aa", "C:\\dir und 50% fertig_")
+	mk(t, s, "aa", "C:xdir und 500 fertigX")
+	if _, err := s.Create(ctx, who, "key:d", New{Initiative: "aa", Title: "Other", Description: "Купить ХЛЕБ"}); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ name, q, want string }{
+		{"umlaut", "äPFEL", "aa-1"},
+		{"capital umlaut in the text", "ÄPFEL", "aa-1"},
+		{"final sigma", "οδυσσεας", "aa-2"},
+		{"cyrillic description", "хлеб", "aa-5"},
+		{"cyrillic capitals", "ХЛЕБ", "aa-5"},
+		{"backslash", "c:\\", "aa-3"},
+		{"percent", "50% f", "aa-3"},
+		{"underscore", "g_", "aa-3"},
+		{"wrong letter", "üpfel", ""},
+	}
+	for _, c := range cases {
+		got, err := s.List(ctx, Query{Q: c.q})
+		if err != nil || refs(got) != c.want {
+			t.Errorf("%s: %q, %v, want %q", c.name, refs(got), err, c.want)
+		}
+	}
+	first, err := s.List(ctx, Query{Q: "DIR", Limit: 1})
+	if err != nil || refs(first) != "aa-3" || first.NextAfter == "" {
+		t.Fatalf("first page %q, %q, %v", refs(first), first.NextAfter, err)
+	}
+	next, err := s.List(ctx, Query{Q: "DIR", Limit: 1, After: first.NextAfter})
+	if err != nil || refs(next) != "aa-4" || next.NextAfter != "" {
+		t.Fatalf("next page %q, %q, %v", refs(next), next.NextAfter, err)
+	}
+}

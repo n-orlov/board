@@ -213,6 +213,40 @@ Feature: Listing tasks over HTTP
     When I list the tasks with "q=0%25%20done_" as actor "claude@laptop"
     Then the response path "items" lists the refs "aa-1"
 
+  Scenario: q folds letter case beyond ASCII in the title and the description
+    Given I create the task with body "{'initiative':'aa','title':'Äpfel ernten'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'Other','description':'Купить ХЛЕБ завтра'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'ΟΔΥΣΣΕΑΣ lesen'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'Straße fegen'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'Unrelated','description':'nothing here'}" as actor "claude@laptop"
+    When I list the tasks with "q=%C3%A4PFEL" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-1"
+    When I list the tasks with "q=%D0%B0%D0%B5%D0%B1" as actor "claude@laptop"
+    Then the response path "items" has 0 items
+    When I list the tasks with "q=%D1%85%D0%BB%D0%B5%D0%B1" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-2"
+    When I list the tasks with "q=%D0%9A%D0%A3%D0%9F%D0%98%D0%A2%D0%AC%20%D1%85%D0%BB%D0%B5%D0%B1" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-2"
+    When I list the tasks with "q=%CE%BF%CE%B4%CF%85%CF%83%CF%83%CE%B5%CE%B1%CF%82" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-3"
+    When I list the tasks with "q=%CE%9F%CE%94%CE%A5%CE%A3%CE%A3%CE%95%CE%91%CE%A3" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-3"
+    When I list the tasks with "q=STRA%C3%9FE" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-4"
+    When I list the tasks with "q=%C3%9Cpfel" as actor "claude@laptop"
+    Then the response path "items" has 0 items
+
+  Scenario: q keeps a backslash literal and pages with the other filters
+    Given I create the task with body "{'initiative':'aa','title':'ÉCRIRE C:\\dir'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'écrire C:xdir'}" as actor "claude@laptop"
+    And I create the task with body "{'initiative':'aa','title':'écrire encore'}" as actor "claude@laptop"
+    When I list the tasks with "q=C%3A%5C" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-1"
+    When I list the tasks with "q=%C3%89CRIRE&limit=2" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-1,aa-2"
+    When I request the next tasks page with "q=%C3%A9crire&limit=2" as actor "claude@laptop"
+    Then the response path "items" lists the refs "aa-3"
+
   Scenario: filters combine
     Given I create a task in "aa" titled "alpha job" as actor "claude@laptop"
     And I create a task in "bb" titled "alpha job" as actor "claude@laptop"

@@ -826,7 +826,7 @@ principal may use them. The server answers 503 problem documents when it runs wi
   (a live lease, as in the task document), `blocked` and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
   `true` or `false`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
   `closed` or `all`, keeping the tasks closed in the last that many days (with `all` the tasks that are not closed stay);
-  `q` keeps the tasks whose title or description contains the text ignoring letter case (`%` and `_` match themselves).
+  `q` keeps the tasks whose title or description contains the text ignoring letter case, for any Unicode letter and not only ASCII; the same tasks match on SQLite and on Postgres, because the match runs in the service and not in the database's own case folding. `%`, `_` and `\` match themselves.
   `limit` is 1 to 1000, default 100, and `after` is the ULID or ref of the last task of the previous page, in either
   letter case; `next_after` in the answer is the ULID to send and is absent on the last page. A bad `status`, `kind`,
   `tag`, `closed_within`, `limit` or `after` (a ref naming no task and not ULID-shaped), or a flag that is not `true` or

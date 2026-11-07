@@ -68,8 +68,11 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 	if err := s.conditions(ctx, f, q); err != nil {
 		return Page{}, err
 	}
-	query := selectTask + f.where() + ` ORDER BY t.id LIMIT ` + fmt.Sprint(size+1)
-	items, err := s.rows(ctx, query, f.args, f.now)
+	query := selectTask + f.where() + ` ORDER BY t.id`
+	if q.Q == "" {
+		query += ` LIMIT ` + fmt.Sprint(size+1)
+	}
+	items, err := s.rows(ctx, query, f.args, f.now, textMatcher(q.Q), size+1)
 	if err != nil {
 		return Page{}, err
 	}
@@ -81,18 +84,22 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 	return p, nil
 }
 
-// rows runs a query of selectTask's columns and scans every row.
-func (s Store) rows(ctx context.Context, query string, args []any, now time.Time) ([]Task, error) {
+// rows runs a query of selectTask's columns and scans its rows in order, keeping
+// the tasks keep accepts until limit are kept.
+func (s Store) rows(ctx context.Context, query string, args []any, now time.Time, keep func(Task) bool, limit int) ([]Task, error) {
 	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	items := []Task{}
-	for rows.Next() {
+	for len(items) < limit && rows.Next() {
 		t, err := scan(rows)
 		if err != nil {
 			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+		if !keep(t) {
+			continue
 		}
 		t.Overdue = domain.Overdue(t.Kind, t.Status, t.NextCheckAt, now)
 		items = append(items, t)
@@ -156,7 +163,6 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 	f.flag(q.Blocked, `EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
 		WHERE td.task_id = t.id AND b.status <> 'closed')`)
 	f.flag(q.Overdue, `(t.kind = 'watch' AND t.status <> 'closed' AND t.next_check_at IS NOT NULL AND t.next_check_at < ?)`, store.EncodeBound(f.now))
-	f.text(q.Q)
 	return s.afterFilter(ctx, f, q.After)
 }
 
@@ -234,15 +240,23 @@ func (f *filter) closedWithin(q Query) error {
 	return nil
 }
 
-// text adds the condition that the title or the description contains q, ignoring
-// letter case. The pattern's own % and _ match themselves.
-func (f *filter) text(q string) {
+// fold is the letter-case-insensitive form of text: every rune in its simple
+// lower case, reached through upper case so that the final sigma and the like
+// meet their capitals. It is the same on every database because the match runs
+// in Go: SQLite's LOWER folds ASCII only and Postgres's follows the collation.
+func fold(text string) string { return strings.ToLower(strings.ToUpper(text)) }
+
+// textMatcher keeps the tasks whose title or description contains q, in any
+// letter case, as plain text: no character of q is a pattern. The empty q keeps
+// every task.
+func textMatcher(q string) func(Task) bool {
 	if q == "" {
-		return
+		return func(Task) bool { return true }
 	}
-	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(q))
-	pattern := "%" + esc + "%"
-	f.add(`(LOWER(t.title) LIKE ? ESCAPE '\' OR LOWER(t.description) LIKE ? ESCAPE '\')`, pattern, pattern)
+	needle := fold(q)
+	return func(t Task) bool {
+		return strings.Contains(fold(t.Title), needle) || strings.Contains(fold(t.Description), needle)
+	}
 }
 
 // afterFilter adds the condition that keeps the tasks after the one ref names: a
