@@ -1848,7 +1848,11 @@ URLs answer 200 with an `image/*` content type.
 script. `e2e/sameorigin.spec.ts` signs in through the mock provider, then records every request the
 page issues while it loads `#/`, `#/settings/keys` and `#/signed-out` (a full page load each) at
 390x844 and 1440x900 (6 visits), and requires every http(s)/ws(s) URL to have the board server's
-origin. A planted remote image turns the check red.
+origin. R12 extends it to the Phase 1 views as a finite, named list (`PHASE1_STATES`): `#/tasks`,
+`#/i/<slug>` and `#/t/<ref>` (each a full page load over a seeded watch task with a link, a blocker, a
+dependent, a milestone, a live lease and a conflict), and again with a dialog opened on the page (new
+task, edit initiative, edit task, add dependency, end lease): 8 states at both viewports (16 more
+visits). A planted remote image turns the check red.
 
 **Touch and phone ergonomics.** At the phone width (390x844) every visible interactive element
 (`a, button, input, select, textarea, [role=button]`) in the shell, the forms, the lists and the
