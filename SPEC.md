@@ -1550,8 +1550,8 @@ cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked 
 its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
 **Phase 0 pages.** The app has three views, chosen by the URL fragment: **Initiatives** (`#/`, the
-default, where a login lands), the **initiative page** (`#/i/<slug>`, below) and **Settings → API keys**
-(`#/settings/keys`); the other views in the table are later phases. The Initiatives view lists the initiatives
+default, where a login lands), the **initiative page** (`#/i/<slug>`, below), the **Tasks** view (`#/tasks`, below)
+and **Settings → API keys** (`#/settings/keys`); the other views in the table are later phases. The Initiatives view lists the initiatives
 from `GET /api/v1/initiatives?status=<filter>` (following `next_after` through the pages) as one `<table>` that is a dense table from 768 px up and one
 card per initiative below it (the same rows, so the `initiative-row`, `initiative-status`,
 `initiative-tags` and `email` test ids keep their meaning at every width). A row shows the title, a link to
@@ -1618,7 +1618,9 @@ The wording is `web/src/lib/initiativeDialogs.ts`; the calls are `InitiativesApi
 `e2e/initiative_page.spec.ts` (open from the list, filter the tasks, filter the list: open, then closed, then all;
 edit title, description, tags and targets; a refused edit; close with no tasks; close with an open task through force;
 reopen; a refused close) at 390x844 and 1440x900; the page and its Edit and Close dialogs are also in
-`e2e/a11y.spec.ts` (10 states) and `e2e/touch.spec.ts`.
+`e2e/a11y.spec.ts` (12 states) and `e2e/touch.spec.ts`. The initiative page also has **New task** (open initiatives
+only): it opens the New task dialog below with this initiative preset, and a created task reloads the page's tasks and
+counts without the skeleton.
 
 **Initiative view libraries** (R9). `web/src/lib/markdown.ts` renders
 a description as safe HTML: every character is escaped first, so raw HTML shows as text; paragraphs, headings (two
@@ -1629,6 +1631,42 @@ list's status filter (open, closed, all; open by default; sent as the `status` q
 filter (not closed = open and done, done, closed, all; not closed by default). `web/src/lib/counts.ts` turns a
 task `counts` object into the badges and the line "2 open · 1 done · 3 closed" ("No tasks" when empty), and a live
 lease count into "no live leases", "1 live lease" or "3 live leases".
+
+**Tasks view** (`#/tasks`, `web/src/Tasks.svelte`, R10). The route table holds it as the entry `tasks` between
+Initiatives and Settings, so the phone tab bar, the tablet rail and the desktop sidebar all show it, `aria-current`
+on its link. The router matches the fragment without its query (`hashPath` in `web/src/lib/routes.ts`): `#/tasks?status=done`
+is the Tasks view, and `#/tasks/` is not. The view lists the tasks of every initiative from `GET /api/v1/tasks`
+(following `next_after`) as one `<table>` from 768 px up and one card per task below it, with the columns Ref, Title,
+Initiative (a link to `#/i/<slug>`), Kind, Status, Flags (`active`, `blocked`, `overdue` badges) and Lease holder.
+Above it sit seven controls: selects for Status (not closed by default, open, done, closed, all), Kind (any, work,
+watch), Initiative (any, then every initiative by slug) and Active, Blocked and Overdue (any, yes, no), and a Search
+box (title or description contains the text, ignoring case; applied on Enter or when it loses focus). A **Clear
+filters** button shows while any control differs from the default. The filter is the URL fragment's query
+(`filterFromHash`, `tasksHash`): choosing a control rewrites the fragment in place with `history.replaceState` (no history
+entry per choice) and fetches the list again, so a reload or a copied link shows the same controls and rows; editing
+the fragment by hand re-reads the filter. A filter that keeps none says "No tasks match these filters." (or "No tasks
+yet." with the default filter); a failed fetch shows its problem detail in an alert; while any fetch is pending the
+view shows skeleton cards, and of overlapping fetches the newest outcome to land is shown (`TasksStore`,
+`web/src/lib/tasks.ts`). **New task** is a button beside the heading from 768 px up and a primary button anchored above
+the tab bar below it.
+
+**New task dialog** (`web/src/NewTaskDialog.svelte`, R10). The one `Dialog` (a bottom sheet on the phone) opened from the
+Tasks view and from an initiative page, which presets the initiative; the Tasks view presets none and the select asks to
+choose one. The form holds: Initiative (a select of the open initiatives, plus the preset one), Title, Description,
+Kind (work or watch), Cadence (shown only for a watch task: a number and a unit, `90s`, `15m`, `2h` or `1d`), Planned start
+and Planned end (date inputs, sent as midnight UTC), Blocked by (a search box over the open tasks of every initiative,
+at most eight matches by ref or title, each added as a removable chip) and Links (a label and an `http(s)` URL, added with
+**Add link** as removable chips; a pair typed but not added is added on submit). Create posts `POST /api/v1/tasks`
+with the session's `X-CSRF-Token` (`toTaskCreate`: text trimmed, blank optional fields left out, `cadence_seconds`
+for a watch task only, `blocked_by` and `external_refs` when any). A cadence that is not a number and a unit, or a link
+with only one part typed, is refused in the form before any request; a server refusal (a blank title, a closed
+initiative, a cadence under 60 s) shows its problem detail in an alert inside the dialog, which stays open with what was
+typed. On success the dialog closes, a toast says "Task <ref> created" and the list reloads. The logic is
+`web/src/lib/newTask.ts` and `NewTaskStore`; the specs are `e2e/tasks.spec.ts` (create a work task with a blocker, planned
+window and link, and a watch task with a refused and then a good cadence; a refused create keeps the input; every filter
+and a reload keeping them; New task from the initiative page with the initiative preset) at 390x844 and 1440x900, and
+the view and the sheet are also in `e2e/a11y.spec.ts`, `e2e/touch.spec.ts`, `e2e/overflow.spec.ts` and
+`e2e/sameorigin.spec.ts`.
 
 **Task view libraries** (R10). `web/src/lib/taskFilters.ts` holds the Tasks view's filter (status, kind, initiative,
 active, blocked, overdue and text) and its encoding in the URL fragment's query: `#/tasks` is the default filter

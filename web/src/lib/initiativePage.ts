@@ -61,6 +61,7 @@ export function leaseHolder(task: Pick<TaskListItem, 'live_leases'>): string {
 export interface TaskRow {
   id: string;
   ref: string;
+  initiative: string;
   title: string;
   kind: string;
   status: string;
@@ -73,6 +74,7 @@ export function taskRows(tasks: readonly TaskListItem[], filter: TaskFilter): Ta
   return filterTasks(tasks, filter).map((task) => ({
     id: task.id,
     ref: task.ref,
+    initiative: task.initiative,
     title: task.title,
     kind: task.kind,
     status: task.status,
@@ -139,6 +141,11 @@ export class InitiativePageStore {
     this.set({ dialogError: undefined });
     await this.read(slug);
     return true;
+  }
+
+  /** Reads the page again without the skeleton (after a task was created). */
+  reload(slug: string): Promise<void> {
+    return this.read(slug);
   }
 
   /** Saves the edit form. */

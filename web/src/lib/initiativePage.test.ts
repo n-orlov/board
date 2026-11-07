@@ -20,6 +20,7 @@ const task = (ref: string, extra: Partial<TaskListItem> = {}): TaskListItem =>
     id: 'id-' + ref,
     ref,
     title: 'Title ' + ref,
+    initiative: 'aa',
     kind: 'work',
     status: 'open',
     active: false,
@@ -93,8 +94,8 @@ describe('taskRows', () => {
 
   it('keeps the tasks the filter shows, each with its badges and holder', () => {
     expect(taskRows(tasks, 'not-closed')).toEqual([
-      { id: 'id-aa-1', ref: 'aa-1', title: 'Title aa-1', kind: 'work', status: 'open', badges: [{ key: 'active', label: 'active', tone: 'success' }], holder: 'ann' },
-      { id: 'id-aa-2', ref: 'aa-2', title: 'Title aa-2', kind: 'watch', status: 'done', badges: [{ key: 'overdue', label: 'overdue', tone: 'danger' }], holder: '' },
+      { id: 'id-aa-1', ref: 'aa-1', initiative: 'aa', title: 'Title aa-1', kind: 'work', status: 'open', badges: [{ key: 'active', label: 'active', tone: 'success' }], holder: 'ann' },
+      { id: 'id-aa-2', ref: 'aa-2', initiative: 'aa', title: 'Title aa-2', kind: 'watch', status: 'done', badges: [{ key: 'overdue', label: 'overdue', tone: 'danger' }], holder: '' },
     ]);
     expect(taskRows(tasks, 'done').map((r) => r.ref)).toEqual(['aa-2']);
     expect(taskRows(tasks, 'closed').map((r) => r.ref)).toEqual(['aa-3']);
@@ -149,6 +150,20 @@ describe('InitiativePageStore', () => {
     expect(s.state.filter).toBe('closed');
     expect(s.state.tasks).toHaveLength(1);
     expect(get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('InitiativePageStore reload', () => {
+  it('reads the page again without the skeleton', async () => {
+    let tasks = [task('aa-1')];
+    const seen: InitiativePageState[] = [];
+    const s = new InitiativePageStore({ get: async () => initiative, tasks: async () => tasks } as never, (st) => seen.push(st));
+    await s.load('aa');
+    tasks = [task('aa-1'), task('aa-2')];
+    seen.length = 0;
+    await s.reload('aa');
+    expect(seen.every((st) => !st.loading)).toBe(true);
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['aa-1', 'aa-2']);
   });
 });
 

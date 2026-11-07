@@ -21,6 +21,14 @@ const views = [
     },
   },
   {
+    name: 'Tasks',
+    hash: '#/tasks',
+    ready: async (page: Page) => {
+      await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
+      await expect(page.getByTestId('tasks-skeleton')).toHaveCount(0);
+    },
+  },
+  {
     name: 'Settings -> API keys',
     hash: '#/settings/keys',
     ready: async (page: Page) => {

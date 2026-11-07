@@ -6,6 +6,7 @@ import {
   filterFromQuery,
   filterToQuery,
   flagOptions,
+  initiativeOptions,
   isFiltered,
   tasksHash,
   type TasksFilter,
@@ -92,5 +93,21 @@ describe('flagOptions', () => {
       { value: 'yes', label: 'Blocked' },
       { value: 'no', label: 'Not blocked' },
     ]);
+  });
+});
+
+describe('initiativeOptions', () => {
+  it('offers any initiative first, then the slugs sorted', () => {
+    expect(initiativeOptions(['bb', 'aa'], '')).toEqual([
+      { value: '', label: 'Any initiative' },
+      { value: 'aa', label: 'aa' },
+      { value: 'bb', label: 'bb' },
+    ]);
+  });
+
+  it('offers the initiative the URL names once, even when the list lacks it', () => {
+    expect(initiativeOptions(['aa'], 'zz').map((o) => o.value)).toEqual(['', 'aa', 'zz']);
+    expect(initiativeOptions(['aa'], 'aa').map((o) => o.value)).toEqual(['', 'aa']);
+    expect(initiativeOptions([], '').map((o) => o.value)).toEqual(['']);
   });
 });

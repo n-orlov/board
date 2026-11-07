@@ -200,7 +200,8 @@ for (const vp of viewports) {
       await expect(edit.getByLabel('Target start')).toHaveValue('2026-03-01');
       await expect(edit.getByLabel('Target end')).toHaveValue('');
       const box = await edit.getByLabel('Title').boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      // Layout snaps to 1/64 px, so a 44 px box can measure 43.99998 (touch.spec.ts allows the same 1/32 px).
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44 - 1 / 32);
       expect(await edit.getByLabel('Title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
 
       await edit.getByLabel('Title').fill('Renamed plan');

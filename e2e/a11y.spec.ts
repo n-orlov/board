@@ -1,8 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type Page } from '@playwright/test';
 
-// R9: axe-core over the four views, the four dialogs/sheets of the R4 set and the initiative page's Edit and Close dialogs, at the phone and the desktop
-// viewport, in the light and the dark theme: 10 states x 2 viewports x 2 themes = 40 scans. No rule is
+// R9/R12: axe-core over the five views, the four dialogs/sheets of the R4 set, the initiative page's Edit and Close dialogs and the New task sheet, at the phone and the desktop
+// viewport, in the light and the dark theme: 12 states x 2 viewports x 2 themes = 48 scans. No rule is
 // disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -62,6 +62,27 @@ const states: State[] = [
       await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(page.getByRole('dialog', { name: 'Close initiative' })).toBeVisible();
+    },
+  },
+  {
+    name: 'Tasks view',
+    open: async (page) => {
+      await page.goto('/#/tasks?initiative=e2e-a11y');
+      await expect(page.getByTestId('task-row').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'new-task sheet',
+    open: async (page) => {
+      await page.goto('/#/tasks?initiative=e2e-a11y');
+      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      await page.getByRole('button', { name: 'New task' }).locator('visible=true').click();
+      const dialog = page.getByRole('dialog', { name: 'New task' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel('Kind').selectOption('watch'); // the longest form: the cadence field shows
+      await expect(dialog.getByLabel('Cadence')).toBeVisible();
+      await dialog.getByLabel('Find an open task').fill('scan');
+      await expect(dialog.getByTestId('blocker-options')).toBeVisible();
     },
   },
   {

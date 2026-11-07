@@ -43,6 +43,13 @@ export const ROUTES = [
     icon: '',
   },
   {
+    id: 'tasks',
+    hash: '#/tasks',
+    title: 'Tasks',
+    label: 'Tasks',
+    icon: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
+  },
+  {
     id: 'keys',
     hash: '#/settings/keys',
     title: 'API keys',
@@ -59,8 +66,15 @@ function segment(hash: string, prefix: string): string {
   return rest.includes('/') ? '' : rest;
 }
 
+/** The fragment without its query: a view may keep state after the `?` (`#/tasks?status=done`) and is still that view. */
+export function hashPath(hash: string): string {
+  const at = hash.indexOf('?');
+  return at < 0 ? hash : hash.slice(0, at);
+}
+
 function selects(route: Route, hash: string): boolean {
-  return route.param === true ? segment(hash, route.hash) !== '' : route.hash === hash;
+  const path = hashPath(hash);
+  return route.param === true ? segment(path, route.hash) !== '' : route.hash === path;
 }
 
 /** The route a fragment names; anything the table does not name is its first entry. */
@@ -71,7 +85,7 @@ export function resolveRoute<R extends Route>(hash: string, table: readonly R[])
 /** The parameter of the route the fragment selects (`#/i/phone-onboard` gives `phone-onboard`), else the empty string. */
 export function routeParam(hash: string, table: readonly Route[]): string {
   const route = resolveRoute(hash, table);
-  return route.param === true ? segment(hash, route.hash) : '';
+  return route.param === true ? segment(hashPath(hash), route.hash) : '';
 }
 
 export interface NavEntry {

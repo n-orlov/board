@@ -81,6 +81,37 @@ for (const vp of viewports) {
       await expect(page.locator('[data-testid=initiative-row][data-slug=ovf-wide-title]')).toContainText(wide(200));
     });
 
+    test('the Tasks view and the New task sheet hold the longest accepted values without scrolling sideways', async ({ page, playwright, baseURL }) => {
+      const slug = `ovf${'w'.repeat(37)}`;
+      const seed = await playwright.request.newContext({
+        baseURL,
+        extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
+      });
+      const made = await seed.post('/api/v1/tasks', { data: { initiative: slug, title: wide(200) } });
+      expect(made.status()).toBe(201);
+      const { ref } = (await made.json()) as { ref: string };
+      await seed.dispose();
+
+      await page.goto(`/#/tasks?initiative=${slug}`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${ref}]`)).toBeVisible();
+      await expectNoSidewaysScroll(page);
+      await expectNothingPastRight(page, '[data-testid=task-row], [data-testid=task-row] *', vp.size.width);
+
+      await page.getByRole('button', { name: 'New task' }).locator('visible=true').click();
+      const dialog = page.getByRole('dialog', { name: 'New task' });
+      await dialog.getByLabel('Initiative').selectOption(slug);
+      await dialog.getByRole('textbox', { name: 'Title' }).fill(wide(200));
+      await dialog.getByLabel('Find an open task').fill(ref);
+      await dialog.getByTestId('blocker-options').getByRole('button').first().click();
+      await dialog.getByLabel('Link label').fill(wide(80));
+      await dialog.getByLabel('Link URL').fill(`https://example.invalid/${'a'.repeat(170)}`);
+      await dialog.getByRole('button', { name: 'Add link' }).click();
+      await expect(dialog.getByTestId('links')).toBeVisible();
+      await dialog.getByLabel('Find an open task').fill(ref);
+      await expectNoSidewaysScroll(page);
+      await expectNothingPastRight(page, '[role=dialog] *', vp.size.width);
+    });
+
     test('the API keys list holds the longest accepted key names without scrolling sideways', async ({ page }) => {
       await page.goto('/#/settings/keys');
       for (const name of keyNames) await expect(page.locator(`[data-testid=key-row]`, { hasText: name })).toHaveCount(1);
@@ -106,7 +137,7 @@ for (const vp of viewports) {
       const dialog = page.getByRole('dialog', { name: 'New initiative' });
       const slug = `ovf-toast-${vp.name}${'x'.repeat(40)}`.slice(0, 40);
       await dialog.getByLabel('Slug').fill(slug);
-      await dialog.getByLabel('Title').fill(wide(200));
+      await dialog.getByRole('textbox', { name: 'Title' }).fill(wide(200));
       await dialog.getByLabel('Tags').fill(tags.join(', '));
       await expectNoSidewaysScroll(page);
       await dialog.getByRole('button', { name: 'Create initiative' }).click();

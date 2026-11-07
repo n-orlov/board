@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, navEntries, resolveRoute, routeParam, type Route } from './routes';
+import { ROUTES, hashPath, navEntries, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -24,6 +24,10 @@ describe('resolveRoute', () => {
     ['', 'initiatives'],
     ['#/settings', 'initiatives'],
     ['#/settings/keys/', 'initiatives'],
+    ['#/tasks', 'tasks'],
+    ['#/tasks?status=done&kind=watch', 'tasks'],
+    ['#/tasks/', 'initiatives'],
+    ['#/i/phone-onboard?x=1', 'initiative'],
   ])('maps the app table %j to %s', (hash, want) => {
     expect(resolveRoute(hash, ROUTES).id).toBe(want);
   });
@@ -100,14 +104,34 @@ describe('ROUTES', () => {
     const route = resolveRoute('#/i/phone-onboard', ROUTES);
     expect(route.id).toBe('initiative');
     expect(routeParam('#/i/phone-onboard', ROUTES)).toBe('phone-onboard');
+    expect(routeParam('#/i/phone-onboard?x=1', ROUTES)).toBe('phone-onboard');
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
       ['initiatives', true],
+      ['tasks', false],
       ['keys', false],
+    ]);
+  });
+
+  it('puts Tasks between Initiatives and Settings in the navigation, current on its filtered fragment', () => {
+    const route = resolveRoute('#/tasks?status=done', ROUTES);
+    expect(navEntries(route, ROUTES).map((e) => [e.id, e.href, e.current])).toEqual([
+      ['initiatives', '#/', false],
+      ['tasks', '#/tasks', true],
+      ['keys', '#/settings/keys', false],
     ]);
   });
 
   it('starts with the Initiatives view, the default', () => {
     expect(ROUTES[0].id).toBe('initiatives');
     expect(ROUTES[0].hash).toBe('#/');
+  });
+});
+
+describe('hashPath', () => {
+  it('drops the query and keeps the rest', () => {
+    expect(hashPath('#/tasks?status=done')).toBe('#/tasks');
+    expect(hashPath('#/tasks')).toBe('#/tasks');
+    expect(hashPath('#/tasks?a=1?b')).toBe('#/tasks');
+    expect(hashPath('')).toBe('');
   });
 });

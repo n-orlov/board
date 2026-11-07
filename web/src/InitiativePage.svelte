@@ -7,6 +7,7 @@
   import { InitiativePageStore, liveLeaseCount, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import InitiativeEditForm from './InitiativeEditForm.svelte';
+  import NewTaskDialog from './NewTaskDialog.svelte';
   import Toast from './Toast.svelte';
   import { closedToast, closeBody, closeLabel, notClosedCount, REOPEN_BODY } from './lib/initiativeDialogs';
   import { InitiativesApi, toEditForm, type InitiativeEdit } from './lib/initiatives';
@@ -18,7 +19,7 @@
   let { csrf, param }: { csrf: string; param: string } = $props();
 
   let view: InitiativePageState = $state({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined, dialogError: undefined });
-  let dialog: 'edit' | 'close' | 'reopen' | undefined = $state(undefined);
+  let dialog: 'edit' | 'close' | 'reopen' | 'task' | undefined = $state(undefined);
   let toast = $state('');
 
   const store = new InitiativePageStore(new InitiativesApi(currentBrowser(), () => csrf), (s) => (view = s));
@@ -27,7 +28,7 @@
     void store.load(param);
   });
 
-  function open(which: 'edit' | 'close' | 'reopen') {
+  function open(which: 'edit' | 'close' | 'reopen' | 'task') {
     store.clearDialogError();
     dialog = which;
   }
@@ -37,6 +38,12 @@
       dialog = undefined;
       toast = message;
     }
+  }
+
+  function taskCreated(ref: string) {
+    dialog = undefined;
+    toast = `Task ${ref} created`;
+    void store.reload(param);
   }
 
   const save = (form: InitiativeEdit) => finish(store.edit(param, form), 'Initiative saved');
@@ -85,6 +92,9 @@
         by {initiative.created_by}
       </p>
       <div class="mt-3 flex flex-wrap gap-2" data-testid="initiative-actions">
+        {#if initiative.status === 'open'}
+          <button type="button" class="{action} border-accent text-accent" onclick={() => open('task')}>New task</button>
+        {/if}
         <button type="button" class={action} onclick={() => open('edit')}>Edit</button>
         {#if initiative.status === 'open'}
           <button type="button" class={action} onclick={() => open('close')}>Close</button>
@@ -157,7 +167,9 @@
 
 {#if dialog !== undefined && view.initiative !== undefined}
   {@const initiative = view.initiative}
-  {#if dialog === 'edit'}
+  {#if dialog === 'task'}
+    <NewTaskDialog {csrf} initiative={initiative.slug} onclose={() => (dialog = undefined)} oncreated={taskCreated} />
+  {:else if dialog === 'edit'}
     <Dialog label="Edit initiative" onclose={() => (dialog = undefined)} initialFocus="input[name=title]">
       <InitiativeEditForm initial={toEditForm(initiative)} error={view.dialogError} onsave={save} oncancel={() => (dialog = undefined)} />
     </Dialog>

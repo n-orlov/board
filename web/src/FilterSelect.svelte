@@ -16,10 +16,10 @@
   }
 </script>
 
-<label class="flex items-center gap-2 text-sm text-text-muted">
+<label class="flex max-w-full items-center gap-2 text-sm text-text-muted">
   <span>{label}</span>
   <select
-    class="min-h-11 rounded-md border border-border bg-surface-raised px-3 text-base text-text"
+    class="min-h-11 min-w-0 max-w-full rounded-md border border-border bg-surface-raised px-3 text-base text-text"
     data-testid={testid}
     {value}
     onchange={changed}

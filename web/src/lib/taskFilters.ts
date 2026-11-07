@@ -45,6 +45,13 @@ export const KIND_OPTIONS: readonly { value: TaskKindFilter; label: string }[] =
   { value: 'watch', label: 'Watch' },
 ];
 
+/** The options of the initiative select: any, then each slug (the one the URL names too, when the list lacks it), sorted. */
+export function initiativeOptions(slugs: readonly string[], current: string): { value: string; label: string }[] {
+  const all = new Set(slugs);
+  if (current !== '') all.add(current);
+  return [{ value: '', label: 'Any initiative' }, ...[...all].sort().map((slug) => ({ value: slug, label: slug }))];
+}
+
 /** The options of a flag select: `noun` is the flag's own word ("active"). */
 export function flagOptions(noun: string): readonly { value: FlagFilter; label: string }[] {
   return [

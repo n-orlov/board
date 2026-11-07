@@ -63,6 +63,7 @@ test.describe('phone 390x844', () => {
     });
     const res = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-touch', title: 'Touch targets', tags: ['phone', 'ux'] } });
     expect([201, 409]).toContain(res.status());
+    if (res.status() === 201) expect((await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-touch', title: 'Touch task' } })).status()).toBe(201);
     await seed.dispose();
     await page.goto('/');
     await expect(page.getByTestId('initiative-row').first()).toBeVisible();
@@ -76,6 +77,30 @@ test.describe('phone 390x844', () => {
     await page.goto('/#/i/e2e-touch');
     await expect(page.getByTestId('initiative-title')).toHaveText('Touch targets');
     await expectTouchFriendly(page, 4);
+  });
+
+  test('the Tasks view', async ({ page }) => {
+    await page.goto('/#/tasks?initiative=e2e-touch');
+    await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
+    await expect(page.getByTestId('task-row').first()).toBeVisible();
+    await expectTouchFriendly(page, 8);
+  });
+
+  test('the new-task sheet', async ({ page }) => {
+    await page.goto('/#/tasks?initiative=e2e-touch');
+    await expect(page.getByTestId('task-row').first()).toBeVisible();
+    await page.getByRole('button', { name: 'New task' }).click();
+    const dialog = page.getByRole('dialog', { name: 'New task' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Kind').selectOption('watch');
+    await dialog.getByLabel('Find an open task').fill('e2e-touch');
+    await dialog.getByTestId('blocker-options').getByRole('button').first().click(); // a chosen blocker has its remove button
+    await expect(dialog.getByTestId('blockers')).toBeVisible();
+    await dialog.getByLabel('Link label').fill('PR');
+    await dialog.getByLabel('Link URL').fill('https://example.com/1');
+    await dialog.getByRole('button', { name: 'Add link' }).click();
+    await expect(dialog.getByTestId('links')).toBeVisible();
+    await expectTouchFriendly(page, 14);
   });
 
   test('the Settings -> API keys view', async ({ page }) => {

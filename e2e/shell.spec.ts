@@ -48,7 +48,7 @@ for (const vp of viewports) {
         const nav = page.getByTestId(vp.nav);
         await expect(nav).toBeVisible();
         for (const other of allNavs.filter((id) => id !== vp.nav)) await expect(page.getByTestId(other)).toBeHidden();
-        await expect(nav.getByRole('link')).toHaveCount(2);
+        await expect(nav.getByRole('link')).toHaveCount(3);
 
         await expect(nav.locator('[aria-current=page]')).toHaveCount(1);
         await expect(nav.getByRole('link', { name: route.label })).toHaveAttribute('aria-current', 'page');
