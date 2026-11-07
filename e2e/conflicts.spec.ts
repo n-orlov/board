@@ -43,7 +43,7 @@ for (const vp of viewports) {
     test('two leases sharing a resource show as a conflict on both task pages and in the Now panel until one ends', async ({ page, playwright, baseURL }) => {
       const alice = await apiAs(playwright, baseURL, `alice-${vp.name}`);
       const bob = await apiAs(playwright, baseURL, `bob-${vp.name}`);
-      const slug = `e2e-cf-${vp.name}`;
+      const slug = `e2e-lc-${vp.name}`;
       const resource = `repo:cf-${vp.name}`;
       await post(alice, '/api/v1/initiatives', { slug, title: `Conflicts ${slug}` }, 201);
       const first = (await post<{ ref: string }>(alice, '/api/v1/tasks', { initiative: slug, title: 'First task' }, 201)).ref;

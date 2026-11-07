@@ -50,7 +50,7 @@
             <span class="font-medium">Conflict</span> {conflictText(conflict)}
             <span class="mt-1 flex flex-wrap gap-x-3">
               {#each conflict.holders as holder (holder.lease)}
-                <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(holder.task)}>{holder.task}</a>
+                <a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(holder.task)}>{holder.task}</a>
               {/each}
             </span>
           </li>
@@ -68,7 +68,7 @@
             <p>
               <span class="font-medium" data-testid="now-holder">{row.holder}</span>
               <span class="text-text-muted">{row.lease}</span> on
-              <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(row.task)} data-testid="now-task">{row.task}</a>
+              <a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.task)} data-testid="now-task">{row.task}</a>
               {#if row.conflicting}<span class="rounded-md border border-warning px-2 py-0.5 text-xs font-medium" data-testid="now-flag">conflict</span>{/if}
             </p>
             <p>{row.intent}</p>

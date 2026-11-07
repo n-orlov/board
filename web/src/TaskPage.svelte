@@ -84,7 +84,7 @@
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const action = 'min-h-11 flex-1 rounded-md border border-border bg-surface-raised px-4 text-sm font-medium text-text md:flex-none';
   const back = 'inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline';
-  const link = 'inline-flex min-h-11 flex-wrap items-center gap-x-2 text-accent hover:underline';
+  const link = 'inline-flex min-h-11 min-w-11 flex-wrap items-center gap-x-2 text-accent hover:underline';
   const heading = 'text-lg font-bold';
   const headingRow = 'mb-2 mt-6 flex flex-wrap items-center justify-between gap-2';
 </script>

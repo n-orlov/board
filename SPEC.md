@@ -1860,7 +1860,11 @@ skip link, clipped away (`clip-path: inset(50%)`) until it takes focus, is outsi
 hidden. Nothing depends on hover: every action is a button or a link. `e2e/touch.spec.ts` measures
 the Initiatives, initiative page, Settings -> API keys and Signed out views and the new-initiative sheet, the new-key
 sheet, the revoke confirmation, the account menu and the initiative page's Edit and Close sheets opened over them, and fails with the offending
-elements named when one is smaller or a field's text is under 16 px.
+elements named when one is smaller or a field's text is under 16 px. It also holds the Phase 1 views and dialogs to the
+same bar as a finite, named list (`PHASE1_STATES`): the views `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, and the 9 dialogs
+edit initiative, close initiative, new task, edit task, close task, milestone, record check, add dependency and end lease,
+each opened over a seeded initiative with a watch task, links, a dependency, an expired and a live lease and a conflict.
+A link is at least 44 px wide as well as high, so a short link label (a two-letter reference) still meets the bar.
 
 **Accessibility bar.** axe-core (`@axe-core/playwright`, pinned exactly in `e2e/package.json`) reports
 zero violations of impact `serious` or `critical`, with no rule disabled and no element excluded, on
