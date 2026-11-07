@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, navEntries, resolveRoute, type Route } from './routes';
+import { ROUTES, navEntries, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -54,16 +54,56 @@ describe('navEntries', () => {
   });
 });
 
+// A table with a parameter route and a page inside another view.
+const withParam: Route[] = [
+  ...synthetic,
+  { id: 'item', hash: '#/x/', param: true, parent: 'beta', title: 'Item', label: 'Item', icon: '' },
+];
+
+describe('parameter routes', () => {
+  it.each([
+    ['#/x/abc', 'item', 'abc'],
+    ['#/x/a-b-1', 'item', 'a-b-1'],
+    ['#/b/c', 'beta', ''],
+    ['#/', 'alpha', ''],
+  ])('resolves %j to %s with the parameter %j', (hash, id, param) => {
+    expect(resolveRoute(hash, withParam).id).toBe(id);
+    expect(routeParam(hash, withParam)).toBe(param);
+  });
+
+  it.each([['#/x/'], ['#/x'], ['#/x/a/b'], ['#/x/a/'], ['x/abc'], ['']])('sends %j to the first entry with no parameter', (hash) => {
+    expect(resolveRoute(hash, withParam).id).toBe('alpha');
+    expect(routeParam(hash, withParam)).toBe('');
+  });
+
+  it('keeps a page inside another view out of the navigation and flags its parent as current', () => {
+    const item = withParam[3];
+    const entries = navEntries(item, withParam);
+    expect(entries.map((e) => e.id)).toEqual(['alpha', 'beta', 'gamma']);
+    expect(entries.map((e) => e.current)).toEqual([false, true, false]);
+  });
+});
+
 describe('ROUTES', () => {
   it('has distinct ids and hashes, each hash a fragment route, each entry labelled', () => {
     expect(new Set(ROUTES.map((r) => r.id)).size).toBe(ROUTES.length);
     expect(new Set(ROUTES.map((r) => r.hash)).size).toBe(ROUTES.length);
-    for (const route of ROUTES) {
+    for (const route of ROUTES as readonly Route[]) {
       expect(route.hash.startsWith('#/')).toBe(true);
       expect(route.label).not.toBe('');
       expect(route.title).not.toBe('');
-      expect(route.icon).not.toBe('');
+      if (route.parent === undefined) expect(route.icon).not.toBe('');
     }
+  });
+
+  it('routes #/i/<slug> to the initiative page, which hangs under Initiatives', () => {
+    const route = resolveRoute('#/i/phone-onboard', ROUTES);
+    expect(route.id).toBe('initiative');
+    expect(routeParam('#/i/phone-onboard', ROUTES)).toBe('phone-onboard');
+    expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
+      ['initiatives', true],
+      ['keys', false],
+    ]);
   });
 
   it('starts with the Initiatives view, the default', () => {

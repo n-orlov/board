@@ -1,18 +1,24 @@
 <script lang="ts">
   import type { Component } from 'svelte';
   import ApiKeys from './ApiKeys.svelte';
+  import InitiativePage from './InitiativePage.svelte';
   import Initiatives from './Initiatives.svelte';
   import SessionCard from './SessionCard.svelte';
   import Shell from './Shell.svelte';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
-  import { ROUTES, navEntries, resolveRoute, type RouteId } from './lib/routes';
+  import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
 
   // The component of each view; the table in lib/routes.ts decides which one is on screen.
-  const VIEWS: Record<RouteId, Component<{ csrf: string }>> = { initiatives: Initiatives, keys: ApiKeys };
+  const VIEWS: Record<RouteId, Component<{ csrf: string; param: string }>> = {
+    initiatives: Initiatives,
+    initiative: InitiativePage,
+    keys: ApiKeys,
+  };
 
   const browser = currentBrowser();
   let auth: SessionState = $state({ kind: 'loading' });
   let route = $state(resolveRoute(window.location.hash, ROUTES));
+  let param = $state(routeParam(window.location.hash, ROUTES));
   let signOutFailed = $state(false);
 
   const session = new SessionController(browser, (s) => (auth = s), window.location.hash);
@@ -27,6 +33,7 @@
 
   function hashChanged() {
     route = resolveRoute(window.location.hash, ROUTES);
+    param = routeParam(window.location.hash, ROUTES);
     void session.hashChanged(window.location.hash);
   }
 
@@ -66,6 +73,8 @@
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}
-    <View csrf={auth.session.csrf_token} />
+    {#key param}
+      <View csrf={auth.session.csrf_token} {param} />
+    {/key}
   </Shell>
 {/if}

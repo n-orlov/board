@@ -16,6 +16,13 @@ export interface Route {
   label: string;
   /** SVG path data (24x24 viewBox, stroked) of the navigation icon. */
   icon: string;
+  /**
+   * A route with a parameter: `hash` is a prefix and the fragment is that prefix plus one segment, which is the
+   * view's parameter (`#/i/<slug>`). A route without one is selected by its exact fragment.
+   */
+  param?: true;
+  /** A route that is a page inside another view and has no navigation entry of its own. */
+  parent?: string;
 }
 
 export const ROUTES = [
@@ -25,6 +32,15 @@ export const ROUTES = [
     title: 'Initiatives',
     label: 'Initiatives',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  },
+  {
+    id: 'initiative',
+    hash: '#/i/',
+    param: true,
+    parent: 'initiatives',
+    title: 'Initiative',
+    label: 'Initiative',
+    icon: '',
   },
   {
     id: 'keys',
@@ -37,9 +53,25 @@ export const ROUTES = [
 
 export type RouteId = (typeof ROUTES)[number]['id'];
 
+/** The segment after a parameter route's prefix: one piece with no slash, the empty string when there is none. */
+function segment(hash: string, prefix: string): string {
+  const rest = hash.startsWith(prefix) ? hash.slice(prefix.length) : '';
+  return rest.includes('/') ? '' : rest;
+}
+
+function selects(route: Route, hash: string): boolean {
+  return route.param === true ? segment(hash, route.hash) !== '' : route.hash === hash;
+}
+
 /** The route a fragment names; anything the table does not name is its first entry. */
 export function resolveRoute<R extends Route>(hash: string, table: readonly R[]): R {
-  return table.find((route) => route.hash === hash) ?? table[0];
+  return table.find((route) => selects(route, hash)) ?? table[0];
+}
+
+/** The parameter of the route the fragment selects (`#/i/phone-onboard` gives `phone-onboard`), else the empty string. */
+export function routeParam(hash: string, table: readonly Route[]): string {
+  const route = resolveRoute(hash, table);
+  return route.param === true ? segment(hash, route.hash) : '';
 }
 
 export interface NavEntry {
@@ -51,13 +83,15 @@ export interface NavEntry {
   current: boolean;
 }
 
-/** One navigation entry per table entry, the current one flagged. */
+/** One navigation entry per table entry that is not a page inside another view; the current one, or its parent, flagged. */
 export function navEntries(current: Route, table: readonly Route[]): NavEntry[] {
-  return table.map((route) => ({
-    id: route.id,
-    href: route.hash,
-    label: route.label,
-    icon: route.icon,
-    current: route.id === current.id,
-  }));
+  return table
+    .filter((route) => route.parent === undefined)
+    .map((route) => ({
+      id: route.id,
+      href: route.hash,
+      label: route.label,
+      icon: route.icon,
+      current: route.id === current.id || route.id === current.parent,
+    }));
 }

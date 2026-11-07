@@ -70,3 +70,8 @@ export function showsTask(filter: TaskFilter, status: string): boolean {
 export function filterTasks<T extends { status: string }>(tasks: readonly T[], filter: TaskFilter): T[] {
   return tasks.filter((task) => showsTask(filter, task.status));
 }
+
+/** What the Initiatives list says when the filter keeps nothing. */
+export function emptyInitiativesText(filter: InitiativeFilter): string {
+  return filter === 'all' ? 'No initiatives yet' : `No ${filter} initiatives`;
+}

@@ -50,7 +50,7 @@ describe('InitiativesApi.list', () => {
     const { api: a, fetchFn } = api(async () => Response.json({ items: [initiative('a'), initiative('b')] }));
     expect((await a.list()).map((i) => i.slug)).toEqual(['a', 'b']);
     const [url, init] = fetchFn.mock.calls[0];
-    expect(url).toBe('/api/v1/initiatives');
+    expect(url).toBe('/api/v1/initiatives?status=open');
     expect(init?.credentials).toBe('same-origin');
     expect(init?.method).toBeUndefined();
     expect(init?.headers).toEqual({ Accept: 'application/json' });
@@ -59,17 +59,23 @@ describe('InitiativesApi.list', () => {
   it('asks under the mount prefix', async () => {
     const { api: a, fetchFn } = api(async () => Response.json({ items: [] }), '/board/');
     await a.list();
-    expect(fetchFn.mock.calls[0][0]).toBe('/board/api/v1/initiatives');
+    expect(fetchFn.mock.calls[0][0]).toBe('/board/api/v1/initiatives?status=open');
   });
 
   it('follows next_after until the last page', async () => {
     const { api: a, fetchFn } = api(async (url) =>
-      url.includes('after=a%20b')
+      url.includes('after=a+b')
         ? Response.json({ items: [initiative('c')] })
         : Response.json({ items: [initiative('a'), initiative('b')], next_after: 'a b' }),
     );
     expect((await a.list()).map((i) => i.slug)).toEqual(['a', 'b', 'c']);
-    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/initiatives', '/api/v1/initiatives?after=a%20b']);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/initiatives?status=open', '/api/v1/initiatives?status=open&after=a+b']);
+  });
+
+  it.each(['open', 'closed', 'all'] as const)('sends the %s filter as the status query', async (filter) => {
+    const { api: a, fetchFn } = api(async () => Response.json({ items: [] }));
+    await a.list(filter);
+    expect(fetchFn.mock.calls[0][0]).toBe(`/api/v1/initiatives?status=${filter}`);
   });
 
   it('reports an unreachable server with status 0', async () => {
@@ -111,6 +117,28 @@ describe('InitiativesApi.create', () => {
   });
 });
 
+describe('InitiativesStore filter', () => {
+  it('setFilter keeps the filter, fetches under it and shows what that fetch returned', async () => {
+    const list = vi.fn(async (filter: string) => (filter === 'closed' ? [initiative('old', { status: 'closed' })] : [initiative('new')]));
+    const s = new InitiativesStore({ list, create: async () => initiative('a') } as never, () => undefined);
+    await s.setFilter('closed');
+    expect(list).toHaveBeenLastCalledWith('closed');
+    expect(s.state.filter).toBe('closed');
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['old']);
+    await s.setFilter('all');
+    expect(list).toHaveBeenLastCalledWith('all');
+    expect(s.state.filter).toBe('all');
+  });
+
+  it('a reload after a create uses the filter in force', async () => {
+    const list = vi.fn(async (_filter: string) => []);
+    const s = new InitiativesStore({ list, create: async () => initiative('a') } as never, () => undefined);
+    await s.setFilter('all');
+    await s.create({ slug: 'aa', title: 'A', description: '', tags: '' });
+    expect(list.mock.calls.map((c) => c[0])).toEqual(['all', 'all']);
+  });
+});
+
 describe('InitiativesStore', () => {
   function store(fake: { list: () => Promise<Initiative[]>; create: (b: unknown) => Promise<Initiative> }) {
     const seen: InitiativesState[] = [];
@@ -120,7 +148,7 @@ describe('InitiativesStore', () => {
 
   it('starts loading with nothing to show', () => {
     const { s } = store({ list: async () => [], create: async () => initiative('a') });
-    expect(s.state).toEqual({ initiatives: [], loading: true, error: undefined, formError: undefined });
+    expect(s.state).toEqual({ initiatives: [], filter: 'open', loading: true, error: undefined, formError: undefined });
   });
 
   it('load shows the list and stops loading', async () => {

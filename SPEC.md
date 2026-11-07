@@ -1517,7 +1517,7 @@ operator. Live via SSE (§7.1).
 |---|---|
 | **Attention** (default) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
 | **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters: tags, initiatives, actor, "show archived closed within N days". |
-| **Initiatives** | list with tags, open/done/closed counts, live-lease count; initiative page with tasks table and its own timeline. |
+| **Initiatives** | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
 | **Actors** | who is alive now (live leases, last seen), with way back. |
@@ -1549,14 +1549,16 @@ outcome to land is shown and an older one landing after it is dropped (`web/src/
 cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from
 its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
-**Phase 0 pages.** The app has two views, chosen by the URL fragment: **Initiatives** (`#/`, the
-default, where a login lands) and **Settings → API keys** (`#/settings/keys`); the other views in
-the table are later phases. The Initiatives view lists every initiative from `GET /api/v1/initiatives`
-(following `next_after` through the pages) as one `<table>` that is a dense table from 768 px up and one
+**Phase 0 pages.** The app has three views, chosen by the URL fragment: **Initiatives** (`#/`, the
+default, where a login lands), the **initiative page** (`#/i/<slug>`, below) and **Settings → API keys**
+(`#/settings/keys`); the other views in the table are later phases. The Initiatives view lists the initiatives
+from `GET /api/v1/initiatives?status=<filter>` (following `next_after` through the pages) as one `<table>` that is a dense table from 768 px up and one
 card per initiative below it (the same rows, so the `initiative-row`, `initiative-status`,
-`initiative-tags` and `email` test ids keep their meaning at every width). A row shows the title with
-the slug beneath it in monospace, the status as a badge (`open` success, `closed` neutral, an unknown
-status neutral), the tags as chips and the creation time as a `<time datetime>` whose text is relative
+`initiative-tags` and `email` test ids keep their meaning at every width). A row shows the title, a link to
+`#/i/<slug>` (`initiative-link`), with the slug beneath it in monospace, the status as a badge (`open` success,
+`closed` neutral, an unknown status neutral), the tags as chips, the task counts of the item ("2 open · 1 done ·
+1 closed", "No tasks" when none; `initiative-counts`) with its live-lease count ("1 live lease", "no live leases";
+`initiative-leases`) in the Tasks column, and the creation time as a `<time datetime>` whose text is relative
 (`web/src/lib/format.ts`: just now, minutes, hours, yesterday, days up to 7, then the local date) and
 whose `title` is the absolute local time. **New initiative** (a button beside the heading from 768 px
 up, a primary button anchored above the tab bar below it) opens the create form, a slug, a title, an
@@ -1572,7 +1574,31 @@ dropped (`web/src/lib/fetches.ts`); a refused create makes no fetch. An empty li
 The page calls the API with the session cookie, and its write sends the session's `X-CSRF-Token` (§3.2)
 (`e2e/initiatives.spec.ts` at 390x844 and 1440x900).
 
-**Initiative view libraries** (R9; the views that use them come in later tasks). `web/src/lib/markdown.ts` renders
+**Status filter.** Above the list, a select labelled Status holds open, closed and all (open by default). Choosing
+one fetches the list again with that `status` (the page keeps the choice for the reload after a create); an empty
+result says "No open initiatives", "No closed initiatives" or "No initiatives yet", and the select stays on
+screen in every state.
+
+**Initiative page** (`#/i/<slug>`, `web/src/InitiativePage.svelte`, R9). The route table (`web/src/lib/routes.ts`)
+holds it as an entry with `param: true`: its `hash` `#/i/` is a prefix and the one slash-free segment after it is the
+view's parameter (`routeParam`); it names `parent: 'initiatives'`, so it has no navigation entry of its own and the
+Initiatives entry is the one flagged `aria-current` while it is open. A fragment with an empty or multi-segment
+tail is not this route. The page reads `GET /api/v1/initiatives/<slug>` and `GET /api/v1/tasks?initiative=<slug>&status=all`
+(following `next_after`); a failure of either (an unknown slug is 404) shows its problem detail in an alert and no
+partial page. It shows a back link to the list, the title, the slug in monospace, the status badge, the tags, the
+targets ("Targets: 2026-03-01 to 2026-04-15", "from ...", "until ...", none when unset), the creation time, the
+description as rendered Markdown (`renderMarkdown`, the only HTML the page injects), the counts as three badges
+(open, done, closed) with the live-lease total, and the tasks. The counts are those of all the tasks, whatever the
+task filter shows. The tasks are one `<table>` from 768 px up and one card per task below it, with the columns Ref,
+Title, Kind, Status, Flags (the `active`, `blocked` and `overdue` badges of the task, from the API's derived fields)
+and Lease holder (the actor of the oldest live lease, "+N" for further ones). A select labelled Tasks filters them:
+not closed (open and done; the default), done, closed and all; the page holds every task, so choosing needs no
+fetch. A filter that keeps none says "No tasks match this filter." The logic is `web/src/lib/initiativePage.ts`
+(`InitiativePageStore`, `taskRows`, `taskBadges`, `leaseHolder`, `taskCounts`, `targetsText`). Specs:
+`e2e/initiative_page.spec.ts` (open from the list, filter the tasks, filter the list: open, then closed, then all) at
+390x844 and 1440x900; the page is also in `e2e/a11y.spec.ts` and `e2e/touch.spec.ts`.
+
+**Initiative view libraries** (R9). `web/src/lib/markdown.ts` renders
 a description as safe HTML: every character is escaped first, so raw HTML shows as text; paragraphs, headings (two
 levels down), lists, quotes, fenced code, inline code, bold, italic and links are the only markup; a link whose
 scheme is not http, https or mailto (after whitespace and control characters are ignored, as a browser does) is
@@ -1678,16 +1704,16 @@ element's own box: a visually hidden control does not count as met by being 1 px
 radios are transparent inputs laid over their 44 px-high labels rather than `sr-only`. Only the
 skip link, clipped away (`clip-path: inset(50%)`) until it takes focus, is outside the rule while
 hidden. Nothing depends on hover: every action is a button or a link. `e2e/touch.spec.ts` measures
-the Initiatives, Settings -> API keys and Signed out views and the new-initiative sheet, the new-key
+the Initiatives, initiative page, Settings -> API keys and Signed out views and the new-initiative sheet, the new-key
 sheet, the revoke confirmation and the account menu opened over them, and fails with the offending
 elements named when one is smaller or a field's text is under 16 px.
 
 **Accessibility bar.** axe-core (`@axe-core/playwright`, pinned exactly in `e2e/package.json`) reports
 zero violations of impact `serious` or `critical`, with no rule disabled and no element excluded, on
-every one of seven states: the Initiatives view, the Settings -> API keys view, the Signed out view,
+every one of eight states: the Initiatives view, the initiative page, the Settings -> API keys view, the Signed out view,
 and the new-initiative sheet, the new-key sheet, the revoke confirmation and the account menu opened
 over them. Each is scanned at 390x844 and 1440x900 in the light and the dark theme (the browser's
-colour scheme drives the System setting): 7 x 2 x 2 = 28 scans, in `e2e/a11y.spec.ts`. A failing
+colour scheme drives the System setting): 8 x 2 x 2 = 32 scans, in `e2e/a11y.spec.ts`. A failing
 scan names the rule, the impact and the offending elements. Colour contrast is met by the design
 tokens in both themes, never by a per-element override.
 

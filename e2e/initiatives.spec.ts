@@ -10,6 +10,9 @@ const viewports = [
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
 
+// The list request, whatever its query (the status filter rides on it).
+const isList = (url: URL) => url.pathname === '/api/v1/initiatives';
+
 const newInitiative = (page: Page) => page.getByRole('button', { name: 'New initiative' });
 
 async function openForm(page: Page) {
@@ -22,7 +25,7 @@ async function openForm(page: Page) {
 // Holds every GET of the list until the test releases it by its order (0 = the first fetch). Each held GET is
 // answered from the server as it stood when the request was made, so a fetch released late carries an older list;
 // `fail` answers it with a 503 problem document instead.
-async function holdListGets(page: Page, pattern: string) {
+async function holdListGets(page: Page, pattern: (url: URL) => boolean) {
   const held: { release: (fail?: boolean) => void }[] = [];
   await page.route(pattern, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
@@ -35,7 +38,7 @@ async function holdListGets(page: Page, pattern: string) {
     count: () => held.length,
     /** Releases GET number `n` and waits until the page has taken its answer in. */
     release: async (n: number, fail = false) => {
-      const landed = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith(pattern.replace('**', '')));
+      const landed = page.waitForResponse((r) => r.request().method() === 'GET' && pattern(new URL(r.url())));
       held[n]!.release(fail);
       await landed;
       // Lets the page parse the answer and render it before the test looks.
@@ -146,7 +149,7 @@ for (const vp of viewports) {
     });
 
     test('the empty state offers New initiative, which opens the form', async ({ page }) => {
-      await page.route('**/api/v1/initiatives', (route) =>
+      await page.route(isList, (route) =>
         route.request().method() === 'GET' ? route.fulfill({ json: { items: [] } }) : route.continue(),
       );
       await page.goto('/');
@@ -161,7 +164,7 @@ for (const vp of viewports) {
     test('loading shows skeleton rows until the list arrives', async ({ page }) => {
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => (release = resolve));
-      await page.route('**/api/v1/initiatives', async (route) => {
+      await page.route(isList, async (route) => {
         if (route.request().method() !== 'GET') return route.continue();
         await gate;
         return route.fulfill({ json: { items: [] } });
@@ -179,7 +182,7 @@ for (const vp of viewports) {
       let holdFrom = Number.POSITIVE_INFINITY;
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => (release = resolve));
-      await page.route('**/api/v1/initiatives', async (route) => {
+      await page.route(isList, async (route) => {
         if (route.request().method() !== 'GET') return route.continue();
         held += 1;
         if (held >= holdFrom) await gate;
@@ -200,7 +203,7 @@ for (const vp of viewports) {
     });
 
     test('a create submitted while the first fetch is pending keeps skeleton rows until both fetches have landed, then shows the newer list', async ({ page }) => {
-      const gets = await holdListGets(page, '**/api/v1/initiatives');
+      const gets = await holdListGets(page, isList);
       const skeleton = page.getByTestId('skeleton-row');
       await page.goto('/');
       await expect(skeleton).not.toHaveCount(0);
@@ -223,7 +226,7 @@ for (const vp of viewports) {
     });
 
     test('a first fetch that fails while the refresh after a create is pending keeps skeleton rows until the refresh lands', async ({ page }) => {
-      const gets = await holdListGets(page, '**/api/v1/initiatives');
+      const gets = await holdListGets(page, isList);
       const skeleton = page.getByTestId('skeleton-row');
       await page.goto('/');
       await expect.poll(gets.count).toBe(1);
@@ -266,7 +269,7 @@ for (const vp of viewports) {
       if (first === null || second === null) throw new Error('rows have no box');
       // The slug sits beneath the title, in monospace.
       const code = rows.first().locator('code');
-      const title = rows.first().locator('div').first();
+      const title = rows.first().getByTestId('initiative-link');
       expect((await code.boundingBox())!.y).toBeGreaterThan((await title.boundingBox())!.y);
       expect(await code.evaluate((node) => getComputedStyle(node).fontFamily)).toMatch(/mono|Consolas|Menlo/i);
 
@@ -282,7 +285,7 @@ for (const vp of viewports) {
       } else {
         expect(await display(page.locator('table'))).toBe('table');
         expect(await display(rows.first())).toBe('table-row');
-        await expect(page.getByRole('columnheader')).toHaveText(['Title', 'Status', 'Tags', 'Created']);
+        await expect(page.getByRole('columnheader')).toHaveText(['Title', 'Status', 'Tags', 'Tasks', 'Created']);
         expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
       }
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({

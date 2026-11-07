@@ -72,6 +72,12 @@ test.describe('phone 390x844', () => {
     await expectTouchFriendly(page, 4);
   });
 
+  test('the initiative page', async ({ page }) => {
+    await page.goto('/#/i/e2e-touch');
+    await expect(page.getByTestId('initiative-title')).toHaveText('Touch targets');
+    await expectTouchFriendly(page, 4);
+  });
+
   test('the Settings -> API keys view', async ({ page }) => {
     await page.getByTestId('nav-tabbar').getByRole('link', { name: 'Settings' }).click();
     await expect(page.getByTestId('key-row').first()).toBeVisible();

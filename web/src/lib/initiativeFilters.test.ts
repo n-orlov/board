@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_INITIATIVE_FILTER,
+  emptyInitiativesText,
   DEFAULT_TASK_FILTER,
   filterTasks,
   INITIATIVE_FILTERS,
@@ -69,5 +70,13 @@ describe('initiative page task filter', () => {
     expect(filterTasks(tasks, 'closed').map((t) => t.ref)).toEqual(['a-1']);
     expect(filterTasks(tasks, 'all')).toEqual(tasks);
     expect(filterTasks([], 'all')).toEqual([]);
+  });
+});
+
+describe('emptyInitiativesText', () => {
+  it('names the filter, except for all', () => {
+    expect(emptyInitiativesText('all')).toBe('No initiatives yet');
+    expect(emptyInitiativesText('open')).toBe('No open initiatives');
+    expect(emptyInitiativesText('closed')).toBe('No closed initiatives');
   });
 });

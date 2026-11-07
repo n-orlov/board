@@ -1,8 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type Page } from '@playwright/test';
 
-// R9: axe-core over the three views and the four dialogs/sheets of the R4 set, at the phone and the desktop
-// viewport, in the light and the dark theme: 7 states x 2 viewports x 2 themes = 28 scans. No rule is
+// R9: axe-core over the four views and the four dialogs/sheets of the R4 set, at the phone and the desktop
+// viewport, in the light and the dark theme: 8 states x 2 viewports x 2 themes = 32 scans. No rule is
 // disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -38,6 +38,14 @@ const states: State[] = [
     name: 'Initiatives view',
     open: async (page) => {
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'Initiative page',
+    open: async (page) => {
+      await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
+      await expect(page.getByTestId('task-row')).toHaveCount(1);
+      await expect(page.getByTestId('initiative-description').getByRole('link')).toHaveCount(1);
     },
   },
   {
@@ -100,8 +108,16 @@ for (const vp of viewports) {
           baseURL,
           extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
         });
-        const res = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-a11y', title: 'Accessibility', tags: ['a11y', 'axe'] } });
+        const res = await seed.post('/api/v1/initiatives', {
+          data: { slug: 'e2e-a11y', title: 'Accessibility', tags: ['a11y', 'axe'], description: '## Scope\n\nSee [the docs](https://example.com/docs).' },
+        });
         expect([201, 409]).toContain(res.status());
+        if (res.status() === 201) {
+          const task = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y', title: 'Scan the page' } });
+          expect(task.status()).toBe(201);
+          const { ref } = (await task.json()) as { ref: string };
+          expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning' } })).status()).toBe(201);
+        }
         await seed.dispose();
         await page.goto('/');
         await expect(page.getByTestId('initiative-row').first()).toBeVisible();
