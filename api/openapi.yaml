@@ -695,8 +695,9 @@ paths:
       tags: [tasks]
       summary: Edit a task
       description: >-
-        Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end`,
-        `cadence_seconds` and `next_check_at`, and `external_refs` replaces the list. `kind` and `initiative` are
+        Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end` and
+        `next_check_at`, a watch task's `cadence_seconds` cannot be cleared (`null` is 400) and stays 60 to 31536000,
+        and `external_refs` replaces the list. `kind` and `initiative` are
         immutable, and sending either is 400. A patch that changes nothing answers 200 and writes no row, event or
         actor. A change appends `task_updated` whose `data.changed` names the changed fields. A closed task, or a
         task of a closed initiative, is 409.
@@ -2298,8 +2299,8 @@ components:
     TaskPatch:
       type: object
       description: >-
-        The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`,
-        `cadence_seconds` and `next_check_at`, and is 400 for the others.
+        The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end` and
+        `next_check_at`, and is 400 for the others, `cadence_seconds` included.
       properties:
         title:
           type: [string, "null"]
@@ -2326,7 +2327,7 @@ components:
           format: int64
           x-go-type: Maybe[int64]
           x-go-type-skip-optional-pointer: true
-          description: Watch tasks only. 60 to 31536000.
+          description: Watch tasks only, and never cleared. 60 to 31536000.
         next_check_at:
           type: [string, "null"]
           format: date-time

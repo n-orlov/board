@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cadenceInput, dayOf, toTaskEditForm, toTaskPatch, type TaskEditForm } from './taskEdit';
+import { CADENCE_REQUIRED, cadenceInput, dayOf, toTaskEditForm, toTaskPatch, type TaskEditForm } from './taskEdit';
 
 const form = (extra: Partial<TaskEditForm> = {}): TaskEditForm => ({ title: 'T', description: 'D', plannedStart: '', plannedEnd: '', cadence: '', ...extra });
 
@@ -63,12 +63,22 @@ describe('toTaskPatch', () => {
     });
   });
 
-  it('sends a watch task its cadence in seconds, null when emptied, and a work task never', () => {
+  it('sends a watch task its cadence in seconds, and a work task never', () => {
     const watch = form({ cadence: '15m' });
     expect(toTaskPatch(form({ cadence: '2h' }), watch, 'watch')).toEqual({ ok: true, body: { cadence_seconds: 7200 } });
-    expect(toTaskPatch(form({ cadence: ' ' }), watch, 'watch')).toEqual({ ok: true, body: { cadence_seconds: null } });
+    expect(toTaskPatch(form({ cadence: '60s' }), watch, 'watch')).toEqual({ ok: true, body: { cadence_seconds: 60 } });
+    expect(toTaskPatch(form({ cadence: '365d' }), watch, 'watch')).toEqual({ ok: true, body: { cadence_seconds: 31536000 } });
     expect(toTaskPatch(form({ cadence: '15m ' }), watch, 'watch')).toEqual({ ok: true, body: {} });
     expect(toTaskPatch(form({ cadence: '2h' }), watch, 'work')).toEqual({ ok: true, body: {} });
+  });
+
+  it('refuses an emptied watch cadence, never sending null, while an emptied planned date still clears', () => {
+    const watch = form({ cadence: '15m', plannedStart: '2026-03-01' });
+    for (const empty of ['', ' ', '\t']) {
+      expect(toTaskPatch(form({ cadence: empty, plannedStart: '2026-03-01' }), watch, 'watch')).toEqual({ ok: false, error: CADENCE_REQUIRED });
+      expect(toTaskPatch(form({ cadence: empty, plannedStart: '' }), watch, 'watch')).toEqual({ ok: false, error: CADENCE_REQUIRED });
+    }
+    expect(toTaskPatch(form({ cadence: '15m', plannedStart: '' }), watch, 'watch')).toEqual({ ok: true, body: { planned_start: null } });
   });
 
   it('refuses a cadence that is not a number and a unit, and says how to type it', () => {

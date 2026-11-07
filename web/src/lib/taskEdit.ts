@@ -40,6 +40,9 @@ export function toTaskEditForm(task: Pick<TaskDetail, 'title' | 'description' | 
   };
 }
 
+/** A watch task's cadence cannot be cleared; an emptied field is refused in the form. */
+export const CADENCE_REQUIRED = 'A watch task needs a cadence: a number and a unit, such as 15m, 2h or 1d.';
+
 export type TaskPatchResult = { ok: true; body: TaskPatch } | { ok: false; error: string };
 
 /** A planned time: the start of the day typed, or `null` (clear it) when the field was emptied. */
@@ -51,7 +54,7 @@ function planned(date: string): string | null {
 function cadencePatch(form: TaskEditForm, initial: TaskEditForm, kind: string): TaskPatchResult {
   const text = form.cadence.trim();
   if (kind !== 'watch' || text === initial.cadence.trim()) return { ok: true, body: {} };
-  if (text === '') return { ok: true, body: { cadence_seconds: null } };
+  if (text === '') return { ok: false, error: CADENCE_REQUIRED };
   const seconds = parseCadence(text);
   return seconds === undefined ? { ok: false, error: CADENCE_HINT } : { ok: true, body: { cadence_seconds: seconds } };
 }
@@ -67,7 +70,8 @@ function fieldsPatch(form: TaskEditForm, initial: TaskEditForm): TaskPatch {
 
 /**
  * The patch that turns `initial` into `form`: text is trimmed, a field that did not change is left out, an emptied planned
- * time or cadence is `null` (which clears it). A cadence that is not a number and a unit is an error shown in the form.
+ * time is `null` (which clears it). A watch cadence cannot be cleared: an emptied one, or one that is not a number and a
+ * unit, is an error shown in the form.
  */
 export function toTaskPatch(form: TaskEditForm, initial: TaskEditForm, kind: string): TaskPatchResult {
   const cadence = cadencePatch(form, initial, kind);

@@ -1218,9 +1218,9 @@ type TaskMilestone struct {
 	Summary string `json:"summary"`
 }
 
-// TaskPatch The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others.
+// TaskPatch The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end` and `next_check_at`, and is 400 for the others, `cadence_seconds` included.
 type TaskPatch struct {
-	// CadenceSeconds Watch tasks only. 60 to 31536000.
+	// CadenceSeconds Watch tasks only, and never cleared. 60 to 31536000.
 	CadenceSeconds Maybe[int64] `json:"cadence_seconds,omitempty"`
 
 	// Description Markdown, at most 20000 characters.

@@ -837,8 +837,10 @@ principal may use them. The server answers 503 problem documents when it runs wi
   naming `GET /api/v1/tasks/<ref>` for a ref that names no task, however it is spelled.
 - **`PATCH /api/v1/tasks/{ref}`**, body any of `title`, `description`, `planned_start`, `planned_end`,
   `cadence_seconds`, `next_check_at`, `external_refs` (which replaces the list). A field left out keeps its value. `null`
-  clears `planned_start`, `planned_end`, `next_check_at` and `cadence_seconds` (a watch task then fails the cadence rule,
-  **400**), and is **400** for `title`, `description` and `external_refs`. `kind` and `initiative` are immutable, and a
+  clears `planned_start`, `planned_end` and `next_check_at` (nullable). `cadence_seconds` is not nullable on a watch task: it
+  is required there and stays within 60 to 31536000, so `null`, a value under 60 or one over 31536000 is **400** and the
+  stored cadence is unchanged (on a work task `null` is the no-op it already is). `null` is also **400** for `title`,
+  `description` and `external_refs`. `kind` and `initiative` are immutable, and a
   body that names either, even unchanged, is **400**. The same field rules as a create apply to the task as it would be
   after the patch. A patch that changes nothing, a `{}` or values equal to the stored ones, answers **200** and writes
   no row, no event and no actor. A change writes the row and one `task_updated` event whose `data` is
@@ -1702,8 +1704,9 @@ first, each with its summary, a relative time (the absolute local time in its `t
 (`data-type`). The actions come from `taskActions`: **Edit** (not on a closed task), **Done** (open), **Reopen** (done or
 closed), **Close** (not closed). Done and Reopen act at once; **Edit** opens the one `Dialog` (a bottom sheet on the
 phone) with Title, Description, Planned start and end, and for a watch task Cadence, and sends only the fields that
-differ from the task as it was shown (`toTaskPatch`: an emptied planned date or cadence is `null`, which clears it; a
-cadence that is not a number and a unit is refused in the form); **Close** opens a confirmation with a Resolution select
+differ from the task as it was shown (`toTaskPatch`: an emptied planned date is `null`, which clears it; a
+cadence cannot be cleared, so an emptied cadence, like one that is not a number and a unit, is refused in the form and nothing
+is sent); **Close** opens a confirmation with a Resolution select
 (completed, dropped, superseded, duplicate; completed first) and posts the chosen one. A refusal from the API (a stale
 page, an empty title) shows its problem detail inline, in the dialog when one is open (which stays open with what was
 typed) and as an alert under the header otherwise. A success closes the dialog, shows a toast ("Task aa-1 marked done",

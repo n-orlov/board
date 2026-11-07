@@ -280,6 +280,19 @@ Feature: Tasks over HTTP
     Then the response status is 400
     And exactly 0 task_updated events exist for the task "aa-1"
 
+  Scenario: a watch cadence is accepted at both bounds, refused as null after, and a planned date may still be cleared
+    Given I create a watch task in "aa" titled "watch" with a cadence of 3600 seconds as actor "claude@laptop"
+    When I patch the task "aa-1" with body "{'cadence_seconds':60,'planned_start':'2026-12-01T00:00:00Z'}" as actor "claude@laptop"
+    Then the response status is 200
+    When I patch the task "aa-1" with body "{'cadence_seconds':31536000}" as actor "claude@laptop"
+    Then the response status is 200
+    And the response path "cadence_seconds" is "31536000"
+    When I patch the task "aa-1" with body "{'cadence_seconds':null}" as actor "claude@laptop"
+    Then the response status is 400
+    When I patch the task "aa-1" with body "{'planned_start':null}" as actor "claude@laptop"
+    Then the response status is 200
+    And the response path "planned_start" is absent
+
   Scenario: a patch that changes nothing is 200 and writes no event, row or actor
     Given I create a task in "aa" titled "one" as actor "claude@laptop"
     And I create a watch task in "aa" titled "watch" with a cadence of 3600 seconds as actor "claude@laptop"

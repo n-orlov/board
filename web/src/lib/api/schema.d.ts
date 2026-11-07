@@ -299,7 +299,7 @@ export interface paths {
         head?: never;
         /**
          * Edit a task
-         * @description Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and `external_refs` replaces the list. `kind` and `initiative` are immutable, and sending either is 400. A patch that changes nothing answers 200 and writes no row, event or actor. A change appends `task_updated` whose `data.changed` names the changed fields. A closed task, or a task of a closed initiative, is 409.
+         * @description Changes the fields sent. A field left out keeps its value, `null` clears `planned_start`, `planned_end` and `next_check_at`, a watch task's `cadence_seconds` cannot be cleared (`null` is 400) and stays 60 to 31536000, and `external_refs` replaces the list. `kind` and `initiative` are immutable, and sending either is 400. A patch that changes nothing answers 200 and writes no row, event or actor. A change appends `task_updated` whose `data.changed` names the changed fields. A closed task, or a task of a closed initiative, is 409.
          */
         patch: operations["patchTask"];
         trace?: never;
@@ -1164,7 +1164,7 @@ export interface components {
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
         };
-        /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end`, `cadence_seconds` and `next_check_at`, and is 400 for the others. */
+        /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end` and `next_check_at`, and is 400 for the others, `cadence_seconds` included. */
         TaskPatch: {
             /** @description 1 to 200 characters. */
             title?: string | null;
@@ -1176,7 +1176,7 @@ export interface components {
             planned_end?: string | null;
             /**
              * Format: int64
-             * @description Watch tasks only. 60 to 31536000.
+             * @description Watch tasks only, and never cleared. 60 to 31536000.
              */
             cadence_seconds?: number | null;
             /**
