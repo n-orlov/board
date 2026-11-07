@@ -4,7 +4,8 @@
 import { countsText, leasesText, type TaskCounts } from './counts';
 import { errorText } from './fetches';
 import { DEFAULT_TASK_FILTER, filterTasks, type TaskFilter } from './initiativeFilters';
-import type { Initiative, InitiativesApi, TaskListItem } from './initiatives';
+import type { Initiative, InitiativeEdit, InitiativesApi, TaskListItem } from './initiatives';
+import { toPatch } from './initiatives';
 import type { Tone } from './presentation';
 
 /** How many of the tasks are in each status. */
@@ -87,14 +88,18 @@ export interface InitiativePageState {
   loading: boolean;
   /** Why the page could not be read. */
   error: string | undefined;
+  /** Why the last edit, close or reopen was refused; shown inside its dialog, which keeps what was typed. */
+  dialogError: string | undefined;
 }
 
-export class InitiativePageStore {
-  private readonly api: Pick<InitiativesApi, 'get' | 'tasks'>;
-  private readonly onChange: (state: InitiativePageState) => void;
-  private current: InitiativePageState = { initiative: undefined, tasks: [], filter: DEFAULT_TASK_FILTER, loading: true, error: undefined };
+type PageApi = Pick<InitiativesApi, 'get' | 'tasks' | 'patch' | 'close' | 'reopen'>;
 
-  constructor(api: Pick<InitiativesApi, 'get' | 'tasks'>, onChange: (state: InitiativePageState) => void) {
+export class InitiativePageStore {
+  private readonly api: PageApi;
+  private readonly onChange: (state: InitiativePageState) => void;
+  private current: InitiativePageState = { initiative: undefined, tasks: [], filter: DEFAULT_TASK_FILTER, loading: true, error: undefined, dialogError: undefined };
+
+  constructor(api: PageApi, onChange: (state: InitiativePageState) => void) {
     this.api = api;
     this.onChange = onChange;
   }
@@ -110,13 +115,50 @@ export class InitiativePageStore {
 
   /** Reads the initiative and its tasks; either failing shows one error and no half page. */
   async load(slug: string): Promise<void> {
-    this.set({ loading: true });
+    this.set({ loading: true, dialogError: undefined });
+    await this.read(slug);
+  }
+
+  private async read(slug: string): Promise<void> {
     try {
       const [initiative, tasks] = await Promise.all([this.api.get(slug), this.api.tasks(slug)]);
       this.set({ initiative, tasks, loading: false, error: undefined });
     } catch (e) {
       this.set({ initiative: undefined, tasks: [], loading: false, error: errorText(e) });
     }
+  }
+
+  /** Runs a write; on success the page is read again (without the skeleton), on a refusal `dialogError` says why. Whether it worked. */
+  private async write(slug: string, action: () => Promise<unknown>): Promise<boolean> {
+    try {
+      await action();
+    } catch (e) {
+      this.set({ dialogError: errorText(e) });
+      return false;
+    }
+    this.set({ dialogError: undefined });
+    await this.read(slug);
+    return true;
+  }
+
+  /** Saves the edit form. */
+  edit(slug: string, form: InitiativeEdit): Promise<boolean> {
+    return this.write(slug, () => this.api.patch(slug, toPatch(form)));
+  }
+
+  /** Closes the initiative; `force` drops the tasks that are not closed first. */
+  close(slug: string, force: boolean): Promise<boolean> {
+    return this.write(slug, () => this.api.close(slug, force));
+  }
+
+  /** Reopens the closed initiative. */
+  reopen(slug: string): Promise<boolean> {
+    return this.write(slug, () => this.api.reopen(slug));
+  }
+
+  /** Forgets a refusal, for a dialog that is opened again. */
+  clearDialogError(): void {
+    this.set({ dialogError: undefined });
   }
 
   /** Chooses which tasks the table shows; no fetch is needed, the page holds all of them. */

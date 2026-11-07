@@ -13,6 +13,7 @@ export type Initiative = components['schemas']['Initiative'];
 export type InitiativeListItem = components['schemas']['InitiativeListItem'];
 export type TaskListItem = components['schemas']['TaskListItem'];
 export type InitiativeCreate = components['schemas']['InitiativeCreate'];
+export type InitiativePatch = components['schemas']['InitiativePatch'];
 
 /** What the create form collects: tags are one comma-separated line. */
 export interface InitiativeForm {
@@ -20,6 +21,15 @@ export interface InitiativeForm {
   title: string;
   description: string;
   tags: string;
+}
+
+/** What the edit dialog collects: tags are one comma-separated line, a target is a date or empty. */
+export interface InitiativeEdit {
+  title: string;
+  description: string;
+  tags: string;
+  targetStart: string;
+  targetEnd: string;
 }
 
 /** A refused or failed call; `status` is 0 when the server could not be reached. */
@@ -32,17 +42,46 @@ export class InitiativesError extends Error {
   }
 }
 
+/** The tags of a comma-separated line, trimmed, blanks dropped. */
+export function parseTags(line: string): string[] {
+  return line
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== '');
+}
+
 /** The request body for a form: text is trimmed, blank optional fields are left out. */
 export function toCreate(form: InitiativeForm): InitiativeCreate {
   const body: InitiativeCreate = { slug: form.slug.trim(), title: form.title.trim() };
   const description = form.description.trim();
   if (description !== '') body.description = description;
-  const tags = form.tags
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter((tag) => tag !== '');
+  const tags = parseTags(form.tags);
   if (tags.length > 0) body.tags = tags;
   return body;
+}
+
+/** The edit form as typed for an initiative as it is now. */
+export function toEditForm(initiative: Pick<Initiative, 'title' | 'description' | 'tags' | 'target_start' | 'target_end'>): InitiativeEdit {
+  return {
+    title: initiative.title,
+    description: initiative.description,
+    tags: initiative.tags.join(', '),
+    targetStart: initiative.target_start ?? '',
+    targetEnd: initiative.target_end ?? '',
+  };
+}
+
+/** The patch for the edit form: every field is sent, so what is shown is what the initiative becomes; a blank target is `null`, which clears it. */
+export function toPatch(form: InitiativeEdit): InitiativePatch {
+  const start = form.targetStart.trim();
+  const end = form.targetEnd.trim();
+  return {
+    title: form.title.trim(),
+    description: form.description.trim(),
+    tags: parseTags(form.tags),
+    target_start: start === '' ? null : start,
+    target_end: end === '' ? null : end,
+  };
 }
 
 export class InitiativesApi {
@@ -104,6 +143,28 @@ export class InitiativesApi {
       after = page.next_after;
     } while (after !== undefined);
     return items;
+  }
+
+  private async write(path: string, what: string, method: 'PATCH' | 'POST', body?: object): Promise<Initiative> {
+    const headers: Record<string, string> = { Accept: 'application/json', 'X-CSRF-Token': this.csrf() };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const response = await this.call(`/api/v1/initiatives/${path}`, what, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    return (await response.json()) as Initiative;
+  }
+
+  /** Changes the fields sent; the initiative after the edit. */
+  patch(slug: string, body: InitiativePatch): Promise<Initiative> {
+    return this.write(encodeURIComponent(slug), 'Editing the initiative', 'PATCH', body);
+  }
+
+  /** Closes an initiative; with `force` the tasks that are not closed are dropped first. */
+  close(slug: string, force: boolean): Promise<Initiative> {
+    return this.write(`${encodeURIComponent(slug)}/close`, 'Closing the initiative', 'POST', force ? { force: true } : {});
+  }
+
+  /** Reopens a closed initiative; its tasks stay closed. */
+  reopen(slug: string): Promise<Initiative> {
+    return this.write(`${encodeURIComponent(slug)}/reopen`, 'Reopening the initiative', 'POST');
   }
 
   async create(body: InitiativeCreate): Promise<Initiative> {

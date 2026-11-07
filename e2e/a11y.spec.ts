@@ -1,8 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type Page } from '@playwright/test';
 
-// R9: axe-core over the four views and the four dialogs/sheets of the R4 set, at the phone and the desktop
-// viewport, in the light and the dark theme: 8 states x 2 viewports x 2 themes = 32 scans. No rule is
+// R9: axe-core over the four views, the four dialogs/sheets of the R4 set and the initiative page's Edit and Close dialogs, at the phone and the desktop
+// viewport, in the light and the dark theme: 10 states x 2 viewports x 2 themes = 40 scans. No rule is
 // disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -46,6 +46,22 @@ const states: State[] = [
       await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
       await expect(page.getByTestId('task-row')).toHaveCount(1);
       await expect(page.getByTestId('initiative-description').getByRole('link')).toHaveCount(1);
+    },
+  },
+  {
+    name: 'edit-initiative sheet',
+    open: async (page) => {
+      await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
+      await page.getByRole('button', { name: 'Edit' }).click();
+      await expect(page.getByRole('dialog', { name: 'Edit initiative' })).toBeVisible();
+    },
+  },
+  {
+    name: 'close-initiative sheet',
+    open: async (page) => {
+      await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: 'Close initiative' })).toBeVisible();
     },
   },
   {

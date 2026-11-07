@@ -1,8 +1,8 @@
-import { expect, test as base, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // Signs in through the mock provider, so no API key rides along (see login.spec.ts).
 // The initiative page `#/i/<slug>` and the Initiatives list's links, counts, live leases and status filter,
-// at the phone and the desktop size.
+// and the page's Edit, Close (with force) and Reopen dialogs, at the phone and the desktop size.
 const test = base;
 
 const viewports = [
@@ -50,6 +50,23 @@ async function seed(api: APIRequestContext, prefix: string) {
   await post(api, `/api/v1/tasks/${dropped.ref}/close`, { resolution: 'dropped' }, 200);
   return { open, closed, leased: leased.ref, done: done.ref, dropped: dropped.ref, blocked: blocked.ref };
 }
+
+// A fresh open initiative per test (the dialog tests change it), with the given tags and open tasks; returns its slug.
+async function fresh(api: APIRequestContext, slug: string, tasks = 0, extra: object = {}) {
+  await post(api, '/api/v1/initiatives', { slug, title: `Fresh ${slug}`, description: 'Old words.', tags: ['old', 'keep'], target_start: '2026-03-01', ...extra }, 201);
+  const refs: string[] = [];
+  for (let n = 1; n <= tasks; n++) refs.push((await post(api, '/api/v1/tasks', { initiative: slug, title: `Task ${n}` }, 201)).ref);
+  return refs;
+}
+
+async function apiContext(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined) {
+  return playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' },
+  });
+}
+
+const dialog = (page: Page, name: string) => page.getByRole('dialog', { name });
 
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
@@ -163,6 +180,194 @@ for (const vp of viewports) {
       await filter.selectOption('all');
       await expect(row(page, seeded.open)).toHaveCount(1);
       await expect(row(page, seeded.closed)).toHaveCount(1);
+    });
+
+    test('Edit changes the title, description, tags and targets in one dialog', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-ed-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      await page.goto(`/#/i/${slug}`);
+      await expect(page.getByTestId('tag')).toHaveText(['keep', 'old']);
+      await expect(page.getByTestId('initiative-targets')).toHaveText('Targets: from 2026-03-01');
+
+      await page.getByRole('button', { name: 'Edit' }).click();
+      const edit = dialog(page, 'Edit initiative');
+      await expect(edit).toBeVisible();
+      // The form starts from the initiative as it is, and its fields are phone-sized (16 px, 44 px).
+      await expect(edit.getByLabel('Title')).toHaveValue(`Fresh ${slug}`);
+      await expect(edit.getByLabel('Description')).toHaveValue('Old words.');
+      await expect(edit.getByLabel('Tags')).toHaveValue('keep, old');
+      await expect(edit.getByLabel('Target start')).toHaveValue('2026-03-01');
+      await expect(edit.getByLabel('Target end')).toHaveValue('');
+      const box = await edit.getByLabel('Title').boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(await edit.getByLabel('Title').evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
+
+      await edit.getByLabel('Title').fill('Renamed plan');
+      await edit.getByLabel('Description').fill('New **bold** words.');
+      await edit.getByLabel('Tags').fill('web, fresh');
+      await edit.getByLabel('Target start').fill('2026-05-01');
+      await edit.getByLabel('Target end').fill('2026-06-30');
+      await edit.getByRole('button', { name: 'Save' }).click();
+
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toHaveText('Initiative saved');
+      await expect(page.getByTestId('initiative-title')).toHaveText('Renamed plan');
+      await expect(page.getByTestId('initiative-description').locator('strong')).toHaveText('bold');
+      await expect(page.getByTestId('tag')).toHaveText(['fresh', 'web']);
+      await expect(page.getByTestId('initiative-targets')).toHaveText('Targets: 2026-05-01 to 2026-06-30');
+
+      // Emptying a target clears it.
+      await page.getByRole('button', { name: 'Edit' }).click();
+      await dialog(page, 'Edit initiative').getByLabel('Target end').fill('');
+      await dialog(page, 'Edit initiative').getByLabel('Target start').fill('');
+      await dialog(page, 'Edit initiative').getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByTestId('initiative-targets')).toHaveCount(0);
+      const saved = (await (await api.get(`/api/v1/initiatives/${slug}`)).json()) as Record<string, unknown>;
+      expect(saved).toMatchObject({ title: 'Renamed plan', description: 'New **bold** words.', tags: ['fresh', 'web'] });
+      expect(saved.target_start).toBeUndefined();
+      expect(saved.target_end).toBeUndefined();
+      await api.dispose();
+    });
+
+    test('a refused edit keeps the input and shows the refusal inside the dialog', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-rf-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      await page.goto(`/#/i/${slug}`);
+      await page.getByRole('button', { name: 'Edit' }).click();
+      const edit = dialog(page, 'Edit initiative');
+      await edit.getByLabel('Title').fill('Typed title');
+      await edit.getByLabel('Tags').fill('typed');
+      await edit.getByLabel('Target start').fill('2026-09-01');
+      await edit.getByLabel('Target end').fill('2026-08-01');
+      await edit.getByRole('button', { name: 'Save' }).click();
+
+      const refusal = edit.getByRole('alert');
+      await expect(refusal).toBeVisible();
+      await expect(refusal).toContainText('target_end');
+      await expect(edit.getByLabel('Title')).toHaveValue('Typed title');
+      await expect(edit.getByLabel('Tags')).toHaveValue('typed');
+      await expect(edit.getByLabel('Target end')).toHaveValue('2026-08-01');
+      // The page behind it is unchanged, and nothing was saved.
+      await expect(page.getByTestId('initiative-title')).toHaveText(`Fresh ${slug}`);
+      await expect(page.getByTestId('toast')).toHaveCount(0);
+
+      // Correcting the dates lets the same dialog save.
+      await edit.getByLabel('Target end').fill('2026-10-01');
+      await edit.getByRole('button', { name: 'Save' }).click();
+      await expect(edit).toHaveCount(0);
+      await expect(page.getByTestId('initiative-title')).toHaveText('Typed title');
+      await expect(page.getByTestId('initiative-targets')).toHaveText('Targets: 2026-09-01 to 2026-10-01');
+
+      // A blank title is refused as well; Cancel leaves the page as it was.
+      await page.getByRole('button', { name: 'Edit' }).click();
+      await dialog(page, 'Edit initiative').getByLabel('Title').fill('');
+      await dialog(page, 'Edit initiative').getByRole('button', { name: 'Save' }).click();
+      await expect(dialog(page, 'Edit initiative').getByRole('alert')).toBeVisible();
+      await dialog(page, 'Edit initiative').getByRole('button', { name: 'Cancel' }).click();
+      await expect(dialog(page, 'Edit initiative')).toHaveCount(0);
+      await expect(page.getByTestId('initiative-title')).toHaveText('Typed title');
+      await api.dispose();
+    });
+
+    test('Close with no tasks asks for confirmation, then closes; Cancel closes nothing', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-c0-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      await page.goto(`/#/i/${slug}`);
+      await expect(page.getByTestId('initiative-status')).toHaveText('open');
+      await expect(page.getByRole('button', { name: 'Reopen' })).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      const confirm = dialog(page, 'Close initiative');
+      await expect(confirm.getByTestId('dialog-body')).toHaveText('Closing stops new tasks and edits to its tasks until it is reopened.');
+      await expect(confirm.getByRole('button', { name: 'Close initiative' })).toBeVisible();
+      await confirm.getByRole('button', { name: 'Cancel' }).click();
+      await expect(confirm).toHaveCount(0);
+      await expect(page.getByTestId('initiative-status')).toHaveText('open');
+
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await dialog(page, 'Close initiative').getByRole('button', { name: 'Close initiative' }).click();
+      await expect(dialog(page, 'Close initiative')).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toHaveText(`Initiative ${slug} closed`);
+      await expect(page.getByTestId('initiative-status')).toHaveText('closed');
+      await expect(page.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Reopen' })).toBeVisible();
+      await api.dispose();
+    });
+
+    test('Close with an open task says how many and drops them through the force path', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-cf-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      const [open, done, gone] = await fresh(api, slug, 3);
+      await post(api, `/api/v1/tasks/${done}/done`, {}, 200);
+      await post(api, `/api/v1/tasks/${gone}/close`, { resolution: 'dropped' }, 200);
+      await page.goto(`/#/i/${slug}`);
+      await expect(page.getByTestId('count-open')).toHaveText('1 open');
+
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      const confirm = dialog(page, 'Close initiative');
+      // The open and the done task are not closed; the dropped one is not counted.
+      await expect(confirm.getByTestId('dialog-body')).toHaveText('2 tasks not closed. Closing drops them too: each is closed as dropped.');
+      await expect(confirm.getByRole('button', { name: 'Close initiative', exact: true })).toHaveCount(0);
+      await confirm.getByRole('button', { name: 'Close and drop 2 tasks' }).click();
+
+      await expect(confirm).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toHaveText(`Initiative ${slug} closed, 2 tasks dropped`);
+      await expect(page.getByTestId('initiative-status')).toHaveText('closed');
+      await expect(page.getByTestId('count-open')).toHaveText('0 open');
+      await expect(page.getByTestId('count-done')).toHaveText('0 done');
+      await expect(page.getByTestId('count-closed')).toHaveText('3 closed');
+      await expect(page.getByTestId('task-row')).toHaveCount(0);
+      await page.getByRole('combobox', { name: 'Tasks' }).selectOption('closed');
+      await expect(page.getByTestId('task-row')).toHaveCount(3);
+      await expect(taskRow(page, open).getByTestId('task-status')).toHaveText('closed');
+      const task = (await (await api.get(`/api/v1/tasks/${open}`)).json()) as { resolution: string };
+      expect(task.resolution).toBe('dropped');
+      await api.dispose();
+    });
+
+    test('Reopen asks for confirmation and opens a closed initiative again, its tasks staying closed', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-ro-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      const [task] = await fresh(api, slug, 1);
+      await post(api, `/api/v1/initiatives/${slug}/close`, { force: true }, 200);
+      await page.goto(`/#/i/${slug}`);
+      await expect(page.getByTestId('initiative-status')).toHaveText('closed');
+      await expect(page.getByTestId('count-closed')).toHaveText('1 closed');
+
+      await page.getByRole('button', { name: 'Reopen' }).click();
+      const confirm = dialog(page, 'Reopen initiative');
+      await expect(confirm.getByTestId('dialog-body')).toContainText('closed tasks stay closed');
+      await confirm.getByRole('button', { name: 'Cancel' }).click();
+      await expect(page.getByTestId('initiative-status')).toHaveText('closed');
+
+      await page.getByRole('button', { name: 'Reopen' }).click();
+      await dialog(page, 'Reopen initiative').getByRole('button', { name: 'Reopen initiative' }).click();
+      await expect(dialog(page, 'Reopen initiative')).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toHaveText(`Initiative ${slug} reopened`);
+      await expect(page.getByTestId('initiative-status')).toHaveText('open');
+      await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Reopen' })).toHaveCount(0);
+      await expect(page.getByTestId('count-closed')).toHaveText('1 closed');
+      await page.getByRole('combobox', { name: 'Tasks' }).selectOption('closed');
+      await expect(taskRow(page, task).getByTestId('task-status')).toHaveText('closed');
+      await api.dispose();
+    });
+
+    test('a close the server refuses shows its refusal in the dialog and keeps it open', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-st-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      await page.goto(`/#/i/${slug}`);
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      // Someone else closes it while the dialog is open: the second close is a 409.
+      await post(api, `/api/v1/initiatives/${slug}/close`, {}, 200);
+      await dialog(page, 'Close initiative').getByRole('button', { name: 'Close initiative' }).click();
+      await expect(dialog(page, 'Close initiative').getByRole('alert')).toContainText('already closed');
+      await expect(dialog(page, 'Close initiative')).toBeVisible();
+      await api.dispose();
     });
   });
 }

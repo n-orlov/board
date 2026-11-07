@@ -100,6 +100,18 @@ test.describe('phone 390x844', () => {
     await expectTouchFriendly(page, 8);
   });
 
+  test('the edit-initiative and close-initiative sheets', async ({ page }) => {
+    await page.goto('/#/i/e2e-touch');
+    await expect(page.getByTestId('initiative-title')).toHaveText('Touch targets');
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByRole('dialog', { name: 'Edit initiative' })).toBeVisible();
+    await expectTouchFriendly(page, 8);
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Close initiative' })).toBeVisible();
+    await expectTouchFriendly(page, 6);
+  });
+
   test('the new-key sheet', async ({ page }) => {
     await page.getByTestId('nav-tabbar').getByRole('link', { name: 'Settings' }).click();
     await page.getByRole('button', { name: 'New API key' }).click();

@@ -1,10 +1,15 @@
 <script lang="ts">
+  import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import { absoluteTime, relativeTime } from './lib/format';
   import { countBadges } from './lib/counts';
   import { TASK_FILTERS, type TaskFilter } from './lib/initiativeFilters';
   import { InitiativePageStore, liveLeaseCount, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
-  import { InitiativesApi } from './lib/initiatives';
+  import InitiativeConfirm from './InitiativeConfirm.svelte';
+  import InitiativeEditForm from './InitiativeEditForm.svelte';
+  import Toast from './Toast.svelte';
+  import { closedToast, closeBody, closeLabel, notClosedCount, REOPEN_BODY } from './lib/initiativeDialogs';
+  import { InitiativesApi, toEditForm, type InitiativeEdit } from './lib/initiatives';
   import { renderMarkdown } from './lib/markdown';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { currentBrowser } from './lib/session';
@@ -12,7 +17,9 @@
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
-  let view: InitiativePageState = $state({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined });
+  let view: InitiativePageState = $state({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined, dialogError: undefined });
+  let dialog: 'edit' | 'close' | 'reopen' | undefined = $state(undefined);
+  let toast = $state('');
 
   const store = new InitiativePageStore(new InitiativesApi(currentBrowser(), () => csrf), (s) => (view = s));
 
@@ -20,11 +27,29 @@
     void store.load(param);
   });
 
+  function open(which: 'edit' | 'close' | 'reopen') {
+    store.clearDialogError();
+    dialog = which;
+  }
+
+  async function finish(done: Promise<boolean>, message: string) {
+    if (await done) {
+      dialog = undefined;
+      toast = message;
+    }
+  }
+
+  const save = (form: InitiativeEdit) => finish(store.edit(param, form), 'Initiative saved');
+  const closeIt = (dropped: number) => finish(store.close(param, dropped > 0), closedToast(param, dropped));
+  const reopenIt = () => finish(store.reopen(param), `Initiative ${param} reopened`);
+
   const now = new Date();
+  const pending = $derived(notClosedCount(view.tasks));
   const rows = $derived(taskRows(view.tasks, view.filter));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const cell = 'md:table-cell md:px-3 md:py-3';
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
+  const action = 'min-h-11 rounded-md border border-border bg-surface-raised px-4 text-sm font-medium text-text';
   const back = 'inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline';
 </script>
 
@@ -59,6 +84,14 @@
         Created <time datetime={initiative.created_at} title={absoluteTime(initiative.created_at)}>{relativeTime(initiative.created_at, now)}</time>
         by {initiative.created_by}
       </p>
+      <div class="mt-3 flex flex-wrap gap-2" data-testid="initiative-actions">
+        <button type="button" class={action} onclick={() => open('edit')}>Edit</button>
+        {#if initiative.status === 'open'}
+          <button type="button" class={action} onclick={() => open('close')}>Close</button>
+        {:else}
+          <button type="button" class={action} onclick={() => open('reopen')}>Reopen</button>
+        {/if}
+      </div>
     </header>
 
     {#if initiative.description !== ''}
@@ -119,3 +152,30 @@
     {/if}
   {/if}
 </section>
+
+<Toast message={toast} onclear={() => (toast = '')} />
+
+{#if dialog !== undefined && view.initiative !== undefined}
+  {@const initiative = view.initiative}
+  {#if dialog === 'edit'}
+    <Dialog label="Edit initiative" onclose={() => (dialog = undefined)} initialFocus="input[name=title]">
+      <InitiativeEditForm initial={toEditForm(initiative)} error={view.dialogError} onsave={save} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'close'}
+    <Dialog label="Close initiative" onclose={() => (dialog = undefined)} initialFocus="button[data-cancel]">
+      <InitiativeConfirm
+        heading="Close initiative"
+        body={closeBody(pending)}
+        confirm={closeLabel(pending)}
+        danger={pending > 0}
+        error={view.dialogError}
+        onconfirm={() => closeIt(pending)}
+        oncancel={() => (dialog = undefined)}
+      />
+    </Dialog>
+  {:else}
+    <Dialog label="Reopen initiative" onclose={() => (dialog = undefined)} initialFocus="button[data-cancel]">
+      <InitiativeConfirm heading="Reopen initiative" body={REOPEN_BODY} confirm="Reopen initiative" error={view.dialogError} onconfirm={reopenIt} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {/if}
+{/if}

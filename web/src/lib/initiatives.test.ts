@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InitiativesApi, InitiativesError, InitiativesStore, toCreate, type Initiative, type InitiativesState } from './initiatives';
+import { InitiativesApi, InitiativesError, InitiativesStore, parseTags, toCreate, toEditForm, toPatch, type Initiative, type InitiativesState } from './initiatives';
 import type { Browser } from './session';
 
 const initiative = (slug: string, extra: Partial<Initiative> = {}): Initiative => ({
@@ -42,6 +42,81 @@ describe('toCreate', () => {
 
   it('leaves tags out when only separators were typed', () => {
     expect(toCreate({ ...form, tags: ' , ,' })).toEqual({ slug: 'alpha', title: 'Alpha' });
+  });
+});
+
+describe('parseTags', () => {
+  it('splits on commas, trims and drops blanks', () => {
+    expect(parseTags(' a, b ,, c ,')).toEqual(['a', 'b', 'c']);
+    expect(parseTags('')).toEqual([]);
+  });
+});
+
+describe('toEditForm and toPatch', () => {
+  const edit = { title: ' T ', description: ' d ', tags: 'x, y', targetStart: ' 2026-01-02 ', targetEnd: '' };
+
+  it('fills the form from the initiative: tags on one line, an unset target blank', () => {
+    expect(toEditForm(initiative('aa', { title: 'T', description: 'd', tags: ['x', 'y'], target_start: '2026-01-02' }))).toEqual({
+      title: 'T',
+      description: 'd',
+      tags: 'x, y',
+      targetStart: '2026-01-02',
+      targetEnd: '',
+    });
+    expect(toEditForm(initiative('aa', { target_end: '2026-02-03' })).targetEnd).toBe('2026-02-03');
+  });
+
+  it('sends every field: text trimmed, the tags as a list, a blank target as null so it is cleared', () => {
+    expect(toPatch(edit)).toEqual({ title: 'T', description: 'd', tags: ['x', 'y'], target_start: '2026-01-02', target_end: null });
+    expect(toPatch({ ...edit, targetStart: '  ', targetEnd: '2026-03-04', tags: '', description: '' })).toEqual({
+      title: 'T',
+      description: '',
+      tags: [],
+      target_start: null,
+      target_end: '2026-03-04',
+    });
+  });
+});
+
+describe('InitiativesApi.patch, close and reopen', () => {
+  it('patch sends the body with the CSRF token on the encoded slug', async () => {
+    const { api: a, fetchFn } = api(async () => Response.json(initiative('a/b')));
+    await a.patch('a/b', { title: 'N' });
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('/api/v1/initiatives/a%2Fb');
+    expect(init?.method).toBe('PATCH');
+    expect(init?.credentials).toBe('same-origin');
+    expect(init?.headers).toEqual({ Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': 'csrf-1' });
+    expect(JSON.parse(init?.body as string)).toEqual({ title: 'N' });
+  });
+
+  it('close posts an empty object, or force true when forcing', async () => {
+    const { api: a, fetchFn } = api(async () => Response.json(initiative('aa')));
+    await a.close('aa', false);
+    await a.close('aa', true);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/initiatives/aa/close', '/api/v1/initiatives/aa/close']);
+    expect(fetchFn.mock.calls.map((c) => c[1]?.method)).toEqual(['POST', 'POST']);
+    expect(fetchFn.mock.calls.map((c) => JSON.parse(c[1]?.body as string))).toEqual([{}, { force: true }]);
+    expect(fetchFn.mock.calls[0][1]?.headers).toEqual({ Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': 'csrf-1' });
+  });
+
+  it('reopen posts without a body or a content type', async () => {
+    const { api: a, fetchFn } = api(async () => Response.json(initiative('aa')));
+    expect((await a.reopen('aa')).slug).toBe('aa');
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('/api/v1/initiatives/aa/reopen');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBeUndefined();
+    expect(init?.headers).toEqual({ Accept: 'application/json', 'X-CSRF-Token': 'csrf-1' });
+  });
+
+  it('a refusal throws the problem detail with its status, each with its own fallback', async () => {
+    const refuse = api(async () => problem(409, { title: 'Conflict', detail: 'initiative aa has open tasks' }));
+    await expect(refuse.api.close('aa', false)).rejects.toMatchObject({ status: 409, message: 'initiative aa has open tasks' });
+    const plain = api(async () => new Response('x', { status: 500 }));
+    await expect(plain.api.patch('aa', {})).rejects.toMatchObject({ message: 'Editing the initiative failed (HTTP 500).' });
+    await expect(plain.api.close('aa', false)).rejects.toMatchObject({ message: 'Closing the initiative failed (HTTP 500).' });
+    await expect(plain.api.reopen('aa')).rejects.toMatchObject({ message: 'Reopening the initiative failed (HTTP 500).' });
   });
 });
 

@@ -1594,9 +1594,31 @@ Title, Kind, Status, Flags (the `active`, `blocked` and `overdue` badges of the 
 and Lease holder (the actor of the oldest live lease, "+N" for further ones). A select labelled Tasks filters them:
 not closed (open and done; the default), done, closed and all; the page holds every task, so choosing needs no
 fetch. A filter that keeps none says "No tasks match this filter." The logic is `web/src/lib/initiativePage.ts`
-(`InitiativePageStore`, `taskRows`, `taskBadges`, `leaseHolder`, `taskCounts`, `targetsText`). Specs:
-`e2e/initiative_page.spec.ts` (open from the list, filter the tasks, filter the list: open, then closed, then all) at
-390x844 and 1440x900; the page is also in `e2e/a11y.spec.ts` and `e2e/touch.spec.ts`.
+(`InitiativePageStore`, `taskRows`, `taskBadges`, `leaseHolder`, `taskCounts`, `targetsText`).
+
+**Initiative page actions** (R9). Under the header sit an Edit button and, by status, a Close button (open) or a
+Reopen button (closed). Each opens the one `Dialog` (a bottom sheet on the phone) with the writes carrying the
+session's `X-CSRF-Token`; a toast confirms what was done.
+*Edit* ("Edit initiative", `InitiativeEditForm.svelte`) holds the title, description, tags (one comma-separated line)
+and the target start and end (date inputs) in one dialog, filled from the initiative as it is. Save sends `PATCH
+/api/v1/initiatives/<slug>` with every field (`toPatch`: text trimmed, tags as a list, a blank target as `null`, which
+clears it), then reads the page again without the skeleton. A refusal (a blank title, a target end before the start)
+shows the server's problem detail in an alert inside the dialog, which stays open with what was typed; Cancel and Escape
+leave the initiative as it was.
+*Close* ("Close initiative", `InitiativeConfirm.svelte`) is a confirmation. The page holds every task, so the dialog
+counts the tasks that are not closed (open or done; `notClosedCount`). With none it says what closing does and its
+button is "Close initiative", which posts `{}`. With N it says "N tasks not closed. Closing drops them too: each is
+closed as dropped." and the button is "Close and drop N tasks" (singular for one), which posts `{"force": true}`; the
+server then closes each task `dropped` and the initiative in one transaction. The toast says "Initiative <slug> closed,
+N tasks dropped" and the page shows the closed status and the counts moved to closed. A refusal (for example the
+initiative was closed by someone else meanwhile, 409) shows inline and the dialog stays open.
+*Reopen* ("Reopen initiative") is a confirmation that says the closed tasks stay closed; its button posts to `/reopen`.
+The wording is `web/src/lib/initiativeDialogs.ts`; the calls are `InitiativesApi.patch`, `.close(slug, force)` and
+`.reopen`, and `InitiativePageStore.edit`, `.close`, `.reopen` hold the refusal as `dialogError`. Specs:
+`e2e/initiative_page.spec.ts` (open from the list, filter the tasks, filter the list: open, then closed, then all;
+edit title, description, tags and targets; a refused edit; close with no tasks; close with an open task through force;
+reopen; a refused close) at 390x844 and 1440x900; the page and its Edit and Close dialogs are also in
+`e2e/a11y.spec.ts` (10 states) and `e2e/touch.spec.ts`.
 
 **Initiative view libraries** (R9). `web/src/lib/markdown.ts` renders
 a description as safe HTML: every character is escaped first, so raw HTML shows as text; paragraphs, headings (two
@@ -1705,15 +1727,15 @@ radios are transparent inputs laid over their 44 px-high labels rather than `sr-
 skip link, clipped away (`clip-path: inset(50%)`) until it takes focus, is outside the rule while
 hidden. Nothing depends on hover: every action is a button or a link. `e2e/touch.spec.ts` measures
 the Initiatives, initiative page, Settings -> API keys and Signed out views and the new-initiative sheet, the new-key
-sheet, the revoke confirmation and the account menu opened over them, and fails with the offending
+sheet, the revoke confirmation, the account menu and the initiative page's Edit and Close sheets opened over them, and fails with the offending
 elements named when one is smaller or a field's text is under 16 px.
 
 **Accessibility bar.** axe-core (`@axe-core/playwright`, pinned exactly in `e2e/package.json`) reports
 zero violations of impact `serious` or `critical`, with no rule disabled and no element excluded, on
-every one of eight states: the Initiatives view, the initiative page, the Settings -> API keys view, the Signed out view,
-and the new-initiative sheet, the new-key sheet, the revoke confirmation and the account menu opened
-over them. Each is scanned at 390x844 and 1440x900 in the light and the dark theme (the browser's
-colour scheme drives the System setting): 8 x 2 x 2 = 32 scans, in `e2e/a11y.spec.ts`. A failing
+every one of ten states: the Initiatives view, the initiative page, the Settings -> API keys view, the Signed out view,
+the new-initiative sheet, the new-key sheet, the revoke confirmation, the account menu and the initiative
+page's Edit and Close sheets opened over them. Each is scanned at 390x844 and 1440x900 in the light and the dark theme (the browser's
+colour scheme drives the System setting): 10 x 2 x 2 = 40 scans, in `e2e/a11y.spec.ts`. A failing
 scan names the rule, the impact and the offending elements. Colour contrast is met by the design
 tokens in both themes, never by a per-element override.
 

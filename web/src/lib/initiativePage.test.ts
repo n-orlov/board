@@ -110,7 +110,7 @@ describe('InitiativePageStore', () => {
 
   it('starts loading with the not-closed filter', () => {
     const { s } = store({ get: async () => initiative, tasks: async () => [] });
-    expect(s.state).toEqual({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined });
+    expect(s.state).toEqual({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined, dialogError: undefined });
   });
 
   it('load shows the initiative and its tasks and stops loading', async () => {
@@ -149,6 +149,76 @@ describe('InitiativePageStore', () => {
     expect(s.state.filter).toBe('closed');
     expect(s.state.tasks).toHaveLength(1);
     expect(get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('InitiativePageStore writes', () => {
+  const later = { slug: 'aa', title: 'Later' } as Initiative;
+  function writer(over: { patch?: () => Promise<unknown>; close?: () => Promise<unknown>; reopen?: () => Promise<unknown> } = {}) {
+    let current = initiative;
+    const api = {
+      get: vi.fn(async () => current),
+      tasks: vi.fn(async () => [task('aa-1')]),
+      patch: vi.fn(over.patch ?? (async () => (current = later))),
+      close: vi.fn(over.close ?? (async () => (current = later))),
+      reopen: vi.fn(over.reopen ?? (async () => (current = later))),
+    };
+    const seen: InitiativePageState[] = [];
+    return { api, s: new InitiativePageStore(api as never, (st) => seen.push(st)), seen };
+  }
+  const form = { title: ' New ', description: '', tags: 'a, b', targetStart: '', targetEnd: '2026-05-01' };
+
+  it('edit sends the patch of the form, then reads the page again without showing the skeleton', async () => {
+    const { api, s, seen } = writer();
+    await s.load('aa');
+    seen.length = 0;
+    expect(await s.edit('aa', form)).toBe(true);
+    expect(api.patch).toHaveBeenCalledWith('aa', { title: 'New', description: '', tags: ['a', 'b'], target_start: null, target_end: '2026-05-01' });
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(s.state.initiative).toBe(later);
+    expect(seen.every((st) => !st.loading)).toBe(true);
+  });
+
+  it('a refused edit keeps the page, says why in dialogError and reads nothing again', async () => {
+    const { api, s } = writer({ patch: async () => Promise.reject(new InitiativesError(400, 'target_end is before target_start')) });
+    await s.load('aa');
+    expect(await s.edit('aa', form)).toBe(false);
+    expect(s.state.dialogError).toBe('target_end is before target_start');
+    expect(s.state.initiative).toBe(initiative);
+    expect(s.state.error).toBeUndefined();
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('the next write and clearDialogError forget a refusal', async () => {
+    let fail = true;
+    const { s } = writer({ close: async () => (fail ? Promise.reject(new Error('busy')) : {}) });
+    await s.load('aa');
+    expect(await s.close('aa', false)).toBe(false);
+    s.clearDialogError();
+    expect(s.state.dialogError).toBeUndefined();
+    expect(await s.close('aa', false)).toBe(false);
+    fail = false;
+    expect(await s.close('aa', false)).toBe(true);
+    expect(s.state.dialogError).toBeUndefined();
+  });
+
+  it('close passes force through, reopen takes only the slug, and both read the page again', async () => {
+    const { api, s } = writer();
+    await s.load('aa');
+    await s.close('aa', true);
+    await s.close('aa', false);
+    await s.reopen('aa');
+    expect(api.close.mock.calls).toEqual([['aa', true], ['aa', false]]);
+    expect(api.reopen.mock.calls).toEqual([['aa']]);
+    expect(api.get).toHaveBeenCalledTimes(4);
+  });
+
+  it('a load clears the refusal of an earlier write', async () => {
+    const { s } = writer({ close: async () => Promise.reject(new Error('no')) });
+    await s.load('aa');
+    await s.close('aa', false);
+    await s.load('aa');
+    expect(s.state.dialogError).toBeUndefined();
   });
 });
 
