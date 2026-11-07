@@ -2,6 +2,7 @@ package features
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -112,6 +113,50 @@ func (h *harness) expireLease(ctx context.Context, ref string, seconds int) erro
 	}
 	if rows != 1 {
 		return fmt.Errorf("%d leases backdated for %s, want 1", rows, ref)
+	}
+	return nil
+}
+
+// leaseRowsDump is every column of every lease row a refused request must leave
+// alone, one line per lease.
+func (h *harness) leaseRowsDump(ctx context.Context) (string, error) {
+	db, err := h.openDB()
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT n, state, expires_at, renewed_at, COALESCE(ended_at, 0), COALESCE(acked_at, 0), intent, outcome
+		FROM leases ORDER BY n`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var out strings.Builder
+	for rows.Next() {
+		var n, exp, ren, ended, acked int64
+		var state, intent string
+		var outcome sql.NullString
+		if err := rows.Scan(&n, &state, &exp, &ren, &ended, &acked, &intent, &outcome); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&out, "L%d|%s|%d|%d|%d|%d|%s|%s\n", n, state, exp, ren, ended, acked, intent, outcome.String)
+	}
+	return out.String(), rows.Err()
+}
+
+func (h *harness) noteLeaseRows(ctx context.Context) error {
+	got, err := h.leaseRowsDump(ctx)
+	h.api.leaseRows = got
+	return err
+}
+
+func (h *harness) leaseRowsUnchanged(ctx context.Context) error {
+	got, err := h.leaseRowsDump(ctx)
+	if err != nil {
+		return err
+	}
+	if h.api.leaseRows == "" || got != h.api.leaseRows {
+		return fmt.Errorf("the lease rows are\n%swere\n%s", got, h.api.leaseRows)
 	}
 	return nil
 }
@@ -241,6 +286,8 @@ func registerLeaseSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I request the next leases page with "([^"]*)" as actor "([^"]*)"$`, h.nextLeasesPage)
 	sc.Step(`^the lease "([^"]*)" ran out (\d+) seconds ago$`, h.expireLease)
 	sc.Step(`^within (\d+) seconds the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateWithin)
+	sc.Step(`^I note the lease rows$`, h.noteLeaseRows)
+	sc.Step(`^the lease rows are unchanged$`, h.leaseRowsUnchanged)
 	sc.Step(`^there are (\d+) leases in the database$`, h.leaseCount)
 	sc.Step(`^the lease "([^"]*)" is "([^"]*)" in the database$`, h.leaseStateIs)
 	sc.Step(`^the response path "([^"]*)" is the request time plus (\d+) seconds$`, h.pathIsTimePlus)

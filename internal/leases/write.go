@@ -97,12 +97,12 @@ func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, i
 		return Result{}, invalid(err, nextResources)
 	}
 	in.Intent = strings.TrimSpace(in.Intent)
-	if _, err := s.ExpireDue(ctx); err != nil {
-		return Result{}, err
-	}
 	var out Result
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		if _, err = s.expireDue(ctx, tx, s.now()); err != nil {
+			return err
+		}
 		out, err = s.start(ctx, tx, actor, principal, in, resources)
 		return err
 	})
@@ -231,12 +231,12 @@ func (s Store) Renew(ctx context.Context, actor audit.Actor, principal, ref stri
 	if err != nil {
 		return Result{}, err
 	}
-	if _, err := s.ExpireDue(ctx); err != nil {
-		return Result{}, err
-	}
 	var out Result
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		if _, err = s.expireDue(ctx, tx, s.now()); err != nil {
+			return err
+		}
 		out, err = s.renewRef(ctx, tx, actor, principal, ref, in)
 		return err
 	})

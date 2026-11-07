@@ -28,7 +28,9 @@ type apiState struct {
 	headers map[string]string
 	// counts is the tasks, events and actors count a scenario noted, and
 	// sentAt and answeredAt bracket the last task request.
-	counts             string
+	counts string
+	// leaseRows is the leases table a scenario noted.
+	leaseRows          string
 	sentAt, answeredAt time.Time
 }
 

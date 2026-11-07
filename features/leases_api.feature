@@ -143,8 +143,13 @@ Feature: Leases over HTTP
     And the response path "expired_at" is present
     And the response expired_at is the expiry stored for the lease "L1"
     And the response path "next" is present
-    And the lease "L1" is "expired" in the database
+    And the lease "L1" is "live" in the database
     And exactly 0 lease_renewed events exist for the lease "L1"
+    And exactly 0 lease_expired events exist for the lease "L1"
+    When I request the lease "L1" as actor "claude@laptop"
+    Then the response path "state" is "expired"
+    And the lease "L1" is "expired" in the database
+    And exactly 1 lease_expired event exists for the lease "L1"
 
   Scenario: renewing an ended lease is 409
     Given I start a lease with body "{'task':'aa-1','intent':'first'}" as actor "claude@laptop"

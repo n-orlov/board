@@ -24,12 +24,12 @@ func (s Store) End(ctx context.Context, actor audit.Actor, principal, ref, outco
 			return Lease{}, invalid(err, "Send an outcome of at most 200 characters, or leave it out.")
 		}
 	}
-	if _, err := s.ExpireDue(ctx); err != nil {
-		return Lease{}, err
-	}
 	var out Lease
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		if _, err = s.expireDue(ctx, tx, s.now()); err != nil {
+			return err
+		}
 		out, err = s.end(ctx, tx, actor, principal, ref, outcome)
 		return err
 	})
@@ -120,12 +120,12 @@ func (s Store) appendFor(ctx context.Context, tx *sql.Tx, actorID, principal str
 // an unknown lease and ErrConflict for a lease that has not expired (live or
 // ended), and writes nothing then.
 func (s Store) Ack(ctx context.Context, actor audit.Actor, principal, ref string) (Lease, error) {
-	if _, err := s.ExpireDue(ctx); err != nil {
-		return Lease{}, err
-	}
 	var out Lease
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		if _, err = s.expireDue(ctx, tx, s.now()); err != nil {
+			return err
+		}
 		out, err = s.ack(ctx, tx, actor, principal, ref)
 		return err
 	})
