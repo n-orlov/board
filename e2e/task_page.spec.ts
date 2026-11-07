@@ -76,7 +76,7 @@ for (const vp of viewports) {
       await page.locator(`[data-testid=task-row][data-ref=${blocker}]`).getByRole('link', { name: blocker }).click();
       await expect(page).toHaveURL(new RegExp(`#/t/${blocker}$`));
 
-      await expect(page.getByTestId('task-ref')).toHaveText(blocker);
+      await expect(page.getByTestId('task-page').getByTestId('task-ref')).toHaveText(blocker);
       await expect(page.getByRole('heading', { level: 2, name: 'Write the plan' })).toBeVisible();
       await expect(page.getByTestId('task-status')).toHaveText('open');
       await expect(page.getByTestId('task-kind')).toHaveText('work');
@@ -113,7 +113,7 @@ for (const vp of viewports) {
 
       await blocking.getByRole('link').click();
       await expect(page).toHaveURL(new RegExp(`#/t/${blocked}$`));
-      await expect(page.getByTestId('task-ref')).toHaveText(blocked);
+      await expect(page.getByTestId('task-page').getByTestId('task-ref')).toHaveText(blocked);
       await expect(page.getByTestId('flag-blocked')).toHaveText('blocked');
       const dep = page.getByTestId('task-deps').locator(`[data-ref=${blocker}]`);
       await expect(dep).toContainText('Write the plan');
@@ -267,7 +267,7 @@ for (const vp of viewports) {
 
       // The blocker's page shows the other side, and a dependency back onto it would close a cycle: refused, inline.
       await page.goto(`/#/t/${blocker}`);
-      await expect(page.getByTestId('task-ref')).toHaveText(blocker);
+      await expect(page.getByTestId('task-page').getByTestId('task-ref')).toHaveText(blocker);
       await expect(page.getByTestId('task-blocking').locator(`[data-ref=${task}]`)).toBeVisible();
       await page.getByRole('button', { name: 'Add dependency' }).click();
       const cycle = dialog(page, 'Add dependency');
@@ -280,7 +280,7 @@ for (const vp of viewports) {
       await expect(page.getByRole('button', { name: 'Add dependency' })).toBeFocused();
 
       await page.goto(`/#/t/${task}`);
-      await expect(page.getByTestId('task-ref')).toHaveText(task);
+      await expect(page.getByTestId('task-page').getByTestId('task-ref')).toHaveText(task);
       await page.getByRole('button', { name: `Remove dependency on ${blocker}` }).click();
       await expect(page.getByTestId('toast')).toContainText(`Task ${task} no longer waits for ${blocker}`);
       await expect(page.getByTestId('no-deps')).toBeVisible();
