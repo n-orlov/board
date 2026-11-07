@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { taskHref } from './lib/taskPage';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import { absoluteTime, relativeTime } from './lib/format';
@@ -143,7 +144,7 @@
               data-ref={row.ref}
               class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
             >
-              <td class="font-mono text-sm text-text-muted {cell}" data-testid="task-ref">{row.ref}</td>
+              <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
               <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">{row.title}</td>
               <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
               <td class={cell} data-testid="task-status">

@@ -11,6 +11,12 @@ import { apiQuery, DEFAULT_TASKS_FILTER, type TasksFilter } from './taskFilters'
 import type { Browser } from './session';
 
 export type TaskDetail = components['schemas']['TaskDetail'];
+export type TaskPatch = components['schemas']['TaskPatch'];
+export type TaskEvent = components['schemas']['Event'];
+export type Resolution = 'completed' | 'dropped' | 'superseded' | 'duplicate';
+
+/** A page of a task's events is as large as the API allows, so a busy task takes few requests. */
+const EVENT_PAGE = '1000';
 
 export class TasksApi {
   private readonly browser: Browser;
@@ -58,13 +64,55 @@ export class TasksApi {
     return this.listQuery(new URLSearchParams({ status: 'open' }));
   }
 
-  async create(body: TaskCreate): Promise<TaskDetail> {
-    const response = await this.call('/api/v1/tasks', 'Creating the task', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf() },
-      body: JSON.stringify(body),
-    });
+  /** A write: JSON in (when there is a body), the task out. */
+  private async write(method: string, path: string, what: string, body?: object): Promise<TaskDetail> {
+    const headers: Record<string, string> = { Accept: 'application/json', 'X-CSRF-Token': this.csrf() };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const response = await this.call(path, what, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return (await response.json()) as TaskDetail;
+  }
+
+  create(body: TaskCreate): Promise<TaskDetail> {
+    return this.write('POST', '/api/v1/tasks', 'Creating the task', body);
+  }
+
+  /** The task with its dependencies, blocking tasks and live leases. */
+  async get(ref: string): Promise<TaskDetail> {
+    const response = await this.call(`/api/v1/tasks/${encodeURIComponent(ref)}`, 'Reading the task', { headers: { Accept: 'application/json' } });
+    return (await response.json()) as TaskDetail;
+  }
+
+  /** Every event of the task in the order they were written, following `next_after` through the pages. */
+  async events(ref: string): Promise<TaskEvent[]> {
+    const items: TaskEvent[] = [];
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ limit: EVENT_PAGE });
+      if (after !== undefined) query.set('after', after);
+      const response = await this.call(`/api/v1/tasks/${encodeURIComponent(ref)}/events?${query.toString()}`, 'Reading the task events', {
+        headers: { Accept: 'application/json' },
+      });
+      const page = (await response.json()) as components['schemas']['EventList'];
+      items.push(...page.items);
+      after = page.next_after;
+    } while (after !== undefined);
+    return items;
+  }
+
+  patch(ref: string, body: TaskPatch): Promise<TaskDetail> {
+    return this.write('PATCH', `/api/v1/tasks/${encodeURIComponent(ref)}`, 'Saving the task', body);
+  }
+
+  done(ref: string): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/done`, 'Marking the task done');
+  }
+
+  reopen(ref: string): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/reopen`, 'Reopening the task');
+  }
+
+  close(ref: string, resolution: Resolution): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/close`, 'Closing the task', { resolution });
   }
 }
 

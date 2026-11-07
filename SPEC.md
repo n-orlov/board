@@ -1684,6 +1684,35 @@ contested resources by name with every holder, `nowPanel` gives one row per live
 conflict), the conflicts and a summary such as "2 live leases, 1 conflict", and `taskConflicts` gives, per contested
 resource a live lease of one task holds, the other holders (printed "repo:board: also held by bob on bb-1").
 
+**Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
+like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
+the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in
+the initiative page's table is a link to it. The page reads `GET /api/v1/tasks/<ref>` and every page of
+`GET /api/v1/tasks/<ref>/events` (`TasksApi`, `TaskPageStore` in `web/src/lib/taskPage.ts`); either failing shows one
+alert and no half page, and a ref that does not exist is that alert (the API's 404). It shows, top to bottom: a back link
+to Tasks and a link to the task's initiative; the header (the ref in monospace, the title, the status, the resolution of
+a closed task, the kind with a watch task's cadence as "watch, every 15 minutes", the `active`, `blocked` and `overdue`
+badges, who created it and when); the description as safe Markdown; the planned window ("2026-03-01 to 2026-04-15",
+"from ...", "until ...") and a watch task's next check; the links (`http(s)` only, `rel="noopener noreferrer"`); **Blocked
+by** and **Blocking**, each task a link to its own page with its ref, title and status; the **live leases** (holder,
+lease ref, intent, resources, "expires in 41m" from `expiresIn`); and the **timeline**: every event of the task newest
+first, each with its summary, a relative time (the absolute local time in its `title`), the actor and the event type
+(`data-type`). The actions come from `taskActions`: **Edit** (not on a closed task), **Done** (open), **Reopen** (done or
+closed), **Close** (not closed). Done and Reopen act at once; **Edit** opens the one `Dialog` (a bottom sheet on the
+phone) with Title, Description, Planned start and end, and for a watch task Cadence, and sends only the fields that
+differ from the task as it was shown (`toTaskPatch`: an emptied planned date or cadence is `null`, which clears it; a
+cadence that is not a number and a unit is refused in the form); **Close** opens a confirmation with a Resolution select
+(completed, dropped, superseded, duplicate; completed first) and posts the chosen one. A refusal from the API (a stale
+page, an empty title) shows its problem detail inline, in the dialog when one is open (which stays open with what was
+typed) and as an alert under the header otherwise. A success closes the dialog, shows a toast ("Task aa-1 marked done",
+"... reopened", "... saved", "... closed as dropped") and reads the task and its events again without the skeleton, so
+the new event is the first row of the timeline. On the phone the actions sit in a bar fixed above the tab bar (44 px
+buttons, always visible, never hover-only); from 768 px they are part of the header. Milestone, Record check,
+dependency editing and ending or acknowledging a lease are not on the page yet. The specs are `e2e/task_page.spec.ts`
+(the page's content and links, the action bar, Edit with a refused then a good save, a watch task's cadence, Done and Reopen
+with a stale refused Done, Close with each of the four resolutions followed by Reopen, a refused Close) at 390x844
+and 1440x900.
+
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Initiatives) and

@@ -191,3 +191,51 @@ describe('openInitiatives', () => {
 function initiativesOf(slugs: string[]) {
   return slugs.map((slug) => ({ slug }) as InitiativeListItem);
 }
+
+describe('TasksApi task page calls', () => {
+  it('reads a task by its encoded ref', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    expect((await a.get('aa-1')).ref).toBe('aa-1');
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks/aa-1');
+    expect(fetchFn.mock.calls[0]![1]).toMatchObject({ credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    await a.get('a/b');
+    expect(fetchFn.mock.calls[1]![0]).toBe('/api/v1/tasks/a%2Fb');
+  });
+
+  it('reads every event, following next_after through the pages', async () => {
+    const { api: a, fetchFn } = api(async (url) =>
+      url.includes('after=') ? json({ items: [{ ref: 'E2' }] }) : json({ items: [{ ref: 'E1' }], next_after: 'E1' }),
+    );
+    expect((await a.events('aa-1')).map((e) => e.ref)).toEqual(['E1', 'E2']);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/tasks/aa-1/events?limit=1000', '/api/v1/tasks/aa-1/events?limit=1000&after=E1']);
+  });
+
+  it('patches with the JSON body and the CSRF token', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.patch('aa-1', { title: 'N', planned_end: null });
+    const [url, init] = fetchFn.mock.calls[0]!;
+    expect(url).toBe('/api/v1/tasks/aa-1');
+    expect(init).toMatchObject({ method: 'PATCH', credentials: 'same-origin', body: '{"title":"N","planned_end":null}' });
+    expect(init!.headers).toMatchObject({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'csrf-1' });
+  });
+
+  it('posts done and reopen without a body, and close with its resolution', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.done('aa-1');
+    await a.reopen('aa-1');
+    await a.close('aa-1', 'superseded');
+    const calls = fetchFn.mock.calls.map((c) => [c[0], (c[1] as RequestInit).method, (c[1] as RequestInit).body]);
+    expect(calls).toEqual([
+      ['/api/v1/tasks/aa-1/done', 'POST', undefined],
+      ['/api/v1/tasks/aa-1/reopen', 'POST', undefined],
+      ['/api/v1/tasks/aa-1/close', 'POST', '{"resolution":"superseded"}'],
+    ]);
+    expect(fetchFn.mock.calls[0]![1]!.headers).toEqual({ Accept: 'application/json', 'X-CSRF-Token': 'csrf-1' });
+    expect(fetchFn.mock.calls[2]![1]!.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('names the failed action when a write is refused without a detail', async () => {
+    const { api: a } = api(async () => new Response('', { status: 500 }));
+    await expect(a.done('aa-1')).rejects.toMatchObject({ status: 500, message: 'Marking the task done failed (HTTP 500).' });
+  });
+});

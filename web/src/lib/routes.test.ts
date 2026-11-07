@@ -28,6 +28,9 @@ describe('resolveRoute', () => {
     ['#/tasks?status=done&kind=watch', 'tasks'],
     ['#/tasks/', 'initiatives'],
     ['#/i/phone-onboard?x=1', 'initiative'],
+    ['#/t/aa-1', 'task'],
+    ['#/t/', 'initiatives'],
+    ['#/t/aa-1/x', 'initiatives'],
   ])('maps the app table %j to %s', (hash, want) => {
     expect(resolveRoute(hash, ROUTES).id).toBe(want);
   });
@@ -108,6 +111,18 @@ describe('ROUTES', () => {
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
       ['initiatives', true],
       ['tasks', false],
+      ['keys', false],
+    ]);
+  });
+
+  it('routes #/t/<ref> to the task page, which hangs under Tasks', () => {
+    const route = resolveRoute('#/t/aa-1', ROUTES);
+    expect(route.id).toBe('task');
+    expect(routeParam('#/t/aa-1', ROUTES)).toBe('aa-1');
+    expect(routeParam('#/t/', ROUTES)).toBe('');
+    expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
+      ['initiatives', false],
+      ['tasks', true],
       ['keys', false],
     ]);
   });

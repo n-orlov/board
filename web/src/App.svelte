@@ -5,6 +5,7 @@
   import Initiatives from './Initiatives.svelte';
   import SessionCard from './SessionCard.svelte';
   import Shell from './Shell.svelte';
+  import TaskPage from './TaskPage.svelte';
   import Tasks from './Tasks.svelte';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
   import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
@@ -14,6 +15,7 @@
     initiatives: Initiatives,
     initiative: InitiativePage,
     tasks: Tasks,
+    task: TaskPage,
     keys: ApiKeys,
   };
 
