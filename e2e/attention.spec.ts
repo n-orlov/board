@@ -351,7 +351,7 @@ for (const vp of viewports) {
         await expect(page.getByTestId('attention-view')).toBeVisible();
         const nav = page.getByRole('navigation', { name: 'Main' }).locator('visible=true');
         await expect(nav.getByRole('link', { name: 'Attention' })).toHaveAttribute('aria-current', 'page');
-        await expect(nav.getByRole('link').first()).toHaveText('Attention');
+        await expect(nav.getByRole('link').first()).toHaveText(/^\s*Attention/); // a badge's words may follow, from the shared board's items
       });
     }
 

@@ -27,7 +27,6 @@
           href={entry.href}
           class="{link[variant]} text-text-muted hover:text-text aria-[current=page]:font-semibold aria-[current=page]:text-accent {variant === 'tabbar' ? '' : 'aria-[current=page]:bg-surface'}"
           aria-current={entry.current ? 'page' : undefined}
-          aria-label={entry.badgeLabel === '' ? undefined : `${entry.label}, ${entry.badgeLabel}`}
           title={variant === 'rail' ? entry.label : undefined}
         >
           <span class="relative inline-flex">
@@ -40,7 +39,10 @@
               >
             {/if}
           </span>
-          <span class={variant === 'rail' ? 'sr-only' : ''}>{entry.label}</span>
+          <!-- The badge's words ride in the link's content, not in an aria-label, so the name keeps the visible text (axe label-content-name-mismatch). -->
+          <span class={variant === 'rail' ? 'sr-only' : ''}
+            >{entry.label}{#if entry.badgeLabel !== ''}<span class="sr-only">{entry.badgeLabel}</span>{/if}</span
+          >
         </a>
       </li>
     {/each}

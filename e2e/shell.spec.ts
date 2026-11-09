@@ -225,7 +225,7 @@ for (const vp of viewports) {
           await expect(link).toHaveAccessibleName('Attention');
         } else {
           await expect(badge).toHaveText(text);
-          await expect(link).toHaveAccessibleName(`Attention, ${total} items need attention`);
+          await expect(link).toHaveAccessibleName(`Attention ${total} items need attention`);
         }
         // No other entry carries a badge, and the page does not overflow.
         await expect(nav.getByTestId('attention-badge')).toHaveCount(total === 0 ? 0 : 1);
