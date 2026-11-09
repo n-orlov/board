@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import AccountMenu from './AccountMenu.svelte';
   import Icon from './Icon.svelte';
+  import LiveIndicator from './LiveIndicator.svelte';
   import Nav from './Nav.svelte';
   import type { NavEntry } from './lib/routes';
 
@@ -47,6 +48,7 @@
   >
     <span class="font-bold">board</span>
     <span class="min-w-0 flex-1 truncate text-text-muted" data-testid="topbar-title">{title}</span>
+    <LiveIndicator />
     <button type="button" class={button} aria-label="Account menu" aria-haspopup="dialog" onclick={() => (menuOpen = true)}>
       <Icon d={USER} />
     </button>
@@ -59,6 +61,7 @@
     <div class="flex-1">
       <Nav {entries} variant="rail" testid="nav-rail" />
     </div>
+    <LiveIndicator compact />
     <button type="button" class={button} aria-label="Account menu" aria-haspopup="dialog" onclick={() => (menuOpen = true)}>
       <Icon d={USER} />
     </button>
@@ -72,6 +75,7 @@
       <Nav {entries} variant="sidebar" testid="nav-sidebar" />
     </div>
     <div class="flex flex-col gap-2 border-t border-border pt-3" data-testid="sidebar-foot">
+      <div class="px-3"><LiveIndicator /></div>
       <div class="flex items-center gap-2">
         <span class="min-w-0 flex-1 truncate px-3 text-sm text-text-muted" data-testid="email">{email}</span>
         <button type="button" class={button} aria-label="Account menu" aria-haspopup="dialog" onclick={() => (menuOpen = true)}>

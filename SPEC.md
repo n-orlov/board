@@ -1929,7 +1929,11 @@ the timer, the others share its refetch). `attention` messages go to a listener 
 `reset`, and the stream opening again after an error, refetch every subscribed view; the first open does not. A stream
 the browser gave up on (closed, not retried) is opened again after 3 s, and at once when the browser comes back online.
 The **indicator** state is `live` (the stream is open), `reconnecting` (opening, or after an error) or `offline` (the
-browser says it is offline, whatever the stream does). Nothing in the UI polls on a timer.
+browser says it is offline, whatever the stream does). The shell shows it (`web/src/LiveIndicator.svelte`, started with
+the shell) as a coloured dot plus the state's word (`live` success, `reconnecting` warning, `offline` danger), so the state
+never rides on colour alone. It is a status region whose accessible name is `Live updates: <state>`, and it sits in the
+phone top bar, at the foot of the tablet icon rail (word under the dot) and above the email in the desktop sidebar foot
+(`data-testid="live-indicator"`, one per layout, only the one on screen is visible). Nothing in the UI polls on a timer.
 
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
 from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
