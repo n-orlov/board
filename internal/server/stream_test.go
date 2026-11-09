@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/feed"
@@ -269,6 +270,49 @@ func TestEveryEventIsOneMessageInOrder(t *testing.T) {
 			}
 			if e["ref"] != fmt.Sprintf("E%d", i+1) || e["initiative"] != slug {
 				t.Errorf("message %d is %v, want E%d on %s", i, e, i+1, slug)
+			}
+		}
+	})
+}
+
+// initiativeOf returns the initiative of the next event message of s.
+func initiativeOf(s *sse) any {
+	s.t.Helper()
+	msg := s.nextMessage()
+	var e map[string]any
+	if err := json.Unmarshal([]byte(msg[strings.Index(msg, "data: ")+len("data: "):]), &e); err != nil {
+		s.t.Fatalf("message %q: %v", msg, err)
+	}
+	return e["initiative"]
+}
+
+// SPEC 7.1: a stream starts at the change feed's position when it connects. An
+// event the feed delivered before the connection is not sent; one committed
+// before it that the feed had not read yet is sent, so nothing is lost between
+// a client's read of the board and its stream.
+func TestAStreamStartsAtTheFeedPositionWhenItConnects(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		st := openStore(t, dbs.New(t))
+		if err := st.Migrate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// A poll of an hour: the feed reads only when a write through the server wakes it.
+		r := startRig(t, st, newToken(t, st), streamSettings{poll: time.Hour, heartbeat: time.Minute})
+		first := r.openStream("/api/v1/stream?topics=events")
+		r.createInitiative("delivered")
+		if got := initiativeOf(first); got != "delivered" {
+			t.Fatalf("first stream got %v, want delivered", got)
+		}
+		// Committed beside the server, so nothing wakes the feed: it stays unread.
+		if _, err := (initiatives.Store{Store: st}).Create(context.Background(), audit.Actor{Handle: "beside@host"}, "key:caller",
+			initiatives.New{Slug: "unread", Title: "Title of unread"}); err != nil {
+			t.Fatal(err)
+		}
+		second := r.openStream("/api/v1/stream?topics=events")
+		r.createInitiative("after")
+		for _, want := range []string{"unread", "after"} {
+			if got := initiativeOf(second); got != want {
+				t.Errorf("second stream got %v, want %s (the delivered event is not sent again)", got, want)
 			}
 		}
 	})

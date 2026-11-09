@@ -1122,10 +1122,13 @@ by default; any other topic is **400** with a `next` line naming the two. The an
 `Content-Type: text/event-stream`, `Cache-Control: no-cache` and `X-Accel-Buffering: no`, sent at once, and every
 message is flushed as it is written. A server with no change feed answers 503.
 
-- **`events`**: one message per event row, in the order they were written, from the moment the stream connects:
-  `event: board`, `id:` the event's ULID (`events.id`) and `data:` the event as one JSON line, the object
-  `GET /api/v1/events` lists. Events written before the connection are not sent (resume is a later change; a
-  `Last-Event-ID` header is not read yet and the stream continues live).
+- **`events`**: one message per event row, in the order they were written: `event: board`, `id:` the event's
+  ULID (`events.id`) and `data:` the event as one JSON line, the object `GET /api/v1/events` lists. A stream
+  starts at the change feed's position when it connects (§7.3): every event the feed delivers from then on is
+  sent, and an event the feed had already delivered is not. So an event committed before the connection that
+  the feed had not delivered yet (it reads every `BOARD_STREAM_POLL` and holds rows behind a gap, §7.3) is
+  still sent, and nothing committed between a client's read of the board and its stream is lost. Resume is a later change: a `Last-Event-ID`
+  header is not read yet and the stream continues live.
 - **`attention`**: accepted; it carries no message yet (the counts it will carry are §5.3's).
 - **Heartbeat**: a comment line, `: ping`, every `BOARD_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
   is idle, so a proxy keeps it open.
