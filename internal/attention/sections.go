@@ -35,9 +35,10 @@ func taskRef(slug sql.NullString, seq sql.NullInt64) string {
 
 func asksSection(sc scope) section {
 	return scoped(sc, `COALESCE(t.initiative_id, k.initiative_id)`,
-		`k.n, k.question, k.mode, k.blocking, k.poll_seen_at, k.created_at, ti.slug, t.seq, a.handle, a.way_back`,
+		`k.n, k.question, k.mode, k.blocking, k.poll_seen_at, k.created_at, ti.slug, t.seq, a.handle, a.way_back, ki.slug`,
 		`asks k JOIN actors a ON a.id = k.actor_id LEFT JOIN tasks t ON t.id = k.task_id
-		 LEFT JOIN initiatives ti ON ti.id = t.initiative_id WHERE k.state = 'open'`,
+		 LEFT JOIN initiatives ti ON ti.id = t.initiative_id
+		 LEFT JOIN initiatives ki ON ki.id = k.initiative_id WHERE k.state = 'open'`,
 		`k.created_at DESC, k.n DESC`)
 }
 
@@ -48,13 +49,18 @@ func (s Store) openAsks(ctx context.Context, sc scope, now time.Time) ([]OpenAsk
 			k           OpenAsk
 			n           int64
 			slug, wb    sql.NullString
+			iniSlug     sql.NullString
 			seq, polled sql.NullInt64
 			created     int64
 		)
-		if err := r.Scan(&n, &k.Question, &k.Mode, &k.Blocking, &polled, &created, &slug, &seq, &k.Asker.Handle, &wb); err != nil {
+		if err := r.Scan(&n, &k.Question, &k.Mode, &k.Blocking, &polled, &created, &slug, &seq, &k.Asker.Handle, &wb, &iniSlug); err != nil {
 			return OpenAsk{}, err
 		}
 		k.Ref, k.Task, k.Asker.WayBack = domain.FormatAskRef(n), taskRef(slug, seq), wb.String
+		k.Initiative = slug.String
+		if !slug.Valid {
+			k.Initiative = iniSlug.String
+		}
 		k.CreatedAt = store.DecodeTime(created)
 		k.Age = now.Sub(k.CreatedAt)
 		k.AskerWaiting = waiting.Waiting(asks.Ask{State: domain.AskOpen, Mode: k.Mode, PollSeenAt: timeOf(polled)})

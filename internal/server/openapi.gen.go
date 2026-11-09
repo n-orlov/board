@@ -713,11 +713,14 @@ type AttentionAsk struct {
 	Asker AttentionActor `json:"asker"`
 
 	// AskerWaiting For a `poll` ask, whether the asker is still polling; false for a `stop` ask.
-	AskerWaiting bool             `json:"asker_waiting"`
-	Blocking     bool             `json:"blocking"`
-	CreatedAt    time.Time        `json:"created_at"`
-	Mode         AttentionAskMode `json:"mode"`
-	Question     string           `json:"question"`
+	AskerWaiting bool      `json:"asker_waiting"`
+	Blocking     bool      `json:"blocking"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// Initiative The slug of the initiative the ask belongs to, through its task or raised on the initiative directly. Absent for a global ask.
+	Initiative *string          `json:"initiative,omitempty"`
+	Mode       AttentionAskMode `json:"mode"`
+	Question   string           `json:"question"`
 
 	// Ref The ask's ref, `A<n>`.
 	Ref string `json:"ref"`

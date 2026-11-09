@@ -38,12 +38,15 @@ type Actor struct {
 	WayBack string
 }
 
-// OpenAsk is an open ask. Task is empty for an ask on no task. Age is the time
+// OpenAsk is an open ask. Task is empty for an ask on no task. Initiative is the
+// slug of the initiative the ask belongs to (its task's, or the one it was raised
+// on directly), empty for a global ask. Age is the time
 // since the ask was raised.
 type OpenAsk struct {
 	Ref          string
 	Question     string
 	Task         string
+	Initiative   string
 	Asker        Actor
 	Mode         string
 	AskerWaiting bool

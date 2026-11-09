@@ -650,7 +650,7 @@ prominently. Optional resource prefixes (`host:` vs `repo:`) carry no special me
 `GET /api/v1/attention` returns, each list newest-relevant first, each item with the
 **actors involved** (`{handle, way_back?}`):
 
-1. **Open asks** (`open_asks`): ref, question, task, asker, mode (and, for `poll`, `asker_waiting`:
+1. **Open asks** (`open_asks`): ref, question, task, initiative, asker, mode (and, for `poll`, `asker_waiting`:
    a poll is in flight or ended within the last 60 s), blocking flag, `created_at` and
    `age_seconds`.
 2. **Done, not closed** tasks (`done_not_closed`): task, title, who marked done (`done_by`), when
@@ -1162,8 +1162,10 @@ writes their `lease_expired` events, and judges all five sections at that one in
 - **Counts** (`AttentionCounts`) are `{open_asks, done_not_closed, expired_leases, overdue_watches, conflicts, total}`,
   `total` the sum of the five, all integers following the filters.
 - **An actor** (`AttentionActor`) is `{handle, way_back?}`; `way_back` is absent when the board has none on record.
-- **Open ask**: `{ref, question, task?, asker, mode, asker_waiting, blocking, created_at, age_seconds}`. `age_seconds` is
-  the whole seconds since `created_at`; `task` is absent for an ask on no task; `asker_waiting` is false for a `stop`
+- **Open ask**: `{ref, question, task?, initiative?, asker, mode, asker_waiting, blocking, created_at, age_seconds}`. `age_seconds` is
+  the whole seconds since `created_at`; `task` is absent for an ask on no task; `initiative` is the slug of the ask's
+  initiative, its task's or the one it was raised on directly, and absent only for a global ask (the view links the
+  initiative from it, and the task only when there is one); `asker_waiting` is false for a `stop`
   ask.
 - **Done task**: `{task, title, done_by, done_at, last_lease?}` with `last_lease` `{lease, holder, outcome?, ended_at}`,
   absent when no lease on the task ended and without `outcome` when the holder wrote none.

@@ -141,12 +141,12 @@ func TestAnOpenAskIsListedWithItsFieldsAndClearedByAnswerOrWithdrawal(t *testing
 		t.Errorf("order = %s, %s, want newest first (%s, %s)", r.OpenAsks[0].Ref, r.OpenAsks[1].Ref, second.Ref, first.Ref)
 	}
 	got := r.OpenAsks[1]
-	want := OpenAsk{Ref: first.Ref, Question: "which db?", Task: "aa-1", Asker: Actor{Handle: "claude@host", WayBack: "tmux 3"},
+	want := OpenAsk{Ref: first.Ref, Question: "which db?", Task: "aa-1", Initiative: "aa", Asker: Actor{Handle: "claude@host", WayBack: "tmux 3"},
 		Mode: "poll", AskerWaiting: true, Blocking: true, CreatedAt: got.CreatedAt, Age: 31 * time.Second}
 	if got != want {
 		t.Errorf("open ask = %+v, want %+v", got, want)
 	}
-	if r.OpenAsks[0].Task != "" || r.OpenAsks[0].AskerWaiting || r.OpenAsks[0].Asker.Handle != "codex@host" {
+	if r.OpenAsks[0].Task != "" || r.OpenAsks[0].Initiative != "bb" || r.OpenAsks[0].AskerWaiting || r.OpenAsks[0].Asker.Handle != "codex@host" {
 		t.Errorf("ask without a task = %+v", r.OpenAsks[0])
 	}
 
@@ -161,6 +161,36 @@ func TestAnOpenAskIsListedWithItsFieldsAndClearedByAnswerOrWithdrawal(t *testing
 	}
 	if c := e.counts(t); c != (Counts{}) {
 		t.Errorf("after the withdrawal counts = %+v, want all zero", c)
+	}
+}
+
+func TestAnOpenAsksInitiativeIsKeptWhetherOrNotItHasATask(t *testing.T) {
+	e := newEnv(t)
+	onTask := e.ask(t, me, asks.New{Task: "bb-1", Question: "on a task?"})
+	direct := e.ask(t, me, asks.New{Initiative: "aa", Question: "on an initiative?"})
+	global := e.ask(t, me, asks.New{Question: "anywhere?"})
+	both := e.ask(t, me, asks.New{Task: "aa-2", Initiative: "aa", Question: "task and initiative?"})
+
+	want := map[string]OpenAsk{
+		onTask.Ref: {Task: "bb-1", Initiative: "bb"},
+		direct.Ref: {Task: "", Initiative: "aa"},
+		global.Ref: {Task: "", Initiative: ""},
+		both.Ref:   {Task: "aa-2", Initiative: "aa"},
+	}
+	r := e.get(t, Query{})
+	if len(r.OpenAsks) != len(want) {
+		t.Fatalf("open asks = %d, want %d", len(r.OpenAsks), len(want))
+	}
+	for _, k := range r.OpenAsks {
+		if w := want[k.Ref]; k.Task != w.Task || k.Initiative != w.Initiative {
+			t.Errorf("%s: task %q initiative %q, want task %q initiative %q", k.Ref, k.Task, k.Initiative, w.Task, w.Initiative)
+		}
+	}
+	// The scope filter and the reported initiative agree: asking for aa keeps exactly the asks that report aa.
+	for _, k := range e.get(t, Query{Initiatives: []string{"aa"}}).OpenAsks {
+		if k.Initiative != "aa" {
+			t.Errorf("%s kept by the aa filter reports initiative %q", k.Ref, k.Initiative)
+		}
 	}
 }
 

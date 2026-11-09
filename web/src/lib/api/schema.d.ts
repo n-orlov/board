@@ -1372,6 +1372,8 @@ export interface components {
             question: string;
             /** @description The ref of the task the ask is on. Absent for an ask on no task. */
             task?: string;
+            /** @description The slug of the initiative the ask belongs to, through its task or raised on the initiative directly. Absent for a global ask. */
+            initiative?: string;
             asker: components["schemas"]["AttentionActor"];
             /** @enum {string} */
             mode: "stop" | "poll";

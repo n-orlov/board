@@ -3,6 +3,7 @@
 // view draws: a title, a link to the task, detail lines and the actors involved, each with the way back to copy.
 import { mountPrefix } from './apibase';
 import type { components } from './api/schema';
+import { initiativeOfHref } from './attentionActions';
 import { ageText, askerWaitingLabel, apiQuery, DEFAULT_ATTENTION_FILTER, type AttentionFilter, type SectionKey } from './attention';
 import { errorText, Fetches } from './fetches';
 import { relativeTime } from './format';
@@ -27,6 +28,8 @@ export interface ItemRow {
   title: string;
   /** The fragment of the task the item is on, when it is on one. */
   href: string | undefined;
+  /** The slug of the initiative the item belongs to, when it does (an ask's own initiative, or its task's). */
+  initiative: string | undefined;
   details: string[];
   actors: ItemActor[];
 }
@@ -40,13 +43,17 @@ function taskHref(ref: string): string {
 }
 
 function askRows(items: NonNullable<Attention['open_asks']>): ItemRow[] {
-  return items.map((a) => ({
-    id: a.ref,
-    title: `${a.ref}: ${a.question}`,
-    href: a.task === undefined ? undefined : taskHref(a.task),
-    details: [`asked ${ageText(a.age_seconds)}`, a.mode === 'stop' ? 'asker stopped' : askerWaitingLabel(a.asker_waiting), ...(a.blocking ? ['blocking'] : [])],
-    actors: [actor('asked by', a.asker)],
-  }));
+  return items.map((a) => {
+    const href = a.task === undefined ? undefined : taskHref(a.task);
+    return {
+      id: a.ref,
+      title: `${a.ref}: ${a.question}`,
+      href,
+      initiative: a.initiative ?? initiativeOfHref(href),
+      details: [`asked ${ageText(a.age_seconds)}`, a.mode === 'stop' ? 'asker stopped' : askerWaitingLabel(a.asker_waiting), ...(a.blocking ? ['blocking'] : [])],
+      actors: [actor('asked by', a.asker)],
+    };
+  });
 }
 
 function doneRows(items: NonNullable<Attention['done_not_closed']>, now: Date): ItemRow[] {
@@ -57,6 +64,7 @@ function doneRows(items: NonNullable<Attention['done_not_closed']>, now: Date): 
       id: t.task,
       title: `${t.task} ${t.title}`,
       href: taskHref(t.task),
+      initiative: initiativeOfHref(taskHref(t.task)),
       details: [`done ${relativeTime(t.done_at, now)}`, ...outcome],
       actors: [actor('done by', t.done_by), ...(lease === undefined ? [] : [actor('last lease', lease.holder)])],
     };
@@ -68,6 +76,7 @@ function leaseRows(items: NonNullable<Attention['expired_leases']>, now: Date): 
     id: l.lease,
     title: `${l.lease} on ${l.task} ${l.title}`,
     href: taskHref(l.task),
+    initiative: initiativeOfHref(taskHref(l.task)),
     details: [l.intent, `expired ${relativeTime(l.expired_at, now)}`],
     actors: [actor('held by', l.holder)],
   }));
@@ -78,6 +87,7 @@ function watchRows(items: NonNullable<Attention['overdue_watches']>, now: Date):
     id: w.task,
     title: `${w.task} ${w.title}`,
     href: taskHref(w.task),
+    initiative: initiativeOfHref(taskHref(w.task)),
     details: [`check was due ${relativeTime(w.next_check_at, now)}`, ...(w.last_check === undefined ? [] : [`last check: ${w.last_check.summary}`])],
     actors: [actor('owner', w.owner), ...(w.last_check === undefined ? [] : [actor('last check by', w.last_check.by)])],
   }));
@@ -88,6 +98,7 @@ function conflictRows(items: NonNullable<Attention['conflicts']>): ItemRow[] {
     id: c.resource,
     title: c.resource,
     href: c.tasks.length === 1 ? taskHref(c.tasks[0]!) : undefined,
+    initiative: initiativeOfHref(c.tasks.length === 1 ? taskHref(c.tasks[0]!) : undefined),
     details: c.holders.map((h) => `${h.lease} on ${h.task}: ${h.intent}`),
     actors: c.holders.map((h) => actor(h.lease, h.actor)),
   }));

@@ -241,6 +241,26 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('an ask raised on an initiative with no task links its initiative and no task; a global ask links neither', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `ini-${vp.name}`);
+      const direct = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Which direction overall?', initiative: slug }, 201);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await expect(item).toHaveCount(1, FIVE_SECONDS);
+      await expect(item).toContainText(direct.ref);
+      await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
+      await expect(item.getByTestId('item-link')).toHaveCount(0);
+
+      const global = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Anything at all?' }, 201);
+      await page.goto('/#/attention');
+      const mine = section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: global.ref });
+      await expect(mine).toHaveCount(1, FIVE_SECONDS);
+      await expect(mine.getByTestId('initiative-link')).toHaveCount(0);
+      await expect(mine.getByTestId('item-link')).toHaveCount(0);
+      await post(api, `/api/v1/asks/${global.ref}/withdraw`, {}, 200);
+      await api.dispose();
+    });
+
     test('Answer with free text sends what was typed', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `free-${vp.name}`);
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'What now?', initiative: slug }, 201);

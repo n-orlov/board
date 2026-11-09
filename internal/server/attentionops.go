@@ -69,7 +69,7 @@ func mapped[S, D any](in []S, f func(S) D) *[]D {
 
 func apiAttentionAsk(k attention.OpenAsk) AttentionAsk {
 	return AttentionAsk{
-		Ref: k.Ref, Question: k.Question, Task: optionalText(k.Task), Asker: apiActor(k.Asker), Mode: AttentionAskMode(k.Mode),
+		Ref: k.Ref, Question: k.Question, Task: optionalText(k.Task), Initiative: optionalText(k.Initiative), Asker: apiActor(k.Asker), Mode: AttentionAskMode(k.Mode),
 		AskerWaiting: k.AskerWaiting, Blocking: k.Blocking, CreatedAt: k.CreatedAt, AgeSeconds: int(k.Age.Seconds()),
 	}
 }

@@ -13,7 +13,6 @@
     actionName,
     actionsFor,
     initiativeHref,
-    initiativeOfHref,
     type ActionKind,
     type ActionsState,
   } from './lib/attentionActions';
@@ -155,7 +154,7 @@
           {:else}
             <ul class="flex flex-col gap-3">
               {#each rows as row (row.id)}
-                {@const initiative = initiativeOfHref(row.href)}
+                {@const initiative = row.initiative}
                 <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item">
                   <p class="font-medium">
                     {#if row.href !== undefined}

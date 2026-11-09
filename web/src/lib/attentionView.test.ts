@@ -63,6 +63,7 @@ describe('rowsFor', () => {
       id: 'A1',
       title: 'A1: Which one?',
       href: '#/t/aa-1',
+      initiative: 'aa',
       details: ['asked 1 hour ago', 'asker waiting', 'blocking'],
       actors: [{ role: 'asked by', handle: 'bob', wayBack: 'ralphctl status bob' }],
     });
@@ -70,9 +71,33 @@ describe('rowsFor', () => {
       id: 'A2',
       title: 'A2: Free?',
       href: undefined,
+      initiative: undefined,
       details: ['asked just now', 'asker stopped'],
       actors: [{ role: 'asked by', handle: 'sue', wayBack: undefined }],
     });
+  });
+
+  it('keeps the initiative of an ask raised on an initiative with no task, and links no task for it', () => {
+    const ask = { question: 'Which?', asker: bob, mode: 'stop' as const, asker_waiting: false, blocking: false, created_at: '2026-01-01T11:59:50Z', age_seconds: 10 };
+    const rows = rowsFor(
+      'open_asks',
+      {
+        counts,
+        open_asks: [
+          { ...ask, ref: 'A3', initiative: 'bb' },
+          { ...ask, ref: 'A4', task: 'my-slug-3', initiative: 'my-slug' },
+          { ...ask, ref: 'A5', task: 'cc-2' },
+          { ...ask, ref: 'A6' },
+        ],
+      },
+      NOW,
+    );
+    expect(rows.map((r) => [r.id, r.href, r.initiative])).toEqual([
+      ['A3', undefined, 'bb'],
+      ['A4', '#/t/my-slug-3', 'my-slug'],
+      ['A5', '#/t/cc-2', 'cc'],
+      ['A6', undefined, undefined],
+    ]);
   });
 
   it('shows a done task with who marked it done, when, and its last lease outcome', () => {
@@ -81,6 +106,7 @@ describe('rowsFor', () => {
       id: 'aa-2',
       title: 'aa-2 Ship it',
       href: '#/t/aa-2',
+      initiative: 'aa',
       details: ['done 2 hours ago', 'last lease L3: shipped'],
       actors: [
         { role: 'done by', handle: 'bob', wayBack: 'ralphctl status bob' },
@@ -99,6 +125,7 @@ describe('rowsFor', () => {
         id: 'L4',
         title: 'L4 on aa-3 Slow',
         href: '#/t/aa-3',
+        initiative: 'aa',
         details: ['ride', 'expired 3 hours ago'],
         actors: [{ role: 'held by', handle: 'bob', wayBack: 'ralphctl status bob' }],
       },
@@ -122,6 +149,7 @@ describe('rowsFor', () => {
       id: 'db/main',
       title: 'db/main',
       href: undefined,
+      initiative: undefined,
       details: ['L1 on aa-1: migrate', 'L2 on aa-2: vacuum'],
       actors: [
         { role: 'L1', handle: 'bob', wayBack: 'ralphctl status bob' },
