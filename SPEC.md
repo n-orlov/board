@@ -1127,8 +1127,17 @@ message is flushed as it is written. A server with no change feed answers 503.
   starts at the change feed's position when it connects (§7.3): every event the feed delivers from then on is
   sent, and an event the feed had already delivered is not. So an event committed before the connection that
   the feed had not delivered yet (it reads every `BOARD_STREAM_POLL` and holds rows behind a gap, §7.3) is
-  still sent, and nothing committed between a client's read of the board and its stream is lost. Resume is a later change: a `Last-Event-ID`
-  header is not read yet and the stream continues live.
+  still sent, and nothing committed between a client's read of the board and its stream is lost.
+  **Resume:** a `Last-Event-ID` header (the ULID of the last event the client has; an `EventSource` sends it by
+  itself when it reconnects) or, when the header is absent or empty, a `?last_event_id=` parameter makes the
+  stream send, before any live event, every event written after that one, in order of `n`, up to the feed
+  position the stream began at; the live part starts after that position, so the replay and the live events
+  neither leave a gap nor repeat one. An id may also be an `E<n>` ref. A client that read an event from a
+  server whose feed is further ahead than this one gets no live event it already has. When **more than 1000**
+  events would replay (1000 do replay), or the id names no event (unreadable, or no such event), the stream
+  sends **one** `event: reset` instead, with no `id` line and `data: {"reason":"too_many"}` or
+  `{"reason":"unknown_id"}`, replays nothing and continues live; the client then refetches what it shows.
+  Resume applies to the `events` topic and is ignored when the stream did not ask for it.
 - **`attention`**: accepted; it carries no message yet (the counts it will carry are §5.3's).
 - **Heartbeat**: a comment line, `: ping`, every `BOARD_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
   is idle, so a proxy keeps it open.

@@ -1082,7 +1082,12 @@ paths:
         message per event, in the order they were written: `event: board`, `id:` the event's ULID and `data:` the
         event as one JSON line, the same object `GET /api/v1/events` lists. A comment line `: ping` is sent every
         `BOARD_STREAM_HEARTBEAT` (default 25 s) so an idle connection stays open. The stream ends when the client
-        disconnects or the server shuts down.
+        disconnects or the server shuts down. **Resume:** a `Last-Event-ID` header (the header wins) or a
+        `last_event_id` query parameter, the ULID of the last event the client has, makes the stream send every event
+        written after it, in order, before the live ones, with no gap and no duplicate. When more than 1000 events
+        would be replayed, or the id names no event, the stream sends one `event: reset` (no `id`, `data` a JSON
+        object whose `reason` is `unknown_id` or `too_many`) instead of any replay and continues live; the client
+        then refetches what it shows. Resume applies to the `events` topic.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -1098,6 +1103,18 @@ paths:
               enum: [events, attention]
           style: form
           explode: false
+        - name: last_event_id
+          in: query
+          required: false
+          description: The id of the last event the client has, as the `Last-Event-ID` header; the header wins.
+          schema:
+            type: string
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: The id of the last event the client has; an `EventSource` sends it when it reconnects.
+          schema:
+            type: string
       responses:
         "200":
           description: The stream. The response carries `Cache-Control` no-cache and `X-Accel-Buffering` no.

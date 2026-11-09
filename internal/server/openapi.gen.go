@@ -1742,6 +1742,12 @@ type GetNowParams struct {
 type GetStreamParams struct {
 	// Topics The topics to receive, comma-separated. Default `events,attention`.
 	Topics *[]GetStreamParamsTopics `form:"topics,omitempty" json:"topics,omitempty"`
+
+	// LastEventId The id of the last event the client has, as the `Last-Event-ID` header; the header wins.
+	LastEventId *string `form:"last_event_id,omitempty" json:"last_event_id,omitempty"`
+
+	// LastEventID The id of the last event the client has; an `EventSource` sends it when it reconnects.
+	LastEventID *string `json:"Last-Event-ID,omitempty"`
 }
 
 // GetStreamParamsTopics defines parameters for GetStream.
@@ -2877,8 +2883,33 @@ func (siw *ServerInterfaceWrapper) GetStream(w http.ResponseWriter, r *http.Requ
 
 	bind.check("topics", runtime.BindQueryParameterWithOptions("form", false, false, "topics", r.URL.Query(), &params.Topics, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
 
+	// ------------- Optional query parameter "last_event_id" -------------
+
+	bind.check("last_event_id", runtime.BindQueryParameterWithOptions("form", true, false, "last_event_id", r.URL.Query(), &params.LastEventId, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
 	if bind.failed {
 		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Last-Event-ID" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Last-Event-ID")]; found {
+		var LastEventID string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Last-Event-ID", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Last-Event-ID", valueList[0], &LastEventID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Last-Event-ID", Err: err})
+			return
+		}
+
+		params.LastEventID = &LastEventID
+
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,7 @@ type rig struct {
 	cancel   context.CancelFunc
 	done     chan error
 	feedDone chan struct{}
+	feed     *feed.Feed
 }
 
 // openStore opens and migrates the database at url, closed when t ends.
@@ -59,7 +60,7 @@ func startRig(t *testing.T, st *store.Store, token string, cfg streamSettings) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, token: token, cancel: cancel, done: make(chan error, 1), feedDone: make(chan struct{})}
+	r := &rig{t: t, feed: f, token: token, cancel: cancel, done: make(chan error, 1), feedDone: make(chan struct{})}
 	go func() { defer close(r.feedDone); f.Run(ctx) }()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -133,9 +134,24 @@ type sse struct {
 }
 
 // openStream connects to path and returns once the server has sent the headers.
-func (r *rig) openStream(path string) *sse {
+func (r *rig) openStream(path string) *sse { return r.openStreamWith(path, nil) }
+
+// openStreamWith is openStream with extra request headers, such as Last-Event-ID.
+func (r *rig) openStreamWith(path string, header map[string]string) *sse {
 	r.t.Helper()
-	resp := r.do(http.MethodGet, path, "", r.token) //nolint:bodyclose // the body is closed by sse.close, registered with t.Cleanup below
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, r.base+path, nil)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set(ActorHeader, "tester@host")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	resp, err := noKeepAlive.Do(req) //nolint:bodyclose // the body is closed by sse.close, registered with t.Cleanup below
+	if err != nil {
+		r.t.Fatal(err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()

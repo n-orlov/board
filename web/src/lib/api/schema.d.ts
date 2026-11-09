@@ -477,7 +477,7 @@ export interface paths {
         };
         /**
          * Stream events (server-sent events)
-         * @description A `text/event-stream` of what happens on the board, flushed as it is written. `topics` is a comma-separated list of `events` and `attention`; the default is both and any other topic is 400. Topic `events` sends one message per event, in the order they were written: `event: board`, `id:` the event's ULID and `data:` the event as one JSON line, the same object `GET /api/v1/events` lists. A comment line `: ping` is sent every `BOARD_STREAM_HEARTBEAT` (default 25 s) so an idle connection stays open. The stream ends when the client disconnects or the server shuts down.
+         * @description A `text/event-stream` of what happens on the board, flushed as it is written. `topics` is a comma-separated list of `events` and `attention`; the default is both and any other topic is 400. Topic `events` sends one message per event, in the order they were written: `event: board`, `id:` the event's ULID and `data:` the event as one JSON line, the same object `GET /api/v1/events` lists. A comment line `: ping` is sent every `BOARD_STREAM_HEARTBEAT` (default 25 s) so an idle connection stays open. The stream ends when the client disconnects or the server shuts down. **Resume:** a `Last-Event-ID` header (the header wins) or a `last_event_id` query parameter, the ULID of the last event the client has, makes the stream send every event written after it, in order, before the live ones, with no gap and no duplicate. When more than 1000 events would be replayed, or the id names no event, the stream sends one `event: reset` (no `id`, `data` a JSON object whose `reason` is `unknown_id` or `too_many`) instead of any replay and continues live; the client then refetches what it shows. Resume applies to the `events` topic.
          */
         get: operations["getStream"];
         put?: never;
@@ -2484,8 +2484,13 @@ export interface operations {
             query?: {
                 /** @description The topics to receive, comma-separated. Default `events,attention`. */
                 topics?: ("events" | "attention")[];
+                /** @description The id of the last event the client has, as the `Last-Event-ID` header; the header wins. */
+                last_event_id?: string;
             };
-            header?: never;
+            header?: {
+                /** @description The id of the last event the client has; an `EventSource` sends it when it reconnects. */
+                "Last-Event-ID"?: string;
+            };
             path?: never;
             cookie?: never;
         };
