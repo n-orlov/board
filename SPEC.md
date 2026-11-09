@@ -544,14 +544,40 @@ draw as point markers. `lease_renewed` is stored but not drawn (it is the heartb
 | mentions | json text | list of actor handles |
 | created_at | ts | |
 
-Broadcast = `task_id IS NULL AND initiative_id IS NULL`. A note bound to a task also writes a
-`note_posted` event on that task.
+A note's short ref is `N<n>`: `n` is the table's auto-incrementing key (`domain.FormatNoteRef`; read back by
+`domain.ParseNoteRef` with `N` in either case and a positive `n`). Every read takes `N<n>` or the ULID, in either letter
+case. Timestamps are UTC milliseconds (`BIGINT`) and `mentions` is a JSON text list (`[]` when none). Migration
+`00006_notes` creates the table and `cursors` (§4.8) in both dialects, with the §4.10 indexes.
+
+Broadcast = `task_id IS NULL AND initiative_id IS NULL`, whatever its `resource`. **Every note writes a `note_posted`
+event, in the same transaction as the note, whether it is bound to a task, to an initiative, to a resource or to
+nothing (a broadcast)**: the event carries the note's `task_id` and `initiative_id` as they apply (none for a
+broadcast), `ref_id` = the note's id, the one-line summary `note N3 on aa-1: <text>` (`on <slug>` for an initiative,
+`on <resource>` for a resource, `(broadcast)` for neither) and `data` = `{ref, summary, broadcast}` plus `task`,
+`initiative`, `resource` and `mentions` when set. The body is never in the event.
+
+**Store** (`internal/notes`). `Post` takes a `task` (ref or ULID), an `initiative` (slug or ULID), a `summary`, a
+`body`, a `resource` and `mentions`. The initiative of a note on a task is the task's, and a task with a different
+initiative is invalid; an unknown task or initiative is not found. A closed task or initiative still takes notes. The
+summary is 1 to 200 characters on one line, the body at most 20000, the resource at most 100 characters, the mentions at
+most 20 handles of at most 100 characters without whitespace (repeats dropped, order kept). A refused post writes no
+row, event or actor. `List` filters with AND by `since` (a note ULID or `N<n>`: the notes after it; an RFC 3339 time:
+the notes at or after that instant), `after` (the page cursor, a note ULID or `N<n>`), `task`, `initiative` (a task's
+notes belong to its initiative), `resources` (any of them), `broadcast` (`only` or `exclude`), `mention` (an exact
+handle), `author` and `limit` (1 to 1000, default 100), ordered by `id`; bodies are left out unless `full` is set.
+`NextAfter` is the ULID of the last note of a page when more follow, else empty. `since=cursor` arrives with the cursor
+store.
 
 ### 4.8 `cursors`
 
-`cursors(actor_id, stream, position)`: optional server-side read cursor per actor and stream
-(`notes`, `events`), so an agent may ask "since my last read" without keeping state itself
-(`since=cursor`). Updated only when the reader asks (`ack=true`).
+| column | type | notes |
+|---|---|---|
+| actor_id | fk | the reader; with `stream` the primary key |
+| stream | text | `notes` or `events` (a check constraint refuses any other) |
+| position | text | the id of the last note or event the actor read on that stream |
+
+An optional server-side read cursor per actor and stream, so an agent may ask "since my last read" without keeping
+state itself (`since=cursor`). Updated only when the reader asks (`ack=true`).
 
 ### 4.9 `api_keys`, `sessions`
 
@@ -567,8 +593,8 @@ and is indexed on `expires_at` for that sweep.
 
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
-`lease_resources` (migration `00004_leases`, §4.4). The other tables of this
-section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
+`cursors` (`00006_notes`, §4.7, §4.8). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
