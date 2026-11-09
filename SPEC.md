@@ -347,8 +347,10 @@ close on closed) is `ErrConflict`, a `ConflictError` whose text names the task a
 initiative is `ErrInitiativeClosed` and writes nothing. A transition ends nothing else: live leases stay live.
 
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
-open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is the
-dependency half of **blocked**, computed in the same query that reads the task. `Task.Overdue` is **overdue** (§4.6).
+open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is
+computed in the same query that reads the task, and the list filter `blocked` uses the same condition. The rule: a task is
+blocked while (a) some task it is blocked by is not `closed`, or (b) it has an `open` ask whose `blocking` is true (§4.5).
+Answering or withdrawing that ask ends (b); an ask without `blocking`, or one that is no longer open, never blocks. `Task.Overdue` is **overdue** (§4.6).
 
 `task_deps(task_id, blocked_by_task_id)`: PK both, no self-reference, cycles rejected on insert.
 A dependency is **open** while the blocking task is not `closed` (done-not-closed still blocks).
@@ -849,7 +851,7 @@ principal may use them. The server answers 503 problem documents when it runs wi
   needed: `initiative` (slug or ULID, either letter case) and `tag` (an initiative tag) may repeat, a task being kept
   when it belongs to any initiative given and its initiative carries every tag given (`domain.NormalizeTags` rules);
   `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`; `kind` is `work` or `watch`; `active`
-  (a live lease, as in the task document), `blocked` and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
+  (a live lease, as in the task document), `blocked` (an open dependency or an open blocking ask) and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
   `true` or `false`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
   `closed` or `all`, keeping the tasks closed in the last that many days (with `all` the tasks that are not closed stay);
   `q` keeps the tasks whose title or description contains the text ignoring letter case, for any Unicode letter and not only ASCII; the same tasks match on SQLite and on Postgres, because the match runs in the service and not in the database's own case folding. `%`, `_` and `\` match themselves.
@@ -919,13 +921,13 @@ principal may use them. The server answers 503 problem documents when it runs wi
 - **The task document** (all of the above answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
   status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,
-  live_leases}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
-  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking` and `live_leases` as `[]`.
+  live_leases, open_asks}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
+  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`.
   `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
   status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
   is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
   expires_at, state, resources}`, resources sorted); the read first expires the due leases (§5.1), so a lease past its expiry is not listed. The derived `active` is a non-empty
-  `live_leases`, `blocked` is an open dependency (§4.3) and `overdue` is §4.6's rule at the time of the read.
+  `live_leases`, `open_asks` are the task's asks in state `open`, blocking or not, oldest first, each an `Ask` (§6.6); `blocked` is an open dependency or an open blocking ask (§4.3) and `overdue` is §4.6's rule at the time of the read.
 - A PATCH body is read with a three-state field (`internal/server` `Maybe`): left out, `null`, or a value. Fields the
   document does not name are ignored.
 

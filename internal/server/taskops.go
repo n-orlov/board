@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/leases"
@@ -34,6 +35,8 @@ func (p problemResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter)
 type taskOps struct {
 	tasks  *tasks.Store
 	leases *leases.Store
+	// asks lists the open asks a task document carries; nil lists none.
+	asks *asks.Store
 }
 
 // ready answers 503 when the operations have no store behind them.
@@ -120,7 +123,7 @@ func resolution(s string) *TaskDetailResolution {
 
 // apiTaskDetail is the document for t with its links and live leases. A task is
 // active while it has a live lease.
-func apiTaskDetail(t tasks.Task, links tasks.Links, live []leases.Lease) TaskDetail {
+func apiTaskDetail(t tasks.Task, links tasks.Links, live []leases.Lease, open []Ask) TaskDetail {
 	out := TaskDetail{
 		Id: t.ID, Ref: t.Ref, Initiative: t.Initiative, Seq: t.Seq, Title: t.Title, Description: t.Description,
 		Kind: TaskDetailKind(t.Kind), Status: TaskDetailStatus(t.Status), Resolution: resolution(t.Resolution),
@@ -129,12 +132,28 @@ func apiTaskDetail(t tasks.Task, links tasks.Links, live []leases.Lease) TaskDet
 		CreatedBy:    t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		DoneAt: t.DoneAt, DoneBy: optionalText(t.DoneBy), ClosedAt: t.ClosedAt, ClosedBy: optionalText(t.ClosedBy),
 		Active: len(live) > 0, Blocked: t.Blocked, Overdue: t.Overdue,
-		Deps: apiLinks(links.Deps), Blocking: apiLinks(links.Blocking), LiveLeases: make([]Lease, len(live)),
+		Deps: apiLinks(links.Deps), Blocking: apiLinks(links.Blocking), LiveLeases: make([]Lease, len(live)), OpenAsks: open,
 	}
 	for i, l := range live {
 		out.LiveLeases[i] = apiLease(l)
 	}
 	return out
+}
+
+// openAsks lists the open asks of t, oldest first, never nil.
+func (o taskOps) openAsks(ctx context.Context, t tasks.Task) ([]Ask, error) {
+	out := []Ask{}
+	if o.asks == nil {
+		return out, nil
+	}
+	page, err := o.asks.List(ctx, asks.Query{State: asks.StateOpen, Task: t.ID, Limit: 1000})
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range page.Items {
+		out = append(out, askOps{asks: o.asks}.apiAsk(k))
+	}
+	return out, nil
 }
 
 // detail reads what the document of t carries beyond the row.
@@ -147,7 +166,11 @@ func (o taskOps) detail(ctx context.Context, t tasks.Task) (TaskDetail, error) {
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	return apiTaskDetail(t, links, live), nil
+	open, err := o.openAsks(ctx, t)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	return apiTaskDetail(t, links, live, open), nil
 }
 
 // newTask is the store's request for a create body.

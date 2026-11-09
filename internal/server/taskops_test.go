@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/tasks"
 )
@@ -76,6 +79,9 @@ func TestGetTaskCarriesOverdueBlockedAndClosedFields(t *testing.T) {
 	}
 	if blocking, _ := watch["blocking"].([]any); len(blocking) != 1 {
 		t.Errorf("blocking = %v", watch["blocking"])
+	}
+	if open, ok := watch["open_asks"].([]any); !ok || len(open) != 0 {
+		t.Errorf("open_asks = %v, want an empty list", watch["open_asks"])
 	}
 	waits := decode(t, s.send(http.MethodGet, "/api/v1/tasks/aa-2", "", "a"))
 	if waits["blocked"] != true || waits["overdue"] != false {
@@ -342,5 +348,33 @@ func TestDependencyOperationsAnswerTheDependentTaskAndEachRefusalWithAProblem(t 
 		if rec.Code != tc.code || !strings.Contains(fmt.Sprint(doc["blocked"], doc["detail"]), tc.want) {
 			t.Errorf("%s %s = %d %s, want %d and %q", tc.method, tc.path, rec.Code, rec.Body, tc.code, tc.want)
 		}
+	}
+}
+
+// WithAsks and WithTasks give the task document its open asks in either order.
+func TestTaskDocumentListsOpenAsksWhicheverOptionComesFirst(t *testing.T) {
+	for name, order := range map[string]func(*keyServer) []Option{
+		"asks first": func(s *keyServer) []Option {
+			return []Option{WithAsks(&asks.Store{Store: s.st}), WithTasks(&tasks.Store{Store: s.st}, &leases.Store{Store: s.st})}
+		},
+		"tasks first": func(s *keyServer) []Option {
+			return []Option{WithTasks(&tasks.Store{Store: s.st}, &leases.Store{Store: s.st}), WithAsks(&asks.Store{Store: s.st})}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newKeyServer(t)
+			opts := append([]Option{WithInitiatives(&initiatives.Store{Store: s.st})}, order(s)...)
+			s.h = NewHandler(ok, (&auth.Verifier{Store: s.st}).Verify, nil, s.keys, opts...)
+			s.create("aa", "")
+			s.task(`{"initiative":"aa","title":"one"}`)
+			if rec := s.send(http.MethodPost, "/api/v1/asks", `{"task":"aa-1","question":"Which?","blocking":true}`, "claude@host"); rec.Code != http.StatusCreated {
+				t.Fatalf("raise = %d %s", rec.Code, rec.Body)
+			}
+			doc := decode(t, s.send(http.MethodGet, "/api/v1/tasks/aa-1", "", "claude@host"))
+			open, _ := doc["open_asks"].([]any)
+			if doc["blocked"] != true || len(open) != 1 || open[0].(map[string]any)["ref"] != "A1" {
+				t.Errorf("document = %v", doc)
+			}
+		})
 	}
 }

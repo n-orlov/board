@@ -145,11 +145,17 @@ func (s Store) now() time.Time {
 var taskColumns = []string{"id", "initiative_id", "seq", "title", "description", "kind", "planned_start", "planned_end",
 	"cadence_seconds", "next_check_at", "external_refs", "created_by", "created_at", "updated_at"}
 
+// blockedSQL is the derived blocked of the task t: it has a dependency whose
+// blocker is not closed, or an open ask that is blocking (SPEC 4.3). The bare
+// k.blocking is a boolean in both dialects.
+const blockedSQL = `EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
+		WHERE td.task_id = t.id AND b.status <> 'closed')
+	OR EXISTS (SELECT 1 FROM asks k WHERE k.task_id = t.id AND k.state = 'open' AND k.blocking)`
+
 const selectTask = `SELECT t.id, i.slug, t.initiative_id, t.seq, t.title, t.description, t.kind, t.status, t.resolution,
 	t.planned_start, t.planned_end, t.cadence_seconds, t.next_check_at, t.external_refs,
 	c.handle, t.created_at, t.updated_at, t.done_at, d.handle, t.closed_at, cl.handle,
-	EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
-		WHERE td.task_id = t.id AND b.status <> 'closed')
+	(` + blockedSQL + `)
 	FROM tasks t JOIN initiatives i ON i.id = t.initiative_id JOIN actors c ON c.id = t.created_by
 	LEFT JOIN actors d ON d.id = t.done_by LEFT JOIN actors cl ON cl.id = t.closed_by`
 

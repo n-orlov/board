@@ -160,8 +160,7 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 		return err
 	}
 	f.flag(q.Active, `EXISTS (SELECT 1 FROM leases l WHERE l.task_id = t.id AND l.state = 'live' AND l.expires_at >= ?)`, store.EncodeBound(f.now))
-	f.flag(q.Blocked, `EXISTS (SELECT 1 FROM task_deps td JOIN tasks b ON b.id = td.blocked_by_task_id
-		WHERE td.task_id = t.id AND b.status <> 'closed')`)
+	f.flag(q.Blocked, `(`+blockedSQL+`)`)
 	f.flag(q.Overdue, `(t.kind = 'watch' AND t.status <> 'closed' AND t.next_check_at IS NOT NULL AND t.next_check_at < ?)`, store.EncodeBound(f.now))
 	return s.afterFilter(ctx, f, q.After)
 }

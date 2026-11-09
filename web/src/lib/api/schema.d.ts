@@ -265,7 +265,7 @@ export interface paths {
         };
         /**
          * List the tasks
-         * @description A page of tasks ordered by id (creation order), each with its live leases. Filters combine. `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has an open dependency) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`. `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is not active. An initiative that names nothing is 404.
+         * @description A page of tasks ordered by id (creation order), each with its live leases. Filters combine. `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`. `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is not active. An initiative that names nothing is 404.
          */
         get: operations["listTasks"];
         put?: never;
@@ -289,7 +289,7 @@ export interface paths {
         };
         /**
          * Read a task
-         * @description The task whose ref (`<slug>-<seq>`) or ULID is given, in either letter case, with the tasks it is blocked by (`deps`), the tasks it blocks (`blocking`), its live leases and the derived `active`, `blocked` and `overdue`.
+         * @description The task whose ref (`<slug>-<seq>`) or ULID is given, in either letter case, with the tasks it is blocked by (`deps`), the tasks it blocks (`blocking`), its live leases, its open asks (`open_asks`) and the derived `active`, `blocked` (an open dependency or an open blocking ask) and `overdue`.
          */
         get: operations["getTask"];
         put?: never;
@@ -1064,6 +1064,8 @@ export interface components {
             blocking: components["schemas"]["TaskLink"][];
             /** @description Its live leases, oldest first. */
             live_leases: components["schemas"]["Lease"][];
+            /** @description Its open asks, blocking or not, oldest first. While one of them is blocking, `blocked` is true. */
+            open_asks: components["schemas"]["Ask"][];
         };
         /** @description A task of a list, with its live leases. */
         TaskListItem: components["schemas"]["Task"] & {
@@ -1926,7 +1928,7 @@ export interface operations {
                 kind?: "work" | "watch";
                 /** @description `true` keeps tasks with a live lease, `false` those without. */
                 active?: boolean;
-                /** @description `true` keeps tasks with an open dependency, `false` those without. */
+                /** @description `true` keeps tasks with an open dependency or an open blocking ask, `false` those without. */
                 blocked?: boolean;
                 /** @description `true` keeps overdue watch tasks, `false` the tasks that are not overdue. */
                 overdue?: boolean;

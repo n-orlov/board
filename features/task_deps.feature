@@ -4,7 +4,8 @@ Feature: Task dependencies over HTTP
   Each change writes a dep_added or dep_removed event on the dependent task. A
   dependency that exists is added again with no event, a task cannot depend on
   itself, and a dependency that would close a cycle of any length is refused with
-  the path. A task is blocked while a task it depends on is not closed.
+  the path. A task is blocked while a task it depends on is not closed or while it has an
+  open blocking ask (asks_blocking.feature).
 
   Background:
     Given a new database for the board commands

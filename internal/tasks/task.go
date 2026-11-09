@@ -108,7 +108,8 @@ type Task struct {
 	DoneBy         string
 	ClosedAt       *time.Time
 	ClosedBy       string
-	// Blocked is derived: true while some task it is blocked by is not closed.
+	// Blocked is derived: true while some task it is blocked by is not closed or
+	// it has an open blocking ask.
 	Blocked bool
 	// Overdue is derived: a watch task, not closed, whose next_check_at is
 	// before the store's clock when the task was read.

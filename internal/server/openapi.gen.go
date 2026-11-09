@@ -1311,6 +1311,9 @@ type TaskDetail struct {
 	// NextCheckAt Watch tasks only.
 	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
 
+	// OpenAsks Its open asks, blocking or not, oldest first. While one of them is blocking, `blocked` is true.
+	OpenAsks []Ask `json:"open_asks"`
+
 	// Overdue A watch task, not closed, whose `next_check_at` is before now.
 	Overdue      bool       `json:"overdue"`
 	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
@@ -1611,7 +1614,7 @@ type ListTasksParams struct {
 	// Active `true` keeps tasks with a live lease, `false` those without.
 	Active *bool `form:"active,omitempty" json:"active,omitempty"`
 
-	// Blocked `true` keeps tasks with an open dependency, `false` those without.
+	// Blocked `true` keeps tasks with an open dependency or an open blocking ask, `false` those without.
 	Blocked *bool `form:"blocked,omitempty" json:"blocked,omitempty"`
 
 	// Overdue `true` keeps overdue watch tasks, `false` the tasks that are not overdue.

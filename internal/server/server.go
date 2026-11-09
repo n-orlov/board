@@ -63,7 +63,7 @@ func WithInitiatives(st *initiatives.Store) Option {
 // both the operations answer 503.
 func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 	return func(o *operations) {
-		o.taskOps = taskOps{tasks: st, leases: ls}
+		o.taskOps = taskOps{tasks: st, leases: ls, asks: o.taskOps.asks}
 		o.initiativeOps.tasks = st
 		o.initiativeOps.leases = ls
 	}
@@ -82,7 +82,10 @@ func WithLeases(st *leases.Store) Option {
 
 // WithAsks serves /api/v1/asks from st; without it the operations answer 503.
 func WithAsks(st *asks.Store) Option {
-	return func(o *operations) { o.askOps = askOps{asks: st} }
+	return func(o *operations) {
+		o.askOps = askOps{asks: st}
+		o.taskOps.asks = st
+	}
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

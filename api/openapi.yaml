@@ -524,7 +524,7 @@ paths:
         `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the
         initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`,
         `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has
-        an open dependency) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`.
+        an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`.
         `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the
         tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose
         title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is
@@ -578,7 +578,7 @@ paths:
         - name: blocked
           in: query
           required: false
-          description: "`true` keeps tasks with an open dependency, `false` those without."
+          description: "`true` keeps tasks with an open dependency or an open blocking ask, `false` those without."
           schema:
             type: boolean
         - name: overdue
@@ -670,8 +670,8 @@ paths:
       summary: Read a task
       description: >-
         The task whose ref (`<slug>-<seq>`) or ULID is given, in either letter case, with the tasks it is blocked
-        by (`deps`), the tasks it blocks (`blocking`), its live leases and the derived `active`, `blocked` and
-        `overdue`.
+        by (`deps`), the tasks it blocks (`blocking`), its live leases, its open asks (`open_asks`) and the derived `active`,
+        `blocked` (an open dependency or an open blocking ask) and `overdue`.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -2209,7 +2209,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/Task"
         - type: object
-          required: [deps, blocking, live_leases]
+          required: [deps, blocking, live_leases, open_asks]
           properties:
             deps:
               type: array
@@ -2226,6 +2226,12 @@ components:
               description: Its live leases, oldest first.
               items:
                 $ref: "#/components/schemas/Lease"
+            open_asks:
+              type: array
+              description: >-
+                Its open asks, blocking or not, oldest first. While one of them is blocking, `blocked` is true.
+              items:
+                $ref: "#/components/schemas/Ask"
     TaskListItem:
       description: A task of a list, with its live leases.
       allOf:
