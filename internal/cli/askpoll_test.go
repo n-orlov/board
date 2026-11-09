@@ -122,6 +122,81 @@ func TestPollAskObservesAnAnswerInTheSubSecondRemainder(t *testing.T) {
 	}
 }
 
+// lateFetch returns, on its first call, the ask as ended at the given offset
+// from start, the clock having moved to the deadline.
+func lateFetch(start time.Time, state string, endedAt time.Duration) askFetch {
+	return func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
+		stamp := start.Add(endedAt).Format(time.RFC3339Nano)
+		a := askView{Ref: "A1", State: state, AnsweredAt: stamp}
+		if state == "withdrawn" {
+			a = askView{Ref: "A1", State: state, WithdrawnAt: stamp}
+		}
+		return a, json.RawMessage(`{"read":"after"}`), nil
+	}
+}
+
+func TestPollAskOnlyCountsAnEndEffectiveByTheDeadline(t *testing.T) {
+	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	deadline := start.Add(10 * time.Second)
+	for _, c := range []struct {
+		state string
+		at    time.Duration
+		want  string
+		code  int
+	}{
+		{"answered", 9999 * time.Millisecond, "answered", ExitOK},
+		{"answered", 10 * time.Second, "answered", ExitOK},
+		{"answered", 10*time.Second + time.Millisecond, "open", ExitTimeout},
+		{"answered", 11 * time.Second, "open", ExitTimeout},
+		{"withdrawn", 9 * time.Second, "withdrawn", ExitConflict},
+		{"withdrawn", 10 * time.Second, "withdrawn", ExitConflict},
+		{"withdrawn", 10*time.Second + time.Millisecond, "open", ExitTimeout},
+		{"withdrawn", time.Hour, "open", ExitTimeout},
+	} {
+		clock := &pollClock{t: start}
+		a, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, lateFetch(start, c.state, c.at))
+		if err != nil || a.State != c.want || pollExit(a.State) != c.code {
+			t.Errorf("%s at %s: got %q exit %d (%v), want %q exit %d", c.state, c.at, a.State, pollExit(a.State), err, c.want, c.code)
+		}
+	}
+}
+
+func TestPollAskLateEndStopsPollingAndSurvivesSubSecondRemainder(t *testing.T) {
+	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	fetch := func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
+		calls++
+		return askView{Ref: "A1", State: "answered", AnsweredAt: start.Add(901 * time.Millisecond).Format(time.RFC3339Nano)}, nil, nil
+	}
+	clock := &pollClock{t: start}
+	a, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, start.Add(900*time.Millisecond), clock.now, fetch)
+	if err != nil || a.State != "open" || calls != 1 {
+		t.Errorf("got %v after %d calls (%v)", a, calls, err)
+	}
+}
+
+func TestAskPollAnAnswerAfterTheDeadlineExitsThree(t *testing.T) {
+	for _, c := range []struct{ state, field string }{{"answered", "answered_at"}, {"withdrawn", "withdrawn_at"}} {
+		f := &fakeBoard{handler: func(w http.ResponseWriter, r *http.Request) {
+			body := strings.Replace(askAnswer, `"mode":"stop"`, `"mode":"poll"`, 1)
+			if r.Method == http.MethodGet {
+				body = strings.Replace(body, `"state":"open"`, `"state":"`+c.state+`","`+c.field+`":"2026-03-04T12:10:00.001Z","answer":"x","answered_by":"nik"`, 1)
+			}
+			_, _ = w.Write([]byte(body))
+		}}
+		srv := httptest.NewServer(f)
+		old := nowFn
+		clock := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+		nowFn = func() time.Time { t := clock; clock = clock.Add(10 * time.Minute); return t } // the deadline is 12:10:00
+		code, out, _ := runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "10m")
+		nowFn = old
+		srv.Close()
+		if code != ExitTimeout || out != "A1 still open → board ask show A1\n" {
+			t.Errorf("%s after the deadline: got %d %q", c.state, code, out)
+		}
+	}
+}
+
 func TestWaitFetchStopsAtTheDeadlineAndReadsTheAskThen(t *testing.T) {
 	var waits []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

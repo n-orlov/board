@@ -1547,7 +1547,11 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
   remainder, and the client cuts the request off at the deadline itself, then reads the ask once more without a wait; the poll
   therefore stays active to the actual deadline, sub-second remainder included, and sees any answer or withdrawal made before it.
-  No call is made once the deadline has passed, and exit 3 is reported only then. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
+  No call is made once the deadline has passed, and exit 3 is reported only then. Only an answer or withdrawal effective by the
+  deadline gives exit 0 or 6: when the final read, made at the deadline, finds the ask answered or withdrawn with a server stamp
+  (`answered_at`, `withdrawn_at`) after the deadline, the ask was still open at it, so the line is `A<n> still open → …`, the exit is
+  **3**, and nothing more is read (with `--json` the ask as read, in its later state, is printed with exit 3); a stamp at or before
+  the deadline counts. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
   `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
