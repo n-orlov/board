@@ -57,6 +57,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	}
 	if ops.hub != nil {
 		ops.hub.events = ops.events
+		ops.waits = ops.hub
 	}
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
@@ -114,9 +115,15 @@ func WithLeases(st *leases.Store) Option {
 // WithAsks serves /api/v1/asks from st; without it the operations answer 503.
 func WithAsks(st *asks.Store) Option {
 	return func(o *operations) {
-		o.askOps = askOps{asks: st}
+		o.askOps = askOps{asks: st, touch: o.touch}
 		o.taskOps.asks = st
 	}
+}
+
+// WithAskTouch sets how often a held ask long-poll renews the ask's poll_seen_at
+// (DefaultAskTouch, 30 s, when unset or not above zero). Tests shorten it.
+func WithAskTouch(d time.Duration) Option {
+	return func(o *operations) { o.touch = d }
 }
 
 // WithNotes serves /api/v1/notes from st; without it the operations answer 503.

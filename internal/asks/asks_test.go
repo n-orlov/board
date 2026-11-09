@@ -469,3 +469,33 @@ func TestWaitingNeedsAnOpenPollAskSeenWithinTheLastMinute(t *testing.T) {
 		}
 	}
 }
+
+func TestTouchSetsPollSeenAtToTheClockAndWritesNoEvent(t *testing.T) {
+	e := newEnv(t)
+	k := e.raise(t, New{Question: "q?", Mode: "poll"})
+	before := e.counts(t)
+	e.Clock.now = e.Clock.now.Add(5 * time.Minute)
+	if err := e.S.Touch(ctx, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.S.Get(ctx, k.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PollSeenAt == nil || !got.PollSeenAt.Equal(e.Clock.now) {
+		t.Errorf("poll_seen_at = %v, want %v", got.PollSeenAt, e.Clock.now)
+	}
+	if !e.S.Waiting(got) {
+		t.Error("a poll ask just touched is not waiting")
+	}
+	e.Clock.now = e.Clock.now.Add(61 * time.Second)
+	if e.S.Waiting(got) {
+		t.Error("a poll ask touched 61 s ago is still waiting")
+	}
+	if after := e.counts(t); after != before {
+		t.Errorf("counts after Touch = %v, want %v", after, before)
+	}
+	if err := e.S.Touch(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV"); err != nil {
+		t.Errorf("Touch of an unknown id = %v, want nil", err)
+	}
+}

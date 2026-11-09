@@ -1027,7 +1027,7 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
 `api/openapi.yaml`. `{ref}` is `A<n>` (either letter case) or the ask's ULID (either letter case); one that names no
 ask is **404** (`there is no ask A9`). Any authenticated principal may use them. The server answers 503 problem
 documents when it runs without a store. The rules are those of `internal/asks` (§4.5). Long-polling an ask (`?wait=`)
-is §7.2 and arrives with the ask long-poll.
+is §7.2.
 
 - **`POST /api/v1/asks`**, body `{task?, initiative?, question, details?, options?, mode?, blocking?}`. `task` is a task
   ref or ULID and `initiative` a slug or ULID; both may be left out (a board-wide ask). `question` is 1 to 200
@@ -1150,10 +1150,24 @@ message is flushed as it is written. A server with no change feed answers 503.
 
 ### 7.2 Ask long-poll
 
-`GET /api/v1/asks/{id}?wait=N` (N ≤ 300) returns immediately if the ask is not `open`,
-otherwise holds the request until it is answered/withdrawn or N seconds pass. The waiter
-subscribes to the change feed (§7.3), so an answer written through any replica wakes it; there is
-no `LISTEN/NOTIFY`. A poll in flight marks the ask as "asker waiting" in the attention view.
+`GET /api/v1/asks/{id}?wait=N` (`1 ≤ N ≤ 300`; any other value, including 0, 301 and text, is 400 with a `next`) returns
+the ask at once if it is not `open`, otherwise holds the request until it is answered or withdrawn (200 with the new
+state) or N seconds pass (200 with the still-open ask). A `wait` outside the range is refused before the ask is looked up; a valid one on an ask that does not exist is 404.
+
+Waiters are woken by the events feed (§7.3), not by `LISTEN/NOTIFY`: a wait subscribes to the feed, then reads the
+ask, and re-reads it when an `ask_answered` or `ask_withdrawn` event of that ask arrives. An answer written through any
+replica on the same database therefore ends the wait within the feed's tail interval (`BOARD_STREAM_POLL`), and one
+written through the same server ends it at once. A subscription the feed ended because the waiter fell behind starts
+again and re-reads, and the wait re-reads the ask at every renewal below, so no change is lost. The write deadline is
+moved past the wait, so a server write timeout shorter than N does not cut it, and a server shutdown ends the wait with
+the ask as it is.
+
+`poll_seen_at` (§4.5) is stored, not held in memory, so it is right with several replicas. While a wait is held the
+server sets it to now at the start of the wait, at least every 30 seconds (`DefaultAskTouch`) while the wait is held,
+and at its end (also when the client has left). A call that returns at once because the ask is not open writes nothing.
+`asker_waiting` is derived from it: true when the ask is `open`, its mode is `poll` and `poll_seen_at` is within the last
+60 seconds, so a poll-mode asker counts as waiting for a minute after its last wait ended, and a `stop`-mode ask never
+does.
 
 ### 7.3 The change feed
 

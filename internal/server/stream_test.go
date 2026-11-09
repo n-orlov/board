@@ -26,6 +26,8 @@ import (
 // streamSettings tune one server of a rig.
 type streamSettings struct {
 	poll, heartbeat, writeTimeout time.Duration
+	// extra adds options to the server, given its store.
+	extra func(*store.Store) []Option
 }
 
 // rig is one running board server: the real handler on a real listener over a
@@ -71,6 +73,9 @@ func startRig(t *testing.T, st *store.Store, token string, cfg streamSettings) *
 	opts := []Option{WithInitiatives(&initiatives.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithStream(f, cfg.heartbeat)}
 	if cfg.writeTimeout > 0 {
 		opts = append(opts, WithWriteTimeout(cfg.writeTimeout))
+	}
+	if cfg.extra != nil {
+		opts = append(opts, cfg.extra(st)...)
 	}
 	go func() { r.done <- serveOn(ctx, ln, ok, (&auth.Verifier{Store: st}).Verify, nil, keys, opts...) }()
 	t.Cleanup(func() { _ = r.stop() })

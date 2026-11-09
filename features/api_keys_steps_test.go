@@ -38,6 +38,8 @@ type apiState struct {
 	// allRows is every row of every table a scenario noted.
 	allRows            string
 	sentAt, answeredAt time.Time
+	// wait is the ask wait a scenario left running in the background.
+	wait *askWait
 }
 
 // sendKeyed sends one request to the running server with the given key and actor

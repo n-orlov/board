@@ -1630,6 +1630,12 @@ type ListAsksParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// GetAskParams defines parameters for GetAsk.
+type GetAskParams struct {
+	// Wait Seconds to hold the request while the ask is open, 1 to 300.
+	Wait *int `form:"wait,omitempty" json:"wait,omitempty"`
+}
+
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
 	// Since An event id, an `E<n>` ref (either letter case), an RFC 3339 time, or `cursor` for the caller's `events` cursor.
@@ -1883,7 +1889,7 @@ type ServerInterface interface {
 	RaiseAsk(w http.ResponseWriter, r *http.Request)
 	// GetAsk Read an ask
 	// (GET /api/v1/asks/{ref})
-	GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params GetAskParams)
 	// AnswerAsk Answer an ask
 	// (POST /api/v1/asks/{ref}/answer)
 	AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
@@ -2185,8 +2191,21 @@ func (siw *ServerInterfaceWrapper) GetAsk(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAskParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "wait" -------------
+
+	bind.check("wait", runtime.BindQueryParameterWithOptions("form", true, false, "wait", r.URL.Query(), &params.Wait, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAsk(w, r, ref)
+		siw.Handler.GetAsk(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4103,7 +4122,8 @@ func (response RaiseAsk503ApplicationProblemPlusJSONResponse) VisitRaiseAskRespo
 }
 
 type GetAskRequestObject struct {
-	Ref AskRef `json:"ref"`
+	Ref    AskRef `json:"ref"`
+	Params GetAskParams
 }
 
 type GetAskResponseObject interface {
@@ -8337,10 +8357,11 @@ func (sh *strictHandler) RaiseAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAsk operation middleware
-func (sh *strictHandler) GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+func (sh *strictHandler) GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params GetAskParams) {
 	var request GetAskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetAsk(ctx, request.(GetAskRequestObject))

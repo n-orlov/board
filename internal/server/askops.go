@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/domain"
 )
 
 func (p problemResponse) VisitRaiseAskResponse(w http.ResponseWriter) error    { return p.write(w) }
@@ -17,7 +19,11 @@ func (p problemResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
 
 // askOps is the /api/v1/asks operations (SPEC 6.6). Any authenticated principal
 // may use them: v1 has no ACL.
-type askOps struct{ asks *asks.Store }
+type askOps struct {
+	asks  *asks.Store
+	waits *streamHub    // the change feed that wakes a wait; nil: waits answer 503
+	touch time.Duration // how often a held wait renews poll_seen_at; 0 is DefaultAskTouch
+}
 
 // ready answers 503 when the operations have no store behind them.
 func (o askOps) ready() (problemResponse, bool) {
@@ -123,11 +129,26 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 	if r, off := o.ready(); off {
 		return r, nil
 	}
+	if p := askWaitProblem(req.Params.Wait); p != nil {
+		return *p, nil
+	}
 	k, err := o.asks.Get(ctx, req.Ref)
 	if err != nil {
 		return askResult[GetAskResponseObject](err)
 	}
-	return GetAsk200JSONResponse(o.apiAsk(k)), nil
+	return o.read(ctx, k, req.Params.Wait), nil
+}
+
+// read answers with the ask k: at once, or after a wait when one was asked for
+// and the ask is still open.
+func (o askOps) read(ctx context.Context, k asks.Ask, wait *int) GetAskResponseObject {
+	switch {
+	case wait == nil || k.State != domain.AskOpen:
+		return GetAsk200JSONResponse(o.apiAsk(k))
+	case o.waits == nil:
+		return failure(http.StatusServiceUnavailable, "waiting for an ask is not available")
+	}
+	return askWaitResponse{ctx: ctx, ops: o, ask: k, max: time.Duration(*wait) * time.Second}
 }
 
 // ListAsks lists a page of asks.
