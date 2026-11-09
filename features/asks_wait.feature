@@ -3,7 +3,8 @@ Feature: Ask long-poll
   open. Otherwise it holds the request until the ask is answered or withdrawn, which returns the new state, or
   until N seconds pass, which returns the still-open ask (200). The change feed wakes the wait. While a wait is
   held the ask's poll_seen_at is set, and asker_waiting is true when the ask is open, its mode is poll and
-  poll_seen_at is within the last 60 seconds. The 60 seconds are made by backdating the row, never by waiting.
+  poll_seen_at is within the last 60 seconds. The end of a wait writes poll_seen_at too, and time after it is
+  simulated by moving the stored poll_seen_at back from that value, never by waiting.
 
   Background:
     Given a new database for the board commands
@@ -60,16 +61,29 @@ Feature: Ask long-poll
     And within 1 seconds the poll of the ask "A1" is seen in the database
 
   Scenario: asker_waiting is true during a wait and false 60 seconds after it ends
-    When I start a wait of 60 seconds on the ask "A1" as actor "claude@laptop"
-    Then within 5 seconds the poll of the ask "A1" is seen in the database
+    When I start a wait of 3 seconds on the ask "A1" as actor "claude@laptop"
+    Then within 2 seconds the poll of the ask "A1" is seen in the database
     When I request the ask "A1" as actor "operator@laptop"
     Then the response path "asker_waiting" is "true"
+    And the wait is still held
     When the poll of the ask "A1" was last seen 50 seconds ago
     And I request the ask "A1" as actor "operator@laptop"
     Then the response path "asker_waiting" is "true"
-    When the poll of the ask "A1" was last seen 70 seconds ago
+    And the wait is still held
+    Then the wait ends within 10 seconds
+    And the response status is 200
+    And the response path "state" is "open"
+    And the response path "asker_waiting" is "true"
+    And the poll of the ask "A1" was last seen when the wait ended
+    When I request the ask "A1" as actor "operator@laptop"
+    Then the response path "asker_waiting" is "true"
+    When the clock is 55 seconds past the end of the wait on the ask "A1"
     And I request the ask "A1" as actor "operator@laptop"
-    Then the response path "asker_waiting" is "false"
+    Then the response path "asker_waiting" is "true"
+    When the clock is 61 seconds past the end of the wait on the ask "A1"
+    And I request the ask "A1" as actor "operator@laptop"
+    Then the response path "state" is "open"
+    And the response path "asker_waiting" is "false"
 
   Scenario: an ask in stop mode is never waiting
     When I raise an ask with body "{'question':'Anything?'}" as actor "claude@laptop"

@@ -16,11 +16,15 @@ import (
 // goes on, with the moment it started and, once it ends, how.
 type askWait struct {
 	started time.Time
-	done    chan struct{}
-	status  int
-	body    []byte
-	took    time.Duration
-	err     error
+	seconds int
+	// seenAtEnd is poll_seen_at as the end of the wait left it, in stored
+	// milliseconds, once a step has read it.
+	seenAtEnd int64
+	done      chan struct{}
+	status    int
+	body      []byte
+	took      time.Duration
+	err       error
 }
 
 // startAskWait sends the wait request in the background.
@@ -28,7 +32,7 @@ func (h *harness) startAskWait(parent context.Context, seconds int, ref, actor s
 	if err := h.requireKey(); err != nil {
 		return err
 	}
-	w := &askWait{started: time.Now(), done: make(chan struct{})}
+	w := &askWait{started: time.Now(), seconds: seconds, done: make(chan struct{})}
 	h.api.wait = w
 	target := fmt.Sprintf("http://%s%s?wait=%d", h.addr, h.askPath(ref, ""), seconds)
 	key := h.key
@@ -170,6 +174,76 @@ func (h *harness) backdatePoll(ctx context.Context, ref string, seconds int) err
 	return nil
 }
 
+// pollSeenAt reads the ask's stored poll_seen_at in milliseconds.
+func (h *harness) pollSeenAt(ctx context.Context, ref string) (int64, error) {
+	n, err := askNumber(ref)
+	if err != nil {
+		return 0, err
+	}
+	db, err := h.openDB()
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	q := `SELECT poll_seen_at FROM asks WHERE n = ` + h.placeholder(1) + ` AND poll_seen_at IS NOT NULL`
+	var at int64
+	if err := db.QueryRowContext(ctx, q, n).Scan(&at); err != nil {
+		return 0, fmt.Errorf("poll_seen_at of %s: %w", ref, err)
+	}
+	return at, nil
+}
+
+// pollSeenWhenWaitEnded checks that the wait, which ended, wrote poll_seen_at at
+// its end: no earlier than one second before the wait ran out (the start of the
+// wait wrote it at least that much earlier, and no renewal falls inside a wait
+// this short) and no later than the response arrived. The value is kept as the
+// moment the wait ended.
+func (h *harness) pollSeenWhenWaitEnded(ctx context.Context, ref string) error {
+	w := h.api.wait
+	if w == nil {
+		return errors.New("no wait was started")
+	}
+	select {
+	case <-w.done:
+	default:
+		return errors.New("the wait is still held")
+	}
+	at, err := h.pollSeenAt(ctx, ref)
+	if err != nil {
+		return err
+	}
+	low := w.started.Add(time.Duration(w.seconds)*time.Second - time.Second).UnixMilli()
+	high := w.started.Add(w.took).UnixMilli()
+	if at < low || at > high {
+		return fmt.Errorf("poll_seen_at of %s is %d, want the end of the wait (%d to %d)", ref, at, low, high)
+	}
+	w.seenAtEnd = at
+	return nil
+}
+
+// clockPastWaitEnd moves the simulated clock to the seconds after the end of
+// the wait: the server's clock is the real one, so poll_seen_at is set that
+// much before the value the end of the wait wrote, which is the same distance.
+func (h *harness) clockPastWaitEnd(ctx context.Context, seconds int, ref string) error {
+	w := h.api.wait
+	if w == nil || w.seenAtEnd == 0 {
+		return errors.New("the end of the wait was not read yet")
+	}
+	n, err := askNumber(ref)
+	if err != nil {
+		return err
+	}
+	at := w.seenAtEnd - int64(seconds)*1000
+	rows, err := h.exec(ctx, `UPDATE asks SET poll_seen_at = ? WHERE n = ?`, at, n)
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("%d asks moved for %s, want 1", rows, ref)
+	}
+	return nil
+}
+
 func registerAskWaitSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I start a wait of (\d+) seconds on the ask "([^"]*)" as actor "([^"]*)"$`, h.startAskWait)
 	sc.Step(`^the wait ends within (\d+) seconds$`, h.waitEndsWithin)
@@ -179,4 +253,6 @@ func registerAskWaitSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^within (\d+) seconds the poll of the ask "([^"]*)" is seen in the database$`, h.pollSeenWithin)
 	sc.Step(`^the poll of the ask "([^"]*)" is not seen in the database$`, h.pollNotSeen)
 	sc.Step(`^the poll of the ask "([^"]*)" was last seen (\d+) seconds ago$`, h.backdatePoll)
+	sc.Step(`^the poll of the ask "([^"]*)" was last seen when the wait ended$`, h.pollSeenWhenWaitEnded)
+	sc.Step(`^the clock is (\d+) seconds past the end of the wait on the ask "([^"]*)"$`, h.clockPastWaitEnd)
 }
