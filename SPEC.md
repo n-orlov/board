@@ -778,7 +778,7 @@ unknown task is **404**.
 
 **Note filters**: `since=<ulid|RFC3339|cursor>`, `task=<ref>`, `initiative=<slug>`,
 `resource=<r>` (repeatable), `broadcast=only|exclude`, `mention=<handle>`, `author=<handle>`,
-`fields=summary` (default for lists; bodies via `/notes/{id}` or `fields=full`).
+`fields=summary` (default for lists; bodies via `/notes/{id}` or `fields=full`); §6.7 describes the endpoints.
 
 ### 6.3 Initiatives
 
@@ -1059,6 +1059,41 @@ is §7.2 and arrives with the ask long-poll.
   it, `state` `open`, `answered` or `withdrawn`, and absent optional fields are omitted. `asker_waiting` is derived: true
   when the ask is open, its mode is `poll` and a long poll on it (`poll_seen_at`, §4.5) was seen within the last 60
   seconds, so it is false until a long poll has run.
+
+### 6.7 Notes
+
+`POST`/`GET /api/v1/notes` and `GET /api/v1/notes/{ref}` are in `api/openapi.yaml`. `{ref}` is `N<n>` (either letter
+case) or the note's ULID (either letter case); one that names no note is **404** (`there is no note N9`). Any
+authenticated principal may use them. The server answers 503 problem documents when it runs without a store. The rules
+are those of `internal/notes` (§4.7). `since=cursor`, `ack=true` and the cursor endpoints arrive with the cursor store.
+
+- **`POST /api/v1/notes`**, body `{summary, body?, task?, initiative?, resource?, mentions?}`. `summary` is 1 to 200
+  characters on one line, `body` (Markdown) at most 20000 characters, `resource` at most 100 characters (such as
+  `host:build-1`) and `mentions` at most 20 actor handles. `task` is a task ref or ULID and `initiative` a slug or ULID;
+  both may be left out. The initiative of a note on a task is the task's. A missing body, a bad field, or a `task` and
+  an `initiative` that disagree (the task does not belong to that initiative) is **400** with a `next`; an unknown task
+  or initiative is **404**. A closed task or initiative still takes notes. Otherwise it is **201**, the note, and
+  `note_posted`, which every note writes, a broadcast (neither task nor initiative, with or without a resource)
+  included. A refusal changes nothing: no note, event or actor. In one transaction the server upserts the actor and
+  writes the note with its event, whose `task` and `initiative` are those of the note and whose `data` is `{ref,
+  summary, broadcast}` plus `task`, `initiative`, `resource` and `mentions` when set; the body is never in it.
+- **`GET /api/v1/notes/{ref}`** reads one note, with its body.
+- **`GET /api/v1/notes`** answers `{items, next_after?}`, items ordered by id (posting order). Filters combine with AND:
+  `since` is a note ULID or `N<n>` (the notes after it) or an RFC 3339 time (the notes at or after that instant); `task`
+  (ref or ULID) and `initiative` (slug or ULID) keep the notes on them, a task's notes belonging to its initiative,
+  **404** for one that names nothing; `resource` is repeatable and keeps the notes on any of the resources;
+  `broadcast=only` keeps the broadcasts and `broadcast=exclude` drops them; `mention` keeps the notes that mention one
+  handle exactly and `author` those written by one handle. A filter that matches nothing is **200** with `items: []`.
+  `fields` is `summary` (the default, also when empty: no `body`, but `has_body`) or `full` (with the bodies); anything
+  else is **400** with a `next`, as is a `since` that is none of the three forms, a `broadcast` that is neither value,
+  and an `after` that is not a note ULID or `N<n>` ref. `limit` is 1 to 1000 (default 100; 0 is **400**). `after` is an
+  `N<n>` ref or an ULID: the page starts after that note. `next_after`, the ULID of the last item, is present exactly
+  when more notes follow.
+- **The note document** (`Note`): `{id, ref, author, summary, body?, has_body, task?, initiative?, resource?, mentions,
+  broadcast, created_at}`. `author` is the handle of the actor that posted it, `task` the task's ref, `initiative` its
+  slug, `mentions` a list (empty when none), `broadcast` is derived (no task and no initiative) and absent optional
+  fields are omitted. `has_body` is true when the note has a body, whether or not the document carries it; `body` is
+  present only in `GET /notes/{ref}`, in a `fields=full` list and in the `201` answer, and only when the note has one.
 
 ---
 

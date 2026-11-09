@@ -365,8 +365,8 @@ func TestListPagesByIdAndLeavesBodiesOutUnlessFull(t *testing.T) {
 		t.Errorf("after N5 = %d items, want 2", len(p.Items))
 	}
 	p, _ := e.S.List(ctx, Query{Task: "aa-1"})
-	if p.Items[0].Body != "" {
-		t.Errorf("a summary list carries the body %q", p.Items[0].Body)
+	if p.Items[0].Body != "" || !p.Items[0].HasBody {
+		t.Errorf("a summary list carries the body %q, has_body %v; want no body and has_body", p.Items[0].Body, p.Items[0].HasBody)
 	}
 	p, _ = e.S.List(ctx, Query{Task: "aa-1", Full: true})
 	if p.Items[0].Body != "b1" {

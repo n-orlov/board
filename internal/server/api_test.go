@@ -228,6 +228,9 @@ func (brokenResponse) VisitListAsksResponse(http.ResponseWriter) error          
 func (brokenResponse) VisitGetAskResponse(http.ResponseWriter) error              { return errBroken }
 func (brokenResponse) VisitAnswerAskResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error         { return errBroken }
+func (brokenResponse) VisitPostNoteResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitListNotesResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitGetNoteResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -485,6 +488,24 @@ func (s stubOperations) ListAsks(context.Context, ListAsksRequestObject) (ListAs
 func (s stubOperations) GetAsk(context.Context, GetAskRequestObject) (GetAskResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetAskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) PostNote(context.Context, PostNoteRequestObject) (PostNoteResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PostNoteResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListNotes(context.Context, ListNotesRequestObject) (ListNotesResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListNotesResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetNote(context.Context, GetNoteRequestObject) (GetNoteResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetNoteResponseObject)
 	return resp, err
 }
 
@@ -748,6 +769,17 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get ask 401", 401, GetAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
 		{"get ask 404", 404, GetAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
 		{"get ask 503", 503, GetAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
+		{"post note 400", 400, PostNote400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPostNoteResponse},
+		{"post note 401", 401, PostNote401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPostNoteResponse},
+		{"post note 404", 404, PostNote404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPostNoteResponse},
+		{"post note 503", 503, PostNote503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPostNoteResponse},
+		{"list notes 400", 400, ListNotes400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
+		{"list notes 401", 401, ListNotes401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
+		{"list notes 404", 404, ListNotes404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
+		{"list notes 503", 503, ListNotes503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
+		{"get note 401", 401, GetNote401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},
+		{"get note 404", 404, GetNote404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},
+		{"get note 503", 503, GetNote503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},
 		{"answer ask 400", 400, AnswerAsk400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
 		{"answer ask 401", 401, AnswerAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
 		{"answer ask 404", 404, AnswerAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},

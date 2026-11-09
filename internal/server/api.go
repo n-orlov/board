@@ -47,6 +47,7 @@ type operations struct {
 	eventOps
 	leaseOps
 	askOps
+	noteOps
 	metaOps
 	ready Readiness
 }

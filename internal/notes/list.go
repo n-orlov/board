@@ -165,7 +165,7 @@ func since(f *filter, value string) error {
 	case domain.PointID:
 		f.add(`k.id > ?`, p.ID)
 	default:
-		f.add(`k.created_at >= ?`, store.EncodeTime(p.At))
+		f.add(`k.created_at >= ?`, store.EncodeBound(p.At))
 	}
 	return nil
 }

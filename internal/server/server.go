@@ -14,6 +14,7 @@ import (
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/notes"
 	"github.com/n-orlov/board/internal/tasks"
 	"github.com/n-orlov/board/internal/webui"
 )
@@ -86,6 +87,11 @@ func WithAsks(st *asks.Store) Option {
 		o.askOps = askOps{asks: st}
 		o.taskOps.asks = st
 	}
+}
+
+// WithNotes serves /api/v1/notes from st; without it the operations answer 503.
+func WithNotes(st *notes.Store) Option {
+	return func(o *operations) { o.noteOps = noteOps{notes: st} }
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

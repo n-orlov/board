@@ -1042,6 +1042,72 @@ type Meta struct {
 	Version string `json:"version"`
 }
 
+// Note A note. `body` is present only when the note has one and the read asked for it.
+type Note struct {
+	// Author The handle of the actor that posted it.
+	Author string `json:"author"`
+
+	// Body Markdown, at most 20000 characters. Left out of a summary list.
+	Body *string `json:"body,omitempty"`
+
+	// Broadcast It has neither a task nor an initiative.
+	Broadcast bool      `json:"broadcast"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// HasBody The note has a body, whether or not it is in this document.
+	HasBody bool `json:"has_body"`
+
+	// Id The note's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative, derived from the task when there is one.
+	Initiative *string `json:"initiative,omitempty"`
+
+	// Mentions The actor handles it mentions.
+	Mentions []string `json:"mentions"`
+
+	// Ref The short ref, `N<n>`.
+	Ref string `json:"ref"`
+
+	// Resource At most 100 characters, such as `host:build-1`.
+	Resource *string `json:"resource,omitempty"`
+
+	// Summary One line, 1 to 200 characters.
+	Summary string `json:"summary"`
+
+	// Task The ref of the task it is on.
+	Task *string `json:"task,omitempty"`
+}
+
+// NoteList A page of notes.
+type NoteList struct {
+	Items []Note `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
+// NotePost The note to post.
+type NotePost struct {
+	// Body At most 20000 characters.
+	Body *string `json:"body,omitempty"`
+
+	// Initiative An initiative slug or ULID. With a task it must be the task's own initiative.
+	Initiative *string `json:"initiative,omitempty"`
+
+	// Mentions At most 20 actor handles without whitespace.
+	Mentions *[]string `json:"mentions,omitempty"`
+
+	// Resource At most 100 characters.
+	Resource *string `json:"resource,omitempty"`
+
+	// Summary One line, 1 to 200 characters.
+	Summary string `json:"summary"`
+
+	// Task A task ref or ULID.
+	Task *string `json:"task,omitempty"`
+}
+
 // Now The caller's check-in, in its lease and conflict parts.
 type Now struct {
 	// Actor The handle of the caller's actor.
@@ -1477,6 +1543,9 @@ type EventLimit = int
 // LeaseRef defines model for LeaseRef.
 type LeaseRef = string
 
+// NoteRef defines model for NoteRef.
+type NoteRef = string
+
 // TaskRef defines model for TaskRef.
 type TaskRef = string
 
@@ -1591,6 +1660,39 @@ type ListLeasesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// ListNotesParams defines parameters for ListNotes.
+type ListNotesParams struct {
+	// Since A note ULID or `N<n>` ref, or an RFC 3339 time.
+	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// Task A task ref or ULID.
+	Task *string `form:"task,omitempty" json:"task,omitempty"`
+
+	// Initiative An initiative slug or ULID.
+	Initiative *string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Resource Keep notes on this resource. Repeatable; a note on any of them is kept.
+	Resource *[]string `form:"resource,omitempty" json:"resource,omitempty"`
+
+	// Broadcast `only` keeps the broadcasts, `exclude` drops them.
+	Broadcast *string `form:"broadcast,omitempty" json:"broadcast,omitempty"`
+
+	// Mention Keep the notes that mention this actor handle.
+	Mention *string `form:"mention,omitempty" json:"mention,omitempty"`
+
+	// Author Keep the notes written by this actor handle.
+	Author *string `form:"author,omitempty" json:"author,omitempty"`
+
+	// Fields `summary` (default) leaves the bodies out, `full` includes them.
+	Fields *string `form:"fields,omitempty" json:"fields,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After A note ref (`N<n>`) or id. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // GetNowParams defines parameters for GetNow.
 type GetNowParams struct {
 	// Resources Comma-separated resources to check for conflicts before starting.
@@ -1680,6 +1782,9 @@ type EndLeaseJSONRequestBody = LeaseEnd
 
 // RenewLeaseJSONRequestBody defines body for RenewLease for application/json ContentType.
 type RenewLeaseJSONRequestBody = LeaseRenew
+
+// PostNoteJSONRequestBody defines body for PostNote for application/json ContentType.
+type PostNoteJSONRequestBody = NotePost
 
 // CreateTaskJSONRequestBody defines body for CreateTask for application/json ContentType.
 type CreateTaskJSONRequestBody = TaskCreate
@@ -1779,6 +1884,15 @@ type ServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
+	// ListNotes List notes
+	// (GET /api/v1/notes)
+	ListNotes(w http.ResponseWriter, r *http.Request, params ListNotesParams)
+	// PostNote Post a note
+	// (POST /api/v1/notes)
+	PostNote(w http.ResponseWriter, r *http.Request)
+	// GetNote Read a note
+	// (GET /api/v1/notes/{ref})
+	GetNote(w http.ResponseWriter, r *http.Request, ref NoteRef)
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
@@ -2525,6 +2639,112 @@ func (siw *ServerInterfaceWrapper) GetMeta(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// ListNotes operation middleware
+func (siw *ServerInterfaceWrapper) ListNotes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotesParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "since" -------------
+
+	bind.check("since", runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "task" -------------
+
+	bind.check("task", runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "resource" -------------
+
+	bind.check("resource", runtime.BindQueryParameterWithOptions("form", true, false, "resource", r.URL.Query(), &params.Resource, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "broadcast" -------------
+
+	bind.check("broadcast", runtime.BindQueryParameterWithOptions("form", true, false, "broadcast", r.URL.Query(), &params.Broadcast, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "mention" -------------
+
+	bind.check("mention", runtime.BindQueryParameterWithOptions("form", true, false, "mention", r.URL.Query(), &params.Mention, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "author" -------------
+
+	bind.check("author", runtime.BindQueryParameterWithOptions("form", true, false, "author", r.URL.Query(), &params.Author, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "fields" -------------
+
+	bind.check("fields", runtime.BindQueryParameterWithOptions("form", true, false, "fields", r.URL.Query(), &params.Fields, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "limit" -------------
+
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "after" -------------
+
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNotes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostNote operation middleware
+func (siw *ServerInterfaceWrapper) PostNote(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostNote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNote operation middleware
+func (siw *ServerInterfaceWrapper) GetNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref NoteRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNote(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNow operation middleware
 func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request) {
 
@@ -3177,6 +3397,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/asks/{ref}", wrapper.GetAsk)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/asks/{ref}/answer", wrapper.AnswerAsk)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/asks/{ref}/withdraw", wrapper.WithdrawAsk)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes", wrapper.ListNotes)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/notes", wrapper.PostNote)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes/{ref}", wrapper.GetNote)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -5515,6 +5738,248 @@ func (response GetMeta401ApplicationProblemPlusJSONResponse) VisitGetMetaRespons
 	return err
 }
 
+type ListNotesRequestObject struct {
+	Params ListNotesParams
+}
+
+type ListNotesResponseObject interface {
+	VisitListNotesResponse(w http.ResponseWriter) error
+}
+
+type ListNotes200JSONResponse NoteList
+
+func (response ListNotes200JSONResponse) VisitListNotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotes400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotes400ApplicationProblemPlusJSONResponse) VisitListNotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotes401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotes401ApplicationProblemPlusJSONResponse) VisitListNotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotes404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotes404ApplicationProblemPlusJSONResponse) VisitListNotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotes503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotes503ApplicationProblemPlusJSONResponse) VisitListNotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNoteRequestObject struct {
+	Body *PostNoteJSONRequestBody
+}
+
+type PostNoteResponseObject interface {
+	VisitPostNoteResponse(w http.ResponseWriter) error
+}
+
+type PostNote201JSONResponse Note
+
+func (response PostNote201JSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote400ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote401ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote404ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote503ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNoteRequestObject struct {
+	Ref NoteRef `json:"ref"`
+}
+
+type GetNoteResponseObject interface {
+	VisitGetNoteResponse(w http.ResponseWriter) error
+}
+
+type GetNote200JSONResponse Note
+
+func (response GetNote200JSONResponse) VisitGetNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNote401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetNote401ApplicationProblemPlusJSONResponse) VisitGetNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNote404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetNote404ApplicationProblemPlusJSONResponse) VisitGetNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNote503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetNote503ApplicationProblemPlusJSONResponse) VisitGetNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetNowRequestObject struct {
 	Params GetNowParams
 }
@@ -7236,6 +7701,15 @@ type StrictServerInterface interface {
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
+	// ListNotes List notes
+	// (GET /api/v1/notes)
+	ListNotes(ctx context.Context, request ListNotesRequestObject) (ListNotesResponseObject, error)
+	// PostNote Post a note
+	// (POST /api/v1/notes)
+	PostNote(ctx context.Context, request PostNoteRequestObject) (PostNoteResponseObject, error)
+	// GetNote Read a note
+	// (GET /api/v1/notes/{ref})
+	GetNote(ctx context.Context, request GetNoteRequestObject) (GetNoteResponseObject, error)
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
@@ -8098,6 +8572,89 @@ func (sh *strictHandler) GetMeta(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetMetaResponseObject); ok {
 		if err := validResponse.VisitGetMetaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListNotes operation middleware
+func (sh *strictHandler) ListNotes(w http.ResponseWriter, r *http.Request, params ListNotesParams) {
+	var request ListNotesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNotes(ctx, request.(ListNotesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNotes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListNotesResponseObject); ok {
+		if err := validResponse.VisitListNotesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PostNote operation middleware
+func (sh *strictHandler) PostNote(w http.ResponseWriter, r *http.Request) {
+	var request PostNoteRequestObject
+
+	var body PostNoteJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PostNote(ctx, request.(PostNoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostNote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PostNoteResponseObject); ok {
+		if err := validResponse.VisitPostNoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetNote operation middleware
+func (sh *strictHandler) GetNote(w http.ResponseWriter, r *http.Request, ref NoteRef) {
+	var request GetNoteRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNote(ctx, request.(GetNoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetNoteResponseObject); ok {
+		if err := validResponse.VisitGetNoteResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

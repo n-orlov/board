@@ -656,6 +656,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notes
+         * @description A page of notes ordered by id (posting order). Filters combine. `since` is a note ULID or `N<n>` ref (the notes after it) or an RFC 3339 time (the notes at or after it); `task` (ref or ULID) and `initiative` (slug or ULID) keep the notes on them, a task's notes belonging to its initiative; `resource` is repeatable and keeps the notes on any of the resources; `broadcast` is `only` or `exclude`; `mention` keeps the notes that mention one handle and `author` those written by one handle. `fields` is `summary` (the default: no `body`, but `has_body`) or `full` (with the bodies). `limit` is 1 to 1000, default 100. `after` is the `N<n>` ref or id of the last note of the previous page; `next_after` is the value to send, absent on the last page. A `task` or `initiative` that names nothing is 404.
+         */
+        get: operations["listNotes"];
+        put?: never;
+        /**
+         * Post a note
+         * @description Posts a note by the caller. `summary` is 1 to 200 characters on one line; `body` (Markdown) is at most 20000 characters; `resource` is at most 100 characters such as `host:build-1`; `mentions` is at most 20 actor handles. `task` is a task ref or ULID and `initiative` a slug or ULID; the initiative of a note on a task is the task's, and sending both is 400 unless the task belongs to that initiative. A note with neither a task nor an initiative is a broadcast, whether or not it has a resource. An unknown task or initiative is 404; a closed task or initiative still takes notes. The answer is 201 with the note and the event `note_posted`, written for every note including a broadcast. A refused request writes no note, event or actor.
+         */
+        post: operations["postNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a note
+         * @description Reads one note, with its body, by `N<n>` ref or ULID in either letter case. 404 for none.
+         */
+        get: operations["getNote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/now": {
         parameters: {
             query?: never;
@@ -1332,6 +1376,54 @@ export interface components {
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
         };
+        /** @description A note. `body` is present only when the note has one and the read asked for it. */
+        Note: {
+            /** @description The note's ULID. */
+            id: string;
+            /** @description The short ref, `N<n>`. */
+            ref: string;
+            /** @description The handle of the actor that posted it. */
+            author: string;
+            /** @description One line, 1 to 200 characters. */
+            summary: string;
+            /** @description Markdown, at most 20000 characters. Left out of a summary list. */
+            body?: string;
+            /** @description The note has a body, whether or not it is in this document. */
+            has_body: boolean;
+            /** @description The ref of the task it is on. */
+            task?: string;
+            /** @description The slug of the initiative, derived from the task when there is one. */
+            initiative?: string;
+            /** @description At most 100 characters, such as `host:build-1`. */
+            resource?: string;
+            /** @description The actor handles it mentions. */
+            mentions: string[];
+            /** @description It has neither a task nor an initiative. */
+            broadcast: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description The note to post. */
+        NotePost: {
+            /** @description One line, 1 to 200 characters. */
+            summary: string;
+            /** @description At most 20000 characters. */
+            body?: string;
+            /** @description A task ref or ULID. */
+            task?: string;
+            /** @description An initiative slug or ULID. With a task it must be the task's own initiative. */
+            initiative?: string;
+            /** @description At most 100 characters. */
+            resource?: string;
+            /** @description At most 20 actor handles without whitespace. */
+            mentions?: string[];
+        };
+        /** @description A page of notes. */
+        NoteList: {
+            items: components["schemas"]["Note"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description A page of events. */
         EventList: {
             items: components["schemas"]["Event"][];
@@ -1503,6 +1595,8 @@ export interface components {
         LeaseRef: string;
         /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
         AskRef: string;
+        /** @description The note's ref (`N<n>`, either letter case) or ULID. */
+        NoteRef: string;
         /** @description The page size, 1 to 1000. Default 100. */
         EventLimit: number;
         /** @description An event id or `E<n>` ref. The page starts after it. */
@@ -2680,6 +2774,105 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listNotes: {
+        parameters: {
+            query?: {
+                /** @description A note ULID or `N<n>` ref, or an RFC 3339 time. */
+                since?: string;
+                /** @description A task ref or ULID. */
+                task?: string;
+                /** @description An initiative slug or ULID. */
+                initiative?: string;
+                /** @description Keep notes on this resource. Repeatable; a note on any of them is kept. */
+                resource?: string[];
+                /** @description `only` keeps the broadcasts, `exclude` drops them. */
+                broadcast?: string;
+                /** @description Keep the notes that mention this actor handle. */
+                mention?: string;
+                /** @description Keep the notes written by this actor handle. */
+                author?: string;
+                /** @description `summary` (default) leaves the bodies out, `full` includes them. */
+                fields?: string;
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description A note ref (`N<n>`) or id. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePost"];
+            };
+        };
+        responses: {
+            /** @description The note was posted. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The note's ref (`N<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["NoteRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

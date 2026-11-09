@@ -43,7 +43,7 @@ func invalid(err error, next string) error {
 // Note is one notes row. Ref is N<n>. Task is the task's ref and Initiative the
 // initiative's slug, both empty when the note has none; Actor is the author's
 // handle. Body is empty when the note has none, and also when it was listed
-// without bodies. Broadcast is derived: no task and no initiative.
+// without bodies; HasBody tells the two apart. Broadcast is derived: no task and no initiative.
 type Note struct {
 	N            int64
 	ID           string
@@ -52,6 +52,7 @@ type Note struct {
 	ActorID      string
 	Summary      string
 	Body         string
+	HasBody      bool
 	TaskID       string
 	Task         string
 	InitiativeID string
@@ -90,12 +91,12 @@ type queryer interface {
 
 func scan(r rowScanner) (Note, error) {
 	var (
-		k                                 Note
+		k                                  Note
 		body, taskID, taskSlug, iniID, ini sql.NullString
-		resource                          sql.NullString
-		seq                               sql.NullInt64
-		mentions                          string
-		created                           int64
+		resource                           sql.NullString
+		seq                                sql.NullInt64
+		mentions                           string
+		created                            int64
 	)
 	err := r.Scan(&k.N, &k.ID, &k.Actor, &k.ActorID, &k.Summary, &body, &taskID, &taskSlug, &seq, &iniID, &ini,
 		&resource, &mentions, &created)
@@ -112,6 +113,7 @@ func scan(r rowScanner) (Note, error) {
 		return Note{}, fmt.Errorf("read mentions: %w", err)
 	}
 	k.CreatedAt = store.DecodeTime(created)
+	k.HasBody = body.Valid && body.String != ""
 	k.Broadcast = !taskID.Valid && !iniID.Valid
 	return k, nil
 }
