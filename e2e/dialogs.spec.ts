@@ -1,4 +1,6 @@
-import { expect, test as base, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { expect, test as base, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R8: the four dialogs/sheets of the R4 set (new initiative, new API key, revoke confirmation, account menu),
 // opened by keyboard only, at the phone and the desktop viewport. Signs in through the mock provider, so no API
@@ -275,6 +277,178 @@ test('the Phase 1 dialog list names the 9 dialogs', () => {
     'add dependency',
     'end lease',
   ]);
+});
+
+// R13: the six Phase 2 dialogs held to the same bar, each opened by keyboard only from its own opener on the Attention or Notes
+// view: focus moves inside on open, Tab and Shift+Tab never leave and come round again, Escape closes with focus back on the
+// opener, and the dialog is a bottom sheet at the phone (its lower edge on the viewport's) and centred on the desktop. Acknowledge is
+// one of the six but opens nothing (its button posts at once and raises a toast), so its case holds that line: no dialog opens, so
+// nothing traps focus, and the keyboard goes on past the item.
+const P2_SLUG = 'e2e-dlg-p2';
+const P2_ACTOR = 'dlg-p2';
+
+type P2Seed = { ask: string; doneTask: string; watch: string };
+let seededP2: Promise<P2Seed> | undefined;
+
+// One initiative with an open blocking ask (with options), a done task, an overdue watch task and a note.
+async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<P2Seed> {
+  const api = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': P2_ACTOR, 'Board-Actor-Way-Back': `ralphctl status ${P2_ACTOR}` },
+  });
+  const created = await api.post('/api/v1/initiatives', { data: { slug: P2_SLUG, title: 'Phase 2 dialog keyboard', tags: ['kbd'] } });
+  expect([201, 409], `seed ${P2_SLUG}: ${created.status()}`).toContain(created.status());
+  const task = async (title: string, extra: object = {}) => (await post(api, '/api/v1/tasks', { initiative: P2_SLUG, title, ...extra }, 201)).ref as string;
+  const askTask = await task('Dlg p2 ask subject');
+  const ask = (await post(api, '/api/v1/asks', { question: 'Does focus stay put?', options: ['Yes', 'No'], task: askTask, mode: 'poll', blocking: true }, 201)).ref as string;
+  const doneTask = await task('Dlg p2 done');
+  await post(api, `/api/v1/tasks/${doneTask}/done`, {}, 200);
+  const watch = await task('Dlg p2 watch', { kind: 'watch', cadence_seconds: 900, next_check_at: '2020-01-01T00:00:00Z' });
+  await post(api, '/api/v1/notes', { task: askTask, summary: 'Dlg p2 note', body: 'Body of the note.' }, 201);
+  await api.dispose();
+  return { ask, doneTask, watch };
+}
+
+// Runs a lease out: its expiry moves into the past in the e2e store, then an API read expires it.
+async function expireLease(api: APIRequestContext, ref: string) {
+  const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const changed = db.prepare('UPDATE leases SET expires_at = ? WHERE n = ?').run(Date.now() - 30_000, Number(ref.slice(1)));
+    expect(changed.changes).toBe(1);
+  } finally {
+    db.close();
+  }
+  expect((await api.get('/api/v1/leases?state=expired')).status()).toBe(200);
+}
+
+const attentionRow = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
+
+const onAttention = async (page: Page, ref: string) => {
+  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
+  await expect(attentionRow(page, ref)).toBeVisible();
+};
+
+type P2Dialog = {
+  name: string;
+  /** The dialog's accessible name, from the seed. */
+  dialog: (seed: P2Seed) => string;
+  go: (page: Page, seed: P2Seed) => Promise<Locator>;
+};
+
+// The finite list of Phase 2 dialogs this spec holds to the focus-trap bar; acknowledge is the one with no dialog (see above).
+const PHASE2_DIALOGS: P2Dialog[] = [
+  {
+    name: 'answer ask',
+    dialog: (seed) => `Answer ${seed.ask}`,
+    go: async (page, seed) => (await onAttention(page, seed.ask), attentionRow(page, seed.ask).getByRole('button', { name: `Answer ${seed.ask}` })),
+  },
+  {
+    name: 'withdraw ask',
+    dialog: (seed) => `Withdraw ${seed.ask}`,
+    go: async (page, seed) => (await onAttention(page, seed.ask), attentionRow(page, seed.ask).getByRole('button', { name: `Withdraw ${seed.ask}` })),
+  },
+  {
+    name: 'post note',
+    dialog: () => 'Post note',
+    go: async (page) => {
+      await page.goto(`/#/notes?initiative=${P2_SLUG}`);
+      await expect(page.getByTestId('notes-list').getByTestId('note').first()).toBeVisible();
+      return visibleButton(page, 'Post note');
+    },
+  },
+  {
+    name: 'close from attention',
+    dialog: () => 'Close task',
+    go: async (page, seed) => (await onAttention(page, seed.doneTask), attentionRow(page, seed.doneTask).getByRole('button', { name: `Close ${seed.doneTask}` })),
+  },
+  {
+    name: 'record check from attention',
+    dialog: () => 'Record check',
+    go: async (page, seed) => (await onAttention(page, seed.watch), attentionRow(page, seed.watch).getByRole('button', { name: `Record check ${seed.watch}` })),
+  },
+];
+
+for (const vp of viewports) {
+  test.describe(`Phase 2 dialogs at ${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const d of PHASE2_DIALOGS) {
+      test(`the ${d.name} dialog: keyboard opens it as ${vp.size.width < 768 ? 'a bottom sheet' : 'a centred dialog'}, focus is trapped inside, Escape returns focus to the opener`, async ({ page, playwright, baseURL }) => {
+        seededP2 ??= seedPhase2(playwright, baseURL);
+        const seed = await seededP2;
+        const opener = await d.go(page, seed);
+        await expect(opener).toBeVisible();
+        const dialog = page.getByRole('dialog', { name: d.dialog(seed) });
+        await expect(dialog).toBeHidden();
+
+        // Reach the opener with Tab only, open it with Enter.
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await tabTo(page, opener);
+        await page.keyboard.press('Enter');
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toHaveAttribute('aria-modal', 'true');
+        expect(await focusIsInside(page), `focus is inside the dialog on open (on ${await focused(page)})`).toBe(true);
+        await expect(opener).not.toBeFocused();
+
+        // A bottom sheet at the phone (the sheet slides up on open: wait for it to settle), centred on the desktop.
+        const bottom = async () => {
+          const box = await dialog.boundingBox();
+          return box === null ? -1 : Math.round(box.y + box.height);
+        };
+        if (vp.size.width < 768) await expect.poll(bottom, 'the dialog sits on the viewport\'s lower edge').toBe(vp.size.height);
+        else expect(await bottom(), 'the dialog is centred, clear of the lower edge').toBeLessThan(vp.size.height);
+
+        // Tab and Shift+Tab stay inside and wrap at both ends.
+        await wrapAround(page, 'Tab');
+        await wrapAround(page, 'Shift+Tab');
+
+        // Escape closes it, focus is back on the opener.
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(opener).toBeFocused();
+      });
+    }
+
+    test('the acknowledge action opens no dialog: nothing traps focus and the keyboard goes on past the item', async ({ page, playwright, baseURL }) => {
+      seededP2 ??= seedPhase2(playwright, baseURL);
+      const seed = await seededP2;
+      const api = await playwright.request.newContext({
+        baseURL,
+        extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': P2_ACTOR, 'Board-Actor-Way-Back': `ralphctl status ${P2_ACTOR}` },
+      });
+      // Acknowledging removes the item, so each visit acknowledges an expired lease of its own.
+      const task = (await post(api, '/api/v1/tasks', { initiative: P2_SLUG, title: `Dlg p2 lease ${vp.name}` }, 201)).ref as string;
+      const lease = (await post(api, '/api/v1/leases', { task, intent: 'to acknowledge', resources: [`repo:dlg-p2-${vp.name}-${Date.now()}`] }, 201)).lease.ref as string;
+      await expireLease(api, lease);
+      await api.dispose();
+
+      await onAttention(page, seed.ask);
+      const opener = attentionRow(page, lease).getByRole('button', { name: `Acknowledge ${lease}` });
+      await expect(opener).toBeVisible();
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await tabTo(page, opener);
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator('[aria-modal=true]')).toHaveCount(0);
+
+      // No trap: the stops Tab visits are more than one, and none of them is inside a dialog.
+      const stops: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        await page.keyboard.press('Tab');
+        expect(await focusIsInside(page), `Tab press ${i + 1} is not inside a dialog`).toBe(false);
+        stops.push(await focused(page));
+      }
+      expect(new Set(stops).size, 'Tab keeps moving through the page').toBeGreaterThan(1);
+    });
+  });
+}
+
+test('the Phase 2 dialog list names the six dialogs', () => {
+  expect([...PHASE2_DIALOGS.map((d) => d.name), 'acknowledge'].sort()).toEqual(
+    ['acknowledge', 'answer ask', 'close from attention', 'post note', 'record check from attention', 'withdraw ask'],
+  );
 });
 
 // Every interactive element has a visible :focus-visible ring: read from computed style after keyboard focus.

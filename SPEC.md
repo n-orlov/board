@@ -2414,6 +2414,13 @@ lease. For each, at 390x844 and 1440x900, the keyboard alone (Tab to the opener,
 inside, Tab and Shift+Tab never leave the dialog and come round to the stop they started on, and Escape closes
 it with focus back on the opener.
 
+R13 extends the same spec to the six Phase 2 dialogs, a finite, named list: answer ask, withdraw ask, post note,
+close from attention and record check from attention, each opened by keyboard from its opener on the Attention
+or Notes view, plus acknowledge. At both viewports each of the five dialogs gets the checks above, and also sits on
+the viewport's lower edge at the phone (a bottom sheet) and clear of it at the desktop (centred). Acknowledge opens
+no dialog (its button posts at once and raises a toast), so its case holds that line: no `role=dialog` or
+`aria-modal` element appears, and Tab keeps moving through the page outside any dialog.
+
 **Theme.** The account menu has a Theme control with three settings: **System** (the default),
 **Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
 it; the effective theme is `light` or `dark` and is the `data-theme` attribute of `<html>`, which
