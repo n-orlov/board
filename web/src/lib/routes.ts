@@ -66,6 +66,13 @@ export const ROUTES = [
     icon: '',
   },
   {
+    id: 'notes',
+    hash: '#/notes',
+    title: 'Notes',
+    label: 'Notes',
+    icon: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5',
+  },
+  {
     id: 'keys',
     hash: '#/settings/keys',
     title: 'API keys',

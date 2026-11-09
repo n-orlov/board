@@ -2,6 +2,7 @@
   import type { Component } from 'svelte';
   import Attention from './Attention.svelte';
   import ApiKeys from './ApiKeys.svelte';
+  import Notes from './Notes.svelte';
   import InitiativePage from './InitiativePage.svelte';
   import Initiatives from './Initiatives.svelte';
   import SessionCard from './SessionCard.svelte';
@@ -18,6 +19,7 @@
     initiative: InitiativePage,
     tasks: Tasks,
     task: TaskPage,
+    notes: Notes,
     keys: ApiKeys,
   };
 

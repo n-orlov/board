@@ -115,6 +115,7 @@ describe('ROUTES', () => {
       ['attention', false],
       ['initiatives', true],
       ['tasks', false],
+      ['notes', false],
       ['keys', false],
     ]);
   });
@@ -128,6 +129,7 @@ describe('ROUTES', () => {
       ['attention', false],
       ['initiatives', false],
       ['tasks', true],
+      ['notes', false],
       ['keys', false],
     ]);
   });
@@ -138,8 +140,17 @@ describe('ROUTES', () => {
       ['attention', '#/attention', false],
       ['initiatives', '#/initiatives', false],
       ['tasks', '#/tasks', true],
+      ['notes', '#/notes', false],
       ['keys', '#/settings/keys', false],
     ]);
+  });
+
+  it('routes #/notes, with or without its filter query, to the Notes view, current in the navigation', () => {
+    for (const hash of ['#/notes', '#/notes?broadcast=only&author=ann']) {
+      const route = resolveRoute(hash, ROUTES);
+      expect(route.id).toBe('notes');
+      expect(navEntries(route, ROUTES).find((e) => e.current)?.id).toBe('notes');
+    }
   });
 
   it('starts with the Attention view, the default: `#/` names no entry and so lands on it', () => {
@@ -154,6 +165,7 @@ describe('ROUTES', () => {
       ['attention', true],
       ['initiatives', false],
       ['tasks', false],
+      ['notes', false],
       ['keys', false],
     ]);
   });

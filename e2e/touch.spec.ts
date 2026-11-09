@@ -290,6 +290,19 @@ test.describe('phone 390x844', () => {
     await expectTouchFriendly(page, 6);
   });
 
+  test('the Notes view with a note, its filters and the Post note sheet', async ({ page, playwright, baseURL }) => {
+    const seed = await playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'touch-notes' } });
+    expect([201, 409]).toContain((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-touch-notes', title: 'Touch Notes' } })).status());
+    expect((await seed.post('/api/v1/notes', { data: { initiative: 'e2e-touch-notes', summary: 'Big enough?', body: 'Yes.' } })).status()).toBe(201);
+    await seed.dispose();
+    await page.goto('/#/notes?initiative=e2e-touch-notes');
+    await expect(page.getByTestId('note').first()).toBeVisible();
+    await expectTouchFriendly(page, 8);
+    await page.getByTestId('notes-view').getByRole('button', { name: 'Post note' }).click();
+    await expect(page.getByRole('dialog', { name: 'Post note' })).toBeVisible();
+    await expectTouchFriendly(page, 5);
+  });
+
   test('the Initiatives view', async ({ page }) => {
     await expectTouchFriendly(page, 4);
   });

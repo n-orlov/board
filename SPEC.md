@@ -2154,6 +2154,32 @@ acknowledged", "Check recorded on aa-1"). Nothing refetches by itself: the acted
 event (`ask_answered`, `ask_withdrawn`, `task_closed`, `lease_acked`, `check_recorded`) refreshes the view.
 `e2e/attention.spec.ts` covers the six actions and the refusal at phone and desktop, and `a11y.spec.ts` scans the Answer sheet.
 
+**Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
+of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`
+(`web/src/lib/notesView.ts`, a `ThreadApi`) reads every page of the filtered list with `fields=summary` and `NotesViewStore`
+turns it around and draws `PAGE_SIZE` (20) notes at a time: **Load more (N next)** (`load-more`, 44 px) draws the next
+page and is gone when every note is drawn. A refresh (a post, a new filter read) keeps how many are drawn, except that a new
+filter starts again from the first page, and an answer for a filter that is no longer set is dropped. A note is a card of
+the shared `NoteList` (`showScope`): its summary, author, relative time (absolute time in the `title`), where it was posted
+(`note-scope`: a link to its task, else a link to its initiative, else "broadcast") and its resource; a note with a body has a
+**Show body** button (`aria-expanded`, named "Show body of N<n>") that reads `GET /notes/<ref>` once and draws the body as safe
+Markdown (`renderMarkdown`). The **six filters** are a form (`notes-filters`, 16 px inputs): a **Broadcast only** toggle button (`broadcast-filter`, `aria-pressed`, 44 px) and
+Task, Initiative, Resource, Author and Mention fields, applied by **Apply filters**; they live in the fragment's query
+(`#/notes?broadcast=only&task=aa-1&initiative=aa&resource=host:b&author=x&mention=y`, blanks left out, see "Ask and notes
+libraries"), applying rewrites the fragment in place and reads again, and a reload, a pasted link or the back button reads the
+same filter back; **Clear filters** shows once any is set. With no match the view says "No notes match these filters."
+(else "No notes."). **Post note** opens the one `Dialog` (a bottom sheet on the phone) with the shared `NoteForm` plus
+Task and Initiative fields (a task ref and an initiative slug, both optional; neither makes a broadcast), a Summary (one
+line, 1 to 200 characters), an optional Markdown body, a Resource and Mentions (handles separated by spaces or commas).
+`NotesViewStore.post` checks the form (`noteProblem`), sends it as the signed-in operator and reads the list again;
+a refusal, the form's own ("Write a summary.") or the API's (an unknown task is 404), shows inside the sheet
+(`dialog-error`) which stays open with what was typed, and a success closes it and says "Note posted" in the polite
+toast. The view does not subscribe to `live()` yet (live refresh across views is a later task). `e2e/notes.spec.ts` (phone
+and desktop) posts three notes from the UI (on a task, on an initiative, a broadcast) and finds each under its filter
+(task; initiative, which also holds the task's note; broadcast only with a resource), checks the filters in the fragment
+and across a reload, the author and mention filters and Clear filters, a refused post and a body expanding, and 45 notes
+drawn 20, 40 and 45 by Load more; `a11y.spec.ts` scans the Notes view (a body expanded) and the Post note sheet.
+
 **Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
 the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in

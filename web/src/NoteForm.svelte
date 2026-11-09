@@ -1,16 +1,25 @@
 <script lang="ts">
   import type { NoteForm } from './lib/notes';
+  import type { NoteScope } from './lib/notesView';
 
   // The Post note dialog's body (PRD R10): a one-line summary, an optional Markdown body, a resource and the handles it
-  // mentions. A refusal comes in as `error`; the dialog stays open and the text stays so it can be corrected.
+  // mentions. With `withScope` it also asks for the task and the initiative the note is on (neither is a broadcast). A refusal comes in as `error`; the dialog stays open and the text stays so it can be corrected.
   let {
     heading,
     error,
+    withScope = false,
     onsubmit,
     oncancel,
-  }: { heading: string; error: string | undefined; onsubmit: (form: NoteForm) => Promise<void>; oncancel: () => void } = $props();
+  }: {
+    heading: string;
+    error: string | undefined;
+    withScope?: boolean;
+    onsubmit: (form: NoteForm, scope: NoteScope) => Promise<void>;
+    oncancel: () => void;
+  } = $props();
 
   let form: NoteForm = $state({ summary: '', body: '', resource: '', mentions: '' });
+  let scope: NoteScope = $state({ task: '', initiative: '' });
   let busy = $state(false);
 
   const input = 'mt-1 block min-h-11 w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text';
@@ -20,7 +29,7 @@
     event.preventDefault();
     busy = true;
     try {
-      await onsubmit({ ...form });
+      await onsubmit({ ...form }, { ...scope });
     } finally {
       busy = false;
     }
@@ -34,6 +43,11 @@
     <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="dialog-error">{error}</p>
   {/if}
 
+  {#if withScope}
+    <p class="text-sm text-text-muted">Leave the task and the initiative empty to post a broadcast.</p>
+    <label class="block text-sm font-medium">Task (optional) <input name="task" class={input} bind:value={scope.task} autocomplete="off" placeholder="phone-onboard-3" /></label>
+    <label class="block text-sm font-medium">Initiative (optional) <input name="initiative" class={input} bind:value={scope.initiative} autocomplete="off" placeholder="phone-onboard" /></label>
+  {/if}
   <label class="block text-sm font-medium">Summary <input name="summary" class={input} bind:value={form.summary} autocomplete="off" /></label>
   <label class="block text-sm font-medium">Body (optional, Markdown) <textarea name="body" rows="5" class={input} bind:value={form.body}></textarea></label>
   <label class="block text-sm font-medium">Resource (optional) <input name="resource" class={input} bind:value={form.resource} autocomplete="off" placeholder="host:build-1" /></label>

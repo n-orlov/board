@@ -17,8 +17,8 @@ export interface ThreadScope {
 }
 
 export class ThreadApi {
-  private readonly browser: Browser;
-  private readonly csrf: () => string;
+  protected readonly browser: Browser;
+  protected readonly csrf: () => string;
 
   /** `csrf` is read at each write, so a page that rotates its token is followed. */
   constructor(browser: Browser, csrf: () => string) {
@@ -26,7 +26,7 @@ export class ThreadApi {
     this.csrf = csrf;
   }
 
-  private async call(path: string, what: string, init: RequestInit): Promise<Response> {
+  protected async call(path: string, what: string, init: RequestInit): Promise<Response> {
     let response: Response;
     try {
       response = await this.browser.fetch(mountPrefix(this.browser.pathname) + path, { ...init, credentials: 'same-origin' });
@@ -37,7 +37,7 @@ export class ThreadApi {
     return response;
   }
 
-  private async pages<T>(path: string, query: URLSearchParams, what: string): Promise<T[]> {
+  protected async pages<T>(path: string, query: URLSearchParams, what: string): Promise<T[]> {
     const items: T[] = [];
     let after: string | undefined;
     do {
@@ -50,7 +50,7 @@ export class ThreadApi {
     return items;
   }
 
-  private async write<T>(path: string, what: string, body: object): Promise<T> {
+  protected async write<T>(path: string, what: string, body: object): Promise<T> {
     const headers = { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf() };
     const response = await this.call(path, what, { method: 'POST', headers, body: JSON.stringify(body) });
     return (await response.json()) as T;

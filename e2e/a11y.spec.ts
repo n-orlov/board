@@ -4,10 +4,10 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
-// theme. `states` holds the 20 earlier states (the Attention view over an open ask and a conflict, and its Answer sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
+// theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. 32 states x 2 viewports x 2 themes = 128 scans. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. 34 states x 2 viewports x 2 themes = 136 scans. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -54,6 +54,23 @@ const states: State[] = [
       await page.getByTestId('action-answer').first().click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await expect(page.getByTestId('answer-question')).toContainText('Is the page readable?');
+    },
+  },
+  {
+    name: 'Notes view',
+    open: async (page) => {
+      await page.goto('/#/notes?initiative=e2e-a11y');
+      await expect(page.getByTestId('notes-list').getByTestId('note')).toHaveCount(1);
+      await page.getByRole('button', { name: /Show body of/ }).click();
+      await expect(page.getByTestId('note-body')).toBeVisible();
+    },
+  },
+  {
+    name: 'Post note sheet',
+    open: async (page) => {
+      await page.goto('/#/notes?initiative=e2e-a11y');
+      await page.getByTestId('notes-view').getByRole('button', { name: 'Post note' }).click();
+      await expect(page.getByRole('dialog', { name: 'Post note' })).toBeVisible();
     },
   },
   {
@@ -440,6 +457,8 @@ for (const vp of viewports) {
             headers: { 'Board-Actor': 'a11y-asker', 'Board-Actor-Way-Back': 'ralphctl status a11y-asker' },
           });
           expect(ask.status()).toBe(201);
+          // A note with a body, for the Notes view.
+          expect((await seed.post('/api/v1/notes', { data: { task: ref, summary: 'Scan started', body: 'Using **axe**.' } })).status()).toBe(201);
           // Something the Add dependency sheet can offer as a blocker.
           expect((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-a11y-blockers', title: 'Blockers' } })).status()).toBe(201);
           const blocker = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y-blockers', title: 'Possible blocker' } });

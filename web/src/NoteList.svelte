@@ -3,11 +3,20 @@
   import { renderMarkdown } from './lib/markdown';
   import type { Note } from './lib/notes';
   import { taskHref } from './lib/taskPage';
+  import { initiativeHref } from './lib/attentionActions';
 
   // A list of notes as the task page and the initiative page draw them (PRD R10): summary, author, time, resource and
   // an expand-to-body button for a note that has a body; the body is read by `onexpand` and arrives in `bodies`.
-  // `showTask` names the task a note is on (the initiative page lists the notes of all its tasks).
-  let { notes, bodies, testid, showTask = false, onexpand }: { notes: Note[]; bodies: Record<string, string>; testid: string; showTask?: boolean; onexpand: (ref: string) => void } = $props();
+  // `showTask` names the task a note is on (the initiative page lists the notes of all its tasks); `showScope` names
+  // where a note was posted: its task, else its initiative, else "broadcast" (the Notes view lists every note).
+  let {
+    notes,
+    bodies,
+    testid,
+    showTask = false,
+    showScope = false,
+    onexpand,
+  }: { notes: Note[]; bodies: Record<string, string>; testid: string; showTask?: boolean; showScope?: boolean; onexpand: (ref: string) => void } = $props();
 
   let expanded: Record<string, boolean> = $state({});
   const now = new Date();
@@ -27,6 +36,11 @@
         <span data-testid="note-author">{note.author}</span> ·
         <time datetime={note.created_at} title={absoluteTime(note.created_at)} data-testid="note-when">{relativeTime(note.created_at, now)}</time>
         {#if showTask && note.task !== undefined}· <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(note.task)} data-testid="note-task">{note.task}</a>{/if}
+        {#if showScope}
+          {#if note.task !== undefined}· <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(note.task)} data-testid="note-scope">{note.task}</a>
+          {:else if note.initiative !== undefined}· <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(note.initiative)} data-testid="note-scope">{note.initiative}</a>
+          {:else}· <span data-testid="note-scope">broadcast</span>{/if}
+        {/if}
         {#if note.resource !== undefined}· <span class="font-mono" data-testid="note-resource">{note.resource}</span>{/if}
       </p>
       {#if note.has_body}
