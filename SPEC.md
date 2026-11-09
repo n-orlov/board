@@ -2448,7 +2448,10 @@ origin. R12 extends it to the Phase 1 views as a finite, named list (`PHASE1_STA
 `#/i/<slug>` and `#/t/<ref>` (each a full page load over a seeded watch task with a link, a blocker, a
 dependent, a milestone, a live lease and a conflict), and again with a dialog opened on the page (new
 task, edit initiative, edit task, add dependency, end lease): 8 states at both viewports (16 more
-visits). A planted remote image turns the check red.
+visits). R13 adds `PHASE2_STATES`: `#/attention` and `#/notes` and the six Phase 2 dialogs (answer ask, withdraw
+ask, post note, close from attention, acknowledge, record check from attention), 8 states at both viewports
+(16 more visits), each of which must also record the `/api/v1/stream` request, so the live stream is held to
+the same same-origin bar as every fetch. A planted remote image turns the check red.
 
 **Touch and phone ergonomics.** At the phone width (390x844) every visible interactive element
 (`a, button, input, select, textarea, [role=button]`) in the shell, the forms, the lists and the
