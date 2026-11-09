@@ -190,6 +190,35 @@ describe('NotesViewStore refresh (a live event)', () => {
     expect(store.state.notes).toHaveLength(3);
   });
 
+  it('keeps the notes and the bodies read through a failed refresh and clears the error on the next good one', async () => {
+    const { gates, store } = gated();
+    const first = store.load();
+    gates[0]!.resolve(notes(3));
+    await first;
+    await store.loadBody('N3');
+    const failed = store.refresh();
+    gates[1]!.reject(new Error('down'));
+    await failed;
+    expect(store.state).toMatchObject({ error: 'down', bodies: { N3: 'body of N3' } });
+    expect(store.state.notes).toHaveLength(3);
+    const good = store.refresh();
+    gates[2]!.resolve(notes(4));
+    await good;
+    expect(store.state).toMatchObject({ error: undefined, bodies: { N3: 'body of N3' } });
+    expect(store.state.notes).toHaveLength(4);
+  });
+
+  it('a failed body read keeps the notes already drawn', async () => {
+    const { gates, api, store } = gated();
+    const first = store.load();
+    gates[0]!.resolve(notes(3));
+    await first;
+    api.note.mockRejectedValueOnce(new Error('gone'));
+    await store.loadBody('N2');
+    expect(store.state.error).toBe('gone');
+    expect(store.state.notes).toHaveLength(3);
+  });
+
   it('drops an older read that lands after a newer one, and one for a filter since replaced', async () => {
     const { gates, store } = gated();
     const first = store.refresh();

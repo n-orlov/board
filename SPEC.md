@@ -1959,7 +1959,7 @@ read keeps the page and shows the error above it.
 The **Notes view** subscribes with the note events (`affectsNotes`: `note_posted`) and refreshes through
 `NotesViewStore.refresh`: the filtered list is read again and swapped in under the filter shown, so a new note appears on
 top of the newest-first list while the page drawn ("Load more"), the bodies already read and an open Post note sheet all
-stay; a failed read keeps the notes and shows the inline error, and an answer for a filter since replaced is dropped.
+stay; a failed read keeps the notes and shows the inline error (`data-testid="notes-error"`) **above the list, which stays mounted**: the expanded rows, their bodies and the page drawn survive the failure and the next successful refresh, which clears the error (so does a failed body read: the list stays and the error shows). Only a first read that fails, with nothing drawn yet, shows the error alone. An answer for a filter since replaced is dropped.
 **Settings → API keys** subscribes with the key events (`affectsKeys`: `key_created`, `key_revoked`, whoever caused them)
 and refreshes through `KeysStore.refresh` in the same way: the list changes in place (never `loading`), and the
 once-shown new-key box and an open create form are untouched. Both reconnect and `reset` refetches come from the stream
@@ -2210,7 +2210,7 @@ toast. The view does not subscribe to `live()` yet (live refresh across views is
 and desktop) posts three notes from the UI (on a task, on an initiative, a broadcast) and finds each under its filter
 (task; initiative, which also holds the task's note; broadcast only with a resource), checks the filters in the fragment
 and across a reload, the author and mention filters and Clear filters, a refused post and a body expanding, and 45 notes
-drawn 20, 40 and 45 by Load more; `a11y.spec.ts` scans the Notes view (a body expanded) and the Post note sheet.
+drawn 20, 40 and 45 by Load more, a failed live refetch (the list read answered 500) that shows `notes-error` beside the rendered note with its body still expanded and clears it on the next good refresh, and a failed body read that keeps the list and the other expanded body; `a11y.spec.ts` scans the Notes view (a body expanded) and the Post note sheet.
 
 **Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of

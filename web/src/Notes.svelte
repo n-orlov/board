@@ -104,7 +104,10 @@
   </form>
 
   {#if view.error !== undefined}
-    <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
+    <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="notes-error">{view.error}</p>
+  {/if}
+  {#if view.error !== undefined && view.notes.length === 0}
+    <!-- the error above is the whole answer: nothing was read to draw -->
   {:else if view.loading && view.notes.length === 0}
     <p class="text-text-muted" role="status">Loading…</p>
   {:else if view.notes.length === 0}

@@ -139,6 +139,58 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('a failed live refetch shows the inline error beside the notes, keeping the expanded body, and the next good one clears it', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-notes-fail-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      await post(api, '/api/v1/notes', { initiative: slug, summary: 'Kept note', body: 'Still **here**.' }, 201);
+      await page.goto(`/#/notes?initiative=${slug}`);
+      await expect.poll(() => summaries(page)).toEqual(['Kept note']);
+      await notes(page).first().getByRole('button', { name: /body of/ }).click();
+      await expect(notes(page).first().getByTestId('note-body').locator('strong')).toHaveText('here');
+
+      // The list read fails from now on; a note posted through the API (not the page) sends the live event.
+      let failing = true;
+      await page.route(
+        (url) => url.pathname === '/api/v1/notes',
+        (route) => (failing ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ title: 'Boom', status: 500, detail: 'notes are down' }) }) : route.continue()),
+      );
+      await post(api, '/api/v1/notes', { initiative: slug, summary: 'Second note' }, 201);
+      const error = page.getByTestId('notes-error');
+      await expect(error).toBeVisible();
+      await expect(page.getByTestId('notes-list')).toBeVisible();
+      await expect(notes(page)).toHaveCount(1);
+      await expect(notes(page).first().getByTestId('note-body').locator('strong')).toHaveText('here');
+      await expect(notes(page).first().getByRole('button', { name: /body of/ })).toHaveAttribute('aria-expanded', 'true');
+
+      // The next successful refetch shows the new note on top, drops the error and still has the body open.
+      failing = false;
+      await post(api, '/api/v1/notes', { initiative: slug, summary: 'Third note' }, 201);
+      await expect.poll(() => summaries(page)).toEqual(['Third note', 'Second note', 'Kept note']);
+      await expect(error).toHaveCount(0);
+      await expect(notes(page).nth(2).getByTestId('note-body').locator('strong')).toHaveText('here');
+      await api.dispose();
+    });
+
+    test('a failed body read keeps the list and its other expanded body, with the inline error', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-notes-bodyfail-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      await fresh(api, slug);
+      const good = await post<{ ref: string }>(api, '/api/v1/notes', { initiative: slug, summary: 'Good body', body: 'Fine.' }, 201);
+      const bad = await post<{ ref: string }>(api, '/api/v1/notes', { initiative: slug, summary: 'Bad body', body: 'Never read.' }, 201);
+      await page.goto(`/#/notes?initiative=${slug}`);
+      await expect.poll(() => summaries(page)).toEqual(['Bad body', 'Good body']);
+      await page.getByRole('button', { name: `Show body of ${good.ref}` }).click();
+      await expect(page.getByTestId('note-body')).toHaveText('Fine.');
+
+      await page.route(`**/api/v1/notes/${bad.ref}*`, (route) => route.fulfill({ status: 500, contentType: 'application/problem+json', body: JSON.stringify({ title: 'Boom', status: 500, detail: 'body is down' }) }));
+      await page.getByRole('button', { name: `Show body of ${bad.ref}` }).click();
+      await expect(page.getByTestId('notes-error')).toBeVisible();
+      await expect(notes(page)).toHaveCount(2);
+      await expect(page.getByTestId('note-body')).toHaveText('Fine.');
+      await api.dispose();
+    });
+
     test('Load more shows the next page of an older tail, newest first', async ({ page, playwright, baseURL }) => {
       const slug = `e2e-notes-page-${vp.name}`;
       const api = await apiContext(playwright, baseURL);
