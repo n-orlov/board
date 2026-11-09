@@ -51,6 +51,11 @@ var (
 		{"--state", true}, {"--mine", false}, {"--task", true}, {"--res", true},
 		{"--limit", true}, {"--all", false}, {"--json", false},
 	}
+	askFlags       = []flagSpec{{"--details", true}, {"--option", true}, {"--stop", false}, {"--blocking", false}, {"--json", false}}
+	askShowFlags   = []flagSpec{{"--json", false}}
+	askLsFlags     = []flagSpec{{"--state", true}, {"--mine", false}, {"--task", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
+	askDropFlags   = []flagSpec{{"--json", false}}
+	answerFlags    = []flagSpec{{"--relay", false}, {"--for", true}, {"--json", false}}
 	nowFlags       = []flagSpec{{"--resources", true}, {"--json", false}}
 	whoamiFlags    = []flagSpec{}
 	helpAgentFlags = []flagSpec{{"--version", false}}

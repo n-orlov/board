@@ -25,7 +25,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|admin>"
+const usageLine = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -107,6 +107,12 @@ type harness struct {
 	// command line stands for it.
 	eventRef string
 
+	// stdin is the text the next command reads from standard input, and
+	// textFile a file of text a command line names as <file>; both are the
+	// scenario's own (the file is removed when the scenario ends).
+	stdin    string
+	textFile string
+
 	server *exec.Cmd
 	addr   string
 	dir    string
@@ -156,6 +162,9 @@ func (h *harness) runArgs(ctx context.Context, args []string, extra ...string) e
 	}
 	cmd.Env = h.env(extra...)
 	cmd.Stdout, cmd.Stderr = &out, &errb
+	if h.stdin != "" {
+		cmd.Stdin, h.stdin = strings.NewReader(h.stdin), ""
+	}
 	err := cmd.Run()
 	h.stdout, h.stderr = out.String(), errb.String()
 	var exitErr *exec.ExitError
@@ -377,6 +386,11 @@ func (h *harness) stopServer() {
 	if h.dir != "" {
 		_ = os.RemoveAll(h.dir)
 	}
+	if h.textFile != "" {
+		_ = os.Remove(h.textFile)
+		h.textFile = ""
+	}
+	h.stdin = ""
 	if h.own != nil {
 		h.own.terminate(context.Background())
 	}
@@ -416,6 +430,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerCLIOutputSteps(sc, h)
 	registerCLITaskSteps(sc, h)
 	registerCLILeaseSteps(sc, h)
+	registerCLIAskSteps(sc, h)
 	registerPhase2UpgradeSteps(sc, h)
 	registerHelpAgentSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)

@@ -123,18 +123,24 @@ func editDate(p parsedArgs, body map[string]any, set, unset, field string) bool 
 
 // readDescription reads the text of --description: standard input for "-", else the named file.
 func readDescription(src string) (string, error) {
+	return readTextSource(src, "description")
+}
+
+// readTextSource reads a text flag's value: standard input for "-", else the
+// named file. what names the flag's subject in an error.
+func readTextSource(src, what string) (string, error) {
 	r := stdin
 	if src != "-" {
-		f, err := os.Open(src) //nolint:gosec // G304: the operator names the description file on the command line
+		f, err := os.Open(src) //nolint:gosec // G304: the operator names the text file on the command line
 		if err != nil {
-			return "", fmt.Errorf("cannot read the description file %s", src)
+			return "", fmt.Errorf("cannot read the %s file %s", what, src)
 		}
 		defer func() { _ = f.Close() }()
 		r = f
 	}
 	raw, err := io.ReadAll(io.LimitReader(r, maxDescriptionBytes))
 	if err != nil {
-		return "", fmt.Errorf("cannot read the description from %s: %w", src, err)
+		return "", fmt.Errorf("cannot read the %s from %s: %w", what, src, err)
 	}
 	return string(raw), nil
 }
