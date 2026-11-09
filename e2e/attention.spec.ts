@@ -91,6 +91,22 @@ async function seed(playwright: PlaywrightTestArgs['playwright'], baseURL: strin
   return { slug, tag, wayBack, asker, other, resource, ask, doneTask, expiredLease: lease.lease.ref, watchTask, conflictTasks: [first, second] };
 }
 
+
+interface Item {
+  slug: string;
+  api: APIRequestContext;
+}
+
+// A fresh initiative of this test's own, filtered to by the view, and an API client of its own actor.
+async function ground(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string): Promise<Item> {
+  const slug = `e2e-att-act-${name}`;
+  const api = await apiAs(playwright, baseURL, `act-${name}`, `ralphctl status act-${name}`);
+  await post(api, '/api/v1/initiatives', { slug, title: `Actions ${name}` }, 201);
+  return { slug, api };
+}
+
+const dialog = (page: Page) => page.getByTestId('dialog');
+
 const section = (page: Page, key: string) => page.getByTestId(`section-${key}`);
 
 for (const vp of viewports) {
@@ -187,6 +203,145 @@ for (const vp of viewports) {
       await page.getByTestId('clear-filters').click();
       await expect(page).toHaveURL(/#\/attention$/);
       await expect(page.getByRole('button', { name: s.tag, exact: true })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('Answer with an option button fills the answer, sends it and the ask leaves its section', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `opt-${vp.name}`);
+      const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Choosing' }, 201)).ref;
+      const ask = await post<{ ref: string }>(
+        api,
+        '/api/v1/asks',
+        { question: 'Left or right?', details: 'Pick **one** <script>window.pwned = 1</script>', options: ['Left', 'Right'], task },
+        201,
+      );
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await expect(item).toContainText(ask.ref, FIVE_SECONDS);
+      await expect(item.getByTestId('item-link')).toHaveAttribute('href', `#/t/${task}`);
+      await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
+
+      await item.getByRole('button', { name: `Answer ${ask.ref}` }).click();
+      await expect(dialog(page)).toBeVisible();
+      await expect(page.getByTestId('answer-question')).toHaveText(`${ask.ref}: Left or right?`);
+      await expect(page.getByTestId('answer-details').locator('strong')).toHaveText('one');
+      await expect(page.getByTestId('answer-details')).toContainText('<script>window.pwned = 1</script>');
+      expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+      await expect(page.getByTestId('answer-option')).toHaveText(['Left', 'Right']);
+
+      await page.getByTestId('answer-option').filter({ hasText: 'Right' }).click();
+      await expect(dialog(page).getByRole('textbox', { name: 'Answer' })).toHaveValue('Right');
+      await dialog(page).getByRole('button', { name: 'Send answer' }).click();
+
+      await expect(page.getByTestId('toast')).toHaveText(`Answered ${ask.ref}`, FIVE_SECONDS);
+      await expect(dialog(page)).toHaveCount(0);
+      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('0', FIVE_SECONDS);
+      const got = await api.get(`/api/v1/asks/${ask.ref}`);
+      expect(await got.json()).toMatchObject({ state: 'answered', answer: 'Right', channel: 'ui' });
+      await api.dispose();
+    });
+
+    test('Answer with free text sends what was typed', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `free-${vp.name}`);
+      const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'What now?', initiative: slug }, 201);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await item.getByRole('button', { name: `Answer ${ask.ref}` }).click();
+      await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByTestId('answer-option')).toHaveCount(0);
+      await expect(page.getByTestId('answer-details')).toHaveCount(0);
+      await expect(page.getByTestId('answer-initiative')).toHaveAttribute('href', `#/i/${slug}`);
+      await dialog(page).getByRole('textbox', { name: 'Answer' }).fill('Ship it on Friday');
+      await dialog(page).getByRole('button', { name: 'Send answer' }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Answered ${ask.ref}`, FIVE_SECONDS);
+      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      expect(await (await api.get(`/api/v1/asks/${ask.ref}`)).json()).toMatchObject({ state: 'answered', answer: 'Ship it on Friday' });
+      await api.dispose();
+    });
+
+    test('a refused answer is shown inside the dialog and the dialog stays', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `refuse-${vp.name}`);
+      const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Too late?', initiative: slug }, 201);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await item.getByRole('button', { name: `Answer ${ask.ref}` }).click();
+      await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
+      await dialog(page).getByRole('button', { name: 'Send answer' }).click();
+      await expect(page.getByTestId('dialog-error')).toContainText('Write an answer', FIVE_SECONDS);
+
+      await post(api, `/api/v1/asks/${ask.ref}/answer`, { answer: 'Somebody else was quicker' }, 200);
+      await dialog(page).getByRole('textbox', { name: 'Answer' }).fill('Mine');
+      await dialog(page).getByRole('button', { name: 'Send answer' }).click();
+      await expect(page.getByTestId('dialog-error')).toContainText(ask.ref, FIVE_SECONDS);
+      await expect(page.getByTestId('dialog-error')).not.toContainText('Write an answer');
+      await expect(dialog(page)).toBeVisible();
+      await expect(page.getByTestId('toast')).toHaveCount(0);
+      await api.dispose();
+    });
+
+    test('Withdraw takes a reason and the ask leaves its section', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `wd-${vp.name}`);
+      const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Never mind?', initiative: slug }, 201);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await item.getByRole('button', { name: `Withdraw ${ask.ref}` }).click();
+      await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
+      await dialog(page).getByRole('textbox', { name: 'Reason (optional)' }).fill('Found it myself');
+      await dialog(page).getByRole('button', { name: 'Withdraw ask' }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Withdrew ${ask.ref}`, FIVE_SECONDS);
+      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      expect(await (await api.get(`/api/v1/asks/${ask.ref}`)).json()).toMatchObject({ state: 'withdrawn' });
+      await api.dispose();
+    });
+
+    test('Close takes a resolution and the task leaves Done, not closed', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `close-${vp.name}`);
+      const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Finished for good' }, 201)).ref;
+      await post(api, `/api/v1/tasks/${task}/done`, {}, 200);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'done_not_closed').getByTestId('attention-item');
+      await expect(item).toContainText('Finished for good', FIVE_SECONDS);
+      await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
+      await item.getByRole('button', { name: `Close ${task}` }).click();
+      await expect(dialog(page)).toBeVisible();
+      await dialog(page).getByLabel('Resolution').selectOption('duplicate');
+      await dialog(page).getByRole('button', { name: 'Close task' }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Task ${task} closed as duplicate`, FIVE_SECONDS);
+      await expect(section(page, 'done_not_closed').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      expect(await (await api.get(`/api/v1/tasks/${task}`)).json()).toMatchObject({ status: 'closed', resolution: 'duplicate' });
+      await api.dispose();
+    });
+
+    test('Acknowledge clears an expired lease at once', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `ack-${vp.name}`);
+      const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Ran out' }, 201)).ref;
+      const lease = (await post<{ lease: { ref: string } }>(api, '/api/v1/leases', { task, intent: 'slow edit', resources: [`repo:ack-${vp.name}`] }, 201)).lease.ref;
+      await expireLease(api, lease);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'expired_leases').getByTestId('attention-item');
+      await expect(item).toContainText(lease, FIVE_SECONDS);
+      await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`, FIVE_SECONDS);
+      await expect(section(page, 'expired_leases').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      expect(await (await api.get(`/api/v1/leases/${lease}`)).json()).toMatchObject({ acked_by: 'operator' });
+      await api.dispose();
+    });
+
+    test('Record check takes a summary and the watch leaves Overdue watches', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `check-${vp.name}`);
+      const task = (
+        await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Late watch', kind: 'watch', cadence_seconds: 900, next_check_at: '2020-01-01T00:00:00Z' }, 201)
+      ).ref;
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'overdue_watches').getByTestId('attention-item');
+      await expect(item).toContainText('Late watch', FIVE_SECONDS);
+      await item.getByRole('button', { name: `Record check ${task}` }).click();
+      await expect(dialog(page)).toBeVisible();
+      await dialog(page).getByRole('textbox', { name: 'Summary' }).fill('Nothing moved');
+      await dialog(page).getByRole('button', { name: 'Record check' }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Check recorded on ${task}`, FIVE_SECONDS);
+      await expect(section(page, 'overdue_watches').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await api.dispose();
     });
 
     for (const entry of ['/', '/#/']) {

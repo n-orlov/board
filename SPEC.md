@@ -2127,6 +2127,22 @@ opening Attention, and an ask raised and answered through the API appearing and 
 Attention is a nav entry and so a state of `e2e/shell.spec.ts`, `a11y.spec.ts`, `touch.spec.ts` and `sameorigin.spec.ts`;
 the Initiatives view moved to `#/initiatives`, which the initiative page's back link and those specs use.
 
+**Attention inline actions** (R9, `web/src/lib/attentionActions.ts`, `web/src/AnswerForm.svelte`). `actionsFor(section)` is the
+finite table of what an item offers: an open ask **Answer** and **Withdraw**, a done task **Close**, an expired lease
+**Acknowledge**, an overdue watch **Record check**, a conflict nothing. Each button (`action-<kind>`, 44 px) is named "<label>
+<ref>"; an item with a task link also links to its initiative (`initiative-link`, `#/i/<slug>`, the ref's slug). Answer opens
+the one `Dialog` over the ask read by `GET /asks/<ref>`: the question as its heading, the details as safe Markdown
+(`renderMarkdown`, so raw HTML shows as text), one button per suggested option that puts the option in the answer field, a free
+text field (16 px), **Send answer**, and a link to the ask's initiative. Withdraw (optional reason, at most 200 characters),
+Close (the four resolutions) and Record check (summary, 1 to 200 characters) open the same dialog forms the task page uses;
+Acknowledge posts at once. `AttentionActions` runs one action: an input that cannot be sent (an empty answer, a summary over
+200 characters) and any refusal of the API (409 for an ask someone else answered first) are shown inline, inside the dialog
+(`dialog-error`) which stays open with the typed text, or on the item (`item-error`) for Acknowledge; a success closes the
+dialog and says so in the polite toast ("Answered A1", "Withdrew A1", "Task aa-1 closed as dropped", "Lease L2
+acknowledged", "Check recorded on aa-1"). Nothing refetches by itself: the acted-on item leaves its section when the stream's
+event (`ask_answered`, `ask_withdrawn`, `task_closed`, `lease_acked`, `check_recorded`) refreshes the view.
+`e2e/attention.spec.ts` covers the six actions and the refusal at phone and desktop, and `a11y.spec.ts` scans the Answer sheet.
+
 **Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
 the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in

@@ -4,10 +4,10 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
-// theme. `states` holds the 19 earlier states (the Attention view over an open ask and a conflict among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
+// theme. `states` holds the 20 earlier states (the Attention view over an open ask and a conflict, and its Answer sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocker, a dependent and a conflict. 31 states x 2 viewports x 2 themes = 124 scans. No
+// expired and a live lease, a blocker, a dependent and a conflict. 32 states x 2 viewports x 2 themes = 128 scans. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -45,6 +45,15 @@ const states: State[] = [
       await page.goto('/#/attention?initiative=e2e-a11y');
       await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
       await expect(page.getByTestId('section-conflicts').getByTestId('attention-item')).toHaveCount(1);
+    },
+  },
+  {
+    name: 'Answer sheet',
+    open: async (page) => {
+      await page.goto('/#/attention?initiative=e2e-a11y');
+      await page.getByTestId('action-answer').first().click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByTestId('answer-question')).toContainText('Is the page readable?');
     },
   },
   {

@@ -1,5 +1,21 @@
 <script lang="ts">
+  import AnswerForm from './AnswerForm.svelte';
+  import Dialog from './Dialog.svelte';
+  import TaskCloseForm from './TaskCloseForm.svelte';
+  import TaskNoteForm from './TaskNoteForm.svelte';
   import Toast from './Toast.svelte';
+  import {
+    ActionsApi,
+    AttentionActions,
+    NO_ACTIONS,
+    actionLabel,
+    actionName,
+    actionsFor,
+    initiativeHref,
+    initiativeOfHref,
+    type ActionKind,
+    type ActionsState,
+  } from './lib/attentionActions';
   import { SECTIONS, attentionHash, emptyText, filterFromHash, isFiltered, sectionCount, toggled, type AttentionFilter } from './lib/attention';
   import {
     AttentionApi,
@@ -15,6 +31,7 @@
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
+  import type { Resolution } from './lib/tasks';
 
   let { csrf }: { csrf: string; param?: string } = $props();
 
@@ -25,6 +42,8 @@
   let toast = $state('');
 
   const store = new AttentionStore(new AttentionApi(browser), (s) => (view = s), initial);
+  let acting: ActionsState = $state(NO_ACTIONS);
+  const actions = new AttentionActions(new ActionsApi(browser, () => csrf), (s) => (acting = s));
 
   $effect(() => {
     void store.load();
@@ -50,6 +69,12 @@
   async function copy(actor: ItemActor) {
     const ok = await copyText(navigator.clipboard, actor.wayBack ?? '');
     toast = ok ? `Copied the way back of ${actor.handle}` : 'Copying failed. Select the way back and copy it by hand.';
+  }
+
+  // An action's success shows a toast; the item itself leaves its section when the stream's event refreshes the view.
+  async function perform(kind: ActionKind, target: string, input = '') {
+    const done = await actions.run(kind, target, input);
+    if (done !== undefined) toast = done;
   }
 
   const choices = $derived(filterChoices(known, view.filter));
@@ -128,6 +153,7 @@
           {:else}
             <ul class="flex flex-col gap-3">
               {#each rows as row (row.id)}
+                {@const initiative = initiativeOfHref(row.href)}
                 <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item">
                   <p class="font-medium">
                     {#if row.href !== undefined}
@@ -155,6 +181,27 @@
                       </li>
                     {/each}
                   </ul>
+                  {#if initiative !== undefined}
+                    <p class="text-sm">
+                      <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(initiative)} data-testid="initiative-link">Initiative {initiative}</a>
+                    </p>
+                  {/if}
+                  {#if acting.itemError?.target === row.id}
+                    <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="item-error">{acting.itemError.text}</p>
+                  {/if}
+                  {#if actionsFor(section.key).length > 0}
+                    <div class="flex flex-wrap gap-2" data-testid="item-actions">
+                      {#each actionsFor(section.key) as kind (kind)}
+                        <button
+                          type="button"
+                          class={action}
+                          aria-label={actionName(kind, row.id)}
+                          data-testid="action-{kind}"
+                          onclick={() => (kind === 'acknowledge' ? void perform(kind, row.id) : void actions.open(kind, row.id))}>{actionLabel(kind)}</button
+                        >
+                      {/each}
+                    </div>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -166,3 +213,24 @@
 </section>
 
 <Toast message={toast} onclear={() => (toast = '')} />
+
+{#if acting.open !== undefined}
+  {@const target = acting.open.target}
+  {#if acting.open.kind === 'answer'}
+    <Dialog label="Answer {target}" onclose={() => actions.cancel()} initialFocus="textarea[name=answer]">
+      <AnswerForm ask={acting.ask} error={acting.error} onsubmit={(answer) => perform('answer', target, answer)} oncancel={() => actions.cancel()} />
+    </Dialog>
+  {:else if acting.open.kind === 'withdraw'}
+    <Dialog label="Withdraw {target}" onclose={() => actions.cancel()} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Withdraw {target}" label="Reason (optional)" hint="Why the ask is withdrawn, in up to 200 characters." submitLabel="Withdraw ask" error={acting.error} onsubmit={(reason) => perform('withdraw', target, reason)} oncancel={() => actions.cancel()} />
+    </Dialog>
+  {:else if acting.open.kind === 'check'}
+    <Dialog label="Record check" onclose={() => actions.cancel()} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Record check on {target}" label="Summary" hint="What the check found, in up to 200 characters. The next check is due one cadence from now." submitLabel="Record check" error={acting.error} onsubmit={(summary) => perform('check', target, summary)} oncancel={() => actions.cancel()} />
+    </Dialog>
+  {:else if acting.open.kind === 'close'}
+    <Dialog label="Close task" onclose={() => actions.cancel()} initialFocus="select[name=resolution]">
+      <TaskCloseForm ref={target} error={acting.error} onconfirm={(resolution: Resolution) => perform('close', target, resolution)} oncancel={() => actions.cancel()} />
+    </Dialog>
+  {/if}
+{/if}
