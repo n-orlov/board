@@ -2805,7 +2805,7 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 | phase | scope |
 |---|---|
 | 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
-| 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
+| 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
 | 3 | Timeline UI (`vis-timeline`, archive window, filters), remaining UI views. |
 | 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 

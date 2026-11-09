@@ -27,6 +27,7 @@ const states = [
   { name: '#/initiatives', hash: () => '#/initiatives', view: 'initiatives', loaded: 'initiative-row' },
   { name: '#/tasks', hash: () => '#/tasks', view: 'tasks', loaded: 'task-row' },
   { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
+  { name: '#/notes', hash: () => '#/notes', view: 'notes', loaded: 'notes-view' },
   { name: '#/t/<ref>', hash: () => `#/t/${seeded.taskRef}`, view: 'task', loaded: 'task-title' },
   { name: '#/settings/keys', hash: () => '#/settings/keys', view: 'keys', loaded: 'key-row' },
 ] as const;
@@ -94,6 +95,11 @@ for (const vp of viewports) {
           else await expect(link).not.toHaveAttribute('aria-current', /.*/);
         }
         await expect(page.getByTestId(state.loaded).first()).toBeVisible();
+        // The live indicator is on screen in this layout with its accessible name (the other two layouts' are display: none).
+        const indicator = page.getByRole('status', { name: /^Live updates: (live|reconnecting|offline)$/ });
+        await expect(indicator).toHaveCount(1);
+        await expect(indicator).toBeVisible();
+        await expect(indicator).toHaveAccessibleName(/^Live updates: (live|reconnecting|offline)$/);
         if (vp.name === 'phone') await expect(page.getByTestId('topbar-title')).toHaveText(viewOf(state.view).title);
         await noHorizontalOverflow(page);
 
