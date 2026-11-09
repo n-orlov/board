@@ -75,9 +75,17 @@ func pollAsk(first askView, raw json.RawMessage, deadline time.Time, now func() 
 	return a, raw, nil
 }
 
-// endedAfter says a was answered or withdrawn strictly after deadline, by the
-// server's own stamp (millisecond precision). An ask that is open, or whose
-// stamp is missing or unreadable, did not end after it.
+// stampPrecision is the precision of the server's answered_at and withdrawn_at:
+// it stores an instant floored to a whole millisecond (SPEC §2), so a stamp s
+// says only that the end happened somewhere in [s, s+1ms).
+const stampPrecision = time.Millisecond
+
+// endedAfter says a was answered or withdrawn after deadline, or may have
+// been: a whole-millisecond stamp counts as effective by the deadline only when
+// its whole millisecond is over by then, since an end later in that millisecond
+// is stored with the same stamp. A stamp carrying a sub-millisecond part is
+// taken as exact. An ask that is open, or whose stamp is missing or unreadable,
+// did not end after it.
 func endedAfter(a askView, deadline time.Time) bool {
 	stamp := ""
 	switch a.State {
@@ -87,7 +95,25 @@ func endedAfter(a askView, deadline time.Time) bool {
 		stamp = a.WithdrawnAt
 	}
 	at, err := time.Parse(time.RFC3339Nano, stamp)
-	return err == nil && at.After(deadline)
+	if err != nil {
+		return false
+	}
+	if at.Truncate(stampPrecision).Equal(at) {
+		return at.Add(stampPrecision).After(deadline)
+	}
+	return at.After(deadline)
+}
+
+// pollDeadline is the deadline of a --poll of seconds raised at now: now plus
+// seconds, rounded up to a whole millisecond, the server's stamp precision. An
+// end the server stamps before it is then told apart exactly from one at or
+// after it, and every end up to now plus seconds is before it.
+func pollDeadline(now time.Time, seconds int64) time.Time {
+	d := now.Add(time.Duration(seconds) * time.Second).Round(0)
+	if t := d.Truncate(stampPrecision); t.Before(d) {
+		return t.Add(stampPrecision)
+	}
+	return d
 }
 
 // askPoll raises the ask as a poll ask, then waits for its end up to seconds.
@@ -106,7 +132,7 @@ func askPoll(p parsedArgs, body map[string]any, seconds int64, stdout, stderr io
 	if err := json.Unmarshal(raw, &first); err != nil {
 		return report(stderr, err)
 	}
-	deadline := nowFn().Add(time.Duration(seconds) * time.Second)
+	deadline := pollDeadline(nowFn(), seconds)
 	a, raw, err := pollAsk(first, raw, deadline, nowFn, waitFetch(ctx, c, first.Ref))
 	if err != nil {
 		return report(stderr, askRefFailure(first.Ref)(err))

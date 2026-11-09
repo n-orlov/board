@@ -145,11 +145,13 @@ func TestPollAskOnlyCountsAnEndEffectiveByTheDeadline(t *testing.T) {
 		code  int
 	}{
 		{"answered", 9999 * time.Millisecond, "answered", ExitOK},
-		{"answered", 10 * time.Second, "answered", ExitOK},
+		{"answered", 10*time.Second - time.Millisecond, "answered", ExitOK},
+		{"answered", 10 * time.Second, "open", ExitTimeout}, // stamped in the deadline's own millisecond: it may be after it
 		{"answered", 10*time.Second + time.Millisecond, "open", ExitTimeout},
 		{"answered", 11 * time.Second, "open", ExitTimeout},
 		{"withdrawn", 9 * time.Second, "withdrawn", ExitConflict},
-		{"withdrawn", 10 * time.Second, "withdrawn", ExitConflict},
+		{"withdrawn", 10*time.Second - time.Millisecond, "withdrawn", ExitConflict},
+		{"withdrawn", 10 * time.Second, "open", ExitTimeout},
 		{"withdrawn", 10*time.Second + time.Millisecond, "open", ExitTimeout},
 		{"withdrawn", time.Hour, "open", ExitTimeout},
 	} {
@@ -157,6 +159,105 @@ func TestPollAskOnlyCountsAnEndEffectiveByTheDeadline(t *testing.T) {
 		a, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, lateFetch(start, c.state, c.at))
 		if err != nil || a.State != c.want || pollExit(a.State) != c.code {
 			t.Errorf("%s at %s: got %q exit %d (%v), want %q exit %d", c.state, c.at, a.State, pollExit(a.State), err, c.want, c.code)
+		}
+	}
+}
+
+// A deadline with a sub-millisecond part shares its millisecond with stamps of
+// ends made both before and after it, since the server floors a stamp to the
+// millisecond: only a stamp whose whole millisecond is over by the deadline
+// counts, and a stamp carrying its own sub-millisecond part is taken as exact.
+func TestPollAskCountsAMillisecondStampOnlyWhenItsMillisecondIsOverByTheDeadline(t *testing.T) {
+	start := time.Date(2026, 11, 9, 20, 30, 0, 0, time.UTC)
+	deadline := start.Add(time.Second + 500*time.Microsecond) // 20:30:01.0005
+	for _, c := range []struct {
+		state string
+		stamp string
+		code  int
+	}{
+		{"answered", "2026-11-09T20:30:00.999Z", ExitOK},
+		{"withdrawn", "2026-11-09T20:30:00.999Z", ExitConflict},
+		{"answered", "2026-11-09T20:30:01Z", ExitTimeout}, // made at .0006 or at .0004: not provably in time
+		{"withdrawn", "2026-11-09T20:30:01.000Z", ExitTimeout},
+		{"answered", "2026-11-09T20:30:01.002Z", ExitTimeout},
+		{"withdrawn", "2026-11-09T20:30:01.0004Z", ExitConflict},
+		{"answered", "2026-11-09T20:30:01.0005Z", ExitOK},
+		{"answered", "2026-11-09T20:30:01.0006Z", ExitTimeout},
+	} {
+		a := askView{Ref: "A1", State: c.state, AnsweredAt: c.stamp}
+		if c.state == "withdrawn" {
+			a = askView{Ref: "A1", State: c.state, WithdrawnAt: c.stamp}
+		}
+		clock := &pollClock{t: start}
+		fetch := func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
+			clock.t = deadline.Add(time.Millisecond) // the read lands after the deadline
+			return a, nil, nil
+		}
+		got, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, fetch)
+		if err != nil || pollExit(got.State) != c.code {
+			t.Errorf("%s at %s: got %q exit %d (%v), want exit %d", c.state, c.stamp, got.State, pollExit(got.State), err, c.code)
+		}
+	}
+}
+
+func TestPollDeadlineRoundsUpToAWholeMillisecond(t *testing.T) {
+	at := func(ns int) time.Time { return time.Date(2026, 3, 4, 12, 0, 0, ns, time.UTC) }
+	for _, c := range []struct {
+		now     time.Time
+		seconds int64
+		want    time.Time
+	}{
+		{at(0), 600, at(0).Add(600 * time.Second)},
+		{at(400_000), 600, at(1_000_000).Add(600 * time.Second)},
+		{at(1), 1, at(1_000_000).Add(time.Second)},
+		{at(999_999_999), 0, at(999_999_999).Truncate(time.Second).Add(time.Second)},
+		{at(7_000_000), 30, at(7_000_000).Add(30 * time.Second)},
+	} {
+		if got := pollDeadline(c.now, c.seconds); !got.Equal(c.want) {
+			t.Errorf("pollDeadline(%s, %d) = %s, want %s", c.now.Format(time.RFC3339Nano), c.seconds, got.Format(time.RFC3339Nano), c.want.Format(time.RFC3339Nano))
+		}
+		if got := pollDeadline(c.now, c.seconds); got.Before(c.now.Add(time.Duration(c.seconds) * time.Second)) {
+			t.Errorf("pollDeadline(%s, %d) = %s is before the requested deadline", c.now, c.seconds, got)
+		}
+	}
+}
+
+// Raised at 12:00:00.0004 with --poll 10m, the deadline is 12:10:00.001: an end
+// the server stamps 12:10:00.000 was made before it, even when after
+// 12:10:00.0004, and one stamped 12:10:00.001 was not.
+func TestAskPollRoundsTheDeadlineUpToTheServersMillisecond(t *testing.T) {
+	for _, c := range []struct {
+		state, field, stamp, out string
+		code                     int
+	}{
+		{"answered", "answered_at", "2026-03-04T12:10:00.000Z", "ok A1 answered by nik: x\n", ExitOK},
+		{"withdrawn", "withdrawn_at", "2026-03-04T12:10:00.000Z", "A1 withdrawn\n", ExitConflict},
+		{"answered", "answered_at", "2026-03-04T12:10:00.001Z", "A1 still open → board ask show A1\n", ExitTimeout},
+		{"withdrawn", "withdrawn_at", "2026-03-04T12:10:00.001Z", "A1 still open → board ask show A1\n", ExitTimeout},
+	} {
+		f := &fakeBoard{handler: func(w http.ResponseWriter, r *http.Request) {
+			body := strings.Replace(askAnswer, `"mode":"stop"`, `"mode":"poll"`, 1)
+			if r.Method == http.MethodGet {
+				body = strings.Replace(body, `"state":"open"`, `"state":"`+c.state+`","`+c.field+`":"`+c.stamp+`","answer":"x","answered_by":"nik"`, 1)
+			}
+			_, _ = w.Write([]byte(body))
+		}}
+		srv := httptest.NewServer(f)
+		old := nowFn
+		clock := time.Date(2026, 3, 4, 12, 0, 0, 400_000, time.UTC)
+		calls := 0
+		nowFn = func() time.Time {
+			calls++
+			if calls == 1 {
+				return clock
+			}
+			return clock.Add(10*time.Minute - time.Second) // one second before the requested deadline
+		}
+		code, out, _ := runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "10m")
+		nowFn = old
+		srv.Close()
+		if code != c.code || out != c.out {
+			t.Errorf("%s stamped %s: got %d %q, want %d %q", c.state, c.stamp, code, out, c.code, c.out)
 		}
 	}
 }

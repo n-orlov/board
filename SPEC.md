@@ -1543,15 +1543,19 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `show`, `ls` or `withdraw` is the subcommand and any other starts a new ask; flags may precede the task.
 - `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
   bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
-  `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until `D` after the raise. Each call asks for at most 300 s (the server's cap) and
+  `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until the deadline: `D` after the raise, rounded up to a whole millisecond (the
+  precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Each call asks for at most 300 s (the server's cap) and
   for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
   remainder, and the client cuts the request off at the deadline itself, then reads the ask once more without a wait; the poll
   therefore stays active to the actual deadline, sub-second remainder included, and sees any answer or withdrawal made before it.
   No call is made once the deadline has passed, and exit 3 is reported only then. Only an answer or withdrawal effective by the
-  deadline gives exit 0 or 6: when the final read, made at the deadline, finds the ask answered or withdrawn with a server stamp
-  (`answered_at`, `withdrawn_at`) after the deadline, the ask was still open at it, so the line is `A<n> still open → …`, the exit is
-  **3**, and nothing more is read (with `--json` the ask as read, in its later state, is printed with exit 3); a stamp at or before
-  the deadline counts. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
+  deadline gives exit 0 or 6. The server stores a stamp (`answered_at`, `withdrawn_at`) floored to the millisecond, so a stamp `s`
+  says the end was made somewhere in `[s, s+1 ms)`; it counts only when that whole millisecond is over by the deadline, `s + 1 ms ≤
+  deadline` (a stamp carrying its own sub-millisecond part is taken as exact, counting when at or before the deadline). With the
+  deadline on a whole millisecond this is exact: an end made before the deadline counts, and one made at it or later, even within
+  its millisecond, does not. When the final read, made at the deadline, finds the ask answered or withdrawn with a stamp that does
+  not count, the ask was still open at the deadline, so the line is `A<n> still open → …`, the exit is **3**, and nothing more is
+  read (with `--json` the ask as read, in its later state, is printed with exit 3). The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
   `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
