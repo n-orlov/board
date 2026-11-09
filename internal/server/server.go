@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/actors"
+	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
@@ -77,6 +78,11 @@ func WithEvents(st *events.Store) Option {
 // WithLeases serves /api/v1/leases from st; without it the operations answer 503.
 func WithLeases(st *leases.Store) Option {
 	return func(o *operations) { o.leaseOps = leaseOps{leases: st} }
+}
+
+// WithAsks serves /api/v1/asks from st; without it the operations answer 503.
+func WithAsks(st *asks.Store) Option {
+	return func(o *operations) { o.askOps = askOps{asks: st} }
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

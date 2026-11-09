@@ -205,3 +205,15 @@ func (s Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
 	}
 	return nil
 }
+
+// waitingWindow is how recent a long poll must be for the asker to count as waiting.
+const waitingWindow = 60 * time.Second
+
+// Waiting is the derived asker_waiting of k: the ask is open, its mode is poll
+// and a long poll on it held or returned within the last 60 seconds.
+func (s Store) Waiting(k Ask) bool {
+	if k.State != domain.AskOpen || k.Mode != domain.AskModePoll || k.PollSeenAt == nil {
+		return false
+	}
+	return s.now().Sub(*k.PollSeenAt) <= waitingWindow
+}

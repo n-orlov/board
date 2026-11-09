@@ -223,6 +223,11 @@ func (brokenResponse) VisitGetLeaseResponse(http.ResponseWriter) error          
 func (brokenResponse) VisitRenewLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitEndLeaseResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitAckLeaseResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitRaiseAskResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitListAsksResponse(http.ResponseWriter) error            { return errBroken }
+func (brokenResponse) VisitGetAskResponse(http.ResponseWriter) error              { return errBroken }
+func (brokenResponse) VisitAnswerAskResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error         { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -465,6 +470,36 @@ func (s stubOperations) AckLease(context.Context, AckLeaseRequestObject) (AckLea
 	return resp, err
 }
 
+func (s stubOperations) RaiseAsk(context.Context, RaiseAskRequestObject) (RaiseAskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RaiseAskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListAsks(context.Context, ListAsksRequestObject) (ListAsksResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListAsksResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetAsk(context.Context, GetAskRequestObject) (GetAskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) AnswerAsk(context.Context, AnswerAskRequestObject) (AnswerAskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(AnswerAskResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) WithdrawAsk(context.Context, WithdrawAskRequestObject) (WithdrawAskResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(WithdrawAskResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) GetMeta(context.Context, GetMetaRequestObject) (GetMetaResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetMetaResponseObject)
@@ -496,6 +531,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"POST /api/v1/tasks", "/api/v1/tasks", "/api/v1/tasks/aa-1", "PATCH /api/v1/tasks/aa-1",
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack", "/api/v1/now",
+		"POST /api/v1/asks", "/api/v1/asks", "/api/v1/asks/A1", "POST /api/v1/asks/A1/answer", "POST /api/v1/asks/A1/withdraw",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
@@ -699,6 +735,29 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list leases 400", 400, ListLeases400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"list leases 401", 401, ListLeases401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"list leases 404", 404, ListLeases404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
+		{"raise ask 400", 400, RaiseAsk400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRaiseAskResponse},
+		{"raise ask 401", 401, RaiseAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRaiseAskResponse},
+		{"raise ask 404", 404, RaiseAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRaiseAskResponse},
+		{"raise ask 409", 409, RaiseAsk409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitRaiseAskResponse},
+		{"raise ask 503", 503, RaiseAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRaiseAskResponse},
+		{"list asks 400", 400, ListAsks400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListAsksResponse},
+		{"list asks 401", 401, ListAsks401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListAsksResponse},
+		{"list asks 404", 404, ListAsks404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListAsksResponse},
+		{"list asks 503", 503, ListAsks503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListAsksResponse},
+		{"get ask 400", 400, GetAsk400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
+		{"get ask 401", 401, GetAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
+		{"get ask 404", 404, GetAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
+		{"get ask 503", 503, GetAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAskResponse},
+		{"answer ask 400", 400, AnswerAsk400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
+		{"answer ask 401", 401, AnswerAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
+		{"answer ask 404", 404, AnswerAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
+		{"answer ask 409", 409, AnswerAsk409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
+		{"answer ask 503", 503, AnswerAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitAnswerAskResponse},
+		{"withdraw ask 400", 400, WithdrawAsk400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
+		{"withdraw ask 401", 401, WithdrawAsk401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
+		{"withdraw ask 404", 404, WithdrawAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
+		{"withdraw ask 409", 409, WithdrawAsk409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
+		{"withdraw ask 503", 503, WithdrawAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
 		{"get now 400", 400, GetNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 401", 401, GetNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 503", 503, GetNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},

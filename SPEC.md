@@ -650,7 +650,7 @@ and CLI can show badges without the lists.
   differs or is missing. `ci/lint.sh` lints the document with Redocly (`recommended-strict`:
   any finding fails) and runs the drift check. The document declares `GET /healthz`,
   `GET /readyz`, `GET /api/openapi.yaml`, `GET /api/openapi.json`, `GET /api/docs`, `GET /api/docs/assets/{name}`, the browser-login operations, the three `/api/v1/keys` operations (§3.3), the `GET`/`POST /api/v1/initiatives` and `GET`/`PATCH /api/v1/initiatives/{slug}` operations (§6.3), the `POST /api/v1/tasks` and `GET`/`PATCH /api/v1/tasks/{ref}`
-  operations (§6.4), the lease operations and `GET /api/v1/now` (§6.5) and the RFC 9457 `Problem` schema (which carries `expired_at` on the 410 of a lease renewal). The binary embeds the document and serves it at
+  operations (§6.4), the lease operations and `GET /api/v1/now` (§6.5), the five ask operations (§6.6) and the RFC 9457 `Problem` schema (which carries `expired_at` on the 410 of a lease renewal). The binary embeds the document and serves it at
   `/api/openapi.yaml` (`application/yaml`, byte for byte the checked-in file) and
   `/api/openapi.json` (the same document converted to JSON), to a caller that presents a key
   or session like any other route.
@@ -714,7 +714,7 @@ and CLI can show badges without the lists.
 | GET | `/tasks/{ref}/events` | the task's events in order, with `limit`/`after` paging (§6.2 below) |
 | GET/POST | `/leases` | list (filters: state, actor, task, resource) / start |
 | POST | `/leases/{id}/renew`, `/end`, `/ack` | |
-| GET/POST | `/asks` | list (state, actor, task) / raise |
+| GET/POST | `/asks` | list (state, actor, task, initiative) / raise (§6.6) |
 | GET | `/asks/{id}` | read; `?wait=<seconds>` long-poll (§7.2) |
 | POST | `/asks/{id}/answer`, `/withdraw` | |
 | GET/POST | `/notes` | list (filters below) / post |
@@ -988,6 +988,49 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   `resources` asked about. The caller's own leases never conflict with the resources asked about. `resources` is a
   comma-separated list of at most 20 resources of 1 to 100 characters (repeats dropped); an empty entry or a bad one is **400**
   with a `next`. Every list is `[]` when empty. It is a 503 without a store.
+
+### 6.6 Asks
+
+`POST`/`GET /api/v1/asks`, `GET /api/v1/asks/{ref}` and `POST /api/v1/asks/{ref}/answer` and `/withdraw` are in
+`api/openapi.yaml`. `{ref}` is `A<n>` (either letter case) or the ask's ULID (either letter case); one that names no
+ask is **404** (`there is no ask A9`). Any authenticated principal may use them. The server answers 503 problem
+documents when it runs without a store. The rules are those of `internal/asks` (§4.5). Long-polling an ask (`?wait=`)
+is §7.2 and arrives with the ask long-poll.
+
+- **`POST /api/v1/asks`**, body `{task?, initiative?, question, details?, options?, mode?, blocking?}`. `task` is a task
+  ref or ULID and `initiative` a slug or ULID; both may be left out (a board-wide ask). `question` is 1 to 200
+  characters on one line, `details` at most 20000 characters, `options` at most 10 strings of 1 to 80 characters,
+  `mode` `stop` (the default) or `poll`, and `blocking` defaults to false. A missing body, a bad field, or a `task` and
+  an `initiative` that disagree (the task does not belong to that initiative; the initiative of an ask on a task is
+  the task's) is **400** with a `next`; an unknown task or initiative is **404**; a **closed** task or a closed
+  initiative is **409** (`cannot raise an ask on task aa-1: it is closed`). Otherwise it is **201**, the ask in
+  state `open`, and `ask_raised`. A refusal changes nothing: no ask, event or actor. In one transaction the server
+  upserts the actor and writes the ask with its event, whose `task` and `initiative` are those of the ask and whose
+  `data` is `{ref, question, mode, blocking, task?, initiative?}`.
+- **`POST /api/v1/asks/{ref}/answer`**, body `{answer, channel?, on_behalf_of?}`. `answer` is 1 to 20000
+  characters, `channel` `ui`, `api` or `relay` (left out it is `ui` for a browser session and `api` for a key) and
+  `on_behalf_of` the handle of the person a relayed answer came from, allowed with `relay` only (**400** otherwise).
+  An open ask becomes `answered` with `answer`, `answered_by` (the caller), `on_behalf_of`, `channel` and
+  `answered_at`, and `ask_answered` is appended (principal and actor those of the caller, `on_behalf_of` that
+  person). Answers **200** with the ask. An ask that is not open is **409** naming its state (`cannot answer ask A1: it
+  is answered`).
+- **`POST /api/v1/asks/{ref}/withdraw`**, body (optional) `{reason?}` of at most 200 characters (**400** otherwise).
+  An open ask becomes `withdrawn` with `withdrawn_at` and `withdraw_reason`, and `ask_withdrawn` is appended. Answers
+  **200** with the ask. An ask that is not open is **409** naming its state (`cannot withdraw ask A1: it is answered`).
+- **`GET /api/v1/asks/{ref}`** reads one ask.
+- **`GET /api/v1/asks`** answers `{items, next_after?}`, items ordered by id (the order they were raised). Filters
+  combine with AND: `state` is `open` (the default, also when empty), `answered`, `withdrawn` or `all` (anything else is
+  **400** with a `next`); `actor` keeps one asker's handle; `task` (ref or ULID) and `initiative` (slug or ULID) keep the
+  asks that name them, **404** for one that names nothing. A filter that matches nothing is **200** with `items: []`.
+  `limit` is 1 to 1000 (default 100; 0 is **400**). `after` is an `A<n>` ref or an ULID: the page starts after
+  that ask; any other text is **400**. `next_after`, the ULID of the last item, is present exactly when more asks
+  follow.
+- **The ask document** (`Ask`): `{id, ref, task?, initiative?, asker, question, details, options, mode, blocking, state,
+  answer?, answered_by?, on_behalf_of?, channel?, created_at, answered_at?, withdrawn_at?, withdraw_reason?,
+  asker_waiting}`. `task` is the task's ref, `initiative` its slug, `asker` the handle of the actor that raised
+  it, `state` `open`, `answered` or `withdrawn`, and absent optional fields are omitted. `asker_waiting` is derived: true
+  when the ask is open, its mode is `poll` and a long poll on it (`poll_seen_at`, §4.5) was seen within the last 60
+  seconds, so it is false until a long poll has run.
 
 ---
 

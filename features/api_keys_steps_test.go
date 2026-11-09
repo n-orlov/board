@@ -31,6 +31,8 @@ type apiState struct {
 	counts string
 	// leaseRows is the leases table a scenario noted.
 	leaseRows string
+	// askCounts is the asks, events and actors count a scenario noted.
+	askCounts string
 	// allRows is every row of every table a scenario noted.
 	allRows            string
 	sentAt, answeredAt time.Time

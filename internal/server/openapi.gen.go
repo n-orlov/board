@@ -19,6 +19,105 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AskChannel.
+const (
+	AskChannelApi   AskChannel = "api"
+	AskChannelRelay AskChannel = "relay"
+	AskChannelUi    AskChannel = "ui"
+)
+
+// Valid indicates whether the value is a known member of the AskChannel enum.
+func (e AskChannel) Valid() bool {
+	switch e {
+	case AskChannelApi:
+		return true
+	case AskChannelRelay:
+		return true
+	case AskChannelUi:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskMode.
+const (
+	AskModePoll AskMode = "poll"
+	AskModeStop AskMode = "stop"
+)
+
+// Valid indicates whether the value is a known member of the AskMode enum.
+func (e AskMode) Valid() bool {
+	switch e {
+	case AskModePoll:
+		return true
+	case AskModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskState.
+const (
+	AskStateAnswered  AskState = "answered"
+	AskStateOpen      AskState = "open"
+	AskStateWithdrawn AskState = "withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the AskState enum.
+func (e AskState) Valid() bool {
+	switch e {
+	case AskStateAnswered:
+		return true
+	case AskStateOpen:
+		return true
+	case AskStateWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskAnswerChannel.
+const (
+	AskAnswerChannelApi   AskAnswerChannel = "api"
+	AskAnswerChannelRelay AskAnswerChannel = "relay"
+	AskAnswerChannelUi    AskAnswerChannel = "ui"
+)
+
+// Valid indicates whether the value is a known member of the AskAnswerChannel enum.
+func (e AskAnswerChannel) Valid() bool {
+	switch e {
+	case AskAnswerChannelApi:
+		return true
+	case AskAnswerChannelRelay:
+		return true
+	case AskAnswerChannelUi:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskRaiseMode.
+const (
+	AskRaiseModePoll AskRaiseMode = "poll"
+	AskRaiseModeStop AskRaiseMode = "stop"
+)
+
+// Valid indicates whether the value is a known member of the AskRaiseMode enum.
+func (e AskRaiseMode) Valid() bool {
+	switch e {
+	case AskRaiseModePoll:
+		return true
+	case AskRaiseModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreatedKeyStatus.
 const (
 	CreatedKeyStatusActive  CreatedKeyStatus = "active"
@@ -431,6 +530,122 @@ func (e ListTasksParamsKind) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// Ask An ask. `asker_waiting` is derived.
+type Ask struct {
+	// Answer Absent until it is answered.
+	Answer     *string    `json:"answer,omitempty"`
+	AnsweredAt *time.Time `json:"answered_at,omitempty"`
+
+	// AnsweredBy The handle of the actor that answered it.
+	AnsweredBy *string `json:"answered_by,omitempty"`
+
+	// Asker The handle of the actor that raised it.
+	Asker string `json:"asker"`
+
+	// AskerWaiting It is open, its mode is `poll` and a long poll on it was seen within the last 60 seconds.
+	AskerWaiting bool `json:"asker_waiting"`
+
+	// Blocking It blocks its task while it is open.
+	Blocking bool `json:"blocking"`
+
+	// Channel How the answer reached the board. Absent until it is answered.
+	Channel   *AskChannel `json:"channel,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+
+	// Details At most 20000 characters. Empty when none was given.
+	Details string `json:"details"`
+
+	// Id The ask's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative, derived from the task when there is one. Absent for a board-wide ask.
+	Initiative *string `json:"initiative,omitempty"`
+	Mode       AskMode `json:"mode"`
+
+	// OnBehalfOf The handle of the person a relayed answer came from.
+	OnBehalfOf *string `json:"on_behalf_of,omitempty"`
+
+	// Options The suggested answers, at most 10 of 1 to 80 characters.
+	Options []string `json:"options"`
+
+	// Question One line, 1 to 200 characters.
+	Question string `json:"question"`
+
+	// Ref The short ref, `A<n>`.
+	Ref   string   `json:"ref"`
+	State AskState `json:"state"`
+
+	// Task The ref of the task it is on. Absent for an ask on an initiative or board-wide.
+	Task           *string    `json:"task,omitempty"`
+	WithdrawReason *string    `json:"withdraw_reason,omitempty"`
+	WithdrawnAt    *time.Time `json:"withdrawn_at,omitempty"`
+}
+
+// AskChannel How the answer reached the board. Absent until it is answered.
+type AskChannel string
+
+// AskMode defines model for Ask.Mode.
+type AskMode string
+
+// AskState defines model for Ask.State.
+type AskState string
+
+// AskAnswer The answer to an open ask.
+type AskAnswer struct {
+	// Answer 1 to 20000 characters.
+	Answer string `json:"answer"`
+
+	// Channel Default ui for a browser session and api for a key.
+	Channel *AskAnswerChannel `json:"channel,omitempty"`
+
+	// OnBehalfOf The handle of the person a relayed answer came from. Channel relay only.
+	OnBehalfOf *string `json:"on_behalf_of,omitempty"`
+}
+
+// AskAnswerChannel Default ui for a browser session and api for a key.
+type AskAnswerChannel string
+
+// AskList A page of asks.
+type AskList struct {
+	Items []Ask `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
+// AskRaise The ask to raise.
+type AskRaise struct {
+	// Blocking Default false.
+	Blocking *bool `json:"blocking,omitempty"`
+
+	// Details At most 20000 characters.
+	Details *string `json:"details,omitempty"`
+
+	// Initiative An initiative slug or ULID. With a task it must be the task's own initiative.
+	Initiative *string `json:"initiative,omitempty"`
+
+	// Mode Default stop.
+	Mode *AskRaiseMode `json:"mode,omitempty"`
+
+	// Options At most 10 strings of 1 to 80 characters.
+	Options *[]string `json:"options,omitempty"`
+
+	// Question One line, 1 to 200 characters.
+	Question string `json:"question"`
+
+	// Task A task ref or ULID.
+	Task *string `json:"task,omitempty"`
+}
+
+// AskRaiseMode Default stop.
+type AskRaiseMode string
+
+// AskWithdraw Why the ask was withdrawn.
+type AskWithdraw struct {
+	// Reason At most 200 characters.
+	Reason *string `json:"reason,omitempty"`
 }
 
 // CreatedKey A key just created. `key` is shown this once.
@@ -1244,6 +1459,9 @@ type TaskPatch struct {
 	Title Maybe[string] `json:"title,omitempty"`
 }
 
+// AskRef defines model for AskRef.
+type AskRef = string
+
 // BlockedByRef defines model for BlockedByRef.
 type BlockedByRef = string
 
@@ -1282,6 +1500,27 @@ type Unauthorized = Problem
 
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
+
+// ListAsksParams defines parameters for ListAsks.
+type ListAsksParams struct {
+	// State open (default), answered, withdrawn or all.
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// Actor Keep the asks raised by this actor handle.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Task A task ref or ULID.
+	Task *string `form:"task,omitempty" json:"task,omitempty"`
+
+	// Initiative An initiative slug or ULID.
+	Initiative *string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After An ask ref (`A<n>`) or id. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
 
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
@@ -1409,6 +1648,15 @@ type ListTaskEventsParams struct {
 // PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
 type PutProtocolSeenJSONRequestBody = ProtocolSeenRequest
 
+// RaiseAskJSONRequestBody defines body for RaiseAsk for application/json ContentType.
+type RaiseAskJSONRequestBody = AskRaise
+
+// AnswerAskJSONRequestBody defines body for AnswerAsk for application/json ContentType.
+type AnswerAskJSONRequestBody = AskAnswer
+
+// WithdrawAskJSONRequestBody defines body for WithdrawAsk for application/json ContentType.
+type WithdrawAskJSONRequestBody = AskWithdraw
+
 // CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
 type CreateInitiativeJSONRequestBody = InitiativeCreate
 
@@ -1462,6 +1710,21 @@ type ServerInterface interface {
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(w http.ResponseWriter, r *http.Request)
+	// ListAsks List asks
+	// (GET /api/v1/asks)
+	ListAsks(w http.ResponseWriter, r *http.Request, params ListAsksParams)
+	// RaiseAsk Raise an ask
+	// (POST /api/v1/asks)
+	RaiseAsk(w http.ResponseWriter, r *http.Request)
+	// GetAsk Read an ask
+	// (GET /api/v1/asks/{ref})
+	GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	// AnswerAsk Answer an ask
+	// (POST /api/v1/asks/{ref}/answer)
+	AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	// WithdrawAsk Withdraw an ask
+	// (POST /api/v1/asks/{ref}/withdraw)
+	WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
@@ -1654,6 +1917,148 @@ func (siw *ServerInterfaceWrapper) PutProtocolSeen(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutProtocolSeen(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAsks operation middleware
+func (siw *ServerInterfaceWrapper) ListAsks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAsksParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "state" -------------
+
+	bind.check("state", runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "actor" -------------
+
+	bind.check("actor", runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "task" -------------
+
+	bind.check("task", runtime.BindQueryParameterWithOptions("form", true, false, "task", r.URL.Query(), &params.Task, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "limit" -------------
+
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "after" -------------
+
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAsks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RaiseAsk operation middleware
+func (siw *ServerInterfaceWrapper) RaiseAsk(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RaiseAsk(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAsk operation middleware
+func (siw *ServerInterfaceWrapper) GetAsk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref AskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAsk(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AnswerAsk operation middleware
+func (siw *ServerInterfaceWrapper) AnswerAsk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref AskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AnswerAsk(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// WithdrawAsk operation middleware
+func (siw *ServerInterfaceWrapper) WithdrawAsk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref AskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WithdrawAsk(w, r, ref)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2764,6 +3169,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/renew", wrapper.RenewLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/end", wrapper.EndLease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases/{ref}/ack", wrapper.AckLease)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/asks", wrapper.ListAsks)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/asks", wrapper.RaiseAsk)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/asks/{ref}", wrapper.GetAsk)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/asks/{ref}/answer", wrapper.AnswerAsk)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/asks/{ref}/withdraw", wrapper.WithdrawAsk)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -3117,6 +3527,486 @@ type PutProtocolSeen503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response PutProtocolSeen503ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAsksRequestObject struct {
+	Params ListAsksParams
+}
+
+type ListAsksResponseObject interface {
+	VisitListAsksResponse(w http.ResponseWriter) error
+}
+
+type ListAsks200JSONResponse AskList
+
+func (response ListAsks200JSONResponse) VisitListAsksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAsks400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListAsks400ApplicationProblemPlusJSONResponse) VisitListAsksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAsks401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListAsks401ApplicationProblemPlusJSONResponse) VisitListAsksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAsks404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListAsks404ApplicationProblemPlusJSONResponse) VisitListAsksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAsks503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListAsks503ApplicationProblemPlusJSONResponse) VisitListAsksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAskRequestObject struct {
+	Body *RaiseAskJSONRequestBody
+}
+
+type RaiseAskResponseObject interface {
+	VisitRaiseAskResponse(w http.ResponseWriter) error
+}
+
+type RaiseAsk201JSONResponse Ask
+
+func (response RaiseAsk201JSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk400ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk401ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk404ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk409ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk503ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAskRequestObject struct {
+	Ref AskRef `json:"ref"`
+}
+
+type GetAskResponseObject interface {
+	VisitGetAskResponse(w http.ResponseWriter) error
+}
+
+type GetAsk200JSONResponse Ask
+
+func (response GetAsk200JSONResponse) VisitGetAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsk400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsk400ApplicationProblemPlusJSONResponse) VisitGetAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsk401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsk401ApplicationProblemPlusJSONResponse) VisitGetAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsk404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsk404ApplicationProblemPlusJSONResponse) VisitGetAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAsk503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAsk503ApplicationProblemPlusJSONResponse) VisitGetAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAskRequestObject struct {
+	Ref  AskRef `json:"ref"`
+	Body *AnswerAskJSONRequestBody
+}
+
+type AnswerAskResponseObject interface {
+	VisitAnswerAskResponse(w http.ResponseWriter) error
+}
+
+type AnswerAsk200JSONResponse Ask
+
+func (response AnswerAsk200JSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAsk400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk400ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAsk401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk401ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAsk404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk404ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAsk409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk409ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AnswerAsk503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk503ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAskRequestObject struct {
+	Ref  AskRef `json:"ref"`
+	Body *WithdrawAskJSONRequestBody
+}
+
+type WithdrawAskResponseObject interface {
+	VisitWithdrawAskResponse(w http.ResponseWriter) error
+}
+
+type WithdrawAsk200JSONResponse Ask
+
+func (response WithdrawAsk200JSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk400ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk401ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk404ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk409ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk503ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6277,6 +7167,21 @@ type StrictServerInterface interface {
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(ctx context.Context, request PutProtocolSeenRequestObject) (PutProtocolSeenResponseObject, error)
+	// ListAsks List asks
+	// (GET /api/v1/asks)
+	ListAsks(ctx context.Context, request ListAsksRequestObject) (ListAsksResponseObject, error)
+	// RaiseAsk Raise an ask
+	// (POST /api/v1/asks)
+	RaiseAsk(ctx context.Context, request RaiseAskRequestObject) (RaiseAskResponseObject, error)
+	// GetAsk Read an ask
+	// (GET /api/v1/asks/{ref})
+	GetAsk(ctx context.Context, request GetAskRequestObject) (GetAskResponseObject, error)
+	// AnswerAsk Answer an ask
+	// (POST /api/v1/asks/{ref}/answer)
+	AnswerAsk(ctx context.Context, request AnswerAskRequestObject) (AnswerAskResponseObject, error)
+	// WithdrawAsk Withdraw an ask
+	// (POST /api/v1/asks/{ref}/withdraw)
+	WithdrawAsk(ctx context.Context, request WithdrawAskRequestObject) (WithdrawAskResponseObject, error)
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
@@ -6548,6 +7453,158 @@ func (sh *strictHandler) PutProtocolSeen(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutProtocolSeenResponseObject); ok {
 		if err := validResponse.VisitPutProtocolSeenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAsks operation middleware
+func (sh *strictHandler) ListAsks(w http.ResponseWriter, r *http.Request, params ListAsksParams) {
+	var request ListAsksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAsks(ctx, request.(ListAsksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAsks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAsksResponseObject); ok {
+		if err := validResponse.VisitListAsksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RaiseAsk operation middleware
+func (sh *strictHandler) RaiseAsk(w http.ResponseWriter, r *http.Request) {
+	var request RaiseAskRequestObject
+
+	var body RaiseAskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RaiseAsk(ctx, request.(RaiseAskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RaiseAsk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RaiseAskResponseObject); ok {
+		if err := validResponse.VisitRaiseAskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAsk operation middleware
+func (sh *strictHandler) GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+	var request GetAskRequestObject
+
+	request.Ref = ref
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAsk(ctx, request.(GetAskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAsk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAskResponseObject); ok {
+		if err := validResponse.VisitGetAskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AnswerAsk operation middleware
+func (sh *strictHandler) AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+	var request AnswerAskRequestObject
+
+	request.Ref = ref
+
+	var body AnswerAskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AnswerAsk(ctx, request.(AnswerAskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AnswerAsk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AnswerAskResponseObject); ok {
+		if err := validResponse.VisitAnswerAskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// WithdrawAsk operation middleware
+func (sh *strictHandler) WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+	var request WithdrawAskRequestObject
+
+	request.Ref = ref
+
+	var body WithdrawAskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.WithdrawAsk(ctx, request.(WithdrawAskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "WithdrawAsk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(WithdrawAskResponseObject); ok {
+		if err := validResponse.VisitWithdrawAskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -250,7 +250,7 @@ func TestListFiltersAndPaging(t *testing.T) {
 		"initiative of ask": {Query{State: "all", Initiative: "aa"}, "A1"},
 		"after ref":         {Query{State: "all", After: "a2"}, "A3 A4"},
 		"after ulid":        {Query{State: "all", After: strings.ToLower(b.ID)}, "A3 A4"},
-		"after unknown id":  {Query{State: "all", After: a1.ID[:25] + "0"}, "A1 A2 A3 A4"},
+		"after unknown id":  {Query{State: "all", After: strings.Repeat("0", 26)}, "A1 A2 A3 A4"},
 		"limit":             {Query{State: "all", Limit: 3}, "A1 A2 A3"},
 	} {
 		if got := refs(c.q); got != c.want {
@@ -446,5 +446,26 @@ func TestALostRaceNamesTheStateAnotherWriterMovedTheAskTo(t *testing.T) {
 	}
 	if err := e.S.wonRace(ctx, tx, res, Ask{ID: "NOPE", Ref: "A9"}, "answer"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("wonRace on a vanished ask = %v", err)
+	}
+}
+
+func TestWaitingNeedsAnOpenPollAskSeenWithinTheLastMinute(t *testing.T) {
+	s := Store{Now: func() time.Time { return t0 }}
+	seen := func(ago time.Duration) *time.Time { at := t0.Add(-ago); return &at }
+	for name, tc := range map[string]struct {
+		ask  Ask
+		want bool
+	}{
+		"polled just now": {Ask{State: "open", Mode: "poll", PollSeenAt: seen(0)}, true},
+		"polled 60 s ago": {Ask{State: "open", Mode: "poll", PollSeenAt: seen(60 * time.Second)}, true},
+		"polled 61 s ago": {Ask{State: "open", Mode: "poll", PollSeenAt: seen(61 * time.Second)}, false},
+		"never polled":    {Ask{State: "open", Mode: "poll"}, false},
+		"stop mode":       {Ask{State: "open", Mode: "stop", PollSeenAt: seen(0)}, false},
+		"answered":        {Ask{State: "answered", Mode: "poll", PollSeenAt: seen(0)}, false},
+		"withdrawn":       {Ask{State: "withdrawn", Mode: "poll", PollSeenAt: seen(0)}, false},
+	} {
+		if got := s.Waiting(tc.ask); got != tc.want {
+			t.Errorf("%s: Waiting = %v, want %v", name, got, tc.want)
+		}
 	}
 }

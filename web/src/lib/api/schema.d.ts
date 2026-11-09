@@ -572,6 +572,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/asks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List asks
+         * @description A page of asks ordered by id (raising order). Filters combine: `state` is `open` (the default), `answered`, `withdrawn` or `all`; `actor` keeps the asks of one asker handle, `task` (ref or ULID) those on one task and `initiative` (slug or ULID) those on one initiative. `limit` is 1 to 1000, default 100. `after` is the `A<n>` ref or id of the last ask of the previous page; `next_after` is the value to send, absent on the last page. A `task` or `initiative` that names nothing is 404.
+         */
+        get: operations["listAsks"];
+        put?: never;
+        /**
+         * Raise an ask
+         * @description Raises an open ask by the caller. `question` is 1 to 200 characters on one line; `details` is at most 20000 characters; `options` is at most 10 suggested answers of 1 to 80 characters each; `mode` is `stop` (default) or `poll`; `blocking` (default false) marks an ask that blocks its task. `task` is a task ref or ULID and `initiative` a slug or ULID; both may be left out for a board-wide ask. The initiative of an ask on a task is the task's: sending both is 400 unless the task belongs to that initiative. An unknown task or initiative is 404, and a closed task or a closed initiative is 409. The answer is 201 with the ask and the event `ask_raised`. A refused request writes no ask, event or actor.
+         */
+        post: operations["raiseAsk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asks/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an ask
+         * @description Reads one ask by `A<n>` ref or ULID in either letter case, with its task ref, initiative slug, asker, `answered_by`, `on_behalf_of`, `channel`, times and the derived `asker_waiting`. 404 for none.
+         */
+        get: operations["getAsk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asks/{ref}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer an ask
+         * @description Moves an open ask to `answered` with the `answer` (1 to 20000 characters) and appends `ask_answered`. `channel` is `ui`, `api` or `relay`; left out it is `ui` for a browser session and `api` for a key. `on_behalf_of` is the handle of the person a relayed answer came from, allowed with channel `relay` only. An ask that is not open is 409 and the problem names its state. A refused request writes nothing.
+         */
+        post: operations["answerAsk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asks/{ref}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw an ask
+         * @description Moves an open ask to `withdrawn` with the optional `reason` (at most 200 characters) and appends `ask_withdrawn`. An ask that is not open is 409 and the problem names its state. A refused request writes nothing.
+         */
+        post: operations["withdrawAsk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/now": {
         parameters: {
             query?: never;
@@ -1158,6 +1242,94 @@ export interface components {
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
         };
+        /** @description An ask. `asker_waiting` is derived. */
+        Ask: {
+            /** @description The ask's ULID. */
+            id: string;
+            /** @description The short ref, `A<n>`. */
+            ref: string;
+            /** @description The ref of the task it is on. Absent for an ask on an initiative or board-wide. */
+            task?: string;
+            /** @description The slug of the initiative, derived from the task when there is one. Absent for a board-wide ask. */
+            initiative?: string;
+            /** @description The handle of the actor that raised it. */
+            asker: string;
+            /** @description One line, 1 to 200 characters. */
+            question: string;
+            /** @description At most 20000 characters. Empty when none was given. */
+            details: string;
+            /** @description The suggested answers, at most 10 of 1 to 80 characters. */
+            options: string[];
+            /** @enum {string} */
+            mode: "stop" | "poll";
+            /** @description It blocks its task while it is open. */
+            blocking: boolean;
+            /** @enum {string} */
+            state: "open" | "answered" | "withdrawn";
+            /** @description Absent until it is answered. */
+            answer?: string;
+            /** @description The handle of the actor that answered it. */
+            answered_by?: string;
+            /** @description The handle of the person a relayed answer came from. */
+            on_behalf_of?: string;
+            /**
+             * @description How the answer reached the board. Absent until it is answered.
+             * @enum {string}
+             */
+            channel?: "ui" | "api" | "relay";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            answered_at?: string;
+            /** Format: date-time */
+            withdrawn_at?: string;
+            withdraw_reason?: string;
+            /** @description It is open, its mode is `poll` and a long poll on it was seen within the last 60 seconds. */
+            asker_waiting: boolean;
+        };
+        /** @description The ask to raise. */
+        AskRaise: {
+            /** @description A task ref or ULID. */
+            task?: string;
+            /** @description An initiative slug or ULID. With a task it must be the task's own initiative. */
+            initiative?: string;
+            /** @description One line, 1 to 200 characters. */
+            question: string;
+            /** @description At most 20000 characters. */
+            details?: string;
+            /** @description At most 10 strings of 1 to 80 characters. */
+            options?: string[];
+            /**
+             * @description Default stop.
+             * @enum {string}
+             */
+            mode?: "stop" | "poll";
+            /** @description Default false. */
+            blocking?: boolean;
+        };
+        /** @description The answer to an open ask. */
+        AskAnswer: {
+            /** @description 1 to 20000 characters. */
+            answer: string;
+            /**
+             * @description Default ui for a browser session and api for a key.
+             * @enum {string}
+             */
+            channel?: "ui" | "api" | "relay";
+            /** @description The handle of the person a relayed answer came from. Channel relay only. */
+            on_behalf_of?: string;
+        };
+        /** @description Why the ask was withdrawn. */
+        AskWithdraw: {
+            /** @description At most 200 characters. */
+            reason?: string;
+        };
+        /** @description A page of asks. */
+        AskList: {
+            items: components["schemas"]["Ask"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description A page of events. */
         EventList: {
             items: components["schemas"]["Event"][];
@@ -1327,6 +1499,8 @@ export interface components {
         BlockedByRef: string;
         /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
         LeaseRef: string;
+        /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
+        AskRef: string;
         /** @description The page size, 1 to 1000. Default 100. */
         EventLimit: number;
         /** @description An event id or `E<n>` ref. The page starts after it. */
@@ -2341,6 +2515,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Lease"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listAsks: {
+        parameters: {
+            query?: {
+                /** @description open (default), answered, withdrawn or all. */
+                state?: string;
+                /** @description Keep the asks raised by this actor handle. */
+                actor?: string;
+                /** @description A task ref or ULID. */
+                task?: string;
+                /** @description An initiative slug or ULID. */
+                initiative?: string;
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description An ask ref (`A<n>`) or id. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    raiseAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRaise"];
+            };
+        };
+        responses: {
+            /** @description The ask was raised. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["AskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    answerAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["AskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskAnswer"];
+            };
+        };
+        responses: {
+            /** @description The answered ask. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    withdrawAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
+                ref: components["parameters"]["AskRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AskWithdraw"];
+            };
+        };
+        responses: {
+            /** @description The withdrawn ask. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ask"];
                 };
             };
             400: components["responses"]["BadRequest"];
