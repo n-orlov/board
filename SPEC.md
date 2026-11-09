@@ -2482,7 +2482,10 @@ dialogs to the bar as a finite, named list (`PHASE1_STATES`): the views `#/tasks
 9 dialogs edit initiative, close initiative, new task, edit task, close task, milestone, record check, add dependency and
 end lease, each opened over a seeded initiative with a watch task, a link, a dependency, a milestone, a check, an
 expired and a live lease and a conflict. A test names the 3 views and the 9 dialogs, so a state cannot drop out of the
-list unnoticed. A failing scan names the rule, the impact and the offending elements. Colour contrast is met by the design
+list unnoticed. R13 extends it to the Phase 2 views and dialogs the same way (`PHASE2_STATES`): `#/attention` with its five
+sections filled, `#/notes` with a body expanded, the six dialogs answer ask, withdraw ask, post note, close from attention,
+acknowledge (the Attention view with the toast the action raises, over a lease the scan acknowledges itself) and record
+check from attention, and the live indicator reading live, offline and reconnecting; a test names them. A failing scan names the rule, the impact and the offending elements. Colour contrast is met by the design
 tokens in both themes, never by a per-element override.
 
 Global: tag filter persisted in the URL, keyboard navigation, no external
