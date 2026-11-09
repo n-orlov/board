@@ -1922,6 +1922,15 @@ operator. Live via SSE (§7.1).
 | **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
 | **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
+**Live refresh** is the module `web/src/lib/live.ts`: one `EventSource` per tab on `GET /api/v1/stream` (§7.1), opened
+once. A view subscribes with a predicate over the `board` events that concern it (event type, initiative, task) and a
+refetch; a matching event refetches that view, **at most once per 500 ms burst** (the first event of a burst starts
+the timer, the others share its refetch). `attention` messages go to a listener (the nav badge) without a fetch. A
+`reset`, and the stream opening again after an error, refetch every subscribed view; the first open does not. A stream
+the browser gave up on (closed, not retried) is opened again after 3 s, and at once when the browser comes back online.
+The **indicator** state is `live` (the stream is open), `reconnecting` (opening, or after an error) or `offline` (the
+browser says it is offline, whatever the stream does). Nothing in the UI polls on a timer.
+
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
 from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
 below it (the same rows, so the `key-row`, `key-status`, `new-key` and `new-key-value` test ids keep
