@@ -2465,6 +2465,12 @@ same bar as a finite, named list (`PHASE1_STATES`): the views `#/tasks`, `#/i/<s
 edit initiative, close initiative, new task, edit task, close task, milestone, record check, add dependency and end lease,
 each opened over a seeded initiative with a watch task, links, a dependency, an expired and a live lease and a conflict.
 A link is at least 44 px wide as well as high, so a short link label (a two-letter reference) still meets the bar.
+R13 extends it to Phase 2 in the same way (`PHASE2_STATES`, phone only): the views `#/attention` (all five sections
+filled, with every row's action buttons and way-back copy button) and `#/notes` (a note body expanded), the sheets answer ask,
+withdraw ask, post note, close from attention and record check from attention, acknowledge (which opens no sheet: its state is the
+Attention view with the toast the action raises), and the live indicator reading live, offline and reconnecting. The indicator
+is a status region, not a control, so its states are measured as the page it sits on. A test names the views, the six dialogs and
+the three indicator states.
 
 **Accessibility bar.** axe-core (`@axe-core/playwright`, pinned exactly in `e2e/package.json`) reports
 zero violations of impact `serious` or `critical`, with no rule disabled and no element excluded, on

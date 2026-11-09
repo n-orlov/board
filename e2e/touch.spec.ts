@@ -9,6 +9,9 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // R12 extends it to the Phase 1 views and dialogs as a finite, named list of states (PHASE1_STATES below): the views
 // `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, and the 9 dialogs edit initiative, close initiative, new task, edit task,
 // close task, milestone, record check, add dependency and end lease.
+// R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/attention` with its five sections
+// filled, `#/notes`, the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge and record check
+// from attention, and the live indicator in its three states.
 const test = base;
 
 const SELECTOR = 'a, button, input, select, textarea, [role=button]';
@@ -254,6 +257,149 @@ const PHASE1_STATES: Phase1State[] = [
   },
 ];
 
+// ---- Phase 2 (R13) -------------------------------------------------------------------------------------------------
+
+const P2_SLUG = 'e2e-touch-p2';
+const P2_RESOURCE = 'repo:touch-p2';
+const P2_ACTOR = 'touch-p2-a';
+const P2_HOLDER = 'touch-p2-b';
+
+type Seed2 = { ask: string; doneTask: string; lease: string; watch: string; note: string };
+let seeded2: Promise<Seed2> | undefined;
+
+async function actorApi(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, actor: string) {
+  return playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor, 'Board-Actor-Way-Back': `ralphctl status ${actor}` },
+  });
+}
+
+// One initiative with one item in each of the five Attention sections (an open blocking ask with options, a done task, an expired
+// lease, an overdue watch and a conflict between two actors) and a note on a task, on the initiative and as a broadcast.
+async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed2> {
+  const a = await actorApi(playwright, baseURL, P2_ACTOR);
+  const b = await actorApi(playwright, baseURL, P2_HOLDER);
+  // A 409 is a second seeding by a worker the runner restarted after a failure: the initiative stays, its items are made again.
+  const created = await a.post('/api/v1/initiatives', { data: { slug: P2_SLUG, title: 'Touch Phase 2', tags: ['phone'] } });
+  expect([201, 409], `seed ${P2_SLUG}: ${created.status()}`).toContain(created.status());
+  const task = async (title: string, extra: object = {}) => (await send(a, '/api/v1/tasks', { initiative: P2_SLUG, title, ...extra }, 201)).ref as string;
+
+  const askTask = await task('Touch p2 ask subject');
+  const ask = (await send(a, '/api/v1/asks', { question: 'Is this big enough?', details: 'Measure it.', options: ['Yes', 'No', 'Maybe'], task: askTask, mode: 'poll', blocking: true }, 201)).ref as string;
+  const doneTask = await task('Touch p2 done');
+  await send(a, `/api/v1/tasks/${doneTask}/done`, {}, 200);
+  const leaseTask = await task('Touch p2 lease');
+  const old = await send(a, '/api/v1/leases', { task: leaseTask, intent: 'will expire', resources: ['repo:touch-p2-old'] }, 201);
+  await expireLease(a, old.lease.ref);
+  const watch = await task('Touch p2 watch', { kind: 'watch', cadence_seconds: 900, next_check_at: '2020-01-01T00:00:00Z' });
+  const first = await task('Touch p2 first holder');
+  const second = await task('Touch p2 second holder');
+  await send(a, '/api/v1/leases', { task: first, intent: 'holding', resources: [P2_RESOURCE] }, 201);
+  await send(b, '/api/v1/leases', { task: second, intent: 'also holding', resources: [P2_RESOURCE] }, 201);
+
+  const onTask = (await send(a, '/api/v1/notes', { task: askTask, summary: 'A note on the task', body: 'Body of the note.' }, 201)).ref as string;
+  await send(a, '/api/v1/notes', { initiative: P2_SLUG, summary: 'A note on the initiative', body: 'More body.' }, 201);
+  await send(a, '/api/v1/notes', { summary: 'A broadcast', body: 'To everyone.', resource: P2_RESOURCE }, 201);
+  await a.dispose();
+  await b.dispose();
+  return { ask, doneTask, lease: old.lease.ref as string, watch, note: onTask };
+}
+
+const attentionItem = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
+
+const openAttention = async (page: Page, seed: Seed2) => {
+  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
+  await expect(page.getByTestId('section-count')).toHaveCount(5);
+  await expect(attentionItem(page, seed.ask)).toBeVisible();
+};
+
+type Phase2State = { name: string; minimum: number; open: (page: Page, seed: Seed2) => Promise<void> };
+
+// The finite list of Phase 2 states this spec measures at the phone: 2 views, the six dialogs and the live indicator in 3 states.
+// Acknowledge opens no sheet: its state is the Attention view with the toast the action raises.
+const PHASE2_STATES: Phase2State[] = [
+  {
+    name: 'view #/attention',
+    minimum: 15,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts']) {
+        await expect(page.getByTestId(`section-${key}`).getByTestId('attention-item').first()).toBeVisible();
+      }
+      await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'view #/notes',
+    minimum: 12,
+    open: async (page, seed) => {
+      await page.goto(`/#/notes?initiative=${P2_SLUG}`);
+      await expect(page.getByTestId('notes-list').getByTestId('note').first()).toBeVisible();
+      await page.getByRole('button', { name: `Show body of ${seed.note}` }).click();
+      await expect(page.getByTestId('note-body').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog answer ask',
+    minimum: 6,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      await attentionItem(page, seed.ask).getByRole('button', { name: `Answer ${seed.ask}` }).click();
+      const dialog = await openDialog(page, `Answer ${seed.ask}`);
+      await expect(page.getByTestId('answer-option')).toHaveCount(3);
+      await dialog.getByRole('textbox', { name: 'Answer' }).fill('Yes');
+    },
+  },
+  {
+    name: 'dialog withdraw ask',
+    minimum: 3,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      await attentionItem(page, seed.ask).getByRole('button', { name: `Withdraw ${seed.ask}` }).click();
+      await openDialog(page, `Withdraw ${seed.ask}`);
+    },
+  },
+  {
+    name: 'dialog post note',
+    minimum: 6,
+    open: async (page) => {
+      await page.goto(`/#/notes?initiative=${P2_SLUG}`);
+      await expect(page.getByTestId('notes-list').getByTestId('note').first()).toBeVisible();
+      await button(page, 'Post note', true).click();
+      await openDialog(page, 'Post note');
+    },
+  },
+  {
+    name: 'dialog close from attention',
+    minimum: 3,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      await attentionItem(page, seed.doneTask).getByRole('button', { name: `Close ${seed.doneTask}` }).click();
+      await openDialog(page, 'Close task');
+    },
+  },
+  {
+    name: 'dialog acknowledge',
+    minimum: 10,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      await attentionItem(page, seed.lease).getByRole('button', { name: `Acknowledge ${seed.lease}` }).click();
+      await expect(page.getByTestId('toast')).toHaveText(`Lease ${seed.lease} acknowledged`);
+    },
+  },
+  {
+    name: 'dialog record check from attention',
+    minimum: 3,
+    open: async (page, seed) => {
+      await openAttention(page, seed);
+      await attentionItem(page, seed.watch).getByRole('button', { name: `Record check ${seed.watch}` }).click();
+      await openDialog(page, 'Record check');
+    },
+  },
+];
+
+const LIVE_STATES = ['live', 'offline', 'reconnecting'] as const;
+
 test.describe('phone 390x844', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -413,6 +559,56 @@ test.describe('phone 390x844', () => {
       await expectTouchFriendly(page, state.minimum);
     });
   }
+
+  for (const state of PHASE2_STATES) {
+    test(`${state.name} has 44 px hit areas and 16 px inputs`, async ({ page, playwright, baseURL }) => {
+      seeded2 ??= seedPhase2(playwright, baseURL);
+      const seed = await seeded2;
+      await state.open(page, seed);
+      await expectTouchFriendly(page, state.minimum);
+    });
+  }
+
+  for (const word of LIVE_STATES) {
+    test(`the live indicator reading ${word} sits on a page of 44 px hit areas`, async ({ page, context }) => {
+      if (word === 'reconnecting') {
+        // The stream never opens: the indicator stays on `reconnecting`.
+        await page.addInitScript(() => {
+          class Silent {
+            readyState = 0;
+            onopen = null;
+            onerror = null;
+            addEventListener() {}
+            close() {}
+          }
+          (window as unknown as { EventSource: unknown }).EventSource = Silent;
+        });
+      }
+      await page.goto('/#/attention');
+      if (word === 'reconnecting') await page.reload(); // beforeEach already loaded the app: the stand-in applies to a fresh document
+      const indicator = page.getByRole('status', { name: /^Live updates:/ });
+      await expect(indicator).toBeVisible();
+      if (word === 'offline') await context.setOffline(true);
+      await expect(indicator).toHaveAccessibleName(`Live updates: ${word}`);
+      await expect(indicator).toHaveText(word);
+      await expectTouchFriendly(page, 4);
+      await context.setOffline(false);
+    });
+  }
+
+  test('the Phase 2 list names the views, the six dialogs and the three live indicator states', () => {
+    const names = PHASE2_STATES.map((s) => s.name);
+    expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes']);
+    expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
+      'answer ask',
+      'withdraw ask',
+      'post note',
+      'close from attention',
+      'acknowledge',
+      'record check from attention',
+    ]);
+    expect(LIVE_STATES).toEqual(['live', 'offline', 'reconnecting']);
+  });
 
   test('the Phase 1 list names the 3 views and the 9 dialogs', () => {
     const names = PHASE1_STATES.map((s) => s.name);
