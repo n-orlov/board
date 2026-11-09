@@ -436,6 +436,24 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 | answered_by, on_behalf_of | fk actor | |
 | channel | `ui` \| `api` \| `relay` | relay = recorded by the agent from a direct reply |
 | created_at, answered_at | | |
+| withdrawn_at, withdraw_reason | nullable | set when the ask is withdrawn; the reason is at most 200 characters |
+| poll_seen_at | ts, nullable | when a long poll (§7.2) on the ask last held or returned; null until one has |
+
+An ask's short ref is `A<n>`: `n` is the table's auto-incrementing key (`domain.FormatAskRef`; read back by
+`domain.ParseAskRef` with `A` in either case and a positive `n`). Every read takes `A<n>` or the ULID, in either letter
+case. Timestamps are UTC milliseconds (`BIGINT`), `options` is a JSON text list (`[]` when none) and `blocking` is a
+boolean (`BOOLEAN` on Postgres, 0 or 1 on SQLite). Indexes: `asks(state, created_at)`, `asks(task_id)`, `asks(actor_id)`.
+
+**Store** (`internal/asks`). `Raise` takes a `task` (ref or ULID), an `initiative` (slug or ULID) or neither; the
+initiative of an ask on a task is the task's, and a task with a different initiative is invalid. A closed task or a
+closed initiative is a conflict; an unknown one is not found. The question is 1 to 200 characters on one line, the
+details at most 20000, the options at most 10 of 1 to 80, the mode `stop` (default) or `poll`. `Answer` takes an answer
+of 1 to 20000 characters and a channel, defaulting to `ui` for a session and `api` for a key; `on_behalf_of` (a handle)
+is allowed with `relay` only. `Withdraw` takes an optional reason. Answering or withdrawing an ask that is not `open` is
+a conflict naming its state and changes no row, event or actor. `List` filters by `state` (`open` by default, `answered`,
+`withdrawn` or `all`), asker, task and initiative, ordered by `id`, with `limit` and an `after` cursor (`A<n>` or ULID).
+Each write appends `ask_raised`, `ask_answered` or `ask_withdrawn` (with the task, the initiative and `ref_id` set as they
+apply) in the same transaction as the change.
 
 ### 4.6 `events`
 

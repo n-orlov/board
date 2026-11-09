@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -218,5 +219,56 @@ func TestLeasesHaveTheSpecIndexesAndTheirResourcesKeyOnBothColumns(t *testing.T)
 	}
 	if err := exec("lease_resources", []string{"lease_id", "resource"}, "L1", "repo:a"); err == nil || !d.IsUniqueViolation(err) {
 		t.Errorf("a duplicate resource = %v, want a unique violation", err)
+	}
+}
+
+// TestAsksHaveTheSpecIndexesAndTheirChecks checks the SPEC 4.5 and 4.10 indexes
+// on asks and that an ask takes only its three states, two modes and three
+// channels, leaves poll_seen_at null and refers to a task that exists.
+func TestAsksHaveTheSpecIndexesAndTheirChecks(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string][]string{
+		"asks_state_created_at": {"state", "created_at"},
+		"asks_task_id":          {"task_id"},
+		"asks_actor_id":         {"actor_id"},
+	} {
+		if got := indexColumns(t, s, name); !reflect.DeepEqual(got, want) {
+			t.Errorf("index %s = %v, want %v", name, got, want)
+		}
+	}
+	d := s.Dialect()
+	exec := func(table string, cols []string, vals ...any) error {
+		_, err := s.Writer().ExecContext(ctx, d.Rebind(d.Insert(table, cols)), vals...)
+		return err
+	}
+	for _, r := range phase0Rows[:2] {
+		if err := exec(r.table, r.cols, r.vals...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cols := []string{"id", "task_id", "actor_id", "question", "mode", "state", "created_at"}
+	if err := exec("asks", cols, "A1", nil, "ACTOR1", "q", "stop", "open", 1); err != nil {
+		t.Fatalf("a global ask = %v", err)
+	}
+	var seen sql.NullInt64
+	if err := s.Writer().QueryRowContext(ctx, d.Rebind(`SELECT poll_seen_at FROM asks WHERE id = ?`), "A1").Scan(&seen); err != nil || seen.Valid {
+		t.Errorf("poll_seen_at = %v, %v; want null", seen, err)
+	}
+	for name, vals := range map[string][]any{
+		"mode ask":      {"A2", nil, "ACTOR1", "q", "ask", "open", 1},
+		"state waiting": {"A3", nil, "ACTOR1", "q", "stop", "waiting", 1},
+		"unknown task":  {"A4", "NOPE", "ACTOR1", "q", "stop", "open", 1},
+		"unknown actor": {"A5", nil, "NOPE", "q", "stop", "open", 1},
+	} {
+		if err := exec("asks", cols, vals...); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if err := exec("asks", append(cols, "channel"), "A6", nil, "ACTOR1", "q", "stop", "answered", 1, "carrier"); err == nil {
+		t.Error("channel carrier was accepted")
 	}
 }
