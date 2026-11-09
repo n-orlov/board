@@ -468,6 +468,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream events (server-sent events)
+         * @description A `text/event-stream` of what happens on the board, flushed as it is written. `topics` is a comma-separated list of `events` and `attention`; the default is both and any other topic is 400. Topic `events` sends one message per event, in the order they were written: `event: board`, `id:` the event's ULID and `data:` the event as one JSON line, the same object `GET /api/v1/events` lists. A comment line `: ping` is sent every `BOARD_STREAM_HEARTBEAT` (default 25 s) so an idle connection stays open. The stream ends when the client disconnects or the server shuts down.
+         */
+        get: operations["getStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/leases": {
         parameters: {
             query?: never;
@@ -2456,6 +2476,32 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getStream: {
+        parameters: {
+            query?: {
+                /** @description The topics to receive, comma-separated. Default `events,attention`. */
+                topics?: ("events" | "attention")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream. The response carries `Cache-Control` no-cache and `X-Accel-Buffering` no. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };

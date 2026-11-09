@@ -487,6 +487,24 @@ func (e ListInitiativesParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for GetStreamParamsTopics.
+const (
+	Attention GetStreamParamsTopics = "attention"
+	Events    GetStreamParamsTopics = "events"
+)
+
+// Valid indicates whether the value is a known member of the GetStreamParamsTopics enum.
+func (e GetStreamParamsTopics) Valid() bool {
+	switch e {
+	case Attention:
+		return true
+	case Events:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListTasksParamsStatus.
 const (
 	ListTasksParamsStatusAll       ListTasksParamsStatus = "all"
@@ -1720,6 +1738,15 @@ type GetNowParams struct {
 	Resources *string `form:"resources,omitempty" json:"resources,omitempty"`
 }
 
+// GetStreamParams defines parameters for GetStream.
+type GetStreamParams struct {
+	// Topics The topics to receive, comma-separated. Default `events,attention`.
+	Topics *[]GetStreamParamsTopics `form:"topics,omitempty" json:"topics,omitempty"`
+}
+
+// GetStreamParamsTopics defines parameters for GetStream.
+type GetStreamParamsTopics string
+
 // ListTasksParams defines parameters for ListTasks.
 type ListTasksParams struct {
 	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
@@ -1923,6 +1950,9 @@ type ServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
+	// GetStream Stream events (server-sent events)
+	// (GET /api/v1/stream)
+	GetStream(w http.ResponseWriter, r *http.Request, params GetStreamParams)
 	// ListTasks List the tasks
 	// (GET /api/v1/tasks)
 	ListTasks(w http.ResponseWriter, r *http.Request, params ListTasksParams)
@@ -2832,6 +2862,36 @@ func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// GetStream operation middleware
+func (siw *ServerInterfaceWrapper) GetStream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetStreamParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "topics" -------------
+
+	bind.check("topics", runtime.BindQueryParameterWithOptions("form", false, false, "topics", r.URL.Query(), &params.Topics, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStream(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTasks operation middleware
 func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Request) {
 
@@ -3443,6 +3503,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/milestones", wrapper.RecordTaskMilestone)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/stream", wrapper.GetStream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases", wrapper.ListLeases)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases", wrapper.StartLease)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases/{ref}", wrapper.GetLease)
@@ -6195,6 +6256,105 @@ func (response GetNow503ApplicationProblemPlusJSONResponse) VisitGetNowResponse(
 	return err
 }
 
+type GetStreamRequestObject struct {
+	Params GetStreamParams
+}
+
+type GetStreamResponseObject interface {
+	VisitGetStreamResponse(w http.ResponseWriter) error
+}
+
+type GetStream200TexteventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetStream200TexteventStreamResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type GetStream400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetStream400ApplicationProblemPlusJSONResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetStream401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetStream401ApplicationProblemPlusJSONResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetStream503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetStream503ApplicationProblemPlusJSONResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTasksRequestObject struct {
 	Params ListTasksParams
 }
@@ -7861,6 +8021,9 @@ type StrictServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
+	// GetStream Stream events (server-sent events)
+	// (GET /api/v1/stream)
+	GetStream(ctx context.Context, request GetStreamRequestObject) (GetStreamResponseObject, error)
 	// ListTasks List the tasks
 	// (GET /api/v1/tasks)
 	ListTasks(ctx context.Context, request ListTasksRequestObject) (ListTasksResponseObject, error)
@@ -8862,6 +9025,32 @@ func (sh *strictHandler) GetNow(w http.ResponseWriter, r *http.Request, params G
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetNowResponseObject); ok {
 		if err := validResponse.VisitGetNowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetStream operation middleware
+func (sh *strictHandler) GetStream(w http.ResponseWriter, r *http.Request, params GetStreamParams) {
+	var request GetStreamRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetStream(ctx, request.(GetStreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetStream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetStreamResponseObject); ok {
+		if err := validResponse.VisitGetStreamResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

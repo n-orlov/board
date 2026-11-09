@@ -139,6 +139,8 @@ type Feed struct {
 	settled int64
 	// pend is the open gap the feed waits on, nil when there is none.
 	pend *pending
+	// unresolved is true until a lazy feed has read the newest event number.
+	unresolved bool
 }
 
 // pending is a gap in `n` below bound, the highest number a read saw, and the
@@ -159,6 +161,18 @@ func New(ctx context.Context, src Source, opts Options) (*Feed, error) {
 		return nil, err
 	}
 	return NewAt(src, last, opts), nil
+}
+
+// NewLazy returns a feed that is positioned at the newest event as of its first
+// successful read of the table, which Poll tries until it works. A server
+// started with BOARD_MIGRATE=off on a database that is not migrated yet, or
+// that cannot be reached yet, serves and starts delivering once the table is
+// readable (GET /readyz says why it is not ready until then). A subscription
+// made before that has After 0 and carries the events from that read on.
+func NewLazy(src Source, opts Options) *Feed {
+	f := NewAt(src, 0, opts)
+	f.unresolved = true
+	return f
 }
 
 // NewAt returns a feed that delivers the events after n.
@@ -222,9 +236,10 @@ func (f *Feed) Poll(ctx context.Context) {
 // pollOnce reads one batch and delivers it. It reports whether to read again at
 // once: the batch was full, or it opened a gap whose writers may already be gone.
 func (f *Feed) pollOnce(ctx context.Context) (bool, error) {
-	f.mu.Lock()
-	from, pend := f.last, f.pend
-	f.mu.Unlock()
+	from, pend, ok := f.position(ctx)
+	if !ok {
+		return false, nil
+	}
 	settle, err := f.settles(ctx, pend)
 	if err != nil {
 		return false, err
@@ -239,7 +254,45 @@ func (f *Feed) pollOnce(ctx context.Context) (bool, error) {
 			return false, err
 		}
 	}
-	return open || (len(items) == batchSize && last > from), nil
+	return open || readAgain(len(items), last, from), nil
+}
+
+// readAgain reports whether a full batch moved the feed forward, so the next one
+// may be waiting.
+func readAgain(n int, last, from int64) bool { return n == batchSize && last > from }
+
+// position returns the number the next read starts after and the gap the feed
+// waits on, resolving a lazy feed first. It reports false while the table cannot
+// be read.
+func (f *Feed) position(ctx context.Context) (int64, *pending, bool) {
+	if !f.resolve(ctx) {
+		return 0, nil, false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.last, f.pend, true
+}
+
+// resolve positions a lazy feed at the newest event. It reports whether the
+// feed has a position; a table that cannot be read yet is not an error, the
+// next poll tries again.
+func (f *Feed) resolve(ctx context.Context) bool {
+	f.mu.Lock()
+	unresolved := f.unresolved
+	f.mu.Unlock()
+	if !unresolved {
+		return true
+	}
+	last, err := f.src.Last(ctx)
+	if err != nil {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unresolved {
+		f.last, f.unresolved = last, false
+	}
+	return true
 }
 
 // settles reads the writers BEFORE the table, while a gap is open, and returns

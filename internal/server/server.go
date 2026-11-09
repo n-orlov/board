@@ -13,6 +13,7 @@ import (
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
+	"github.com/n-orlov/board/internal/feed"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
@@ -43,6 +44,13 @@ type Readiness func(ctx context.Context) error
 // WithInitiatives gives the /api/v1/initiatives operations their store; without
 // it they answer 503.
 func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) http.Handler {
+	h, _ := newHandler(ready, verify, login, keys, opts...)
+	return h
+}
+
+// newHandler is NewHandler and the operations behind it, which Serve reads the
+// write timeout and the stream hub from.
+func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) (http.Handler, operations) {
 	ops := operations{ready: ready, loginOps: loginOps{login: login}, keyOps: keyOps{keys: keys}}
 	for _, opt := range opts {
 		opt(&ops)
@@ -50,7 +58,25 @@ func NewHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))
-	return withProblemNext(authenticated(mux, verify, login))
+	var h http.Handler = mux
+	if ops.hub != nil {
+		h = wakeFeedAfterWrites(h, ops.hub.feed)
+	}
+	return withProblemNext(authenticated(h, verify, login)), ops
+}
+
+// wakeFeedAfterWrites wakes the change feed once a request that may have
+// written has been answered, so a local write reaches a stream without
+// waiting for the poll interval.
+func wakeFeedAfterWrites(next http.Handler, f *feed.Feed) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			f.Notify()
+		}
+	})
 }
 
 // Option adds an optional part to the handler NewHandler returns.
@@ -113,6 +139,23 @@ func WithMeta(b Build, st *actors.Store) Option {
 	return func(o *operations) { o.metaOps = metaOps{build: b, actors: st} }
 }
 
+// WithStream serves GET /api/v1/stream from the change feed f, with a `: ping`
+// comment every heartbeat while a stream is idle, and wakes f after every
+// request that may have written. Without it the operation answers 503. The
+// streams end when the server shuts down.
+func WithStream(f *feed.Feed, heartbeat time.Duration) Option {
+	return func(o *operations) {
+		o.hub = &streamHub{feed: f, heartbeat: heartbeat, stop: make(chan struct{})}
+	}
+}
+
+// WithWriteTimeout sets the write timeout of the http.Server Serve runs. The
+// stream moves its own write deadline before every write, so it outlives it.
+// The default is none.
+func WithWriteTimeout(d time.Duration) Option {
+	return func(o *operations) { o.writeTimeout = d }
+}
+
 // Serve listens on addr and serves NewHandler(ready, verify, login, keys) until ctx is cancelled, then shuts
 // down gracefully. It returns nil on a clean shutdown.
 func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) error {
@@ -124,7 +167,11 @@ func Serve(ctx context.Context, addr string, ready Readiness, verify KeyVerifier
 }
 
 func serveOn(ctx context.Context, ln net.Listener, ready Readiness, verify KeyVerifier, login *Login, keys *auth.Keys, opts ...Option) error {
-	srv := &http.Server{Handler: NewHandler(ready, verify, login, keys, opts...), ReadHeaderTimeout: 10 * time.Second}
+	h, ops := newHandler(ready, verify, login, keys, opts...)
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, WriteTimeout: ops.writeTimeout}
+	if ops.hub != nil {
+		srv.RegisterOnShutdown(ops.hub.Close)
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

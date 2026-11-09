@@ -230,6 +230,7 @@ func (brokenResponse) VisitAnswerAskResponse(http.ResponseWriter) error         
 func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error         { return errBroken }
 func (brokenResponse) VisitPostNoteResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitListNotesResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitGetStreamResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetNoteResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutCursorResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
@@ -516,6 +517,12 @@ func (s stubOperations) GetNote(context.Context, GetNoteRequestObject) (GetNoteR
 	return resp, err
 }
 
+func (s stubOperations) GetStream(context.Context, GetStreamRequestObject) (GetStreamResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetStreamResponseObject)
+	return resp, err
+}
+
 func (s stubOperations) AnswerAsk(context.Context, AnswerAskRequestObject) (AnswerAskResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(AnswerAskResponseObject)
@@ -560,7 +567,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack", "/api/v1/now",
 		"POST /api/v1/asks", "/api/v1/asks", "/api/v1/asks/A1", "POST /api/v1/asks/A1/answer", "POST /api/v1/asks/A1/withdraw",
-		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen",
+		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen", "/api/v1/stream",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		var seen []string
@@ -751,6 +758,9 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list task events 401", 401, ListTaskEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
 		{"list task events 404", 404, ListTaskEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
 		{"list task events 503", 503, ListTaskEvents503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListTaskEventsResponse},
+		{"get stream 400", 400, GetStream400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetStreamResponse},
+		{"get stream 401", 401, GetStream401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetStreamResponse},
+		{"get stream 503", 503, GetStream503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetStreamResponse},
 		{"list events 400", 400, ListEvents400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
 		{"list events 401", 401, ListEvents401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},
 		{"list events 404", 404, ListEvents404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListEventsResponse},

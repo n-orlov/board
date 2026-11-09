@@ -50,7 +50,10 @@ type operations struct {
 	noteOps
 	cursorOps
 	metaOps
-	ready Readiness
+	streamOps
+	// writeTimeout is the http.Server write timeout; 0 means none.
+	writeTimeout time.Duration
+	ready        Readiness
 }
 
 var _ StrictServerInterface = operations{}

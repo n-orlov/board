@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/asks"
@@ -148,7 +149,7 @@ func serve(stderr io.Writer, env Env) int {
 	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
 		return fail(stderr, err)
 	}
-	if _, err := feed.ParseInterval(env("BOARD_STREAM_POLL")); err != nil {
+	if _, _, err := streamSettings(env); err != nil {
 		return fail(stderr, err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -173,10 +174,42 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	}
 	stopSweeper := startSweeper(ctx, stderr, env, st)
 	defer stopSweeper()
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithCursors(&cursors.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st})); err != nil {
+	stream, stopFeed, err := startFeed(ctx, stderr, env, st)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer stopFeed()
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithCursors(&cursors.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Protocol: ProtocolVersion()}, &actors.Store{Store: st}), stream); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK
+}
+
+// streamSettings reads BOARD_STREAM_POLL and BOARD_STREAM_HEARTBEAT.
+func streamSettings(env Env) (poll, heartbeat time.Duration, err error) {
+	if poll, err = feed.ParseInterval(env("BOARD_STREAM_POLL")); err != nil {
+		return 0, 0, err
+	}
+	if heartbeat, err = server.ParseHeartbeat(env("BOARD_STREAM_HEARTBEAT")); err != nil {
+		return 0, 0, err
+	}
+	return poll, heartbeat, nil
+}
+
+// startFeed starts the change feed that tails the events table and returns the
+// option that serves the stream from it, and the function that stops the feed
+// and waits for it. serve has already checked the settings parse.
+func startFeed(ctx context.Context, stderr io.Writer, env Env, st *store.Store) (server.Option, func(), error) {
+	poll, heartbeat, err := streamSettings(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: change feed: %v\n", err) }
+	f := feed.NewLazy(feed.StoreSource{Store: st}, feed.Options{Poll: poll, Report: report})
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); f.Run(ctx) }()
+	return server.WithStream(f, heartbeat), func() { cancel(); <-done }, nil
 }
 
 // prepareSchema refuses a database ahead of this binary whatever

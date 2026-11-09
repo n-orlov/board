@@ -1116,10 +1116,25 @@ are those of `internal/notes` (§4.7); `PUT /api/v1/cursors/{stream}`, `since=cu
 
 ### 7.1 SSE
 
-`GET /api/v1/stream?topics=events,attention`: Server-Sent Events. Each event carries the
-`events.id` as the SSE `id`, so `Last-Event-ID` resumes without gaps (replayed from the table).
-`attention` pushes updated counts when they change. Heartbeat comment every 25 s. The UI uses
-this; nothing in the UI polls.
+`GET /api/v1/stream?topics=events,attention`: Server-Sent Events, authenticated like every other route (a key
+or a session cookie; no credential is 401). `topics` is a comma-separated list of `events` and `attention`, both
+by default; any other topic is **400** with a `next` line naming the two. The answer is 200 with
+`Content-Type: text/event-stream`, `Cache-Control: no-cache` and `X-Accel-Buffering: no`, sent at once, and every
+message is flushed as it is written. A server with no change feed answers 503.
+
+- **`events`**: one message per event row, in the order they were written, from the moment the stream connects:
+  `event: board`, `id:` the event's ULID (`events.id`) and `data:` the event as one JSON line, the object
+  `GET /api/v1/events` lists. Events written before the connection are not sent (resume is a later change; a
+  `Last-Event-ID` header is not read yet and the stream continues live).
+- **`attention`**: accepted; it carries no message yet (the counts it will carry are §5.3's).
+- **Heartbeat**: a comment line, `: ping`, every `BOARD_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
+  is idle, so a proxy keeps it open.
+- **Lifetime**: the stream outlives the server's write timeout, because it moves its own write deadline ahead
+  (10 s) before every write; a client that stops reading ends it. It ends, releasing its goroutine and its
+  subscription to the change feed (§7.3), when the client disconnects, when the feed stops, and when the server
+  shuts down (`http.Server.Shutdown` does not end a handler by itself, so the stream watches the shutdown).
+  `board serve` refuses a `BOARD_STREAM_HEARTBEAT` that is not a Go duration above zero (one stderr line,
+  exit 1). The UI uses this stream; nothing in the UI polls.
 
 ### 7.2 Ask long-poll
 
@@ -1149,7 +1164,9 @@ missing `n` below the highest one read was drawn by one of them or by a transact
 feed holds the later rows, however long that takes, until each noted transaction has ended. Then it reads
 the table once more: a missing row that committed is delivered in its place, and one still missing rolled
 back, so the feed moves past it. On SQLite there is one writer and no such gap. `board serve` refuses a
-`BOARD_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1).
+`BOARD_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1). A
+server started with `BOARD_MIGRATE=off` on a database it cannot read yet still serves: the feed starts at the
+newest event as of its first successful read.
 
 ---
 
@@ -2175,6 +2192,7 @@ All configuration is by environment variable:
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
 | `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
+| `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
 | `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check |
@@ -2378,8 +2396,8 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 | phase | scope |
 |---|---|
 | 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
-| 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page). |
-| 3 | Timeline UI (`vis-timeline`, archive window, filters), SSE live feed, remaining UI views. |
+| 2 | Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
+| 3 | Timeline UI (`vis-timeline`, archive window, filters), remaining UI views. |
 | 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 
 Each phase ends on a green `main` build with all gates still enforced.

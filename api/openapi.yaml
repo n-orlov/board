@@ -33,6 +33,8 @@ tags:
     description: Notes, the findings an actor posts on a task, an initiative, a resource or the whole board.
   - name: events
     description: The audit trail, listed with filters and paging.
+  - name: stream
+    description: The live server-sent event stream the web UI refreshes from.
   - name: meta
     description: The server's versions, the caller, and the agent protocol the caller has read.
 paths:
@@ -1067,6 +1069,46 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/stream:
+    get:
+      operationId: getStream
+      tags: [stream]
+      summary: Stream events (server-sent events)
+      description: >-
+        A `text/event-stream` of what happens on the board, flushed as it is written. `topics` is a comma-separated
+        list of `events` and `attention`; the default is both and any other topic is 400. Topic `events` sends one
+        message per event, in the order they were written: `event: board`, `id:` the event's ULID and `data:` the
+        event as one JSON line, the same object `GET /api/v1/events` lists. A comment line `: ping` is sent every
+        `BOARD_STREAM_HEARTBEAT` (default 25 s) so an idle connection stays open. The stream ends when the client
+        disconnects or the server shuts down.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: topics
+          in: query
+          required: false
+          description: The topics to receive, comma-separated. Default `events,attention`.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [events, attention]
+          style: form
+          explode: false
+      responses:
+        "200":
+          description: The stream. The response carries `Cache-Control` no-cache and `X-Accel-Buffering` no.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/leases:

@@ -182,6 +182,34 @@ func TestNewStartsAtTheNewestEventAndReportsAnUnreadableTable(t *testing.T) {
 	}
 }
 
+func TestALazyFeedStartsAtTheNewestEventOnceTheTableCanBeRead(t *testing.T) {
+	src := &fakeSource{}
+	src.put(1, 2, 3)
+	src.err = errors.New("no such table: events")
+	f := NewLazy(src, Options{})
+	s := f.Subscribe()
+	if s.After != 0 {
+		t.Errorf("a subscription before the first read starts at %d, want 0", s.After)
+	}
+	f.Poll(context.Background())
+	if got := drain(s); len(got) != 0 {
+		t.Errorf("an unreadable table delivered %v", got)
+	}
+	src.err = nil
+	f.Poll(context.Background())
+	if got := drain(s); len(got) != 0 {
+		t.Errorf("the first readable poll replayed %v, want none of the existing events", got)
+	}
+	src.put(4)
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{4}) {
+		t.Errorf("got %v, want only 4", got)
+	}
+	if late := f.Subscribe(); late.After != 4 {
+		t.Errorf("a later subscriber starts at %d, want 4", late.After)
+	}
+}
+
 func TestAGapHoldsLaterEventsForAsLongAsAWriterThatHeldItIsOpen(t *testing.T) {
 	src := &fakeSource{}
 	f := NewAt(src, 0, Options{})
