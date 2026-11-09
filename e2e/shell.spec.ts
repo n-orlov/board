@@ -22,7 +22,9 @@ const seeded = { taskRef: '' };
 // route-table id the fragment must select, `loaded` a test id that exists only once the view has its content (so the
 // overflow check sees the long seeded text); its nav entry (the view itself, or its parent) is the one marked current.
 const states = [
-  { name: '#/', hash: () => '#/', view: 'initiatives', loaded: 'initiative-row' },
+  { name: '#/', hash: () => '#/', view: 'attention', loaded: 'section-open_asks' },
+  { name: '#/attention', hash: () => '#/attention', view: 'attention', loaded: 'section-open_asks' },
+  { name: '#/initiatives', hash: () => '#/initiatives', view: 'initiatives', loaded: 'initiative-row' },
   { name: '#/tasks', hash: () => '#/tasks', view: 'tasks', loaded: 'task-row' },
   { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
   { name: '#/t/<ref>', hash: () => `#/t/${seeded.taskRef}`, view: 'task', loaded: 'task-title' },
@@ -116,7 +118,7 @@ for (const vp of viewports) {
       if (vp.name === 'phone') {
         await expect(topbar).toBeVisible();
         await expect(topbar).toContainText('board');
-        await expect(page.getByTestId('topbar-title')).toHaveText('Initiatives');
+        await expect(page.getByTestId('topbar-title')).toHaveText('Attention');
         await expect(foot).toBeHidden();
       } else {
         await expect(topbar).toBeHidden();
@@ -169,7 +171,7 @@ test.describe('phone list with the tab bar', () => {
     }
     await seed.dispose();
 
-    await page.goto('/');
+    await page.goto('/#/initiatives');
     await expect(page.getByTestId('initiative-row')).not.toHaveCount(0);
     expect(await page.getByTestId('initiative-row').count()).toBeGreaterThanOrEqual(30);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));

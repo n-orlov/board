@@ -83,7 +83,7 @@ for (const vp of viewports) {
     });
 
     test('an initiative opens from the list into its page with the details, counts and tasks', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       const listed = row(page, seeded.open);
       await expect(listed).toHaveCount(1);
       await expect(listed.getByTestId('initiative-counts')).toHaveText('2 open · 1 done · 1 closed');
@@ -163,7 +163,7 @@ for (const vp of viewports) {
     });
 
     test('the Initiatives status filter shows the open ones, then the closed ones, then all', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       const filter = page.getByRole('combobox', { name: 'Status' });
       expect(await filter.locator('option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['open', 'closed', 'all']);
 

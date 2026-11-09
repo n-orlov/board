@@ -193,10 +193,10 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - **The UI's login**: the UI has no login form of its own. A navigation without a session never
   reaches the app: it is redirected to `/auth/login`, which starts the flow above and ends on `/`
   with a session. At load the app calls `GET /auth/session` (`web/src/lib/session.ts`): 200 shows
-  the signed-in page (the initiatives page) with the session's email, 401 (the session ended while
+  the signed-in page (the Attention view) with the session's email, 401 (the session ended while
   the page was open) sends the page to `/auth/login` under the app's mount prefix, and any other
   failure is shown as an error without a redirect, so a down server cannot cause a login loop.
-  `e2e/login.spec.ts` logs in through the mock provider and lands on the initiatives page.
+  `e2e/login.spec.ts` logs in through the mock provider and lands on the Attention view.
 
 ### 3.3 Agents: API keys
 
@@ -1913,9 +1913,9 @@ operator. Live via SSE (§7.1).
 
 | view | content |
 |---|---|
-| **Attention** (default) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
+| **Attention** (default, `#/attention`; `#/` lands on it) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
 | **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters: tags, initiatives, actor, "show archived closed within N days". |
-| **Initiatives** | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
+| **Initiatives** (`#/initiatives`) | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
 | **Actors** | who is alive now (live leases, last seen), with way back. |
@@ -1960,8 +1960,7 @@ outcome to land is shown and an older one landing after it is dropped (`web/src/
 cookie, and its writes send the session's `X-CSRF-Token` (§3.2). A key revoked on the page gets 401 from
 its next request (`e2e/keys.spec.ts`, `features/ui_keys.feature`).
 
-**Phase 0 pages.** The app has three views, chosen by the URL fragment: **Initiatives** (`#/`, the
-default, where a login lands), the **initiative page** (`#/i/<slug>`, below), the **Tasks** view (`#/tasks`, below)
+**Phase 0 pages.** The app has three views, chosen by the URL fragment: **Initiatives** (`#/initiatives`), the **initiative page** (`#/i/<slug>`, below), the **Tasks** view (`#/tasks`, below)
 and **Settings → API keys** (`#/settings/keys`); the other views in the table are later phases. The Initiatives view lists the initiatives
 from `GET /api/v1/initiatives?status=<filter>` (following `next_after` through the pages) as one `<table>` that is a dense table from 768 px up and one
 card per initiative below it (the same rows, so the `initiative-row`, `initiative-status`,
@@ -2105,6 +2104,29 @@ in the URL fragment's query as repeated keys, tags first (`#/attention?tag=work&
 `#/attention`), with blanks and repeats dropped, so a reload reads the same filter back; `apiQuery` sends the same repeated keys
 to `GET /attention`.
 
+**Attention view** (`#/attention`, `web/src/Attention.svelte`, R9). It is the first entry of the route table and so the
+default: the router sends every fragment the table does not name, `#/` included, to the first entry, and a login lands on
+it. The view reads `GET /attention` under its filter and draws the five sections in §5.3 order (open asks, done not
+closed, expired leases, overdue watches, conflicts) as `h3` headings each with its count (`section-count`); a section with
+no item shows its calm empty text (`section-empty`, `SECTIONS` in `web/src/lib/attention.ts`) and a count of 0. An item is
+a card (`attention-item`) with a title that links to its task (`#/t/<ref>`; a conflict links only when it names one task),
+detail lines (an ask's age, mode, whether the asker waits and `blocking`; when a task was done and its last lease's
+outcome; a lease's intent and expiry; when a watch's check was due and the last check; a conflict's holders) and its
+actors, each as `role handle` with the way back the board has on record in monospace and a **Copy way back** button
+(`copy-way-back`, named "Copy way back of <handle>") that writes it to the clipboard through `copyText` and confirms in the
+polite toast; an actor with no way back says so and has no button. `rowsFor` in `web/src/lib/attentionView.ts` builds the
+rows, `AttentionStore` holds the answer, drops one that lands after a newer one or for a filter no longer set, and keeps what
+is shown while a refresh is out. The tag and initiative filters are toggle chips (`aria-pressed`, 44 px) drawn from the
+initiatives and their tags plus whatever the fragment names, with a **Clear filters** button; a change rewrites the fragment
+in place (`#/attention?tag=work&initiative=aa`) and refetches, and a reload or a pasted link reads the same filter back.
+The view subscribes to `live()` (`affectsAttention`: every event but notes and keys) so a matching event refetches it
+within the 500 ms debounce, with no timer of its own. `e2e/attention.spec.ts` (phone and desktop) populates the five
+sections through the API (an expired lease by moving its expiry into the e2e store, as `e2e/a11y.spec.ts` does), asserts the
+order, counts, empty states, actors and way backs, the clipboard text, the filters surviving a reload, `/` and `#/`
+opening Attention, and an ask raised and answered through the API appearing and disappearing within 5 s without a reload.
+Attention is a nav entry and so a state of `e2e/shell.spec.ts`, `a11y.spec.ts`, `touch.spec.ts` and `sameorigin.spec.ts`;
+the Initiatives view moved to `#/initiatives`, which the initiative page's back link and those specs use.
+
 **Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
 the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in
@@ -2198,7 +2220,7 @@ account button opens the account menu (the email and Sign out) in the dialog com
 every width. The first focusable element of the page is a "Skip to content" link that moves focus
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:
-Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>` and
+Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/` and `#/attention` (the Attention view), `#/initiatives`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>` and
 `#/settings/keys` as states and, at 390x844, 820x1180 and 1440x900, asserts the nav links are
 exactly the route table's (imported, not copied), the right entry carries `aria-current`, and
 navigating by nav click moves it. The page never scrolls horizontally (the same spec), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
@@ -2230,11 +2252,11 @@ up, the account menu below it, both showing the signed-in email) posts `POST /au
 session's `X-CSRF-Token`, then shows the **Signed out** view at `#/signed-out`: a card with a **Sign in**
 button, a plain link to `/auth/login`. That view never starts a login redirect by itself: a page opened
 on `#/signed-out` neither loads the session nor follows a 401. Leaving the view with Back loads the
-session again, and a signed-in page that is sent to `#/signed-out` returns to `#/`. A failed logout
+session again, and a signed-in page that is sent to `#/signed-out` returns to `#/` (the Attention view). A failed logout
 keeps the app and shows "Sign out failed". A reload of `#/signed-out` is answered by the server (the
 fragment never reaches it), which sends an anonymous navigation to the login page (§3.2)
 (`e2e/session.spec.ts`: sign in, Sign out, no navigation to `/auth/login`, the old cookie gets 401,
-Sign in lands on Initiatives).
+Sign in lands on Attention).
 
 **Dialogs and sheets.** Every modal surface in the UI is the one `Dialog` component
 (`web/src/Dialog.svelte`); its focus rules are pure functions in `web/src/lib/focustrap.ts`.
@@ -2283,8 +2305,8 @@ URLs answer 200 with an `image/*` content type.
 
 **Same origin.** The UI requests nothing from another origin: no web font, CDN, remote icon or
 script. `e2e/sameorigin.spec.ts` signs in through the mock provider, then records every request the
-page issues while it loads `#/`, `#/settings/keys` and `#/signed-out` (a full page load each) at
-390x844 and 1440x900 (6 visits), and requires every http(s)/ws(s) URL to have the board server's
+page issues while it loads `#/` (Attention), `#/initiatives`, `#/tasks`, `#/settings/keys` and `#/signed-out` (a full page load each) at
+390x844 and 1440x900, and requires every http(s)/ws(s) URL to have the board server's
 origin. R12 extends it to the Phase 1 views as a finite, named list (`PHASE1_STATES`): `#/tasks`,
 `#/i/<slug>` and `#/t/<ref>` (each a full page load over a seeded watch task with a link, a blocker, a
 dependent, a milestone, a live lease and a conflict), and again with a dialog opened on the page (new

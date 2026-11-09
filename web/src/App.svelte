@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Component } from 'svelte';
+  import Attention from './Attention.svelte';
   import ApiKeys from './ApiKeys.svelte';
   import InitiativePage from './InitiativePage.svelte';
   import Initiatives from './Initiatives.svelte';
@@ -12,6 +13,7 @@
 
   // The component of each view; the table in lib/routes.ts decides which one is on screen.
   const VIEWS: Record<RouteId, Component<{ csrf: string; param: string }>> = {
+    attention: Attention,
     initiatives: Initiatives,
     initiative: InitiativePage,
     tasks: Tasks,

@@ -18,14 +18,14 @@ test('a visit to / with no session is redirected to the login page, which starts
   await bare.dispose();
 });
 
-test('logging in through the mock provider lands on the initiatives page', async ({ page }) => {
+test('logging in through the mock provider lands on the Attention view', async ({ page }) => {
   const visited: string[] = [];
   // Every hop of the redirect chain is its own navigation request.
   page.on('request', (request) => {
     if (request.isNavigationRequest()) visited.push(new URL(request.url()).pathname);
   });
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
   await expect(page.getByTestId('email')).toHaveText('operator@example.test');
   expect(new URL(page.url()).pathname).toBe('/');
   expect(visited).toContain('/auth/login');
@@ -48,7 +48,7 @@ test('a page whose session call answers 401 is sent through the login page', asy
     if (request.isNavigationRequest()) visited.push(new URL(request.url()).pathname);
   });
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
   expect(refused).toBe(true);
   expect(visited).toContain('/auth/login');
 });

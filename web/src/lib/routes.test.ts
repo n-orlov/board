@@ -20,17 +20,20 @@ describe('resolveRoute', () => {
 
   it.each([
     ['#/settings/keys', 'keys'],
-    ['#/', 'initiatives'],
-    ['', 'initiatives'],
-    ['#/settings', 'initiatives'],
-    ['#/settings/keys/', 'initiatives'],
+    ['#/', 'attention'],
+    ['', 'attention'],
+    ['#/attention', 'attention'],
+    ['#/attention?tag=work&initiative=aa', 'attention'],
+    ['#/initiatives', 'initiatives'],
+    ['#/settings', 'attention'],
+    ['#/settings/keys/', 'attention'],
     ['#/tasks', 'tasks'],
     ['#/tasks?status=done&kind=watch', 'tasks'],
-    ['#/tasks/', 'initiatives'],
+    ['#/tasks/', 'attention'],
     ['#/i/phone-onboard?x=1', 'initiative'],
     ['#/t/aa-1', 'task'],
-    ['#/t/', 'initiatives'],
-    ['#/t/aa-1/x', 'initiatives'],
+    ['#/t/', 'attention'],
+    ['#/t/aa-1/x', 'attention'],
   ])('maps the app table %j to %s', (hash, want) => {
     expect(resolveRoute(hash, ROUTES).id).toBe(want);
   });
@@ -109,6 +112,7 @@ describe('ROUTES', () => {
     expect(routeParam('#/i/phone-onboard', ROUTES)).toBe('phone-onboard');
     expect(routeParam('#/i/phone-onboard?x=1', ROUTES)).toBe('phone-onboard');
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
+      ['attention', false],
       ['initiatives', true],
       ['tasks', false],
       ['keys', false],
@@ -121,6 +125,7 @@ describe('ROUTES', () => {
     expect(routeParam('#/t/aa-1', ROUTES)).toBe('aa-1');
     expect(routeParam('#/t/', ROUTES)).toBe('');
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
+      ['attention', false],
       ['initiatives', false],
       ['tasks', true],
       ['keys', false],
@@ -130,15 +135,27 @@ describe('ROUTES', () => {
   it('puts Tasks between Initiatives and Settings in the navigation, current on its filtered fragment', () => {
     const route = resolveRoute('#/tasks?status=done', ROUTES);
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.href, e.current])).toEqual([
-      ['initiatives', '#/', false],
+      ['attention', '#/attention', false],
+      ['initiatives', '#/initiatives', false],
       ['tasks', '#/tasks', true],
       ['keys', '#/settings/keys', false],
     ]);
   });
 
-  it('starts with the Initiatives view, the default', () => {
-    expect(ROUTES[0].id).toBe('initiatives');
-    expect(ROUTES[0].hash).toBe('#/');
+  it('starts with the Attention view, the default: `#/` names no entry and so lands on it', () => {
+    expect(ROUTES[0].id).toBe('attention');
+    expect(ROUTES[0].hash).toBe('#/attention');
+    expect(resolveRoute('#/', ROUTES)).toBe(ROUTES[0]);
+  });
+
+  it('keeps the filter query on the Attention fragment and marks it current', () => {
+    const route = resolveRoute('#/attention?tag=work', ROUTES);
+    expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
+      ['attention', true],
+      ['initiatives', false],
+      ['tasks', false],
+      ['keys', false],
+    ]);
   });
 });
 

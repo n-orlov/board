@@ -62,7 +62,7 @@
 </script>
 
 <section aria-labelledby="initiative-heading" class="pb-16 md:pb-0" data-testid="initiative-page">
-  <a class={back} href="#/" data-testid="back-link">← Initiatives</a>
+  <a class={back} href="#/initiatives" data-testid="back-link">← Initiatives</a>
 
   {#if view.error !== undefined}
     <p role="alert" class="my-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>

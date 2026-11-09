@@ -27,8 +27,15 @@ export interface Route {
 
 export const ROUTES = [
   {
+    id: 'attention',
+    hash: '#/attention',
+    title: 'Attention',
+    label: 'Attention',
+    icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+  },
+  {
     id: 'initiatives',
-    hash: '#/',
+    hash: '#/initiatives',
     title: 'Initiatives',
     label: 'Initiatives',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
@@ -86,7 +93,7 @@ function selects(route: Route, hash: string): boolean {
   return route.param === true ? segment(path, route.hash) !== '' : route.hash === path;
 }
 
-/** The route a fragment names; anything the table does not name is its first entry. */
+/** The route a fragment names; anything the table does not name (`#/` included) is its first entry, the Attention view. */
 export function resolveRoute<R extends Route>(hash: string, table: readonly R[]): R {
   return table.find((route) => selects(route, hash)) ?? table[0];
 }

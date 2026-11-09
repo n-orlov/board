@@ -2,8 +2,8 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 
 // R1: the UI makes no cross-origin request (no web font, CDN, remote icon or script). Signs in through the
 // mock provider (another port, so another origin: recording starts only afterwards, and no API key rides
-// along), then records every request the page issues while it loads each of the three views at the phone and
-// the desktop viewport: 3 views x 2 viewports = 6 visits. R12 adds PHASE1_STATES, the finite list of the Phase 1
+// along), then records every request the page issues while it loads each of the views (Attention, Initiatives, Tasks, Settings -> API keys) at the phone and
+// the desktop viewport. R12 adds PHASE1_STATES, the finite list of the Phase 1
 // views `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, each loaded in full over a seeded watch task with a blocker, a
 // dependent, a milestone, a lease and a conflict, and each again with a dialog opened on the page (edit initiative,
 // new task, edit task, add dependency, end lease): 8 states x 2 viewports = 16 more visits. Every recorded http(s)/ws(s) URL must have the board
@@ -17,8 +17,15 @@ const viewports = [
 
 const views = [
   {
-    name: 'Initiatives',
+    name: 'Attention',
     hash: '#/',
+    ready: async (page: Page) => {
+      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+    },
+  },
+  {
+    name: 'Initiatives',
+    hash: '#/initiatives',
     ready: async (page: Page) => {
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
     },
@@ -209,7 +216,7 @@ for (const vp of viewports) {
       const res = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-sameorigin', title: 'Same origin', tags: ['origin'] } });
       expect([201, 409]).toContain(res.status());
       await seed.dispose();
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
     });
 
@@ -271,7 +278,7 @@ test.describe('direction check', () => {
     const remote = 'http://remote.invalid/planted.png';
     // Answer it locally so the check never depends on the network; the request is still recorded.
     await page.route(remote, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: '' }));
-    await page.goto('/');
+    await page.goto('/#/initiatives');
     await expect(page.getByTestId('initiative-row').first()).toBeVisible();
     const urls = record(page);
     await page.evaluate((src) => {

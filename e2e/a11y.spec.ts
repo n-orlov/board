@@ -4,10 +4,10 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
-// theme. `states` holds the 18 earlier states; R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
+// theme. `states` holds the 19 earlier states (the Attention view over an open ask and a conflict among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocker, a dependent and a conflict. 30 states x 2 viewports x 2 themes = 120 scans. No
+// expired and a live lease, a blocker, a dependent and a conflict. 31 states x 2 viewports x 2 themes = 124 scans. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -39,6 +39,14 @@ async function scan(page: Page, effectiveTheme: string) {
 type State = { name: string; open: (page: Page) => Promise<void> };
 
 const states: State[] = [
+  {
+    name: 'Attention view',
+    open: async (page) => {
+      await page.goto('/#/attention?initiative=e2e-a11y');
+      await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
+      await expect(page.getByTestId('section-conflicts').getByTestId('attention-item')).toHaveCount(1);
+    },
+  },
   {
     name: 'Initiatives view',
     open: async (page) => {
@@ -412,6 +420,12 @@ for (const vp of viewports) {
           expect(task.status()).toBe(201);
           const { ref } = (await task.json()) as { ref: string };
           expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning', resources: ['repo:a11y'] } })).status()).toBe(201);
+          // An open ask by an actor with a way back, for the Attention view.
+          const ask = await seed.post('/api/v1/asks', {
+            data: { question: 'Is the page readable?', task: ref, blocking: true },
+            headers: { 'Board-Actor': 'a11y-asker', 'Board-Actor-Way-Back': 'ralphctl status a11y-asker' },
+          });
+          expect(ask.status()).toBe(201);
           // Something the Add dependency sheet can offer as a blocker.
           expect((await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-a11y-blockers', title: 'Blockers' } })).status()).toBe(201);
           const blocker = await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-a11y-blockers', title: 'Possible blocker' } });
@@ -425,7 +439,7 @@ for (const vp of viewports) {
           expect(lease.status()).toBe(201);
         }
         await seed.dispose();
-        await page.goto('/');
+        await page.goto('/#/initiatives');
         await expect(page.getByTestId('initiative-row').first()).toBeVisible();
       });
 

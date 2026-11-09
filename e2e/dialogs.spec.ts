@@ -92,7 +92,7 @@ for (const vp of viewports) {
       const res = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-dialogs', title: 'Dialog keyboard', tags: ['kbd'] } });
       expect([201, 409]).toContain(res.status());
       await seed.dispose();
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
     });
 
@@ -234,7 +234,7 @@ for (const vp of viewports) {
       test(`the ${d.name} dialog: keyboard opens it, focus is trapped inside, Escape returns focus to the opener`, async ({ page, playwright, baseURL }) => {
         seededP1 ??= seedPhase1(playwright, baseURL);
         const seed = await seededP1;
-        await page.goto('/');
+        await page.goto('/#/initiatives');
         await expect(page.getByTestId('initiative-row').first()).toBeVisible();
         const opener = await d.go(page, seed);
         await expect(opener).toBeVisible();
@@ -304,7 +304,7 @@ for (const vp of viewports) {
       const res = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-dialogs', title: 'Dialog keyboard', tags: ['kbd'] } });
       expect([201, 409]).toContain(res.status());
       await seed.dispose();
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
     });
 

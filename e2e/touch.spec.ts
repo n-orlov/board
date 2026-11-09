@@ -270,8 +270,24 @@ test.describe('phone 390x844', () => {
       expect((await seed.post('/api/v1/tasks', { data: { initiative: 'e2e-touch', title: 'Touch blocker' } })).status()).toBe(201); // for the Add dependency sheet
     }
     await seed.dispose();
-    await page.goto('/');
+    await page.goto('/#/initiatives');
     await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+  });
+
+  test('the Attention view with an ask, its way back button and the filter chips', async ({ page, playwright, baseURL }) => {
+    const seed = await playwright.request.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'touch-att', 'Board-Actor-Way-Back': 'ralphctl status touch-att' },
+    });
+    const made = await seed.post('/api/v1/initiatives', { data: { slug: 'e2e-touch-att', title: 'Touch Attention', tags: ['touch-att'] } });
+    expect([201, 409]).toContain(made.status());
+    if (made.status() === 201) {
+      expect((await seed.post('/api/v1/asks', { data: { question: 'Is this big enough?', initiative: 'e2e-touch-att' } })).status()).toBe(201);
+    }
+    await seed.dispose();
+    await page.goto('/#/attention?initiative=e2e-touch-att');
+    await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
+    await expectTouchFriendly(page, 6);
   });
 
   test('the Initiatives view', async ({ page }) => {

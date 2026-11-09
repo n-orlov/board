@@ -321,7 +321,7 @@ for (const vp of viewports) {
     });
 
     test('the Initiatives list holds the longest accepted titles, slugs and tags without scrolling sideways', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.locator('[data-testid=initiative-row][data-slug=ovf-wide-title]')).toBeVisible();
       for (const i of initiatives) await expect(page.locator(`[data-testid=initiative-row][data-slug=${i.slug}]`)).toHaveCount(1);
       await expectNoSidewaysScroll(page);
@@ -382,7 +382,7 @@ for (const vp of viewports) {
     });
 
     test('creating an initiative with the longest slug shows a toast that stays inside the viewport', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await page.getByRole('button', { name: 'New initiative' }).locator('visible=true').click();
       const dialog = page.getByRole('dialog', { name: 'New initiative' });
       const slug = `ovf-toast-${vp.name}${'x'.repeat(40)}`.slice(0, 40);

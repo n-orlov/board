@@ -53,7 +53,7 @@ for (const vp of viewports) {
     const slug = (name: string) => `e2e-${vp.name}-${name}`;
 
     test('an initiative created through the form is listed with its status and tags, announced, and survives a reload', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();
       const row = page.locator(`[data-testid=initiative-row][data-slug=${slug('created')}]`);
       await expect(row).toHaveCount(0);
@@ -94,7 +94,7 @@ for (const vp of viewports) {
     });
 
     test('a slug the server refuses is shown on the form, nothing is listed, and what was typed stays', async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();
       const dialog = await openForm(page);
       await dialog.getByLabel('Slug').fill('Bad Slug!');
@@ -126,7 +126,7 @@ for (const vp of viewports) {
       expect(detail).not.toBe('');
       await seed.dispose();
 
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.locator(`[data-testid=initiative-row][data-slug=${slug('taken')}]`)).toHaveCount(1);
       const dialog = await openForm(page);
       await dialog.getByLabel('Slug').fill(slug('taken'));
@@ -152,7 +152,7 @@ for (const vp of viewports) {
       await page.route(isList, (route) =>
         route.request().method() === 'GET' ? route.fulfill({ json: { items: [] } }) : route.continue(),
       );
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       const empty = page.getByTestId('empty-state');
       await expect(empty).toBeVisible();
       await expect(page.getByTestId('initiative-row')).toHaveCount(0);
@@ -169,7 +169,7 @@ for (const vp of viewports) {
         await gate;
         return route.fulfill({ json: { items: [] } });
       });
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByTestId('skeleton-row')).not.toHaveCount(0);
       await expect(page.getByTestId('initiative-row')).toHaveCount(0);
       release();
@@ -188,7 +188,7 @@ for (const vp of viewports) {
         if (held >= holdFrom) await gate;
         return route.fetch().then((response) => route.fulfill({ response }));
       });
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(page.getByTestId('skeleton-row')).toHaveCount(0);
       holdFrom = held + 1;
       const dialog = await openForm(page);
@@ -205,7 +205,7 @@ for (const vp of viewports) {
     test('a create submitted while the first fetch is pending keeps skeleton rows until both fetches have landed, then shows the newer list', async ({ page }) => {
       const gets = await holdListGets(page, isList);
       const skeleton = page.getByTestId('skeleton-row');
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect(skeleton).not.toHaveCount(0);
       await expect.poll(gets.count).toBe(1);
       const dialog = await openForm(page);
@@ -228,7 +228,7 @@ for (const vp of viewports) {
     test('a first fetch that fails while the refresh after a create is pending keeps skeleton rows until the refresh lands', async ({ page }) => {
       const gets = await holdListGets(page, isList);
       const skeleton = page.getByTestId('skeleton-row');
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       await expect.poll(gets.count).toBe(1);
       const dialog = await openForm(page);
       await dialog.getByLabel('Slug').fill(slug('overlap-fail'));
@@ -260,7 +260,7 @@ for (const vp of viewports) {
       }
       await seed.dispose();
 
-      await page.goto('/');
+      await page.goto('/#/initiatives');
       const rows = page.getByTestId('initiative-row');
       await expect(rows.first()).toBeVisible();
       const display = (el: ReturnType<Page['locator']>) => el.evaluate((node) => getComputedStyle(node).display);
