@@ -10,6 +10,7 @@ import (
 
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
@@ -129,6 +130,11 @@ func WithAskTouch(d time.Duration) Option {
 // WithNotes serves /api/v1/notes from st; without it the operations answer 503.
 func WithNotes(st *notes.Store) Option {
 	return func(o *operations) { o.notes = st }
+}
+
+// WithAttention serves GET /api/v1/attention from st; without it the operation answers 503.
+func WithAttention(st *attention.Store) Option {
+	return func(o *operations) { o.attentionOps = attentionOps{attention: st} }
 }
 
 // WithCursors serves PUT /api/v1/cursors/{stream} from st and lets `since=cursor`

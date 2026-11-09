@@ -31,6 +31,8 @@ tags:
     description: Asks, the questions an actor raises for the operator, with their answers and withdrawals.
   - name: notes
     description: Notes, the findings an actor posts on a task, an initiative, a resource or the whole board.
+  - name: attention
+    description: What needs the operator now, in five sections with their counts.
   - name: events
     description: The audit trail, listed with filters and paging.
   - name: stream
@@ -1814,6 +1816,67 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/attention:
+    get:
+      operationId: getAttention
+      tags: [attention]
+      summary: What needs attention
+      description: >-
+        The five sections of what needs the operator, each newest relevant first and each item carrying the actors
+        involved (`handle` and `way_back`): `open_asks`, `done_not_closed` (tasks marked done and not closed),
+        `expired_leases` (expired, not acknowledged, and with no later lease on the task), `overdue_watches` (open
+        watches whose `next_check_at` is past) and `conflicts` (a resource that two or more live leases hold). `counts`
+        is the size of each section and `total`, their sum. After expiring the leases that are due the sections are
+        judged at one instant. `initiative` (slug or ULID, repeatable: any of them) and `tag` (repeatable: the
+        initiative carries all of them) keep the items on a task or ask of a matching initiative; an ask on no
+        initiative is left out when either is given. An `initiative` that names nothing is 404 and a malformed `tag` is
+        400. `fields=counts` answers only `counts`, and `fields=full` (the default) the sections too; any other `fields`
+        is 400. An empty board counts 0 everywhere.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: initiative
+          in: query
+          required: false
+          description: Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: tag
+          in: query
+          required: false
+          description: Keep items whose initiative carries this tag. Repeatable; every tag given must match.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: fields
+          in: query
+          required: false
+          description: "`full` (the default) answers the sections and the counts, `counts` only the counts."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The sections, or only the counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attention"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -2773,6 +2836,209 @@ components:
             that hold one of the resources asked about, in lease-number order, each once.
           items:
             $ref: "#/components/schemas/LeaseConflict"
+    AttentionActor:
+      type: object
+      description: An actor involved in an item, with the way back the board has on record for it.
+      required: [handle]
+      properties:
+        handle:
+          type: string
+        way_back:
+          type: string
+          description: How to reach the actor again. Absent when the board has none.
+    AttentionCounts:
+      type: object
+      description: The size of each section and their sum.
+      required: [open_asks, done_not_closed, expired_leases, overdue_watches, conflicts, total]
+      properties:
+        open_asks:
+          type: integer
+        done_not_closed:
+          type: integer
+        expired_leases:
+          type: integer
+        overdue_watches:
+          type: integer
+        conflicts:
+          type: integer
+        total:
+          type: integer
+          description: The sum of the five sections.
+    AttentionAsk:
+      type: object
+      description: An open ask.
+      required: [ref, question, asker, mode, asker_waiting, blocking, created_at, age_seconds]
+      properties:
+        ref:
+          type: string
+          description: The ask's ref, `A<n>`.
+        question:
+          type: string
+        task:
+          type: string
+          description: The ref of the task the ask is on. Absent for an ask on no task.
+        asker:
+          $ref: "#/components/schemas/AttentionActor"
+        mode:
+          type: string
+          enum: [stop, poll]
+        asker_waiting:
+          type: boolean
+          description: For a `poll` ask, whether the asker is still polling; false for a `stop` ask.
+        blocking:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        age_seconds:
+          type: integer
+          description: Whole seconds since the ask was raised.
+    AttentionLastLease:
+      type: object
+      description: The last ended lease of a task.
+      required: [lease, holder, ended_at]
+      properties:
+        lease:
+          type: string
+          description: The lease's ref, `L<n>`.
+        holder:
+          $ref: "#/components/schemas/AttentionActor"
+        outcome:
+          type: string
+          description: What the holder wrote when they ended it. Absent when they wrote nothing.
+        ended_at:
+          type: string
+          format: date-time
+    AttentionDoneTask:
+      type: object
+      description: A task marked done and not yet closed.
+      required: [task, title, done_by, done_at]
+      properties:
+        task:
+          type: string
+          description: The task's ref.
+        title:
+          type: string
+        done_by:
+          $ref: "#/components/schemas/AttentionActor"
+        done_at:
+          type: string
+          format: date-time
+        last_lease:
+          $ref: "#/components/schemas/AttentionLastLease"
+    AttentionExpiredLease:
+      type: object
+      description: A lease that ran out, was not acknowledged and has no later lease on its task.
+      required: [lease, holder, task, title, intent, renewed_at, expired_at]
+      properties:
+        lease:
+          type: string
+          description: The lease's ref, `L<n>`.
+        holder:
+          $ref: "#/components/schemas/AttentionActor"
+        task:
+          type: string
+        title:
+          type: string
+        intent:
+          type: string
+        renewed_at:
+          type: string
+          format: date-time
+          description: The last renewal of the lease.
+        expired_at:
+          type: string
+          format: date-time
+    AttentionLastCheck:
+      type: object
+      description: The latest check recorded on a watch.
+      required: [summary, by, at]
+      properties:
+        summary:
+          type: string
+        by:
+          $ref: "#/components/schemas/AttentionActor"
+        at:
+          type: string
+          format: date-time
+    AttentionWatch:
+      type: object
+      description: An open watch whose next check is due.
+      required: [task, title, owner, next_check_at]
+      properties:
+        task:
+          type: string
+        title:
+          type: string
+        owner:
+          $ref: "#/components/schemas/AttentionActor"
+        next_check_at:
+          type: string
+          format: date-time
+        last_check:
+          $ref: "#/components/schemas/AttentionLastCheck"
+    AttentionHolder:
+      type: object
+      description: One live lease on a contested resource.
+      required: [lease, actor, task, intent, expires_at]
+      properties:
+        lease:
+          type: string
+        actor:
+          $ref: "#/components/schemas/AttentionActor"
+        task:
+          type: string
+        intent:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    AttentionConflict:
+      type: object
+      description: A resource that two or more live leases hold.
+      required: [resource, holders, tasks]
+      properties:
+        resource:
+          type: string
+        holders:
+          type: array
+          description: Every live lease on the resource, in lease-number order.
+          items:
+            $ref: "#/components/schemas/AttentionHolder"
+        tasks:
+          type: array
+          description: The distinct tasks of the holders, in the same order.
+          items:
+            type: string
+    Attention:
+      type: object
+      description: >-
+        The five sections and their counts. `fields=counts` leaves the sections out, so `counts` is the only
+        member always present.
+      required: [counts]
+      properties:
+        counts:
+          $ref: "#/components/schemas/AttentionCounts"
+        open_asks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttentionAsk"
+        done_not_closed:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttentionDoneTask"
+        expired_leases:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttentionExpiredLease"
+        overdue_watches:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttentionWatch"
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttentionConflict"
     LeaseList:
       type: object
       description: A page of leases.

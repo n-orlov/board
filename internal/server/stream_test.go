@@ -567,7 +567,7 @@ func TestParseHeartbeatReadsADurationAboveZero(t *testing.T) {
 }
 
 func TestStreamTopicEnumAcceptsOnlyTheDeclaredValues(t *testing.T) {
-	if !Events.Valid() || !Attention.Valid() || GetStreamParamsTopics("x").Valid() {
+	if !GetStreamParamsTopicsEvents.Valid() || !GetStreamParamsTopicsAttention.Valid() || GetStreamParamsTopics("x").Valid() {
 		t.Error("the topics enum does not accept exactly events and attention")
 	}
 }

@@ -230,6 +230,7 @@ func (brokenResponse) VisitAnswerAskResponse(http.ResponseWriter) error         
 func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error         { return errBroken }
 func (brokenResponse) VisitPostNoteResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitListNotesResponse(http.ResponseWriter) error           { return errBroken }
+func (brokenResponse) VisitGetAttentionResponse(http.ResponseWriter) error        { return errBroken }
 func (brokenResponse) VisitGetStreamResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetNoteResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutCursorResponse(http.ResponseWriter) error           { return errBroken }
@@ -436,6 +437,12 @@ func (s stubOperations) ListEvents(context.Context, ListEventsRequestObject) (Li
 func (s stubOperations) StartLease(context.Context, StartLeaseRequestObject) (StartLeaseResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(StartLeaseResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetAttention(context.Context, GetAttentionRequestObject) (GetAttentionResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAttentionResponseObject)
 	return resp, err
 }
 
@@ -811,6 +818,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"withdraw ask 404", 404, WithdrawAsk404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
 		{"withdraw ask 409", 409, WithdrawAsk409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
 		{"withdraw ask 503", 503, WithdrawAsk503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitWithdrawAskResponse},
+		{"get attention 400", 400, GetAttention400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
+		{"get attention 401", 401, GetAttention401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
+		{"get attention 404", 404, GetAttention404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
+		{"get attention 503", 503, GetAttention503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
 		{"get now 400", 400, GetNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 401", 401, GetNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 503", 503, GetNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},

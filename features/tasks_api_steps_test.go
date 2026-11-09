@@ -310,6 +310,7 @@ func registerTaskAPISteps(sc *godog.ScenarioContext, h *harness) {
 	registerNoteSteps(sc, h)
 	registerCursorSteps(sc, h)
 	registerNowSteps(sc, h)
+	registerAttentionSteps(sc, h)
 	registerTaskListSteps(sc, h)
 	registerInitiativeListSteps(sc, h)
 }

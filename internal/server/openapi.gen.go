@@ -118,6 +118,24 @@ func (e AskRaiseMode) Valid() bool {
 	}
 }
 
+// Defines values for AttentionAskMode.
+const (
+	AttentionAskModePoll AttentionAskMode = "poll"
+	AttentionAskModeStop AttentionAskMode = "stop"
+)
+
+// Valid indicates whether the value is a known member of the AttentionAskMode enum.
+func (e AttentionAskMode) Valid() bool {
+	switch e {
+	case AttentionAskModePoll:
+		return true
+	case AttentionAskModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreatedKeyStatus.
 const (
 	CreatedKeyStatusActive  CreatedKeyStatus = "active"
@@ -489,16 +507,16 @@ func (e ListInitiativesParamsStatus) Valid() bool {
 
 // Defines values for GetStreamParamsTopics.
 const (
-	Attention GetStreamParamsTopics = "attention"
-	Events    GetStreamParamsTopics = "events"
+	GetStreamParamsTopicsAttention GetStreamParamsTopics = "attention"
+	GetStreamParamsTopicsEvents    GetStreamParamsTopics = "events"
 )
 
 // Valid indicates whether the value is a known member of the GetStreamParamsTopics enum.
 func (e GetStreamParamsTopics) Valid() bool {
 	switch e {
-	case Attention:
+	case GetStreamParamsTopicsAttention:
 		return true
-	case Events:
+	case GetStreamParamsTopicsEvents:
 		return true
 	default:
 		return false
@@ -664,6 +682,150 @@ type AskRaiseMode string
 type AskWithdraw struct {
 	// Reason At most 200 characters.
 	Reason *string `json:"reason,omitempty"`
+}
+
+// Attention The five sections and their counts. `fields=counts` leaves the sections out, so `counts` is the only member always present.
+type Attention struct {
+	Conflicts *[]AttentionConflict `json:"conflicts,omitempty"`
+
+	// Counts The size of each section and their sum.
+	Counts         AttentionCounts          `json:"counts"`
+	DoneNotClosed  *[]AttentionDoneTask     `json:"done_not_closed,omitempty"`
+	ExpiredLeases  *[]AttentionExpiredLease `json:"expired_leases,omitempty"`
+	OpenAsks       *[]AttentionAsk          `json:"open_asks,omitempty"`
+	OverdueWatches *[]AttentionWatch        `json:"overdue_watches,omitempty"`
+}
+
+// AttentionActor An actor involved in an item, with the way back the board has on record for it.
+type AttentionActor struct {
+	Handle string `json:"handle"`
+
+	// WayBack How to reach the actor again. Absent when the board has none.
+	WayBack *string `json:"way_back,omitempty"`
+}
+
+// AttentionAsk An open ask.
+type AttentionAsk struct {
+	// AgeSeconds Whole seconds since the ask was raised.
+	AgeSeconds int `json:"age_seconds"`
+
+	// Asker An actor involved in an item, with the way back the board has on record for it.
+	Asker AttentionActor `json:"asker"`
+
+	// AskerWaiting For a `poll` ask, whether the asker is still polling; false for a `stop` ask.
+	AskerWaiting bool             `json:"asker_waiting"`
+	Blocking     bool             `json:"blocking"`
+	CreatedAt    time.Time        `json:"created_at"`
+	Mode         AttentionAskMode `json:"mode"`
+	Question     string           `json:"question"`
+
+	// Ref The ask's ref, `A<n>`.
+	Ref string `json:"ref"`
+
+	// Task The ref of the task the ask is on. Absent for an ask on no task.
+	Task *string `json:"task,omitempty"`
+}
+
+// AttentionAskMode defines model for AttentionAsk.Mode.
+type AttentionAskMode string
+
+// AttentionConflict A resource that two or more live leases hold.
+type AttentionConflict struct {
+	// Holders Every live lease on the resource, in lease-number order.
+	Holders  []AttentionHolder `json:"holders"`
+	Resource string            `json:"resource"`
+
+	// Tasks The distinct tasks of the holders, in the same order.
+	Tasks []string `json:"tasks"`
+}
+
+// AttentionCounts The size of each section and their sum.
+type AttentionCounts struct {
+	Conflicts      int `json:"conflicts"`
+	DoneNotClosed  int `json:"done_not_closed"`
+	ExpiredLeases  int `json:"expired_leases"`
+	OpenAsks       int `json:"open_asks"`
+	OverdueWatches int `json:"overdue_watches"`
+
+	// Total The sum of the five sections.
+	Total int `json:"total"`
+}
+
+// AttentionDoneTask A task marked done and not yet closed.
+type AttentionDoneTask struct {
+	DoneAt time.Time `json:"done_at"`
+
+	// DoneBy An actor involved in an item, with the way back the board has on record for it.
+	DoneBy AttentionActor `json:"done_by"`
+
+	// LastLease The last ended lease of a task.
+	LastLease *AttentionLastLease `json:"last_lease,omitempty"`
+
+	// Task The task's ref.
+	Task  string `json:"task"`
+	Title string `json:"title"`
+}
+
+// AttentionExpiredLease A lease that ran out, was not acknowledged and has no later lease on its task.
+type AttentionExpiredLease struct {
+	ExpiredAt time.Time `json:"expired_at"`
+
+	// Holder An actor involved in an item, with the way back the board has on record for it.
+	Holder AttentionActor `json:"holder"`
+	Intent string         `json:"intent"`
+
+	// Lease The lease's ref, `L<n>`.
+	Lease string `json:"lease"`
+
+	// RenewedAt The last renewal of the lease.
+	RenewedAt time.Time `json:"renewed_at"`
+	Task      string    `json:"task"`
+	Title     string    `json:"title"`
+}
+
+// AttentionHolder One live lease on a contested resource.
+type AttentionHolder struct {
+	// Actor An actor involved in an item, with the way back the board has on record for it.
+	Actor     AttentionActor `json:"actor"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	Intent    string         `json:"intent"`
+	Lease     string         `json:"lease"`
+	Task      string         `json:"task"`
+}
+
+// AttentionLastCheck The latest check recorded on a watch.
+type AttentionLastCheck struct {
+	At time.Time `json:"at"`
+
+	// By An actor involved in an item, with the way back the board has on record for it.
+	By      AttentionActor `json:"by"`
+	Summary string         `json:"summary"`
+}
+
+// AttentionLastLease The last ended lease of a task.
+type AttentionLastLease struct {
+	EndedAt time.Time `json:"ended_at"`
+
+	// Holder An actor involved in an item, with the way back the board has on record for it.
+	Holder AttentionActor `json:"holder"`
+
+	// Lease The lease's ref, `L<n>`.
+	Lease string `json:"lease"`
+
+	// Outcome What the holder wrote when they ended it. Absent when they wrote nothing.
+	Outcome *string `json:"outcome,omitempty"`
+}
+
+// AttentionWatch An open watch whose next check is due.
+type AttentionWatch struct {
+	// LastCheck The latest check recorded on a watch.
+	LastCheck   *AttentionLastCheck `json:"last_check,omitempty"`
+	NextCheckAt time.Time           `json:"next_check_at"`
+
+	// Owner An actor involved in an item, with the way back the board has on record for it.
+	Owner AttentionActor `json:"owner"`
+	Task  string         `json:"task"`
+	Title string         `json:"title"`
 }
 
 // CreatedKey A key just created. `key` is shown this once.
@@ -1636,6 +1798,18 @@ type GetAskParams struct {
 	Wait *int `form:"wait,omitempty" json:"wait,omitempty"`
 }
 
+// GetAttentionParams defines parameters for GetAttention.
+type GetAttentionParams struct {
+	// Initiative Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept.
+	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Tag Keep items whose initiative carries this tag. Repeatable; every tag given must match.
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Fields `full` (the default) answers the sections and the counts, `counts` only the counts.
+	Fields *string `form:"fields,omitempty" json:"fields,omitempty"`
+}
+
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
 	// Since An event id, an `E<n>` ref (either letter case), an RFC 3339 time, or `cursor` for the caller's `events` cursor.
@@ -1896,6 +2070,9 @@ type ServerInterface interface {
 	// WithdrawAsk Withdraw an ask
 	// (POST /api/v1/asks/{ref}/withdraw)
 	WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	// GetAttention What needs attention
+	// (GET /api/v1/attention)
+	GetAttention(w http.ResponseWriter, r *http.Request, params GetAttentionParams)
 	// PutCursor Set a read cursor
 	// (PUT /api/v1/cursors/{stream})
 	PutCursor(w http.ResponseWriter, r *http.Request, stream string)
@@ -2258,6 +2435,44 @@ func (siw *ServerInterfaceWrapper) WithdrawAsk(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.WithdrawAsk(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAttention operation middleware
+func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAttentionParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "tag" -------------
+
+	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "fields" -------------
+
+	bind.check("fields", runtime.BindQueryParameterWithOptions("form", true, false, "fields", r.URL.Query(), &params.Fields, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAttention(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3570,6 +3785,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes/{ref}", wrapper.GetNote)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/cursors/{stream}", wrapper.PutCursor)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
@@ -4403,6 +4619,92 @@ type WithdrawAsk503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response WithdrawAsk503ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionRequestObject struct {
+	Params GetAttentionParams
+}
+
+type GetAttentionResponseObject interface {
+	VisitGetAttentionResponse(w http.ResponseWriter) error
+}
+
+type GetAttention200JSONResponse Attention
+
+func (response GetAttention200JSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttention400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttention400ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttention401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttention401ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttention404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttention404ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttention503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttention503ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -8006,6 +8308,9 @@ type StrictServerInterface interface {
 	// WithdrawAsk Withdraw an ask
 	// (POST /api/v1/asks/{ref}/withdraw)
 	WithdrawAsk(ctx context.Context, request WithdrawAskRequestObject) (WithdrawAskResponseObject, error)
+	// GetAttention What needs attention
+	// (GET /api/v1/attention)
+	GetAttention(ctx context.Context, request GetAttentionRequestObject) (GetAttentionResponseObject, error)
 	// PutCursor Set a read cursor
 	// (PUT /api/v1/cursors/{stream})
 	PutCursor(ctx context.Context, request PutCursorRequestObject) (PutCursorResponseObject, error)
@@ -8445,6 +8750,32 @@ func (sh *strictHandler) WithdrawAsk(w http.ResponseWriter, r *http.Request, ref
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(WithdrawAskResponseObject); ok {
 		if err := validResponse.VisitWithdrawAskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAttention operation middleware
+func (sh *strictHandler) GetAttention(w http.ResponseWriter, r *http.Request, params GetAttentionParams) {
+	var request GetAttentionRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAttention(ctx, request.(GetAttentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAttention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAttentionResponseObject); ok {
+		if err := validResponse.VisitGetAttentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

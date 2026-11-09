@@ -760,6 +760,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What needs attention
+         * @description The five sections of what needs the operator, each newest relevant first and each item carrying the actors involved (`handle` and `way_back`): `open_asks`, `done_not_closed` (tasks marked done and not closed), `expired_leases` (expired, not acknowledged, and with no later lease on the task), `overdue_watches` (open watches whose `next_check_at` is past) and `conflicts` (a resource that two or more live leases hold). `counts` is the size of each section and `total`, their sum. After expiring the leases that are due the sections are judged at one instant. `initiative` (slug or ULID, repeatable: any of them) and `tag` (repeatable: the initiative carries all of them) keep the items on a task or ask of a matching initiative; an ask on no initiative is left out when either is given. An `initiative` that names nothing is 404 and a malformed `tag` is 400. `fields=counts` answers only `counts`, and `fields=full` (the default) the sections too; any other `fields` is 400. An empty board counts 0 everywhere.
+         */
+        get: operations["getAttention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -1321,6 +1341,118 @@ export interface components {
             others_leases: components["schemas"]["Lease"][];
             /** @description The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors that hold one of the resources asked about, in lease-number order, each once. */
             conflicts: components["schemas"]["LeaseConflict"][];
+        };
+        /** @description An actor involved in an item, with the way back the board has on record for it. */
+        AttentionActor: {
+            handle: string;
+            /** @description How to reach the actor again. Absent when the board has none. */
+            way_back?: string;
+        };
+        /** @description The size of each section and their sum. */
+        AttentionCounts: {
+            open_asks: number;
+            done_not_closed: number;
+            expired_leases: number;
+            overdue_watches: number;
+            conflicts: number;
+            /** @description The sum of the five sections. */
+            total: number;
+        };
+        /** @description An open ask. */
+        AttentionAsk: {
+            /** @description The ask's ref, `A<n>`. */
+            ref: string;
+            question: string;
+            /** @description The ref of the task the ask is on. Absent for an ask on no task. */
+            task?: string;
+            asker: components["schemas"]["AttentionActor"];
+            /** @enum {string} */
+            mode: "stop" | "poll";
+            /** @description For a `poll` ask, whether the asker is still polling; false for a `stop` ask. */
+            asker_waiting: boolean;
+            blocking: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Whole seconds since the ask was raised. */
+            age_seconds: number;
+        };
+        /** @description The last ended lease of a task. */
+        AttentionLastLease: {
+            /** @description The lease's ref, `L<n>`. */
+            lease: string;
+            holder: components["schemas"]["AttentionActor"];
+            /** @description What the holder wrote when they ended it. Absent when they wrote nothing. */
+            outcome?: string;
+            /** Format: date-time */
+            ended_at: string;
+        };
+        /** @description A task marked done and not yet closed. */
+        AttentionDoneTask: {
+            /** @description The task's ref. */
+            task: string;
+            title: string;
+            done_by: components["schemas"]["AttentionActor"];
+            /** Format: date-time */
+            done_at: string;
+            last_lease?: components["schemas"]["AttentionLastLease"];
+        };
+        /** @description A lease that ran out, was not acknowledged and has no later lease on its task. */
+        AttentionExpiredLease: {
+            /** @description The lease's ref, `L<n>`. */
+            lease: string;
+            holder: components["schemas"]["AttentionActor"];
+            task: string;
+            title: string;
+            intent: string;
+            /**
+             * Format: date-time
+             * @description The last renewal of the lease.
+             */
+            renewed_at: string;
+            /** Format: date-time */
+            expired_at: string;
+        };
+        /** @description The latest check recorded on a watch. */
+        AttentionLastCheck: {
+            summary: string;
+            by: components["schemas"]["AttentionActor"];
+            /** Format: date-time */
+            at: string;
+        };
+        /** @description An open watch whose next check is due. */
+        AttentionWatch: {
+            task: string;
+            title: string;
+            owner: components["schemas"]["AttentionActor"];
+            /** Format: date-time */
+            next_check_at: string;
+            last_check?: components["schemas"]["AttentionLastCheck"];
+        };
+        /** @description One live lease on a contested resource. */
+        AttentionHolder: {
+            lease: string;
+            actor: components["schemas"]["AttentionActor"];
+            task: string;
+            intent: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        /** @description A resource that two or more live leases hold. */
+        AttentionConflict: {
+            resource: string;
+            /** @description Every live lease on the resource, in lease-number order. */
+            holders: components["schemas"]["AttentionHolder"][];
+            /** @description The distinct tasks of the holders, in the same order. */
+            tasks: string[];
+        };
+        /** @description The five sections and their counts. `fields=counts` leaves the sections out, so `counts` is the only member always present. */
+        Attention: {
+            counts: components["schemas"]["AttentionCounts"];
+            open_asks?: components["schemas"]["AttentionAsk"][];
+            done_not_closed?: components["schemas"]["AttentionDoneTask"][];
+            expired_leases?: components["schemas"]["AttentionExpiredLease"][];
+            overdue_watches?: components["schemas"]["AttentionWatch"][];
+            conflicts?: components["schemas"]["AttentionConflict"][];
         };
         /** @description A page of leases. */
         LeaseList: {
@@ -3020,6 +3152,37 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAttention: {
+        parameters: {
+            query?: {
+                /** @description Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept. */
+                initiative?: string[];
+                /** @description Keep items whose initiative carries this tag. Repeatable; every tag given must match. */
+                tag?: string[];
+                /** @description `full` (the default) answers the sections and the counts, `counts` only the counts. */
+                fields?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sections, or only the counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attention"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

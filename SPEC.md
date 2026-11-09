@@ -648,19 +648,24 @@ prominently. Optional resource prefixes (`host:` vs `repo:`) carry no special me
 ### 5.3 Attention view
 
 `GET /api/v1/attention` returns, each list newest-relevant first, each item with the
-**actors involved** (handle + way back):
+**actors involved** (`{handle, way_back?}`):
 
-1. **Open asks**: question, asker, mode (and, for `poll`, whether the asker is still polling:
-   a poll is in flight or ended within the last 60 s), blocking flag, age.
-2. **Done, not closed** tasks: who marked done, when, last outcome text.
-3. **Expired leases** not yet acknowledged: holder, task, intent, last renewal. The operator
-   acknowledges (`POST /api/v1/leases/{id}/ack`) after looking; a later lease by anyone on the
-   same task also clears it.
-4. **Overdue watches**: task, `next_check_at`, last check event.
-5. **Live conflicts**: resource, holders, tasks.
+1. **Open asks** (`open_asks`): ref, question, task, asker, mode (and, for `poll`, `asker_waiting`:
+   a poll is in flight or ended within the last 60 s), blocking flag, `created_at` and
+   `age_seconds`.
+2. **Done, not closed** tasks (`done_not_closed`): task, title, who marked done (`done_by`), when
+   (`done_at`), and the last ended lease of the task with its outcome text (`last_lease`).
+3. **Expired leases** (`expired_leases`) not yet acknowledged: lease, holder, task, title, intent,
+   last renewal (`renewed_at`) and `expired_at`. The operator acknowledges
+   (`POST /api/v1/leases/{id}/ack`) after looking; a later lease by anyone on the same task also
+   clears it.
+4. **Overdue watches** (`overdue_watches`): task, title, owner, `next_check_at`, last check event
+   (`last_check`: summary, by, at).
+5. **Live conflicts** (`conflicts`): resource, holders (lease, actor, task, intent, expiry), tasks.
 
-Filters: `tag`, `initiative`. Counts per section are in the response header object so the UI
-and CLI can show badges without the lists.
+Filters: `tag`, `initiative`, each repeatable. `counts` (`{open_asks, done_not_closed,
+expired_leases, overdue_watches, conflicts, total}`) is in the response so the UI and CLI can show
+badges without the lists, and `fields=counts` answers only `counts`. The HTTP shape is §6.8.
 
 Derivation (`internal/attention`), judged at one instant after the leases that ran out are
 expired (§5.1):
@@ -749,7 +754,7 @@ expired (§5.1):
 | method | path | purpose |
 |---|---|---|
 | GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. **Phase 1 ships only the lease and conflict parts** (my leases, others' leases, conflicts); the ask, note and attention parts arrive with Phase 2 (§6.5). |
-| GET | `/attention` | §5.3 |
+| GET | `/attention` | §5.3, §6.8 |
 | GET/POST | `/initiatives` | list (filters: tag, status, closed_within) / create |
 | GET/PATCH | `/initiatives/{slug}` | read / update (title, description, tags, targets) |
 | POST | `/initiatives/{slug}/close`, `/reopen` | |
@@ -1126,6 +1131,37 @@ are those of `internal/notes` (§4.7); `PUT /api/v1/cursors/{stream}`, `since=cu
   slug, `mentions` a list (empty when none), `broadcast` is derived (no task and no initiative) and absent optional
   fields are omitted. `has_body` is true when the note has a body, whether or not the document carries it; `body` is
   present only in `GET /notes/{ref}`, in a `fields=full` list and in the `201` answer, and only when the note has one.
+
+### 6.8 Attention
+
+`GET /api/v1/attention` is in `api/openapi.yaml` and answers what §5.3 derives. Any authenticated principal may use it
+(v1 has no ACL) and a server without a store answers **503**. It first expires the leases that ran out (§5.1), which
+writes their `lease_expired` events, and judges all five sections at that one instant.
+
+- **Parameters.** `initiative` (a slug or ULID, repeatable: an item on any of them is kept) and `tag` (repeatable: the
+  initiative carries every one given); with neither the whole board is read. An `initiative` that names nothing is
+  **404** (`there is no initiative zz`), a `tag` that is not a valid tag is **400**, each with a `next` line. `fields`
+  is `full` (the default, also when empty) or `counts`; anything else is **400** with a `next`.
+- **The answer** is `{counts, open_asks, done_not_closed, expired_leases, overdue_watches, conflicts}`. Every section is
+  a list, empty (`[]`) and never absent or null when nothing needs attention, so an empty board answers 0 in every
+  count and five empty lists. `fields=counts` answers `{counts}` and no other member; its numbers are those the full
+  answer would hold for the same filters.
+- **Counts** (`AttentionCounts`) are `{open_asks, done_not_closed, expired_leases, overdue_watches, conflicts, total}`,
+  `total` the sum of the five, all integers following the filters.
+- **An actor** (`AttentionActor`) is `{handle, way_back?}`; `way_back` is absent when the board has none on record.
+- **Open ask**: `{ref, question, task?, asker, mode, asker_waiting, blocking, created_at, age_seconds}`. `age_seconds` is
+  the whole seconds since `created_at`; `task` is absent for an ask on no task; `asker_waiting` is false for a `stop`
+  ask.
+- **Done task**: `{task, title, done_by, done_at, last_lease?}` with `last_lease` `{lease, holder, outcome?, ended_at}`,
+  absent when no lease on the task ended and without `outcome` when the holder wrote none.
+- **Expired lease**: `{lease, holder, task, title, intent, renewed_at, expired_at}`.
+- **Overdue watch**: `{task, title, owner, next_check_at, last_check?}` with `last_check` `{summary, by, at}`, absent
+  when no check was ever recorded; `owner` is the actor that created the watch.
+- **Conflict**: `{resource, holders, tasks}`, each holder `{lease, actor, task, intent, expires_at}` in lease-number
+  order and `tasks` the distinct tasks of the holders in that order.
+- **Clearing.** Each section empties by the action that deals with it: an ask by answering or withdrawing it, a done task
+  by closing it, an expired lease by acknowledging it or by any later lease on its task, an overdue watch by recording a
+  check (which moves `next_check_at`) and a conflict by ending (or letting expire) one of its leases.
 
 ---
 

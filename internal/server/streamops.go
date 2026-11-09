@@ -78,9 +78,9 @@ func parseTopics(param *[]GetStreamParamsTopics) (streamTopics, *problemResponse
 	var t streamTopics
 	for _, topic := range *param {
 		switch topic {
-		case Events:
+		case GetStreamParamsTopicsEvents:
 			t.events = true
-		case Attention:
+		case GetStreamParamsTopicsAttention:
 			t.attention = true
 		default:
 			p := failure(http.StatusBadRequest, fmt.Sprintf("topic %q is not events or attention", string(topic))).
