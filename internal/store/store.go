@@ -247,6 +247,23 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
+// MigrateTo applies the embedded migrations up to and including version, and
+// no further. It lets a test build the schema of an earlier release; it
+// refuses a database whose schema is newer than the binary, like Migrate.
+func (s *Store) MigrateTo(ctx context.Context, version int64) error {
+	if err := s.CheckSchema(ctx); err != nil {
+		return err
+	}
+	p, err := s.provider()
+	if err != nil {
+		return fmt.Errorf("prepare migrations: %w", err)
+	}
+	if _, err := p.UpTo(ctx, version); err != nil {
+		return fmt.Errorf("apply migrations up to %d: %w", version, err)
+	}
+	return nil
+}
+
 // Ready reports nil when the database is reachable and carries every embedded
 // migration, and an error otherwise. It never writes.
 func (s *Store) Ready(ctx context.Context) error {

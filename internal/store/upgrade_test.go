@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -270,5 +271,33 @@ func TestAsksHaveTheSpecIndexesAndTheirChecks(t *testing.T) {
 	}
 	if err := exec("asks", append(cols, "channel"), "A6", nil, "ACTOR1", "q", "stop", "answered", 1, "carrier"); err == nil {
 		t.Error("channel carrier was accepted")
+	}
+}
+
+// TestMigrateToStopsAtTheVersionAsked builds the schema of an earlier release:
+// the database ends at the version named, is not ready, and Migrate takes it on.
+func TestMigrateToStopsAtTheVersionAsked(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.MigrateTo(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s.SchemaVersion(ctx); err != nil || v != 4 {
+		t.Fatalf("version after MigrateTo(4) = %d, %v; want 4", v, err)
+	}
+	if err := s.Ready(ctx); !errors.Is(err, ErrNotMigrated) {
+		t.Errorf("Ready at version 4 = %v, want ErrNotMigrated", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ready(ctx); err != nil {
+		t.Errorf("Ready after Migrate = %v", err)
+	}
+	if _, err := s.Writer().ExecContext(ctx, "INSERT INTO goose_db_version (version_id, is_applied) VALUES (9999, 1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MigrateTo(ctx, 4); !errors.Is(err, ErrSchemaNewer) {
+		t.Errorf("MigrateTo on a newer schema = %v, want ErrSchemaNewer", err)
 	}
 }
