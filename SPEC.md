@@ -1952,6 +1952,15 @@ live lease) (`affectsTaskPage`), and reads the task, events, leases, asks and no
 `TaskPageStore.refresh` without the skeleton: the new status shows, and an open dialog keeps what was typed; a failed
 read keeps the page and shows the error above it.
 
+The **Notes view** subscribes with the note events (`affectsNotes`: `note_posted`) and refreshes through
+`NotesViewStore.refresh`: the filtered list is read again and swapped in under the filter shown, so a new note appears on
+top of the newest-first list while the page drawn ("Load more"), the bodies already read and an open Post note sheet all
+stay; a failed read keeps the notes and shows the inline error, and an answer for a filter since replaced is dropped.
+**Settings → API keys** subscribes with the key events (`affectsKeys`: `key_created`, `key_revoked`, whoever caused them)
+and refreshes through `KeysStore.refresh` in the same way: the list changes in place (never `loading`), and the
+once-shown new-key box and an open create form are untouched. Both reconnect and `reset` refetches come from the stream
+module, so a change made while the browser was offline shows once it is back online.
+
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
 from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
 below it (the same rows, so the `key-row`, `key-status`, `new-key` and `new-key-value` test ids keep

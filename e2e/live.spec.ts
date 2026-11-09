@@ -216,5 +216,60 @@ for (const vp of viewports) {
       await expect(page.getByRole('alert')).toHaveCount(0);
       expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
     });
+
+    test('the Notes view shows a note posted through the API within 5 s, and one posted while offline once back online', async ({ page, context, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-notes-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live notes ${vp.name}` }, 201);
+      await page.goto('/#/notes');
+      await expect(page.getByTestId('notes-view')).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByTestId('notes-skeleton')).toBeHidden(FIVE_SECONDS);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+      const noteWith = (summary: string) => page.getByTestId('notes-list').getByTestId('note-summary').filter({ hasText: summary });
+
+      await post(api, '/api/v1/notes', { initiative: slug, summary: `Online note ${vp.name}`, body: 'Posted while the view is open' }, 201);
+      await expect(noteWith(`Online note ${vp.name}`)).toBeVisible(FIVE_SECONDS);
+
+      await context.setOffline(true);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('offline', FIVE_SECONDS);
+      await post(api, '/api/v1/notes', { initiative: slug, summary: `Offline note ${vp.name}`, body: 'Posted while the browser is offline' }, 201);
+      await expect(noteWith(`Offline note ${vp.name}`)).toHaveCount(0);
+      await context.setOffline(false);
+      await expect(noteWith(`Offline note ${vp.name}`)).toBeVisible(FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
+
+    test('Settings -> API keys shows a key created and revoked through the API within 5 s, and one created while offline once back online', async ({
+      page,
+      context,
+      playwright,
+      baseURL,
+    }) => {
+      const api = await apiAs(playwright, baseURL);
+      const row = (name: string) => page.locator(`[data-testid=key-row][data-name=${name}]`);
+      const online = `e2e-live-key-${vp.name}`;
+      const offline = `e2e-live-key-offline-${vp.name}`;
+      await page.goto('/#/settings/keys');
+      await expect(page.getByRole('heading', { level: 2, name: 'API keys' })).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByTestId('keys-skeleton')).toBeHidden(FIVE_SECONDS);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+      await expect(row(online)).toHaveCount(0);
+
+      await post(api, '/api/v1/keys', { name: online }, 201);
+      await expect(row(online)).toBeVisible(FIVE_SECONDS);
+      await expect(row(online).getByTestId('key-status')).toContainText('active');
+      await post(api, `/api/v1/keys/${online}/revoke`, {}, 200);
+      await expect(row(online).getByTestId('key-status')).toContainText('revoked', FIVE_SECONDS);
+
+      await context.setOffline(true);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('offline', FIVE_SECONDS);
+      await post(api, '/api/v1/keys', { name: offline }, 201);
+      await expect(row(offline)).toHaveCount(0);
+      await context.setOffline(false);
+      await expect(row(offline)).toBeVisible(FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
   });
 }

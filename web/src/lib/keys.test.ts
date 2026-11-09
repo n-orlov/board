@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { KeysApi, KeysError, KeysStore, type CreatedKey, type Key, type KeysState } from './keys';
+import { affectsKeys, KeysApi, KeysError, KeysStore, type CreatedKey, type Key, type KeysState } from './keys';
 import type { Browser } from './session';
 
 const key = (name: string, extra: Partial<Key> = {}): Key => ({
@@ -433,5 +433,83 @@ describe('KeysStore loading', () => {
     gates[1]!.resolve([key('stale')]);
     await a;
     expect(s.state).toMatchObject({ loading: false, error: 'newer', keys: [key('keep')] });
+  });
+});
+
+describe('KeysStore refresh (a live event)', () => {
+  function gated() {
+    const gates: { resolve: (k: Key[]) => void; reject: (e: unknown) => void }[] = [];
+    const list = () => new Promise<Key[]>((resolve, reject) => gates.push({ resolve, reject }));
+    return { gates, list };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('swaps the list in without making it loading, and keeps the one-time key on show', async () => {
+    const { gates, list } = gated();
+    const { s, seen } = store({ list });
+    const first = s.create('ci', '');
+    await tick();
+    gates[0]!.resolve([key('a')]);
+    await first;
+    expect(s.state.created?.key).toBe('brd_once');
+    seen.length = 0;
+    const again = s.refresh();
+    await tick();
+    expect(s.state.keys.map((k) => k.name)).toEqual(['a']);
+    gates[1]!.resolve([key('a'), key('b')]);
+    await again;
+    expect(s.state.keys.map((k) => k.name)).toEqual(['a', 'b']);
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(s.state.created?.key).toBe('brd_once');
+    expect(seen.map((x) => x.loading)).not.toContain(true);
+  });
+
+  it('keeps the keys it had when the read fails and says why', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    gates[0]!.resolve([key('a')]);
+    await first;
+    const again = s.refresh();
+    gates[1]!.reject(new KeysError(503, 'down'));
+    await again;
+    expect(s.state).toMatchObject({ loading: false, error: 'down' });
+    expect(s.state.keys.map((k) => k.name)).toEqual(['a']);
+  });
+
+  it('drops an older read that lands after a newer one', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.refresh();
+    const second = s.refresh();
+    gates[1]!.resolve([key('new')]);
+    await second;
+    gates[0]!.resolve([key('old')]);
+    await first;
+    expect(s.state.keys.map((k) => k.name)).toEqual(['new']);
+  });
+
+  it('a first load still pending keeps the list loading after a refresh lands', async () => {
+    const { gates, list } = gated();
+    const { s } = store({ list });
+    const first = s.load();
+    await tick();
+    const again = s.refresh();
+    gates[1]!.resolve([key('x')]);
+    await again;
+    expect(s.state.loading).toBe(true);
+    gates[0]!.resolve([key('old')]);
+    await first;
+    expect(s.state.loading).toBe(false);
+    expect(s.state.keys.map((k) => k.name)).toEqual(['x']);
+  });
+});
+
+describe('affectsKeys', () => {
+  it('is true for the key events, false for the rest', () => {
+    expect(affectsKeys({ type: 'key_created' })).toBe(true);
+    expect(affectsKeys({ type: 'key_revoked' })).toBe(true);
+    expect(affectsKeys({ type: 'note_posted' })).toBe(false);
+    expect(affectsKeys({ type: 'task_done' })).toBe(false);
   });
 });

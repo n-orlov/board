@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_NOTES_FILTER, type Note } from './notes';
-import { moreCount, NotesApi, NotesViewStore, PAGE_SIZE, postScope, visibleNotes, type NotesViewState } from './notesView';
+import { affectsNotes, moreCount, NotesApi, NotesViewStore, PAGE_SIZE, postScope, visibleNotes, type NotesViewState } from './notesView';
 import type { Browser } from './session';
 
 const json = (body: object, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -147,5 +147,87 @@ describe('postScope', () => {
     expect(postScope({ task: '', initiative: '' })).toEqual({});
     expect(postScope({ task: ' a-1 ', initiative: ' a ' })).toEqual({ task: 'a-1', initiative: 'a' });
     expect(postScope({ task: '', initiative: 'a' })).toEqual({ initiative: 'a' });
+  });
+});
+
+describe('NotesViewStore refresh (a live event)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  function gated() {
+    const gates: { resolve: (n: Note[]) => void; reject: (e: unknown) => void }[] = [];
+    const filtered = vi.fn(() => new Promise<Note[]>((resolve, reject) => gates.push({ resolve, reject })));
+    const api = { filtered, note: vi.fn(async (ref: string) => ({ ref, body: `body of ${ref}` }) as Note), postNote: vi.fn(async () => ({}) as Note) };
+    const seen: NotesViewState[] = [];
+    return { gates, api, seen, store: new NotesViewStore(api, (s) => seen.push(s), DEFAULT_NOTES_FILTER) };
+  }
+
+  it('adds the new note on top, keeping the page drawn and the bodies read, without making the view loading', async () => {
+    const { gates, store, seen } = gated();
+    const first = store.load();
+    gates[0]!.resolve(notes(45));
+    await first;
+    store.loadMore();
+    await store.loadBody('N45');
+    seen.length = 0;
+    const again = store.refresh();
+    await tick();
+    expect(store.state.notes).toHaveLength(45);
+    gates[1]!.resolve(notes(46));
+    await again;
+    expect(store.state.notes[0]?.ref).toBe('N46');
+    expect(store.state).toMatchObject({ shown: 40, loading: false, error: undefined, bodies: { N45: 'body of N45' } });
+    expect(seen.map((s) => s.loading)).not.toContain(true);
+  });
+
+  it('keeps the notes it had when the read fails and says why', async () => {
+    const { gates, store } = gated();
+    const first = store.load();
+    gates[0]!.resolve(notes(3));
+    await first;
+    const again = store.refresh();
+    gates[1]!.reject(new Error('down'));
+    await again;
+    expect(store.state).toMatchObject({ loading: false, error: 'down' });
+    expect(store.state.notes).toHaveLength(3);
+  });
+
+  it('drops an older read that lands after a newer one, and one for a filter since replaced', async () => {
+    const { gates, store } = gated();
+    const first = store.refresh();
+    const second = store.refresh();
+    gates[1]!.resolve(notes(2));
+    await second;
+    gates[0]!.resolve(notes(1));
+    await first;
+    expect(store.state.notes).toHaveLength(2);
+
+    const stale = store.refresh();
+    const next = store.setFilter({ ...DEFAULT_NOTES_FILTER, author: 'ann' });
+    gates[3]!.resolve(notes(5));
+    await next;
+    gates[2]!.resolve(notes(9));
+    await stale;
+    expect(store.state.notes).toHaveLength(5);
+  });
+
+  it('a first load still pending keeps the view loading after a refresh lands', async () => {
+    const { gates, store } = gated();
+    const first = store.load();
+    await tick();
+    const again = store.refresh();
+    gates[1]!.resolve(notes(2));
+    await again;
+    expect(store.state.loading).toBe(true);
+    gates[0]!.resolve(notes(1));
+    await first;
+    expect(store.state.loading).toBe(false);
+    expect(store.state.notes).toHaveLength(2);
+  });
+});
+
+describe('affectsNotes', () => {
+  it('is true for the note events, false for the rest', () => {
+    expect(affectsNotes({ type: 'note_posted' })).toBe(true);
+    expect(affectsNotes({ type: 'task_done' })).toBe(false);
+    expect(affectsNotes({ type: 'key_created' })).toBe(false);
   });
 });

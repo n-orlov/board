@@ -94,6 +94,23 @@ export class NotesViewStore {
     this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy });
   }
 
+  /**
+   * Reads the notes again for a live event: what is drawn stays (how many, the bodies read, no `loading`), a read that
+   * fails keeps the notes it had and says why in the inline error, and an answer for a filter since replaced is dropped.
+   */
+  async refresh(): Promise<void> {
+    const ticket = this.fetches.begin();
+    const filter = this.current.filter;
+    let outcome: Partial<NotesViewState>;
+    try {
+      outcome = { notes: newestFirst(await this.api.filtered(filter)), error: undefined };
+    } catch (e) {
+      outcome = { error: errorText(e) };
+    }
+    const show = this.fetches.end(ticket) && filter === this.current.filter;
+    this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy && this.current.loading });
+  }
+
   /** A new filter starts again from the first page. */
   async setFilter(filter: NotesFilter): Promise<void> {
     this.current = { ...this.current, filter, shown: PAGE_SIZE };
@@ -137,4 +154,9 @@ export class NotesViewStore {
   clearActionError(): void {
     this.publish({ actionError: undefined });
   }
+}
+
+/** Whether a live event can change the Notes view: a note posted (the filter decides whether it shows). */
+export function affectsNotes(event: { type: string }): boolean {
+  return event.type.startsWith('note_');
 }

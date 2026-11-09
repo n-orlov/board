@@ -3,8 +3,9 @@
   import KeyForm from './KeyForm.svelte';
   import { copyText } from './lib/clipboard';
   import { absoluteTime, relativeTime } from './lib/format';
-  import { KeysApi, KeysStore, type KeysState } from './lib/keys';
+  import { KeysApi, KeysStore, affectsKeys, type KeysState } from './lib/keys';
   import { keyTone, toneClasses } from './lib/presentation';
+  import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
 
   let { csrf }: { csrf: string } = $props();
@@ -20,6 +21,8 @@
 
   $effect(() => {
     void store.load();
+    // A key created or revoked elsewhere changes the list in place; the once-shown key box and an open form stay.
+    return live().subscribe(affectsKeys, () => store.refresh());
   });
 
   function openForm() {

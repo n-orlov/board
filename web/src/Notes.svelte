@@ -3,9 +3,10 @@
   import NoteForm from './NoteForm.svelte';
   import NoteList from './NoteList.svelte';
   import Toast from './Toast.svelte';
+  import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
   import { filterFromHash, isFiltered, notesHash, DEFAULT_NOTES_FILTER, type NoteForm as PostForm, type NotesFilter } from './lib/notes';
-  import { moreCount, NotesApi, NotesViewStore, visibleNotes, type NoteScope, type NotesViewState } from './lib/notesView';
+  import { affectsNotes, moreCount, NotesApi, NotesViewStore, visibleNotes, type NoteScope, type NotesViewState } from './lib/notesView';
 
   // The Notes view (PRD R10): every note newest first, the six filters in the fragment's query, a page at a time and
   // Post note. The data layer is lib/notesView.ts.
@@ -22,6 +23,8 @@
 
   $effect(() => {
     void store.load();
+    // A note posted elsewhere shows under the filter in place: the page drawn, the bodies read and an open sheet stay.
+    return live().subscribe(affectsNotes, () => store.refresh());
   });
 
   // The filter lives in the fragment: applying rewrites it in place (no history entry per choice) and reads again.

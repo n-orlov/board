@@ -131,6 +131,22 @@ export class KeysStore {
     this.set({ ...shown, loading: this.fetches.busy });
   }
 
+  /**
+   * Reads the list again for a live event: the keys stay on screen (no `loading`), the one-time key box and an open form
+   * are untouched, and a failed read keeps the list and says why in the inline error. Newest outcome wins (`Fetches`).
+   */
+  async refresh(): Promise<void> {
+    const ticket = this.fetches.begin();
+    let outcome: Partial<KeysState>;
+    try {
+      outcome = { keys: await this.api.list(), error: undefined };
+    } catch (e) {
+      outcome = { error: errorText(e) };
+    }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy && this.current.loading });
+  }
+
   /** Makes the key, keeps it for the page to show once, and reloads the list. Whether it worked; on a refusal `formError` says why. */
   async create(name: string, expiresIn: string): Promise<boolean> {
     const ok = await this.run(async () => ({ created: await this.api.create(name.trim(), expiresIn.trim()) }), 'formError');
@@ -156,4 +172,9 @@ export class KeysStore {
   dismiss(): void {
     this.set({ created: undefined });
   }
+}
+
+/** Whether a live event can change the key list: a key created or revoked, by anyone. */
+export function affectsKeys(event: { type: string }): boolean {
+  return event.type.startsWith('key_');
 }
