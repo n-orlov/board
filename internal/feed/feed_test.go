@@ -21,10 +21,44 @@ import (
 var t0 = time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 
 // fakeSource is an events table the test fills by hand, with gaps if it likes.
+// writers names the transactions inside an event write; onWriters, when set,
+// runs right after Writers has answered (a writer ending at that moment).
 type fakeSource struct {
-	mu    sync.Mutex
-	items []events.Event
-	err   error
+	mu        sync.Mutex
+	items     []events.Event
+	err       error
+	writers   []string
+	writerErr error
+	onWriters func()
+	asked     int
+}
+
+func (s *fakeSource) Writers(context.Context) ([]string, error) {
+	s.mu.Lock()
+	s.asked++
+	w, err, after := slices.Clone(s.writers), s.writerErr, s.onWriters
+	s.onWriters = nil
+	s.mu.Unlock()
+	if after != nil {
+		after()
+	}
+	return w, err
+}
+
+func (s *fakeSource) setWriters(w ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writers = w
+}
+
+// commit inserts the events ns where n puts them, as a late commit does.
+func (s *fakeSource) commit(ns ...int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range ns {
+		s.items = append(s.items, events.Event{N: n, ID: fmt.Sprintf("id%d", n)})
+	}
+	slices.SortFunc(s.items, func(a, b events.Event) int { return int(a.N - b.N) })
 }
 
 func (s *fakeSource) put(ns ...int64) {
@@ -59,10 +93,6 @@ func (s *fakeSource) Last(context.Context) (int64, error) {
 	}
 	return last, s.err
 }
-
-type clock struct{ now time.Time }
-
-func (c *clock) Now() time.Time { return c.now }
 
 func drain(s *Subscription) []int64 {
 	var got []int64
@@ -152,51 +182,156 @@ func TestNewStartsAtTheNewestEventAndReportsAnUnreadableTable(t *testing.T) {
 	}
 }
 
-func TestAGapHoldsLaterEventsUntilTheMissingOneCommits(t *testing.T) {
+func TestAGapHoldsLaterEventsForAsLongAsAWriterThatHeldItIsOpen(t *testing.T) {
 	src := &fakeSource{}
-	c := &clock{now: t0}
-	f := NewAt(src, 0, Options{GapGrace: 5 * time.Second, Now: c.Now})
+	f := NewAt(src, 0, Options{})
 	s := f.Subscribe()
 	src.put(1, 3, 4)
+	src.setWriters("w2", "w9")
 	f.Poll(context.Background())
 	if got := drain(s); !equal(got, []int64{1}) {
 		t.Fatalf("before the gap closes got %v, want [1]", got)
 	}
-	c.now = t0.Add(4 * time.Second)
-	f.Poll(context.Background())
-	if got := drain(s); len(got) != 0 {
-		t.Fatalf("inside the grace period got %v", got)
+	// However long it stays open, and whoever else comes and goes.
+	for range 50 {
+		src.setWriters("w2", "w10")
+		f.Poll(context.Background())
 	}
-	src.mu.Lock()
-	src.items = append([]events.Event{src.items[0], {N: 2, ID: "id2"}}, src.items[1:]...)
-	src.mu.Unlock()
+	if got := drain(s); len(got) != 0 {
+		t.Fatalf("delivered %v across a gap whose writer is still open", got)
+	}
+	src.commit(2)
+	src.setWriters("w10")
 	f.Poll(context.Background())
 	if got := drain(s); !equal(got, []int64{2, 3, 4}) {
 		t.Errorf("after the gap closed got %v, want [2 3 4]", got)
 	}
 }
 
-func TestAGapOlderThanTheGraceIsARolledBackWrite(t *testing.T) {
+func TestAGapClosedByItsOwnCommitNeedsNoWriterToEnd(t *testing.T) {
 	src := &fakeSource{}
-	c := &clock{now: t0}
-	f := NewAt(src, 0, Options{GapGrace: 5 * time.Second, Now: c.Now})
+	f := NewAt(src, 0, Options{})
+	s := f.Subscribe()
+	src.put(1, 3)
+	src.setWriters("w2", "w4")
+	f.Poll(context.Background())
+	src.commit(2)
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{1, 2, 3}) {
+		t.Fatalf("got %v, want [1 2 3]", got)
+	}
+	// The closed gap leaves nothing behind: a later gap waits on its own writers.
+	src.commit(5)
+	src.setWriters("w4")
+	f.Poll(context.Background())
+	if got := drain(s); len(got) != 0 {
+		t.Fatalf("delivered %v across the new gap at 4", got)
+	}
+	src.setWriters()
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{5}) {
+		t.Errorf("got %v, want [5] once w4 ended without committing 4", got)
+	}
+}
+
+func TestAGapWhoseWritersHaveAllEndedIsARolledBackWrite(t *testing.T) {
+	src := &fakeSource{}
+	f := NewAt(src, 0, Options{})
 	s := f.Subscribe()
 	src.put(1, 3, 4, 6)
+	src.setWriters("w2")
 	f.Poll(context.Background())
-	c.now = t0.Add(5 * time.Second)
-	f.Poll(context.Background())
-	if got := drain(s); !equal(got, []int64{1, 3, 4}) {
-		t.Fatalf("got %v, want [1 3 4]", got)
+	if got := drain(s); !equal(got, []int64{1}) {
+		t.Fatalf("got %v, want [1]", got)
 	}
-	// 5 is a new gap, with its own grace period.
+	src.setWriters("w7") // w2 ended; w7 began after the read and draws above 6
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{3, 4, 6}) {
+		t.Fatalf("got %v, want [3 4 6]", got)
+	}
+	// 8 skips 7, which w7 may still commit: a new gap, with its own writers.
+	src.put(8)
 	f.Poll(context.Background())
 	if got := drain(s); len(got) != 0 {
 		t.Fatalf("a second gap was skipped at once: %v", got)
 	}
-	c.now = t0.Add(10 * time.Second)
+	src.setWriters()
 	f.Poll(context.Background())
-	if got := drain(s); !equal(got, []int64{6}) {
-		t.Errorf("got %v, want [6]", got)
+	if got := drain(s); !equal(got, []int64{8}) {
+		t.Errorf("got %v, want [8]", got)
+	}
+}
+
+func TestAGapWithNoWriterLeftIsResolvedInTheSamePoll(t *testing.T) {
+	src := &fakeSource{}
+	f := NewAt(src, 0, Options{})
+	s := f.Subscribe()
+	src.put(1, 3)
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{1, 3}) {
+		t.Errorf("got %v, want [1 3]: no writer can still commit 2", got)
+	}
+}
+
+func TestAWriterThatCommitsAsTheGapSettlesIsNotSkipped(t *testing.T) {
+	src := &fakeSource{}
+	f := NewAt(src, 0, Options{})
+	s := f.Subscribe()
+	src.put(1, 3, 4)
+	src.setWriters("w2")
+	f.Poll(context.Background())
+	// w2 commits 2 right after the feed sees it gone from the writers: the
+	// table must be read after that check, or 2 would be lost.
+	src.mu.Lock()
+	src.writers = nil
+	src.onWriters = func() { src.commit(2) }
+	src.mu.Unlock()
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{1, 2, 3, 4}) {
+		t.Errorf("got %v, want [1 2 3 4]", got)
+	}
+}
+
+func TestAnUnreadableWriterListIsReportedAndSkipsNothing(t *testing.T) {
+	src := &fakeSource{writerErr: errors.New("pg_locks down")}
+	var reported []error
+	f := NewAt(src, 0, Options{Report: func(err error) { reported = append(reported, err) }})
+	s := f.Subscribe()
+	src.put(1, 3)
+	f.Poll(context.Background()) // opening the gap fails
+	src.mu.Lock()
+	src.writerErr = nil
+	src.writers = []string{"w2"}
+	src.mu.Unlock()
+	f.Poll(context.Background()) // opens it
+	src.mu.Lock()
+	src.writerErr = errors.New("pg_locks down")
+	src.writers = nil
+	src.mu.Unlock()
+	f.Poll(context.Background()) // cannot tell whether w2 ended
+	if len(reported) != 2 {
+		t.Errorf("reported %v, want two errors", reported)
+	}
+	if got := drain(s); !equal(got, []int64{1}) {
+		t.Fatalf("got %v, want [1] while the writers are unknown", got)
+	}
+	src.mu.Lock()
+	src.writerErr = nil
+	src.mu.Unlock()
+	f.Poll(context.Background())
+	if got := drain(s); !equal(got, []int64{3}) {
+		t.Errorf("got %v, want [3]", got)
+	}
+}
+
+func TestNoGapAsksForNoWriters(t *testing.T) {
+	src := &fakeSource{}
+	f := NewAt(src, 0, Options{})
+	src.put(1, 2, 3)
+	f.Poll(context.Background())
+	f.Poll(context.Background())
+	if src.asked != 0 {
+		t.Errorf("asked for the writers %d times without a gap", src.asked)
 	}
 }
 
@@ -519,5 +654,25 @@ func TestAnUnsubscribedSubscriberLeaksNoGoroutine(t *testing.T) {
 	}
 	if n := goroutines(t, base); n > base {
 		t.Errorf("%d goroutines after unsubscribing, %d before subscribing", n, base)
+	}
+}
+
+// replaying is a Source whose reads also return rows the feed already has.
+type replaying struct{ *fakeSource }
+
+func (r replaying) After(ctx context.Context, _ int64, limit int) ([]events.Event, error) {
+	return r.fakeSource.After(ctx, 0, limit)
+}
+
+func TestARowAtOrBelowThePositionIsNeverDeliveredAgain(t *testing.T) {
+	src := &fakeSource{}
+	f := NewAt(replaying{src}, 0, Options{})
+	s := f.Subscribe()
+	src.put(1, 2)
+	f.Poll(context.Background())
+	src.put(4)
+	f.Poll(context.Background()) // 3 never committed and nobody holds it
+	if got := drain(s); !equal(got, []int64{1, 2, 4}) {
+		t.Errorf("got %v, want [1 2 4] with nothing twice", got)
 	}
 }

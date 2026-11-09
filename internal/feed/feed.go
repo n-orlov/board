@@ -5,8 +5,8 @@
 //
 // The feed polls every BOARD_STREAM_POLL and a local write wakes it at once
 // through Notify. On Postgres a lower `n` can commit after a higher one, so a
-// gap in `n` is held back until the missing event commits or the gap is old
-// enough to be a rolled-back write.
+// gap in `n` is held back until every transaction that could still commit the
+// missing number has ended; a number still missing after that rolled back.
 package feed
 
 import (
@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,6 @@ import (
 
 // DefaultPoll is the poll interval when BOARD_STREAM_POLL is unset.
 const DefaultPoll = time.Second
-
-// DefaultGapGrace is how long an event is held behind a missing `n` before the
-// feed decides the missing write rolled back and moves on.
-const DefaultGapGrace = 2 * time.Second
 
 const (
 	defaultBuffer = 256
@@ -59,6 +56,10 @@ type Source interface {
 	After(ctx context.Context, n int64, limit int) ([]events.Event, error)
 	// Last returns the highest n in the table, 0 when it is empty.
 	Last(ctx context.Context) (int64, error)
+	// Writers names the transactions that are inside an event write right now:
+	// each took the event-write lock before its number was drawn and holds it
+	// until it commits or rolls back. A database with one writer returns none.
+	Writers(ctx context.Context) ([]string, error)
 }
 
 // StoreSource reads the events of one database.
@@ -86,16 +87,37 @@ func (s StoreSource) Last(ctx context.Context) (int64, error) {
 	return n.Int64, nil
 }
 
+// Writers implements Source.
+func (s StoreSource) Writers(ctx context.Context) ([]string, error) {
+	q := s.Store.Dialect().EventWriters()
+	if q == "" {
+		return nil, nil
+	}
+	rows, err := s.Store.Reader().QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("read event writers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var w string
+		if err := rows.Scan(&w); err != nil {
+			return nil, fmt.Errorf("read event writers: %w", err)
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read event writers: %w", err)
+	}
+	return out, nil
+}
+
 // Options tunes a Feed. The zero value is the production setting.
 type Options struct {
 	// Poll is the poll interval; 0 means DefaultPoll.
 	Poll time.Duration
-	// GapGrace is how long a gap in `n` is held; 0 means DefaultGapGrace.
-	GapGrace time.Duration
 	// Buffer is the size of each subscription's channel; 0 means 256.
 	Buffer int
-	// Now is the clock the gap grace reads; nil means time.Now.
-	Now func() time.Time
 	// Tick makes the poll ticker; nil means a time.Ticker. Tests inject it.
 	Tick func(d time.Duration) (ticks <-chan time.Time, stop func())
 	// Report receives the errors of a failed poll; the feed retries on the next
@@ -109,11 +131,24 @@ type Feed struct {
 	opts Options
 	wake chan struct{}
 
-	mu      sync.Mutex
-	last    int64
-	subs    map[*Subscription]struct{}
-	gap     int64
-	gapFrom time.Time
+	mu   sync.Mutex
+	last int64
+	subs map[*Subscription]struct{}
+	// settled is the number up to which every missing `n` is known to have
+	// rolled back: an event at or below it is delivered across a gap.
+	settled int64
+	// pend is the open gap the feed waits on, nil when there is none.
+	pend *pending
+}
+
+// pending is a gap in `n` below bound, the highest number a read saw, and the
+// transactions that held the event-write lock right after that read. Every
+// missing number below bound was drawn by one of them or by a transaction that
+// had already ended, so once all of them have ended a fresh read shows every
+// missing number that committed, and the rest rolled back.
+type pending struct {
+	bound   int64
+	holders []string
 }
 
 // New returns a feed positioned at the newest event: it delivers the events
@@ -131,14 +166,8 @@ func NewAt(src Source, n int64, opts Options) *Feed {
 	if opts.Poll <= 0 {
 		opts.Poll = DefaultPoll
 	}
-	if opts.GapGrace <= 0 {
-		opts.GapGrace = DefaultGapGrace
-	}
 	if opts.Buffer <= 0 {
 		opts.Buffer = defaultBuffer
-	}
-	if opts.Now == nil {
-		opts.Now = time.Now
 	}
 	if opts.Tick == nil {
 		opts.Tick = func(d time.Duration) (<-chan time.Time, func()) {
@@ -190,50 +219,109 @@ func (f *Feed) Poll(ctx context.Context) {
 	}
 }
 
-// pollOnce reads one batch and delivers it. It reports whether the batch was
-// full, so more may be waiting.
+// pollOnce reads one batch and delivers it. It reports whether to read again at
+// once: the batch was full, or it opened a gap whose writers may already be gone.
 func (f *Feed) pollOnce(ctx context.Context) (bool, error) {
 	f.mu.Lock()
-	from := f.last
+	from, pend := f.last, f.pend
 	f.mu.Unlock()
+	settle, err := f.settles(ctx, pend)
+	if err != nil {
+		return false, err
+	}
 	items, err := f.src.After(ctx, from, batchSize)
 	if err != nil {
 		return false, err
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, e := range items {
-		if !f.admit(e.N) {
-			break
+	open, last := f.advance(items, pend, settle)
+	if open {
+		if err := f.openGap(ctx, items[len(items)-1].N); err != nil {
+			return false, err
 		}
-		f.deliver(e)
 	}
-	return len(items) == batchSize && f.last > from, nil
+	return open || (len(items) == batchSize && last > from), nil
 }
 
-// admit decides whether the event with number n is next in line, and moves the
-// position to it. A number that skips ahead is held (false) until the gap closes
-// or has stayed open for the grace period, which means the missing write rolled
-// back; after that the feed moves on.
-func (f *Feed) admit(n int64) bool {
-	if n <= f.last {
-		return false
+// settles reads the writers BEFORE the table, while a gap is open, and returns
+// the gap's bound once none of its holders is left (0 until then). A writer that
+// ends after this check ended before the read that follows, so that read shows
+// its event if it committed one.
+func (f *Feed) settles(ctx context.Context, pend *pending) (int64, error) {
+	if pend == nil {
+		return 0, nil
 	}
-	if n == f.last+1 {
-		f.last = n
-		f.gap = 0
-		return true
+	w, err := f.src.Writers(ctx)
+	if err != nil {
+		return 0, err
 	}
-	now := f.opts.Now()
-	if f.gap != f.last+1 {
-		f.gap, f.gapFrom = f.last+1, now
-		return false
+	left := still(pend.holders, w)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pend.holders = left
+	if len(left) > 0 {
+		return 0, nil
 	}
-	if now.Sub(f.gapFrom) < f.opts.GapGrace {
-		return false
+	return pend.bound, nil
+}
+
+// advance delivers the events of one read up to the first gap that is not
+// settled. It reports whether it stopped at a gap no pending entry covers yet,
+// and the number of the last event delivered.
+func (f *Feed) advance(items []events.Event, pend *pending, settle int64) (bool, int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if settle > 0 && f.pend == pend {
+		f.settled, f.pend = max(f.settled, settle), nil
 	}
-	f.last, f.gap = n, 0
-	return true
+	held := f.deliverUpToGap(items)
+	if f.pend != nil && f.last >= f.pend.bound {
+		f.pend = nil // the gap closed by itself
+	}
+	return held && f.pend == nil, f.last
+}
+
+// deliverUpToGap delivers items in order until one skips past a number that is
+// neither delivered nor settled. It reports whether it stopped there. The
+// caller holds f.mu.
+func (f *Feed) deliverUpToGap(items []events.Event) bool {
+	for _, e := range items {
+		if e.N <= f.last {
+			continue
+		}
+		if e.N != f.last+1 && e.N > f.settled {
+			return true
+		}
+		f.last = e.N
+		f.deliver(e)
+	}
+	return false
+}
+
+// openGap reads the writers AFTER the table that showed a gap below bound: every
+// missing number below it was drawn by a writer that holds the lock now or that
+// has already ended.
+func (f *Feed) openGap(ctx context.Context, bound int64) error {
+	w, err := f.src.Writers(ctx)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pend == nil {
+		f.pend = &pending{bound: bound, holders: w}
+	}
+	return nil
+}
+
+// still returns the holders that are still among the current writers.
+func still(holders, writers []string) []string {
+	var out []string
+	for _, h := range holders {
+		if slices.Contains(writers, h) {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // deliver sends e to every subscriber, ending those whose buffer is full.

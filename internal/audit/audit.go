@@ -122,6 +122,8 @@ func Append(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.
 }
 
 // AppendAs appends e, made by the actor row actorID that UpsertActor returned.
+// It first takes the dialect's event-write lock, which tx holds until it ends,
+// so the change feed can tell an uncommitted event number from a rolled-back one.
 func AppendAs(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, now time.Time, e Event) error {
 	id, err := domain.NewULID(now)
 	if err != nil {
@@ -134,6 +136,11 @@ func AppendAs(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, 
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("record event: %w", err)
+	}
+	if lock := d.LockEventWrite(); lock != "" {
+		if _, err := tx.ExecContext(ctx, lock); err != nil {
+			return fmt.Errorf("record event: %w", err)
+		}
 	}
 	_, err = tx.ExecContext(ctx, d.Rebind(d.Insert("events", eventColumns)),
 		id, store.EncodeTime(now), actorID, e.Principal, nullable(e.OnBehalfOfID), nullable(e.InitiativeID), nullable(e.TaskID), e.Type, nullable(e.RefID), e.Summary, string(payload))

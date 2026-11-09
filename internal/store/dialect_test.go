@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,21 @@ func TestEncodeBoundIsTheSmallestMillisecondNotBeforeTheInstant(t *testing.T) {
 		}
 		if EncodeTime(c.at) > EncodeBound(c.at) || EncodeBound(c.at)-EncodeTime(c.at) > 1 {
 			t.Errorf("%s: bound and floor differ by more than one millisecond", name)
+		}
+	}
+}
+
+func TestOnlyPostgresLocksEventWritesAndListsTheWriters(t *testing.T) {
+	if (SQLite{}).LockEventWrite() != "" || (SQLite{}).EventWriters() != "" {
+		t.Error("SQLite has one writer and needs no event-write lock")
+	}
+	lock, writers := (Postgres{}).LockEventWrite(), (Postgres{}).EventWriters()
+	if lock != "SELECT pg_advisory_xact_lock_shared(1650751025)" {
+		t.Errorf("Postgres LockEventWrite = %q", lock)
+	}
+	for _, want := range []string{"FROM pg_locks", "locktype = 'advisory'", "granted", "objid = 1650751025", "objsubid = 1", "current_database()"} {
+		if !strings.Contains(writers, want) {
+			t.Errorf("Postgres EventWriters %q lacks %q", writers, want)
 		}
 	}
 }

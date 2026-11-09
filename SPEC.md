@@ -1141,10 +1141,15 @@ so that it resynchronises (the stream sends `reset`) instead of holding the feed
 This is what lets several replicas share one database: nothing is sent between servers, each tails the
 table and so each sees every event, whichever server took the write. On Postgres, `n` is assigned when a
 row is inserted but visible when its transaction commits, so a row with a lower `n` can appear after one
-with a higher `n`. The feed never delivers past such a gap: it holds the later rows until the missing one
-commits, and treats a gap that stays open for two seconds as a rolled-back write and moves on. On SQLite
-there is one writer and no such gap. `board serve` refuses a `BOARD_STREAM_POLL` that is not a Go duration
-above zero (one stderr line, exit 1).
+with a higher `n`. The feed never delivers past such a gap, and it never guesses from the clock whether
+the missing row rolled back. Every transaction that appends an event first takes a shared transaction-level
+advisory lock (`pg_advisory_xact_lock_shared`), before its `n` is drawn, and holds it until it commits or
+rolls back. When a read shows a gap, the feed notes which transactions hold that lock (`pg_locks`). Every
+missing `n` below the highest one read was drawn by one of them or by a transaction already ended. The
+feed holds the later rows, however long that takes, until each noted transaction has ended. Then it reads
+the table once more: a missing row that committed is delivered in its place, and one still missing rolled
+back, so the feed moves past it. On SQLite there is one writer and no such gap. `board serve` refuses a
+`BOARD_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1).
 
 ---
 

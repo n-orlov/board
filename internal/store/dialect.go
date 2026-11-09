@@ -37,6 +37,15 @@ type Dialect interface {
 	EncodeBool(v bool) any
 	// SupportsListenNotify reports whether LISTEN/NOTIFY exists.
 	SupportsListenNotify() bool
+	// LockEventWrite is the statement a transaction runs right before it
+	// inserts into events, or "" when the database needs none (SPEC 7.3). On
+	// Postgres it takes a shared transaction lock, so EventWriters can name every
+	// transaction that may hold an uncommitted event number.
+	LockEventWrite() string
+	// EventWriters is a query whose rows name, one text column each, the
+	// transactions that currently hold the LockEventWrite lock, or "" when the
+	// database has no such writers.
+	EventWriters() string
 	// IsMissingTable reports whether err says a table does not exist.
 	IsMissingTable(err error) bool
 	// IsUniqueViolation reports whether err is a unique or primary key violation.
@@ -196,6 +205,29 @@ func (SQLite) SupportsListenNotify() bool { return false }
 
 // SupportsListenNotify implements Dialect.
 func (Postgres) SupportsListenNotify() bool { return true }
+
+// eventLockKey is the Postgres advisory lock key of event writes ("bdv1"). It is
+// below 2^32, so pg_locks shows it as classid 0, objid eventLockKey, objsubid 1.
+const eventLockKey = 0x62647631
+
+// LockEventWrite implements Dialect: SQLite has one writer at a time, so an
+// event number is never pending behind a committed higher one.
+func (SQLite) LockEventWrite() string { return "" }
+
+// LockEventWrite implements Dialect.
+func (Postgres) LockEventWrite() string {
+	return fmt.Sprintf("SELECT pg_advisory_xact_lock_shared(%d)", eventLockKey)
+}
+
+// EventWriters implements Dialect.
+func (SQLite) EventWriters() string { return "" }
+
+// EventWriters implements Dialect.
+func (Postgres) EventWriters() string {
+	return fmt.Sprintf(`SELECT virtualtransaction FROM pg_locks
+WHERE locktype = 'advisory' AND granted AND classid = 0 AND objid = %d AND objsubid = 1
+AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`, eventLockKey)
+}
 
 // IsMissingTable implements Dialect.
 func (SQLite) IsMissingTable(err error) bool {
