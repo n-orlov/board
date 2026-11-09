@@ -2104,6 +2104,17 @@ in the URL fragment's query as repeated keys, tags first (`#/attention?tag=work&
 `#/attention`), with blanks and repeats dropped, so a reload reads the same filter back; `apiQuery` sends the same repeated keys
 to `GET /attention`.
 
+**Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
+the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
+`modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a
+closed one) and is empty for a non-blocking ask, and `stateLine` says how an ask stands or ended: "asker stopped", "asker waiting" or
+"asker not waiting" (poll), "answered by alice in the UI" (`ui`, `through the API` for `api`, `relayed` for `relay`, with "(on behalf
+of bob)" when a person is named) or "withdrawn: reason". `canAct` offers Answer and Withdraw on an open ask only, and `blockedReasons`
+lists "blocked by A3: question" for each open blocking ask (the reason in a task's `blocked` badge). `web/src/lib/notes.ts` holds the
+Notes view's filter: broadcast only, task, initiative, resource, author and mention. It lives in the URL fragment's query as
+`broadcast=only`, `task=`, `initiative=`, `resource=`, `author=`, `mention=` in that order, with blanks left out (the default is the
+bare `#/notes`), so a reload reads the same filter back; `apiQuery` sends the same keys to `GET /notes`.
+
 **Attention view** (`#/attention`, `web/src/Attention.svelte`, R9). It is the first entry of the route table and so the
 default: the router sends every fragment the table does not name, `#/` included, to the first entry, and a login lands on
 it. The view reads `GET /attention` under its filter and draws the five sections in §5.3 order (open asks, done not
