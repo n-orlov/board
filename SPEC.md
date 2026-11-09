@@ -662,6 +662,23 @@ prominently. Optional resource prefixes (`host:` vs `repo:`) carry no special me
 Filters: `tag`, `initiative`. Counts per section are in the response header object so the UI
 and CLI can show badges without the lists.
 
+Derivation (`internal/attention`), judged at one instant after the leases that ran out are
+expired (§5.1):
+
+- Each section is newest relevant first: open asks by creation, done tasks by `done_at`, expired
+  leases by expiry, overdue watches by `next_check_at` (the one most recently due first), conflicts
+  by their newest lease; ties go to the later row (conflicts: the resource name).
+- A lease is listed as expired when it is `expired`, has no `acked_at` and no lease of any state
+  and holder started on its task after it. The last outcome of a done task is that of its last
+  ended lease (nothing when none ended). An overdue watch is a `watch` task that is not closed and
+  whose `next_check_at` is past; its last check is its latest `check_recorded` event.
+- A conflict is a resource that two or more live leases hold (§5.2, so two leases of one actor on
+  different tasks count); it lists every holder in lease-number order and the distinct tasks.
+- `initiative` (repeatable: any of them) and `tag` (repeatable: the initiative carries all of
+  them) keep the items on a task or ask of a matching initiative; an ask on no initiative is left
+  out under either filter, and a conflict is kept when any of its leases is on a kept task. The
+  counts and `total` (their sum) follow the filters. An empty board counts 0 everywhere.
+
 ---
 
 ## 6. HTTP API
