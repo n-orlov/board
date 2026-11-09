@@ -565,8 +565,8 @@ row, event or actor. `List` filters with AND by `since` (a note ULID or `N<n>`: 
 the notes at or after that instant), `after` (the page cursor, a note ULID or `N<n>`), `task`, `initiative` (a task's
 notes belong to its initiative), `resources` (any of them), `broadcast` (`only` or `exclude`), `mention` (an exact
 handle), `author` and `limit` (1 to 1000, default 100), ordered by `id`; bodies are left out unless `full` is set.
-`NextAfter` is the ULID of the last note of a page when more follow, else empty. `since=cursor` arrives with the cursor
-store.
+`NextAfter` is the ULID of the last note of a page when more follow, else empty. `since=cursor` is resolved by the
+server (§6.7) from the cursor store, `internal/cursors`, before the query runs.
 
 ### 4.8 `cursors`
 
@@ -577,7 +577,10 @@ store.
 | position | text | the id of the last note or event the actor read on that stream |
 
 An optional server-side read cursor per actor and stream, so an agent may ask "since my last read" without keeping
-state itself (`since=cursor`). Updated only when the reader asks (`ack=true`).
+state itself (`since=cursor`). Updated only when the reader asks: `PUT /cursors/{stream}` or `ack=true` on the note
+list (§6.7). The position is always the ULID of an existing note or event; `internal/cursors` (`Store.Set`, `Ack`, `Get`)
+resolves an `N<n>` or `E<n>` ref to it, upserts the actor and the row (one per actor and stream) in one transaction, and
+reads a handle's position (empty when none is set, which reads from the start). A cursor write adds no event.
 
 ### 4.9 `api_keys`, `sessions`
 
@@ -768,8 +771,9 @@ at, type, actor, principal, initiative?, task?, ref_id?, summary, data}`: `id` t
 a ref (`<slug>-<seq>`), `ref_id` the id of the object it is about, `summary` the one line of §4.6; the optional keys are
 omitted when the event has none. Filters combine with AND: `initiative` (slug or ULID) and `task` (ref or ULID)
 keep the events that name them, `type` (repeatable, OR among the values) keeps those types, `actor` one handle, and
-`since` the events after an event given as its ULID or `E<n>` ref (either letter case) or from an RFC 3339 time on
-(`at >= since`). An empty `type`, a `since` that is none of the three forms, an `after` that is not an event ULID or
+`since` the events after an event given as its ULID or `E<n>` ref (either letter case), from an RFC 3339 time on
+(`at >= since`), or after the caller's `events` cursor (`since=cursor`, §6.7: with no cursor set it reads from the
+start, and reading moves nothing). An empty `type`, a `since` that is none of those forms, an `after` that is not an event ULID or
 `E<n>` ref, or a `limit` outside 1 to 1000 (default 100) is **400** with a `next`. An `initiative` or `task` that names
 nothing is **404**; a `type` or `actor` that matches nothing is **200** with `items: []`. `next_after` is the ULID of
 the last item to send as `after` for the following page, and is omitted on the last page (a page that ends exactly at
@@ -1065,7 +1069,7 @@ is §7.2 and arrives with the ask long-poll.
 `POST`/`GET /api/v1/notes` and `GET /api/v1/notes/{ref}` are in `api/openapi.yaml`. `{ref}` is `N<n>` (either letter
 case) or the note's ULID (either letter case); one that names no note is **404** (`there is no note N9`). Any
 authenticated principal may use them. The server answers 503 problem documents when it runs without a store. The rules
-are those of `internal/notes` (§4.7). `since=cursor`, `ack=true` and the cursor endpoints arrive with the cursor store.
+are those of `internal/notes` (§4.7); `PUT /api/v1/cursors/{stream}`, `since=cursor` and `ack=true` are the cursors of §4.8.
 
 - **`POST /api/v1/notes`**, body `{summary, body?, task?, initiative?, resource?, mentions?}`. `summary` is 1 to 200
   characters on one line, `body` (Markdown) at most 20000 characters, `resource` at most 100 characters (such as
@@ -1079,16 +1083,27 @@ are those of `internal/notes` (§4.7). `since=cursor`, `ack=true` and the cursor
   summary, broadcast}` plus `task`, `initiative`, `resource` and `mentions` when set; the body is never in it.
 - **`GET /api/v1/notes/{ref}`** reads one note, with its body.
 - **`GET /api/v1/notes`** answers `{items, next_after?}`, items ordered by id (posting order). Filters combine with AND:
-  `since` is a note ULID or `N<n>` (the notes after it) or an RFC 3339 time (the notes at or after that instant); `task`
+  `since` is a note ULID or `N<n>` (the notes after it), an RFC 3339 time (the notes at or after that instant) or `cursor`
+  (the notes after the caller's `notes` cursor, from the start when none is set); `task`
   (ref or ULID) and `initiative` (slug or ULID) keep the notes on them, a task's notes belonging to its initiative,
   **404** for one that names nothing; `resource` is repeatable and keeps the notes on any of the resources;
   `broadcast=only` keeps the broadcasts and `broadcast=exclude` drops them; `mention` keeps the notes that mention one
   handle exactly and `author` those written by one handle. A filter that matches nothing is **200** with `items: []`.
   `fields` is `summary` (the default, also when empty: no `body`, but `has_body`) or `full` (with the bodies); anything
-  else is **400** with a `next`, as is a `since` that is none of the three forms, a `broadcast` that is neither value,
+  else is **400** with a `next`, as is a `since` that is none of the four forms, an `ack` that is not a boolean, a `broadcast` that is neither value,
   and an `after` that is not a note ULID or `N<n>` ref. `limit` is 1 to 1000 (default 100; 0 is **400**). `after` is an
   `N<n>` ref or an ULID: the page starts after that note. `next_after`, the ULID of the last item, is present exactly
-  when more notes follow.
+  when more notes follow. `ack=true` moves the caller's `notes` cursor to the last note of the page (the ULID of the last
+  item, even when more pages follow); an empty page leaves the cursor where it was, and without `ack=true` a read
+  moves nothing, `since=cursor` included.
+- **`PUT /api/v1/cursors/{stream}`**, body `{position}`, sets the caller's cursor on the stream and answers **200**
+  `{stream, position, ref}`: `position` is the ULID the cursor now holds and `ref` its `N<n>` or `E<n>`. `notes` takes a
+  note ULID or `N<n>`, `events` an event ULID or `E<n>` (either letter case). A stream other than `notes` or `events` is
+  **404** (`there is no stream tasks`); a missing body, or a position that names no note (or event) of that stream, a
+  time or any other text is **400**, each with a `next`, and a refusal leaves the cursor as it was. Cursors belong to the
+  calling actor, one per stream. `GET /api/v1/events?since=cursor` reads the events after the caller's `events` cursor
+  (none set: from the start) and moves nothing; the events cursor is set only by this `PUT`. `since=cursor` or `ack=true`
+  on a server without a cursor store is **503**.
 - **The note document** (`Note`): `{id, ref, author, summary, body?, has_body, task?, initiative?, resource?, mentions,
   broadcast, created_at}`. `author` is the handle of the actor that posted it, `task` the task's ref, `initiative` its
   slug, `mentions` a list (empty when none), `broadcast` is derived (no task and no initiative) and absent optional

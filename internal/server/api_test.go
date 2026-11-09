@@ -231,6 +231,7 @@ func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error       
 func (brokenResponse) VisitPostNoteResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitListNotesResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetNoteResponse(http.ResponseWriter) error             { return errBroken }
+func (brokenResponse) VisitPutCursorResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetMetaResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutProtocolSeenResponse(http.ResponseWriter) error {
 	return errBroken
@@ -500,6 +501,12 @@ func (s stubOperations) PostNote(context.Context, PostNoteRequestObject) (PostNo
 func (s stubOperations) ListNotes(context.Context, ListNotesRequestObject) (ListNotesResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(ListNotesResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) PutCursor(context.Context, PutCursorRequestObject) (PutCursorResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PutCursorResponseObject)
 	return resp, err
 }
 
@@ -777,6 +784,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list notes 401", 401, ListNotes401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
 		{"list notes 404", 404, ListNotes404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
 		{"list notes 503", 503, ListNotes503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListNotesResponse},
+		{"put cursor 400", 400, PutCursor400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPutCursorResponse},
+		{"put cursor 401", 401, PutCursor401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPutCursorResponse},
+		{"put cursor 404", 404, PutCursor404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitPutCursorResponse},
+		{"put cursor 503", 503, PutCursor503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPutCursorResponse},
 		{"get note 401", 401, GetNote401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},
 		{"get note 404", 404, GetNote404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},
 		{"get note 503", 503, GetNote503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNoteResponse},

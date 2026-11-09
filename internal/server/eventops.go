@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/tasks"
@@ -16,7 +17,10 @@ func (p problemResponse) VisitListTaskEventsResponse(w http.ResponseWriter) erro
 // eventOps is the event reads: GET /api/v1/events and GET
 // /api/v1/tasks/{ref}/events (SPEC 6.2, 6.4). Any authenticated principal may
 // use them: v1 has no ACL.
-type eventOps struct{ events *events.Store }
+type eventOps struct {
+	events  *events.Store
+	cursors cursorOps
+}
 
 // ready answers 503 when the operations have no store behind them.
 func (o eventOps) ready() (problemResponse, bool) {
@@ -100,12 +104,19 @@ func eventQuery(p ListEventsParams) events.Query {
 	return q
 }
 
-// ListEvents lists a page of events.
+// ListEvents lists a page of events. `since=cursor` reads after the caller's
+// events cursor.
 func (o eventOps) ListEvents(ctx context.Context, req ListEventsRequestObject) (ListEventsResponseObject, error) {
 	if r, off := o.ready(); off {
 		return r, nil
 	}
-	page, err := o.events.List(ctx, eventQuery(req.Params))
+	since, problem, err := o.cursors.readFrom(ctx, cursors.StreamEvents, text(req.Params.Since))
+	if problem != nil || err != nil {
+		return orProblem[ListEventsResponseObject](problem, err)
+	}
+	q := eventQuery(req.Params)
+	q.Since = since
+	page, err := o.events.List(ctx, q)
 	if err != nil {
 		return eventResult[ListEventsResponseObject](err)
 	}

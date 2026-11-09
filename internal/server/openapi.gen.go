@@ -683,6 +683,24 @@ type CreatedKey struct {
 // CreatedKeyStatus The key's state now.
 type CreatedKeyStatus string
 
+// Cursor A read cursor of the caller.
+type Cursor struct {
+	// Position The ULID of the last note or event read on the stream.
+	Position string `json:"position"`
+
+	// Ref The short ref of that item, `N<n>` or `E<n>`.
+	Ref string `json:"ref"`
+
+	// Stream `notes` or `events`.
+	Stream string `json:"stream"`
+}
+
+// CursorSet The position to move a read cursor to.
+type CursorSet struct {
+	// Position A note ULID or `N<n>` (stream `notes`), an event ULID or `E<n>` (stream `events`).
+	Position string `json:"position"`
+}
+
 // Event One row of the audit trail.
 type Event struct {
 	// Actor The handle of the actor the event was written as.
@@ -1596,7 +1614,7 @@ type ListAsksParams struct {
 
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
-	// Since An event id, an `E<n>` ref (either letter case) or an RFC 3339 time.
+	// Since An event id, an `E<n>` ref (either letter case), an RFC 3339 time, or `cursor` for the caller's `events` cursor.
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 
 	// Initiative An initiative slug or ULID.
@@ -1662,8 +1680,11 @@ type ListLeasesParams struct {
 
 // ListNotesParams defines parameters for ListNotes.
 type ListNotesParams struct {
-	// Since A note ULID or `N<n>` ref, or an RFC 3339 time.
+	// Since A note ULID or `N<n>` ref, an RFC 3339 time, or `cursor` for the caller's `notes` cursor.
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// Ack `true` moves the caller's `notes` cursor to the last note of the page.
+	Ack *bool `form:"ack,omitempty" json:"ack,omitempty"`
 
 	// Task A task ref or ULID.
 	Task *string `form:"task,omitempty" json:"task,omitempty"`
@@ -1762,6 +1783,9 @@ type AnswerAskJSONRequestBody = AskAnswer
 // WithdrawAskJSONRequestBody defines body for WithdrawAsk for application/json ContentType.
 type WithdrawAskJSONRequestBody = AskWithdraw
 
+// PutCursorJSONRequestBody defines body for PutCursor for application/json ContentType.
+type PutCursorJSONRequestBody = CursorSet
+
 // CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
 type CreateInitiativeJSONRequestBody = InitiativeCreate
 
@@ -1833,6 +1857,9 @@ type ServerInterface interface {
 	// WithdrawAsk Withdraw an ask
 	// (POST /api/v1/asks/{ref}/withdraw)
 	WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	// PutCursor Set a read cursor
+	// (PUT /api/v1/cursors/{stream})
+	PutCursor(w http.ResponseWriter, r *http.Request, stream string)
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
@@ -2176,6 +2203,32 @@ func (siw *ServerInterfaceWrapper) WithdrawAsk(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.WithdrawAsk(w, r, ref)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutCursor operation middleware
+func (siw *ServerInterfaceWrapper) PutCursor(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "stream" -------------
+	var stream string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "stream", r.PathValue("stream"), &stream, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "stream", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutCursor(w, r, stream)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2653,6 +2706,10 @@ func (siw *ServerInterfaceWrapper) ListNotes(w http.ResponseWriter, r *http.Requ
 	// ------------- Optional query parameter "since" -------------
 
 	bind.check("since", runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "ack" -------------
+
+	bind.check("ack", runtime.BindQueryParameterWithOptions("form", true, false, "ack", r.URL.Query(), &params.Ack, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
 
 	// ------------- Optional query parameter "task" -------------
 
@@ -3400,6 +3457,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes", wrapper.ListNotes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/notes", wrapper.PostNote)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes/{ref}", wrapper.GetNote)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/cursors/{stream}", wrapper.PutCursor)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -4233,6 +4291,93 @@ type WithdrawAsk503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response WithdrawAsk503ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutCursorRequestObject struct {
+	Stream string `json:"stream"`
+	Body   *PutCursorJSONRequestBody
+}
+
+type PutCursorResponseObject interface {
+	VisitPutCursorResponse(w http.ResponseWriter) error
+}
+
+type PutCursor200JSONResponse Cursor
+
+func (response PutCursor200JSONResponse) VisitPutCursorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutCursor400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PutCursor400ApplicationProblemPlusJSONResponse) VisitPutCursorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutCursor401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PutCursor401ApplicationProblemPlusJSONResponse) VisitPutCursorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutCursor404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PutCursor404ApplicationProblemPlusJSONResponse) VisitPutCursorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutCursor503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response PutCursor503ApplicationProblemPlusJSONResponse) VisitPutCursorResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7650,6 +7795,9 @@ type StrictServerInterface interface {
 	// WithdrawAsk Withdraw an ask
 	// (POST /api/v1/asks/{ref}/withdraw)
 	WithdrawAsk(ctx context.Context, request WithdrawAskRequestObject) (WithdrawAskResponseObject, error)
+	// PutCursor Set a read cursor
+	// (PUT /api/v1/cursors/{stream})
+	PutCursor(ctx context.Context, request PutCursorRequestObject) (PutCursorResponseObject, error)
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
@@ -8082,6 +8230,39 @@ func (sh *strictHandler) WithdrawAsk(w http.ResponseWriter, r *http.Request, ref
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(WithdrawAskResponseObject); ok {
 		if err := validResponse.VisitWithdrawAskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutCursor operation middleware
+func (sh *strictHandler) PutCursor(w http.ResponseWriter, r *http.Request, stream string) {
+	var request PutCursorRequestObject
+
+	request.Stream = stream
+
+	var body PutCursorJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutCursor(ctx, request.(PutCursorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutCursor")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutCursorResponseObject); ok {
+		if err := validResponse.VisitPutCursorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

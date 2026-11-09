@@ -11,6 +11,7 @@ import (
 	"github.com/n-orlov/board/internal/actors"
 	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
@@ -73,7 +74,7 @@ func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 // WithEvents serves GET /api/v1/events and GET /api/v1/tasks/{ref}/events from
 // st; without it they answer 503.
 func WithEvents(st *events.Store) Option {
-	return func(o *operations) { o.eventOps = eventOps{events: st} }
+	return func(o *operations) { o.events = st }
 }
 
 // WithLeases serves /api/v1/leases from st; without it the operations answer 503.
@@ -91,7 +92,18 @@ func WithAsks(st *asks.Store) Option {
 
 // WithNotes serves /api/v1/notes from st; without it the operations answer 503.
 func WithNotes(st *notes.Store) Option {
-	return func(o *operations) { o.noteOps = noteOps{notes: st} }
+	return func(o *operations) { o.notes = st }
+}
+
+// WithCursors serves PUT /api/v1/cursors/{stream} from st and lets `since=cursor`
+// on the note and event lists (and `ack=true` on the note list) use it; without
+// it they answer 503.
+func WithCursors(st *cursors.Store) Option {
+	return func(o *operations) {
+		o.cursorOps = cursorOps{cursors: st}
+		o.noteOps.cursors = o.cursorOps
+		o.eventOps.cursors = o.cursorOps
+	}
 }
 
 // WithMeta sets what GET /api/v1/meta reports about the server, and gives

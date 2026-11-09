@@ -457,7 +457,7 @@ export interface paths {
         };
         /**
          * List events
-         * @description A page of events in the order they were written. Filters combine: `since` keeps the events after an event (its id or `E<n>` ref) or from an RFC 3339 time on, `initiative` (slug or ULID) and `task` (ref or ULID) keep the events that name them, `type` keeps the events of any of the types given and `actor` those of one handle. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous page; the response's `next_after` is the value to send, and is absent on the last page. An initiative or task filter that names nothing is 404.
+         * @description A page of events in the order they were written. Filters combine: `since` keeps the events after an event (its id or `E<n>` ref), from an RFC 3339 time on, or after the caller's `events` cursor (`since=cursor`; with no cursor set it reads from the start), `initiative` (slug or ULID) and `task` (ref or ULID) keep the events that name them, `type` keeps the events of any of the types given and `actor` those of one handle. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous page; the response's `next_after` is the value to send, and is absent on the last page. An initiative or task filter that names nothing is 404.
          */
         get: operations["listEvents"];
         put?: never;
@@ -665,7 +665,7 @@ export interface paths {
         };
         /**
          * List notes
-         * @description A page of notes ordered by id (posting order). Filters combine. `since` is a note ULID or `N<n>` ref (the notes after it) or an RFC 3339 time (the notes at or after it); `task` (ref or ULID) and `initiative` (slug or ULID) keep the notes on them, a task's notes belonging to its initiative; `resource` is repeatable and keeps the notes on any of the resources; `broadcast` is `only` or `exclude`; `mention` keeps the notes that mention one handle and `author` those written by one handle. `fields` is `summary` (the default: no `body`, but `has_body`) or `full` (with the bodies). `limit` is 1 to 1000, default 100. `after` is the `N<n>` ref or id of the last note of the previous page; `next_after` is the value to send, absent on the last page. A `task` or `initiative` that names nothing is 404.
+         * @description A page of notes ordered by id (posting order). Filters combine. `since` is a note ULID or `N<n>` ref (the notes after it), an RFC 3339 time (the notes at or after it) or `cursor` (the notes after the caller's `notes` cursor, or from the start when none is set); `ack=true` moves the caller's `notes` cursor to the last note returned (it stays put when the page is empty); `task` (ref or ULID) and `initiative` (slug or ULID) keep the notes on them, a task's notes belonging to its initiative; `resource` is repeatable and keeps the notes on any of the resources; `broadcast` is `only` or `exclude`; `mention` keeps the notes that mention one handle and `author` those written by one handle. `fields` is `summary` (the default: no `body`, but `has_body`) or `full` (with the bodies). `limit` is 1 to 1000, default 100. `after` is the `N<n>` ref or id of the last note of the previous page; `next_after` is the value to send, absent on the last page. A `task` or `initiative` that names nothing is 404.
          */
         get: operations["listNotes"];
         put?: never;
@@ -693,6 +693,26 @@ export interface paths {
          */
         get: operations["getNote"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cursors/{stream}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a read cursor
+         * @description Sets the caller's read cursor on a stream, `notes` or `events`, to `position`: a note ULID or `N<n>` ref for `notes`, an event ULID or `E<n>` ref for `events` (either letter case). The cursor then holds that item's ULID and `since=cursor` on the stream's list reads the items after it. A stream other than those two is 404 and a position that names no note or event (or is not readable) is 400.
+         */
+        put: operations["putCursor"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1423,6 +1443,20 @@ export interface components {
             items: components["schemas"]["Note"][];
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
+        };
+        /** @description The position to move a read cursor to. */
+        CursorSet: {
+            /** @description A note ULID or `N<n>` (stream `notes`), an event ULID or `E<n>` (stream `events`). */
+            position: string;
+        };
+        /** @description A read cursor of the caller. */
+        Cursor: {
+            /** @description `notes` or `events`. */
+            stream: string;
+            /** @description The ULID of the last note or event read on the stream. */
+            position: string;
+            /** @description The short ref of that item, `N<n>` or `E<n>`. */
+            ref: string;
         };
         /** @description A page of events. */
         EventList: {
@@ -2389,7 +2423,7 @@ export interface operations {
     listEvents: {
         parameters: {
             query?: {
-                /** @description An event id, an `E<n>` ref (either letter case) or an RFC 3339 time. */
+                /** @description An event id, an `E<n>` ref (either letter case), an RFC 3339 time, or `cursor` for the caller's `events` cursor. */
                 since?: string;
                 /** @description An initiative slug or ULID. */
                 initiative?: string;
@@ -2780,8 +2814,10 @@ export interface operations {
     listNotes: {
         parameters: {
             query?: {
-                /** @description A note ULID or `N<n>` ref, or an RFC 3339 time. */
+                /** @description A note ULID or `N<n>` ref, an RFC 3339 time, or `cursor` for the caller's `notes` cursor. */
                 since?: string;
+                /** @description `true` moves the caller's `notes` cursor to the last note of the page. */
+                ack?: boolean;
                 /** @description A task ref or ULID. */
                 task?: string;
                 /** @description An initiative slug or ULID. */
@@ -2871,6 +2907,37 @@ export interface operations {
                     "application/json": components["schemas"]["Note"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putCursor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `notes` or `events`. */
+                stream: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CursorSet"];
+            };
+        };
+        responses: {
+            /** @description The cursor as set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cursor"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];

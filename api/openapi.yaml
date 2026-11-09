@@ -1006,7 +1006,8 @@ paths:
       summary: List events
       description: >-
         A page of events in the order they were written. Filters combine: `since` keeps the events after an event
-        (its id or `E<n>` ref) or from an RFC 3339 time on, `initiative` (slug or ULID) and `task` (ref or ULID) keep
+        (its id or `E<n>` ref), from an RFC 3339 time on, or after the caller's `events` cursor (`since=cursor`; with no
+        cursor set it reads from the start), `initiative` (slug or ULID) and `task` (ref or ULID) keep
         the events that name them, `type` keeps the events of any of the types given and `actor` those of one
         handle. `limit` is 1 to 1000, default 100. `after` is the id or `E<n>` ref of the last event of the previous
         page; the response's `next_after` is the value to send, and is absent on the last page. An initiative or
@@ -1018,7 +1019,9 @@ paths:
         - name: since
           in: query
           required: false
-          description: An event id, an `E<n>` ref (either letter case) or an RFC 3339 time.
+          description: >-
+            An event id, an `E<n>` ref (either letter case), an RFC 3339 time, or `cursor` for the caller's `events`
+            cursor.
           schema:
             type: string
         - name: initiative
@@ -1547,7 +1550,9 @@ paths:
       summary: List notes
       description: >-
         A page of notes ordered by id (posting order). Filters combine. `since` is a note ULID or `N<n>` ref (the notes
-        after it) or an RFC 3339 time (the notes at or after it); `task` (ref or ULID) and `initiative` (slug or ULID)
+        after it), an RFC 3339 time (the notes at or after it) or `cursor` (the notes after the caller's `notes`
+        cursor, or from the start when none is set); `ack=true` moves the caller's `notes` cursor to the last note
+        returned (it stays put when the page is empty); `task` (ref or ULID) and `initiative` (slug or ULID)
         keep the notes on them, a task's notes belonging to its initiative; `resource` is repeatable and keeps the
         notes on any of the resources; `broadcast` is `only` or `exclude`; `mention` keeps the notes that mention
         one handle and `author` those written by one handle. `fields` is `summary` (the default: no `body`, but
@@ -1561,9 +1566,15 @@ paths:
         - name: since
           in: query
           required: false
-          description: A note ULID or `N<n>` ref, or an RFC 3339 time.
+          description: A note ULID or `N<n>` ref, an RFC 3339 time, or `cursor` for the caller's `notes` cursor.
           schema:
             type: string
+        - name: ack
+          in: query
+          required: false
+          description: "`true` moves the caller's `notes` cursor to the last note of the page."
+          schema:
+            type: boolean
         - name: task
           in: query
           required: false
@@ -1651,6 +1662,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Note"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/cursors/{stream}:
+    put:
+      operationId: putCursor
+      tags: [notes]
+      summary: Set a read cursor
+      description: >-
+        Sets the caller's read cursor on a stream, `notes` or `events`, to `position`: a note ULID or `N<n>` ref for
+        `notes`, an event ULID or `E<n>` ref for `events` (either letter case). The cursor then holds that item's ULID
+        and `since=cursor` on the stream's list reads the items after it. A stream other than those two is 404 and a
+        position that names no note or event (or is not readable) is 400.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: stream
+          in: path
+          required: true
+          description: "`notes` or `events`."
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CursorSet"
+      responses:
+        "200":
+          description: The cursor as set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cursor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2873,6 +2925,28 @@ components:
         next_after:
           type: string
           description: The `after` value that fetches the following page. Absent on the last page.
+    CursorSet:
+      type: object
+      description: The position to move a read cursor to.
+      required: [position]
+      properties:
+        position:
+          type: string
+          description: A note ULID or `N<n>` (stream `notes`), an event ULID or `E<n>` (stream `events`).
+    Cursor:
+      type: object
+      description: A read cursor of the caller.
+      required: [stream, position, ref]
+      properties:
+        stream:
+          type: string
+          description: "`notes` or `events`."
+        position:
+          type: string
+          description: The ULID of the last note or event read on the stream.
+        ref:
+          type: string
+          description: The short ref of that item, `N<n>` or `E<n>`.
     EventList:
       type: object
       description: A page of events.

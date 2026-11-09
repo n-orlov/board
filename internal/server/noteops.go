@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/notes"
 )
 
@@ -16,7 +17,10 @@ func (p problemResponse) VisitGetNoteResponse(w http.ResponseWriter) error   { r
 
 // noteOps is the /api/v1/notes operations (SPEC 6.7). Any authenticated
 // principal may use them: v1 has no ACL.
-type noteOps struct{ notes *notes.Store }
+type noteOps struct {
+	notes   *notes.Store
+	cursors cursorOps
+}
 
 // ready answers 503 when the operations have no store behind them.
 func (o noteOps) ready() (problemResponse, bool) {
@@ -146,7 +150,8 @@ func noteQuery(p ListNotesParams, full bool) notes.Query {
 	return q
 }
 
-// ListNotes lists a page of notes.
+// ListNotes lists a page of notes. `since=cursor` reads after the caller's
+// notes cursor and `ack=true` moves that cursor to the last note returned.
 func (o noteOps) ListNotes(ctx context.Context, req ListNotesRequestObject) (ListNotesResponseObject, error) {
 	if r, off := o.ready(); off {
 		return r, nil
@@ -155,9 +160,28 @@ func (o noteOps) ListNotes(ctx context.Context, req ListNotesRequestObject) (Lis
 	if bad != nil {
 		return noteResult[ListNotesResponseObject](*bad)
 	}
-	page, err := o.notes.List(ctx, noteQuery(req.Params, full))
+	ack := req.Params.Ack != nil && *req.Params.Ack
+	who, r, ok := caller(ctx)
+	if !ok && ack {
+		return r, nil
+	}
+	if r, off := o.cursors.ready(); off && ack {
+		return r, nil
+	}
+	since, problem, err := o.cursors.readFrom(ctx, cursors.StreamNotes, text(req.Params.Since))
+	if problem != nil || err != nil {
+		return orProblem[ListNotesResponseObject](problem, err)
+	}
+	q := noteQuery(req.Params, full)
+	q.Since = since
+	page, err := o.notes.List(ctx, q)
 	if err != nil {
 		return noteResult[ListNotesResponseObject](err)
+	}
+	if ack && len(page.Items) > 0 {
+		if err := o.cursors.cursors.Ack(ctx, who.AuditActor(), cursors.StreamNotes, page.Items[len(page.Items)-1].ID); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]Note, len(page.Items))
 	for i, k := range page.Items {
