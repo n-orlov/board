@@ -25,7 +25,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>"
+const usageLine = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {

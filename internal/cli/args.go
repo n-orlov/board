@@ -62,6 +62,7 @@ var (
 		{"--since", true}, {"--task", true}, {"--init", true}, {"--broadcast", false}, {"--res", true}, {"--mention", true},
 		{"--ack", false}, {"--limit", true}, {"--all", false}, {"--json", false},
 	}
+	attentionFlags = []flagSpec{{"--tag", true}, {"--init", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
 	nowFlags       = []flagSpec{{"--resources", true}, {"--json", false}}
 	whoamiFlags    = []flagSpec{}
 	helpAgentFlags = []flagSpec{{"--version", false}}

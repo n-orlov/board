@@ -1286,7 +1286,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`.
+`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1304,7 +1304,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -1601,14 +1601,14 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`.
+- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 board version | update [--check] [--version vX.Y.Z]
 board help agent [--version]            # the agent protocol cheat sheet (§8.6)
 board whoami                            # handle, way back, key name, server reachability
 board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
-board attention
+board attention [--tag t]... [--init slug] [--limit N|--all]   # the five §5.3 sections, one line per item
 board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
                 | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
                 | close <slug> [--force] | reopen <slug>
@@ -1632,6 +1632,34 @@ board admin migrate | backup <dest>
 ```
 
 `board ask --poll D` prints the answer (exit 0), the withdrawal (exit 6), or exits 3 on timeout with the ask still open.
+
+`board attention [--tag t]... [--init slug] [--limit N|--all] [--json]` reads `GET /api/v1/attention` (§6.8) and prints the five
+sections of §5.3 in this order, each a heading `<name>: <count>` (a section with nothing in it is just `<name>: 0`) and one
+indented line per item, newest relevant first, with each actor shown as `handle` or `handle (way back)`:
+
+```
+open asks: 1
+  A12  3m ago  phone-onboard-3  claude:ws1:3f2a  "Which database?"  poll  waiting  blocking
+done, not closed: 1
+  homelab-7  Rotate the prefix  done by deck:personal/vpn-debug 2h ago  L5 "prefix rotated"
+expired leases: 1
+  L3  trip-12  ralph:trip-m6 (tmux attach -t trip)  "attachments e2e"  renewed 3h ago
+overdue watches: 1
+  trip-4  poll the build  nik@phone  due 2d ago  last check "build is red" by codex@laptop 2d ago
+conflicts: 1
+  CONFLICT host:gw1: L7 claude:ws1:3f2a phone-onboard-3, L5 deck:personal/vpn-debug homelab-7
+```
+
+The ask line is `A<n>  <age>  <task, or board for an ask on no task>  <asker>  "<question>"` followed by the words `poll`
+(a poll ask), `waiting` (its asker is polling) and `blocking` that apply. The done line is `<task>  <title>  done by <actor> <age>`
+and, when a lease on the task ended, `  L<n> "<outcome>"` (`L<n> ended` when the holder wrote none). The expired line is
+`L<n>  <task>  <holder>  "<intent>"  renewed <age>`. The watch line is `<task>  <title>  <owner>  due <age>` and, when a check
+was ever recorded, `  last check "<summary>" by <actor> <age>`. The conflict line is `CONFLICT <resource>: ` and each holder as
+`L<n> <actor> <task>`, comma separated. `--tag` (repeated: the initiative carries every tag) and `--init` narrow it as the API's
+`tag` and `initiative` do; each section shows at most 5 lines, then `  +K more → board attention <same filters> --all`, and
+`--limit N` or `--all` change that cap. `--json` prints the API document, every item and no cap. An unknown `--init` exits 4
+with `→ board init ls`; a malformed command line (an argument, an unknown flag, `--limit 0`) exits 2 with the usage line
+`usage: board attention [--tag t]... [--init slug] [--limit N|--all] [--json]`.
 
 ### 8.4 Shortcuts
 
