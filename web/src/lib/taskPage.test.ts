@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError } from './initiatives';
-import { depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
+import { affectsTaskPage, depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
 import type { TaskListItem } from './initiatives';
 import type { Ask } from './asks';
 import type { Note } from './notes';
@@ -169,6 +169,52 @@ describe('TaskPageStore', () => {
     expect(await store.edit('aa-1', { ...initial, cadence: 'soon' }, { ...initial, cadence: '5m' }, 'watch')).toBe(false);
     expect(store.state.actionError).toContain('15m');
     expect(api.patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('TaskPageStore refresh (a live event)', () => {
+  it('reads the page again without the skeleton and shows the new status', async () => {
+    const { api, store, states } = harness();
+    await store.load('aa-1');
+    api.get.mockResolvedValueOnce({ ...store.state.task!, status: 'done' });
+    states.length = 0;
+    await store.refresh('aa-1');
+    expect(store.state.task?.status).toBe('done');
+    expect(states.every((s) => !s.loading)).toBe(true);
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the page it had when the read fails and says why', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    api.get.mockRejectedValueOnce(new InitiativesError(503, 'down'));
+    await store.refresh('aa-1');
+    expect(store.state).toMatchObject({ error: 'down', loading: false });
+    expect(store.state.task?.ref).toBe('aa-1');
+    expect(store.state.events).toHaveLength(1);
+  });
+
+  it('keeps an open action refusal and the bodies read so far', async () => {
+    const { store } = harness({ close: vi.fn(async () => Promise.reject(new Error('nope'))) });
+    await store.load('aa-1');
+    await store.close('aa-1', 'dropped');
+    await store.refresh('aa-1');
+    expect(store.state.actionError).toBe('nope');
+  });
+});
+
+describe('affectsTaskPage', () => {
+  const concerns = affectsTaskPage('AA-1');
+  it('is true for an event naming the task (either letter case), any task event and any lease event', () => {
+    expect(concerns({ type: 'note_posted', task: 'aa-1' })).toBe(true);
+    expect(concerns({ type: 'ask_raised', task: 'AA-1' })).toBe(true);
+    expect(concerns({ type: 'task_done', task: 'aa-2' })).toBe(true);
+    expect(concerns({ type: 'lease_started', task: 'aa-2' })).toBe(true);
+  });
+  it('is false for notes and asks of other tasks, and for events naming no task', () => {
+    expect(concerns({ type: 'note_posted', task: 'aa-2' })).toBe(false);
+    expect(concerns({ type: 'ask_raised', task: 'aa-2' })).toBe(false);
+    expect(concerns({ type: 'key_created' })).toBe(false);
   });
 });
 

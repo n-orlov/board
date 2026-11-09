@@ -20,7 +20,8 @@
     type FlagName,
     type TasksFilter,
   } from './lib/taskFilters';
-  import { TasksApi, TasksStore, type TasksState } from './lib/tasks';
+  import { TasksApi, TasksStore, affectsTasks, type TasksState } from './lib/tasks';
+  import { live } from './lib/live';
 
   let { csrf }: { csrf: string; param?: string } = $props();
 
@@ -39,6 +40,8 @@
       .list('all')
       .then((list) => (initiatives = list.map((i) => i.slug)))
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
+    // A change elsewhere refreshes the rows in place under the filter shown: no skeleton, so scroll and an open dialog stay.
+    return live().subscribe(affectsTasks, () => store.refresh());
   });
 
   // The filter lives in the fragment: a change rewrites it in place (no history entry per choice) and fetches.

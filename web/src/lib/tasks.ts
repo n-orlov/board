@@ -266,11 +266,33 @@ export class TasksStore {
     this.set({ ...shown, loading: this.fetches.busy });
   }
 
+  /**
+   * Reads the list again for a live event: the rows stay on screen (no `loading`, so scroll and focus hold), a row that
+   * left the filter (closed elsewhere) just goes, and a failed read keeps the list it had and says why in the inline error,
+   * never as a toast. Overlapping fetches obey the same newest-wins rule as `load`.
+   */
+  async refresh(): Promise<void> {
+    const ticket = this.fetches.begin();
+    let outcome: Partial<TasksState>;
+    try {
+      outcome = { tasks: await this.api.list(this.current.filter), error: undefined };
+    } catch (e) {
+      outcome = { error: errorText(e) };
+    }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy && this.current.loading });
+  }
+
   /** Switches to a filter and fetches the list under it. */
   async setFilter(filter: TasksFilter): Promise<void> {
     this.set({ filter });
     await this.load();
   }
+}
+
+/** Whether a live event can change the Tasks list: any event that names a task (its lease, asks, notes) and an initiative's own (its close drops tasks). */
+export function affectsTasks(event: { type: string; task?: string }): boolean {
+  return event.task !== undefined || event.type.startsWith('initiative_');
 }
 
 export interface NewTaskState {

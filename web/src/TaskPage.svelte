@@ -20,8 +20,9 @@
   import { currentBrowser } from './lib/session';
   import { taskActions } from './lib/taskActions';
   import { toTaskEditForm, type TaskEditForm as EditForm } from './lib/taskEdit';
-  import { eventRows, expiredRows, kindText, leaseRows, plannedText, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
+  import { affectsTaskPage, eventRows, expiredRows, kindText, leaseRows, plannedText, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
   import { TasksApi, type Resolution } from './lib/tasks';
+  import { live } from './lib/live';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
@@ -34,6 +35,8 @@
 
   $effect(() => {
     void store.load(param);
+    // An event that concerns the task reads the page again in place: no skeleton, so an open dialog keeps what was typed.
+    return live().subscribe(affectsTaskPage(param), () => store.refresh(param));
   });
 
   // The refs of the task page are written in either letter case; the API answers with the canonical ref.
@@ -84,7 +87,11 @@
 
   const ack = (lease: string) => finish(store.ackLease(ref, lease), `Lease ${lease} acknowledged`);
 
-  const now = new Date();
+  // The clock is read when the page's data changes, so a refresh restates "expires in" and "ago".
+  const now = $derived.by(() => {
+    void view;
+    return new Date();
+  });
   const actions = $derived(view.task === undefined ? undefined : taskActions(view.task.status, view.task.kind));
   const leases = $derived(view.task === undefined ? [] : leaseRows(view.task, now));
   const expired = $derived(expiredRows(view.expired, now));

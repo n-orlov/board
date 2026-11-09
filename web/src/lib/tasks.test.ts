@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError, type InitiativeListItem, type TaskListItem } from './initiatives';
 import { emptyNewTask } from './newTask';
 import { DEFAULT_TASKS_FILTER } from './taskFilters';
-import { NewTaskStore, openInitiatives, TasksApi, TasksStore, type NewTaskState, type TasksState } from './tasks';
+import { affectsTasks, NewTaskStore, openInitiatives, TasksApi, TasksStore, type NewTaskState, type TasksState } from './tasks';
 import type { Browser } from './session';
 
 const task = (ref: string) => ({ id: 'id-' + ref, ref, title: 'Title ' + ref }) as TaskListItem;
@@ -111,6 +111,83 @@ describe('TasksStore', () => {
     await first;
     expect(s.state.tasks.map((t) => t.ref)).toEqual(['new']);
     expect(s.state.loading).toBe(false);
+  });
+});
+
+describe('TasksStore refresh (a live event)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  function gated() {
+    const gates: { resolve: (t: TaskListItem[]) => void; reject: (e: unknown) => void }[] = [];
+    const list = () => new Promise<TaskListItem[]>((resolve, reject) => gates.push({ resolve, reject }));
+    return { gates, list };
+  }
+
+  it('swaps the rows without making the list loading, and a row that left the filter goes', async () => {
+    const { gates, list } = gated();
+    const seen: boolean[] = [];
+    const s = new TasksStore({ list }, (st) => seen.push(st.loading));
+    const first = s.load();
+    gates[0]!.resolve([task('aa-1'), task('aa-2')]);
+    await first;
+    seen.length = 0;
+    const again = s.refresh();
+    await tick();
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['aa-1', 'aa-2']);
+    gates[1]!.resolve([task('aa-1')]);
+    await again;
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['aa-1']);
+    expect(s.state).toMatchObject({ loading: false, error: undefined });
+    expect(seen).not.toContain(true);
+  });
+
+  it('keeps the rows it had when the read fails and says why', async () => {
+    const { gates, list } = gated();
+    const s = new TasksStore({ list }, () => undefined);
+    const first = s.load();
+    gates[0]!.resolve([task('aa-1')]);
+    await first;
+    const again = s.refresh();
+    gates[1]!.reject(new InitiativesError(503, 'down'));
+    await again;
+    expect(s.state).toMatchObject({ loading: false, error: 'down' });
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['aa-1']);
+  });
+
+  it('drops an older read that lands after a newer one', async () => {
+    const { gates, list } = gated();
+    const s = new TasksStore({ list }, () => undefined);
+    const first = s.refresh();
+    const second = s.refresh();
+    gates[1]!.resolve([task('new')]);
+    await second;
+    gates[0]!.resolve([task('old')]);
+    await first;
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['new']);
+  });
+
+  it('a first load still pending keeps the list loading after a refresh lands', async () => {
+    const { gates, list } = gated();
+    const s = new TasksStore({ list }, () => undefined);
+    const first = s.load();
+    await tick();
+    const again = s.refresh();
+    gates[1]!.resolve([task('x')]);
+    await again;
+    expect(s.state.loading).toBe(true);
+    gates[0]!.resolve([task('old')]);
+    await first;
+    expect(s.state.loading).toBe(false);
+    expect(s.state.tasks.map((t) => t.ref)).toEqual(['x']);
+  });
+});
+
+describe('affectsTasks', () => {
+  it('is true for an event that names a task and for an initiative event, false for the rest', () => {
+    expect(affectsTasks({ type: 'task_done', task: 'aa-1' })).toBe(true);
+    expect(affectsTasks({ type: 'note_posted', task: 'aa-1' })).toBe(true);
+    expect(affectsTasks({ type: 'initiative_closed' })).toBe(true);
+    expect(affectsTasks({ type: 'note_posted' })).toBe(false);
+    expect(affectsTasks({ type: 'key_created' })).toBe(false);
   });
 });
 

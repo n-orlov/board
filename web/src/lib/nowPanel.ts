@@ -46,4 +46,22 @@ export class NowStore {
     const shown = this.fetches.end(ticket) ? outcome : {};
     this.set({ ...shown, loading: this.fetches.busy });
   }
+
+  /** Reads the live leases again for a live event: the panel keeps what it shows (never `loading`); a failed read keeps the leases and says why. */
+  async refresh(): Promise<void> {
+    const ticket = this.fetches.begin();
+    let outcome: Partial<NowState>;
+    try {
+      outcome = { leases: await this.api.liveLeases(), error: undefined };
+    } catch (e) {
+      outcome = { error: errorText(e) };
+    }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy && this.current.loading });
+  }
+}
+
+/** Whether a live event can change the Now panel: a lease started, renewed, ended, acknowledged or expired. */
+export function affectsNow(event: { type: string }): boolean {
+  return event.type.startsWith('lease_');
 }

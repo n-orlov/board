@@ -1942,6 +1942,16 @@ error. The **initiative page** subscribes with the events that name its initiati
 initiative, its tasks, its open asks and its notes again without the skeleton, so the scroll position, an expanded note
 body and an open dialog with what was typed in it all stay.
 
+The **Tasks view** subscribes with the events that name a task or an initiative (`affectsTasks`) and refreshes through
+`TasksStore.refresh`: the rows are swapped in place under the filter shown (never `loading`, so no skeleton, scroll or
+focus loss), a row that no longer matches the filter (closed elsewhere) just goes, and a failed read keeps the rows and
+shows the inline error, never a toast. The **Now panel** subscribes with the lease events (`affectsNow`) and refreshes
+through `NowStore.refresh` in the same way. The **task page** subscribes with the events that name its task (either
+letter case), any task event (a blocker finishing changes what it waits for) and any lease event (conflicts read every
+live lease) (`affectsTaskPage`), and reads the task, events, leases, asks and notes again through
+`TaskPageStore.refresh` without the skeleton: the new status shows, and an open dialog keeps what was typed; a failed
+read keeps the page and shows the error above it.
+
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
 from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
 below it (the same rows, so the `key-row`, `key-status`, `new-key` and `new-key-value` test ids keep

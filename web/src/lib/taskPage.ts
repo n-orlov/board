@@ -176,7 +176,15 @@ export class TaskPageStore {
     await this.read(ref);
   }
 
-  private async read(ref: string): Promise<void> {
+  /**
+   * Reads the page again for a live event, without the skeleton: an open dialog, its typed fields and the scroll position
+   * stay, and a failed read keeps the page it had and shows the error above it.
+   */
+  async refresh(ref: string): Promise<void> {
+    await this.read(ref, true);
+  }
+
+  private async read(ref: string, keep = false): Promise<void> {
     try {
       const [task, events, expired, live, asks, notes] = await Promise.all([
         this.api.get(ref),
@@ -188,7 +196,8 @@ export class TaskPageStore {
       ]);
       this.set({ task, events, expired, live, asks, notes, loading: false, error: undefined });
     } catch (e) {
-      this.set({ task: undefined, events: [], expired: [], live: [], asks: [], notes: [], loading: false, error: errorText(e) });
+      if (keep) this.set({ error: errorText(e) });
+      else this.set({ task: undefined, events: [], expired: [], live: [], asks: [], notes: [], loading: false, error: errorText(e) });
     }
   }
 
@@ -300,4 +309,13 @@ export class TaskPageStore {
   clearActionError(): void {
     this.set({ actionError: undefined });
   }
+}
+
+/**
+ * Whether a live event can change the page of task `ref` (written in either letter case): an event that names the task, a task
+ * event of another task (a blocker finishing changes what this one waits for) and any lease event (the conflicts read every live lease).
+ */
+export function affectsTaskPage(ref: string): (event: { type: string; task?: string }) => boolean {
+  const own = ref.toLowerCase();
+  return (event) => event.task?.toLowerCase() === own || event.type.startsWith('task_') || event.type.startsWith('lease_');
 }

@@ -114,5 +114,107 @@ for (const vp of viewports) {
       await expect(note.getByTestId('note-body')).toBeVisible();
       expect(await page.evaluate(() => Math.round(window.scrollY))).toBeGreaterThanOrEqual(scrolled);
     });
+    test('the Tasks view shows a task added and finished through the API, without a reload', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-tasks-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live tasks ${vp.name}` }, 201);
+      await page.goto(`/#/tasks?initiative=${slug}`);
+      await expect(page.getByTestId('tasks-skeleton')).toBeHidden(FIVE_SECONDS);
+      await expect(page.getByTestId('no-tasks')).toBeVisible(FIVE_SECONDS);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Added through the API' }, 201);
+      const row = page.locator(`[data-testid="task-row"][data-ref="${ref}"]`);
+      await expect(row).toBeVisible(FIVE_SECONDS);
+      await expect(row.getByTestId('task-status')).toHaveText('open');
+
+      await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
+      await expect(row.getByTestId('task-status')).toHaveText('done', FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
+
+    test('a row closed through the API disappears from the Tasks view with no error toast', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-closed-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live closed ${vp.name}` }, 201);
+      const gone = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Closed elsewhere' }, 201)).ref;
+      const stays = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Stays' }, 201)).ref;
+      await page.goto(`/#/tasks?initiative=${slug}`);
+      const goneRow = page.locator(`[data-testid="task-row"][data-ref="${gone}"]`);
+      await expect(goneRow).toBeVisible(FIVE_SECONDS);
+
+      await post(api, `/api/v1/tasks/${gone}/close`, { resolution: 'dropped' }, 200);
+      await expect(goneRow).toBeHidden(FIVE_SECONDS);
+      await expect(page.locator(`[data-testid="task-row"][data-ref="${stays}"]`)).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toHaveCount(0);
+    });
+
+    test('text typed in the New task dialog survives a task created through the API', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-dialog-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live dialog ${vp.name}` }, 201);
+      await page.goto(`/#/tasks?initiative=${slug}`);
+      await expect(page.getByTestId('no-tasks')).toBeVisible(FIVE_SECONDS);
+      await page.getByRole('button', { name: 'New task' }).click();
+      const dialog = page.getByRole('dialog', { name: 'New task' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel('Title').fill('Typed and kept');
+      await dialog.getByLabel('Description').fill('Half a description');
+
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Arrives under the dialog' }, 201);
+      await expect(page.locator(`[data-testid="task-row"][data-ref="${ref}"]`)).toBeAttached(FIVE_SECONDS);
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel('Title')).toHaveValue('Typed and kept');
+      await expect(dialog.getByLabel('Description')).toHaveValue('Half a description');
+    });
+
+    test('the Now panel shows a lease started and ended through the API, without a reload', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-now-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live now ${vp.name}` }, 201);
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Leased through the API' }, 201);
+      await page.goto('/#/tasks');
+      await expect(page.getByTestId('now-panel')).toBeVisible(FIVE_SECONDS);
+      // Below 768 px the panel starts folded to its summary line.
+      const toggle = page.getByTestId('now-toggle');
+      if (await toggle.isVisible()) await toggle.click();
+      const lease = page.locator(`[data-testid="now-lease"][data-task="${ref}"]`);
+      await expect(lease).toHaveCount(0);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      const started = await post<{ lease: { ref: string } }>(api, '/api/v1/leases', { task: ref, intent: 'Shown live' }, 201);
+      await expect(lease).toBeVisible(FIVE_SECONDS);
+      await expect(lease).toContainText('Shown live');
+
+      await post(api, `/api/v1/leases/${started.lease.ref}/end`, {}, 200);
+      await expect(lease).toBeHidden(FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
+
+    test('the task page shows a milestone and a new status from the API, and keeps text typed in an open dialog', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-task-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live task ${vp.name}` }, 201);
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Watched page' }, 201);
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('task-status')).toHaveText('open', FIVE_SECONDS);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      await page.getByRole('button', { name: 'Edit' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Edit task' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel('Description').fill('Typed while the task changes');
+
+      await post(api, `/api/v1/tasks/${ref}/milestones`, { summary: 'Reached through the API' }, 200);
+      await expect(page.getByTestId('task-page')).toContainText('Reached through the API', FIVE_SECONDS);
+      await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
+      await expect(page.getByTestId('task-status')).toHaveText('done', FIVE_SECONDS);
+
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel('Description')).toHaveValue('Typed while the task changes');
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
   });
 }

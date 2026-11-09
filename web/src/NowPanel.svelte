@@ -1,6 +1,7 @@
 <script lang="ts">
   import { conflictText, nowPanel } from './lib/conflicts';
-  import { NowStore, type NowState } from './lib/nowPanel';
+  import { NowStore, affectsNow, type NowState } from './lib/nowPanel';
+  import { live } from './lib/live';
   import { taskHref } from './lib/taskPage';
   import { TasksApi } from './lib/tasks';
   import { currentBrowser } from './lib/session';
@@ -15,6 +16,8 @@
 
   $effect(() => {
     void store.load();
+    // A lease started, ended or expired elsewhere redraws the panel in place.
+    return live().subscribe(affectsNow, () => store.refresh());
   });
 
   const panel = $derived(nowPanel(view.leases, new Date()));
