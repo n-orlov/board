@@ -1286,7 +1286,7 @@ SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read 
 embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
 `-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|admin>`.
+`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`.
 
 `board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1304,7 +1304,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`).
 
 `board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
@@ -1355,7 +1355,7 @@ Exit codes:
 | 1 | error (server, network, unexpected) | the server cannot be reached, `BOARD_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
 | 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
 | 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
-| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board ask` on an unknown task |
+| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board note show` of an unknown `N<n>`, `board ask`, `board note` and `board notes` on an unknown task or initiative |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
 | 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | `board lease start` and `board lease renew` when a live lease of another holds a resource of the lease; `board now --resources` and `board now` when a conflict touches one of my live leases or a resource given; `board start` arrives later |
@@ -1389,8 +1389,8 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `lease start|renew|end|ls`, `now`, `milestone`, `check`, `events`, `ask`, `ask show|ls|withdraw` and `answer`; the other lines
-below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `lease …`, `now`, `milestone`, `check`, `events`, `ask …`, `answer`) call the server at `BOARD_URL` with
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `lease start|renew|end|ls`, `now`, `milestone`, `check`, `events`, `ask`, `ask show|ls|withdraw`, `answer`, `note`, `note show` and `notes`; the other lines
+below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `lease …`, `now`, `milestone`, `check`, `events`, `ask …`, `answer`, `note …`, `notes`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
 walks every registered flag and fails on a key-like name). With `BOARD_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
@@ -1555,6 +1555,27 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   answered` (`--json`: the ask). The channel is `api`; with `--relay` it is `relay`, and `--for` names the person the relayed answer
   came from (`on_behalf_of`): `--for` without `--relay` is exit 2. An ask that is not open exits 6 with `<detail> → board ask show
   A<n>`; an unknown ask exits 4 with `→ board ask ls`.
+- `board note "<summary>" [--body file|-] [--task ref] [--init slug] [--res r] [--mention h]... [--json]` calls `POST /api/v1/notes`
+  and prints `ok note N<n> posted` (`--json`: the note). `--body` is the text of a file or, with `-`, of standard input (a file that
+  cannot be read exits 1 with `cannot read the body file <path>`, before any request); `--task`, `--init` and `--res` each take one value;
+  `--mention` is repeatable. A note with neither `--task` nor `--init` is a broadcast, with or without `--res` (§4.7). An unknown task exits
+  4 with `→ board task ls`, an unknown initiative exits 4 with `→ board init ls`, and a summary or body the server refuses exits 1 with its
+  message. A first word of `show` is the subcommand and any other starts a new note.
+- `board notes [--since last|<time>|<N…>] [--task ref] [--init slug] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all] [--json]`
+  calls `GET /api/v1/notes` and prints one line per matching note, oldest first:
+  `N<n>  <when>  <author>  <scope>  [<resource>]  <summary>`, where `<when>` is `3m ago`, `<scope>` is the note's task ref, else its
+  initiative slug, else `broadcast`, the resource appears in brackets only when the note has one, and the line ends `  +` when the note has a
+  body. `--since last` reads the notes after the caller's `notes` cursor (from the start when none is set), `--since N<n>` (either letter case)
+  those after that note, and `--since` with an RFC 3339 time or a `YYYY-MM-DD` date those at or after it. The filters combine: `--task` and
+  `--init` keep the notes on them, `--broadcast` only the broadcasts, `--res` (repeatable) the notes on any of the resources and `--mention` the
+  notes that mention one handle. The cap is **5** (§8.1), changed by `--limit N` (N ≥ 1) and removed by `--all` (both together are exit 2), and
+  when more match the last line is `+K more → board notes … --all` repeating every filter. `--ack` moves the caller's `notes` cursor (`PUT
+  /api/v1/cursors/notes`) to the last note **shown**, so the notes left out by the cap stay unread and `board notes --since last --ack` again
+  shows the next ones; nothing moves when no note matched. `--json` prints the shown notes as one JSON array (without bodies, with
+  `has_body`). An unknown task exits 4 with `→ board task ls`, an unknown initiative with `→ board init ls`.
+- `board note show <N…> [--json]` calls `GET /api/v1/notes/<ref>` (either letter case) and prints the one-line form of `board notes`, then
+  `initiative: <slug>` when the note is on a task, `mentions: a, b` when it has any, then the body (nothing more when it has none).
+  `--json` prints the note with its body. An unknown note exits 4 with `<detail> → board notes`.
 - `board milestone <task> "<summary>" [--json]` calls `POST /api/v1/tasks/<task>/milestones` and prints `ok task <ref>
   milestone recorded` (`--json`: the task). It works on a task of any kind and status. An unknown task exits 4 with
   `→ board task ls`; a summary the server refuses (empty, over 200 characters) exits 1 with its message.
@@ -1580,7 +1601,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|admin>`.
+- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|admin>`.
 
 ```
 board version | update [--check] [--version vX.Y.Z]
@@ -1601,8 +1622,8 @@ board lease end   [<L…>|<task>] ["<outcome>"]
 board ask <task> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
 board answer <A…> "<answer>" [--relay] [--for <handle>]
 board ask show <A…> | ls [--state open|answered|withdrawn|all] [--mine] [--task <ref>] | withdraw <A…> ["<reason>"]
-board note "<summary>" [--body file|-] [--task <ref>] [--res r] [--mention h]
-board notes [--since last|<time>|<N…>] [--task <ref>] [--broadcast] [--res r] [--ack]
+board note "<summary>" [--body file|-] [--task <ref>] [--init <slug>] [--res r] [--mention h]...
+board notes [--since last|<time>|<N…>] [--task <ref>] [--init <slug>] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all]
 board note show <N…>
 board milestone <task> "<summary>"
 board check <task> "<summary>" [--next 24h]

@@ -51,11 +51,17 @@ var (
 		{"--state", true}, {"--mine", false}, {"--task", true}, {"--res", true},
 		{"--limit", true}, {"--all", false}, {"--json", false},
 	}
-	askFlags       = []flagSpec{{"--details", true}, {"--option", true}, {"--poll", true}, {"--stop", false}, {"--blocking", false}, {"--json", false}}
-	askShowFlags   = []flagSpec{{"--json", false}}
-	askLsFlags     = []flagSpec{{"--state", true}, {"--mine", false}, {"--task", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
-	askDropFlags   = []flagSpec{{"--json", false}}
-	answerFlags    = []flagSpec{{"--relay", false}, {"--for", true}, {"--json", false}}
+	askFlags      = []flagSpec{{"--details", true}, {"--option", true}, {"--poll", true}, {"--stop", false}, {"--blocking", false}, {"--json", false}}
+	askShowFlags  = []flagSpec{{"--json", false}}
+	askLsFlags    = []flagSpec{{"--state", true}, {"--mine", false}, {"--task", true}, {"--limit", true}, {"--all", false}, {"--json", false}}
+	askDropFlags  = []flagSpec{{"--json", false}}
+	answerFlags   = []flagSpec{{"--relay", false}, {"--for", true}, {"--json", false}}
+	noteFlags     = []flagSpec{{"--body", true}, {"--task", true}, {"--init", true}, {"--res", true}, {"--mention", true}, {"--json", false}}
+	noteShowFlags = []flagSpec{{"--json", false}}
+	notesFlags    = []flagSpec{
+		{"--since", true}, {"--task", true}, {"--init", true}, {"--broadcast", false}, {"--res", true}, {"--mention", true},
+		{"--ack", false}, {"--limit", true}, {"--all", false}, {"--json", false},
+	}
 	nowFlags       = []flagSpec{{"--resources", true}, {"--json", false}}
 	whoamiFlags    = []flagSpec{}
 	helpAgentFlags = []flagSpec{{"--version", false}}
