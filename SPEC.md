@@ -2096,6 +2096,15 @@ contested resources by name with every holder, `nowPanel` gives one row per live
 conflict), the conflicts and a summary such as "2 live leases, 1 conflict", and `taskConflicts` gives, per contested
 resource a live lease of one task holds, the other holders (printed "repo:board: also held by bob on bb-1").
 
+**Attention libraries** (R9). `web/src/lib/attention.ts` holds the Attention view's presentation and filter. `SECTIONS` lists the
+five sections in §5.3 order (open asks, done not closed, expired leases, overdue watches, conflicts) each with its calm
+empty-state text (`emptyText`), and `sectionCount` reads a section's count from the response's `counts`. `ageText` phrases an
+ask's `age_seconds` as "just now" (under a minute), "5 minutes ago", "3 hours ago" or "2 days ago" (the largest whole unit),
+and `askerWaitingLabel` says "asker waiting" or "asker not waiting". The filter (`tag` and `initiative`, each repeatable) lives
+in the URL fragment's query as repeated keys, tags first (`#/attention?tag=work&tag=home&initiative=aa`; the default is the bare
+`#/attention`), with blanks and repeats dropped, so a reload reads the same filter back; `apiQuery` sends the same repeated keys
+to `GET /attention`.
+
 **Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
 the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in
