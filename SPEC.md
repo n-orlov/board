@@ -1354,7 +1354,7 @@ Exit codes:
 | 0 | success | a command did what was asked (a write printed its `ok` line, a list printed, possibly nothing) |
 | 1 | error (server, network, unexpected) | the server cannot be reached, `BOARD_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
 | 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
-| 3 | timed out waiting (`--poll`), the ask stays open | not yet reachable: arrives with `board ask --poll` (the stop-mode `board ask` of this phase never waits) |
+| 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board ask` on an unknown task |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
 | 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
@@ -1530,6 +1530,15 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   with `cannot read the details file <path>`, before any request. An unknown task exits 4 with `→ board task ls`, a closed task exits
   6 with `<detail> → board task show <task>`, a question or option the server refuses exits 1 with its message. A first word of
   `show`, `ls` or `withdraw` is the subcommand and any other starts a new ask; flags may precede the task.
+- `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
+  bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
+  `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until `D` after the raise. Each call asks for at most 300 s (the server's cap) and
+  never for more than the time left to the deadline, so the last wait is the remainder; no call is made once less than a whole
+  second is left or the deadline has passed. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
+  line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
+  withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
+  `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
+  last wait, §7.2). Refusals of the raise are those of the stop-mode ask (4 for an unknown task, 6 for a closed one).
 - `board ask show <A…> [--json]` calls `GET /api/v1/asks/<ref>` and prints the one-line form `A<n>  <state>  <task>  <asker>
   "<question>"  (blocking, poll)  <when>` (`-` for an ask on no task; the marks only when they apply; `asked 3m ago`, `answered by
   <handle> 3m ago` or `withdrawn 3m ago`), then `initiative: <slug>` when it has one, one `option: <text>` line per option, the
@@ -1601,7 +1610,7 @@ board admin keys create <name> [--expires 90d] | list | revoke <name>   # direct
 board admin migrate | backup <dest>
 ```
 
-`board ask --poll D` prints the answer (exit 0), or exits 3 on timeout.
+`board ask --poll D` prints the answer (exit 0), the withdrawal (exit 6), or exits 3 on timeout with the ask still open.
 
 ### 8.4 Shortcuts
 

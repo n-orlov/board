@@ -290,3 +290,58 @@ Feature: Asks and answers from the command line
     Then the exit code is 2
     And stderr is one line ending with "[--relay] [--for <handle>] [--json]"
     And there are 0 asks in the database
+
+  Scenario: ask --poll prints the answer given while it waits and exits 0
+    When I start the client 'board ask aa-1 "Which port?" --poll 30s' as actor "claude@laptop" in the background
+    And within 10 seconds the poll of the ask "A1" is seen in the database
+    Then the background client is still waiting
+    When I run the client 'board answer A1 "8080"' as actor "nik@phone"
+    Then the exit code is 0
+    When the background client ends within 10 seconds
+    Then the exit code is 0
+    And stdout is exactly "ok A1 answered by nik@phone: 8080"
+    And stderr is empty
+    When I run the client 'board ask show A1 --json' as actor "claude@laptop"
+    Then stdout JSON path "mode" is "poll"
+    And stdout JSON path "state" is "answered"
+
+  Scenario: ask --poll --json prints the ask that was answered
+    When I start the client 'board ask aa-1 "Which port?" --poll 30s --json' as actor "claude@laptop" in the background
+    And within 10 seconds the poll of the ask "A1" is seen in the database
+    And I run the client 'board answer A1 "8080"' as actor "nik@phone"
+    And the background client ends within 10 seconds
+    Then the exit code is 0
+    And stdout JSON path "state" is "answered"
+    And stdout JSON path "answer" is "8080"
+
+  Scenario: ask --poll prints the withdrawal and exits 6
+    When I start the client 'board ask aa-1 "Which port?" --poll 30s' as actor "claude@laptop" in the background
+    And within 10 seconds the poll of the ask "A1" is seen in the database
+    And I run the client 'board ask withdraw A1 "moot"' as actor "claude@laptop"
+    And the background client ends within 10 seconds
+    Then the exit code is 6
+    And stdout is exactly "A1 withdrawn: moot"
+    And stderr is empty
+
+  Scenario: ask --poll with a short deadline exits 3 and leaves the ask open
+    When I run the client 'board ask aa-1 "Which port?" --poll 2s' as actor "claude@laptop"
+    Then the exit code is 3
+    And stdout is exactly "A1 still open → board ask show A1"
+    And stderr is empty
+    And the ask "A1" is "open" in the database
+    When I run the client 'board ask show A1 --json' as actor "claude@laptop"
+    Then stdout JSON path "mode" is "poll"
+    And stdout JSON path "state" is "open"
+
+  Scenario: ask --poll on an unknown task exits 4 and raises nothing
+    When I run the client 'board ask zz-9 "Which port?" --poll 2s' as actor "claude@laptop"
+    Then the exit code is 4
+    And there are 0 asks in the database
+
+  Scenario: a bad --poll value or --poll with --stop is a usage error
+    When I run the client 'board ask aa-1 "q" --poll soon' as actor "claude@laptop"
+    Then the exit code is 2
+    When I run the client 'board ask aa-1 "q" --poll 5m --stop' as actor "claude@laptop"
+    Then the exit code is 2
+    And stderr is one line ending with "[--json]"
+    And there are 0 asks in the database

@@ -183,7 +183,7 @@ func TestAskUsageErrors(t *testing.T) {
 		usage string
 	}{
 		{[]string{"ask"}, AskUsage}, {[]string{"ask", "aa-1"}, AskUsage}, {[]string{"ask", "aa-1", "q", "x"}, AskUsage},
-		{[]string{"ask", "aa-1", "q", "--poll", "5m"}, AskUsage}, {[]string{"ask", "aa-1", "q", "--option"}, AskUsage},
+		{[]string{"ask", "aa-1", "q", "--poll", "5x"}, AskUsage}, {[]string{"ask", "aa-1", "q", "--poll"}, AskUsage}, {[]string{"ask", "aa-1", "q", "--poll", "0s"}, AskUsage}, {[]string{"ask", "aa-1", "q", "--poll", "5m", "--stop"}, AskUsage}, {[]string{"ask", "aa-1", "q", "--option"}, AskUsage},
 		{[]string{"ask", "show"}, AskUsage}, {[]string{"ask", "show", "A1", "A2"}, AskUsage},
 		{[]string{"ask", "withdraw"}, AskUsage}, {[]string{"ask", "withdraw", "A1", "r", "x"}, AskUsage},
 		{[]string{"ask", "ls", "x"}, AskUsage}, {[]string{"ask", "ls", "--state", "pending"}, AskUsage},

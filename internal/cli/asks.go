@@ -14,7 +14,7 @@ import (
 )
 
 // AskUsage is the single stderr line for a malformed `board ask` command line.
-const AskUsage = "usage: board ask <task> \"<question>\" [--details file|-] [--option a]... [--stop] [--blocking] [--json] | show <A…> [--json] | ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json] | withdraw <A…> [\"<reason>\"] [--json]"
+const AskUsage = "usage: board ask <task> \"<question>\" [--details file|-] [--option a]... [--poll D | --stop] [--blocking] [--json] | show <A…> [--json] | ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json] | withdraw <A…> [\"<reason>\"] [--json]"
 
 // AnswerUsage is the single stderr line for a malformed `board answer` command line.
 const AnswerUsage = "usage: board answer <A…> \"<answer>\" [--relay] [--for <handle>] [--json]"
@@ -68,9 +68,17 @@ func askRaise(args []string, stdout, stderr io.Writer, env Env) int {
 	if !ok || len(p.pos) != 2 {
 		return usageLine(stderr, AskUsage)
 	}
+	wait, ok := pollSeconds(p)
+	if !ok {
+		return usageLine(stderr, AskUsage)
+	}
 	body, err := raiseBody(p)
 	if err != nil {
 		return report(stderr, err)
+	}
+	if wait > 0 {
+		body["mode"] = "poll"
+		return askPoll(p, body, wait, stdout, stderr, env)
 	}
 	return askWrite(p, "POST", "/api/v1/asks", body, raiseFailure(p.pos[0]), "raised", stdout, stderr, env)
 }

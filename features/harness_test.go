@@ -113,6 +113,9 @@ type harness struct {
 	stdin    string
 	textFile string
 
+	// background is the client command a scenario left running.
+	background *backgroundClient
+
 	server *exec.Cmd
 	addr   string
 	dir    string
