@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,11 +21,12 @@ func TestNextWaitNeverExceedsTheCapOrTheTimeLeft(t *testing.T) {
 		{20 * time.Minute, 300, true},
 		{301 * time.Second, 300, true},
 		{300 * time.Second, 300, true},
-		{299*time.Second + 900*time.Millisecond, 299, true},
+		{299*time.Second + 900*time.Millisecond, 300, true},
 		{100 * time.Second, 100, true},
-		{2500 * time.Millisecond, 2, true},
+		{2500 * time.Millisecond, 3, true},
 		{time.Second, 1, true},
-		{999 * time.Millisecond, 0, false},
+		{999 * time.Millisecond, 1, true},
+		{time.Millisecond, 1, true},
 		{0, 0, false},
 		{-5 * time.Second, 0, false},
 	} {
@@ -35,7 +38,7 @@ func TestNextWaitNeverExceedsTheCapOrTheTimeLeft(t *testing.T) {
 }
 
 // pollClock is a clock the fetch moves: each call takes the whole wait, as a
-// wait nobody answers does, or answerAt seconds into the call when set.
+// wait nobody answers does, but never past the time left, where the call is cut off.
 type pollClock struct {
 	t        time.Time
 	waits    []int
@@ -45,12 +48,12 @@ type pollClock struct {
 
 func (c *pollClock) now() time.Time { return c.t }
 
-func (c *pollClock) fetch(wait int) (askView, json.RawMessage, error) {
+func (c *pollClock) fetch(wait int, left time.Duration) (askView, json.RawMessage, error) {
 	c.waits = append(c.waits, wait)
 	if len(c.waits) == c.failOn {
 		return askView{}, nil, errors.New("boom")
 	}
-	c.t = c.t.Add(time.Duration(wait) * time.Second)
+	c.t = c.t.Add(min(time.Duration(wait)*time.Second, left))
 	if len(c.waits) == c.answerOn {
 		return askView{Ref: "A1", State: "answered"}, json.RawMessage(`{"a":1}`), nil
 	}
@@ -74,12 +77,78 @@ func TestPollAskWaitsInSlicesEndingWithTheRemainder(t *testing.T) {
 
 func TestPollAskMakesNoCallWhenTheDeadlineHasPassed(t *testing.T) {
 	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
-	for _, deadline := range []time.Time{start, start.Add(-time.Hour), start.Add(900 * time.Millisecond)} {
+	for _, deadline := range []time.Time{start, start.Add(-time.Hour), start.Add(-time.Millisecond)} {
 		c := &pollClock{t: start}
 		a, raw, err := pollAsk(askView{Ref: "A1", State: "open"}, json.RawMessage(`{"first":1}`), deadline, c.now, c.fetch)
 		if err != nil || a.State != "open" || string(raw) != `{"first":1}` || len(c.waits) != 0 {
 			t.Errorf("deadline %s: got %v %s %v after %v", deadline, a, raw, err, c.waits)
 		}
+	}
+}
+
+func TestPollAskKeepsWaitingThroughASubSecondRemainder(t *testing.T) {
+	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		after time.Duration
+		waits []int
+	}{
+		{900 * time.Millisecond, []int{1}},
+		{time.Millisecond, []int{1}},
+		{2500 * time.Millisecond, []int{3}},
+		{300*time.Second + 400*time.Millisecond, []int{300, 1}},
+		{600*time.Second + 999*time.Millisecond, []int{300, 300, 1}},
+	} {
+		deadline := start.Add(c.after)
+		clock := &pollClock{t: start}
+		a, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, clock.fetch)
+		if err != nil || a.State != "open" {
+			t.Fatalf("%s: got %v %v", c.after, a, err)
+		}
+		if fmt.Sprint(clock.waits) != fmt.Sprint(c.waits) {
+			t.Errorf("%s: waits %v, want %v", c.after, clock.waits, c.waits)
+		}
+		if !clock.t.Equal(deadline) {
+			t.Errorf("%s: gave up at %s, not at the deadline %s", c.after, clock.t, deadline)
+		}
+	}
+}
+
+func TestPollAskObservesAnAnswerInTheSubSecondRemainder(t *testing.T) {
+	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	clock := &pollClock{t: start, answerOn: 2}
+	a, _, err := pollAsk(askView{State: "open"}, nil, start.Add(300*time.Second+500*time.Millisecond), clock.now, clock.fetch)
+	if err != nil || a.State != "answered" || len(clock.waits) != 2 || clock.waits[1] != 1 {
+		t.Errorf("got %v %v after %v", a, err, clock.waits)
+	}
+}
+
+func TestWaitFetchStopsAtTheDeadlineAndReadsTheAskThen(t *testing.T) {
+	var waits []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("wait") != "" {
+			waits = append(waits, r.URL.Query().Get("wait"))
+			select { // an open ask: hold the request
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+		waits = append(waits, "plain")
+		_, _ = w.Write([]byte(`{"ref":"A1","state":"answered","answered_by":"nik","answer":"x"}`))
+	}))
+	defer srv.Close()
+	c := &client{base: srv.URL, http: srv.Client(), key: "k"}
+	started := time.Now()
+	a, _, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond)
+	if err != nil || a.State != "answered" {
+		t.Fatalf("got %v %v", a, err)
+	}
+	if took := time.Since(started); took < 300*time.Millisecond || took > 2*time.Second {
+		t.Errorf("returned after %s, want at the deadline", took)
+	}
+	if len(waits) != 2 || waits[0] != "1" || waits[1] != "plain" {
+		t.Errorf("requests %v", waits)
 	}
 }
 

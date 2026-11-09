@@ -28,29 +28,39 @@ func pollSeconds(p parsedArgs) (int64, bool) {
 }
 
 // nextWait is the length in whole seconds of the next ?wait= call when left
-// is the time to the deadline: at most maxAskWait and never more than left, so
-// the last wait is the remainder. There is no next call (false) once less than
-// one whole second is left, since the server takes no shorter wait.
+// is the time to the deadline: at most maxAskWait, and left rounded UP to a
+// whole second, since the server takes no shorter wait than one second. A
+// remainder under a second therefore still gets a wait; the caller cuts the
+// request off at the deadline itself (askFetch), so the wait never outlives
+// it. There is no next call (false) once nothing is left.
 func nextWait(left time.Duration) (int, bool) {
-	secs := int(max(0, min(left, maxAskWait*time.Second)) / time.Second)
-	return secs, secs >= 1
+	if left <= 0 {
+		return 0, false
+	}
+	capped := min(left, maxAskWait*time.Second)
+	secs := int((capped + time.Second - 1) / time.Second)
+	return secs, true
 }
 
-// askFetch reads the ask once, holding the request open up to wait seconds.
-type askFetch func(wait int) (askView, json.RawMessage, error)
+// askFetch reads the ask once, holding the request open up to wait seconds but
+// not past left, the time to the deadline: a read cut off by the deadline returns the ask as the
+// server has it then, so an answer or withdrawal made before the deadline is
+// never missed.
+type askFetch func(wait int, left time.Duration) (askView, json.RawMessage, error)
 
 // pollAsk waits for the ask to leave `open` by repeating fetch until the
-// deadline. now is the clock. It returns the last ask read: still open when
-// the deadline came first.
+// deadline has elapsed. now is the clock. It returns the last ask read: still
+// open when the deadline came first.
 func pollAsk(first askView, raw json.RawMessage, deadline time.Time, now func() time.Time, fetch askFetch) (askView, json.RawMessage, error) {
 	a := first
 	for a.State == "open" {
-		wait, ok := nextWait(deadline.Sub(now()))
+		left := deadline.Sub(now())
+		wait, ok := nextWait(left)
 		if !ok {
 			break
 		}
 		var err error
-		if a, raw, err = fetch(wait); err != nil {
+		if a, raw, err = fetch(wait, left); err != nil {
 			return a, raw, err
 		}
 	}
@@ -81,21 +91,31 @@ func askPoll(p parsedArgs, body map[string]any, seconds int64, stdout, stderr io
 	return printPollEnd(a, raw, p.has("--json"), stdout)
 }
 
-// waitFetch reads the ask with ?wait=N. The request may be held longer than a
-// plain request, so its timeout is the wait plus the usual one.
+// waitFetch reads the ask with ?wait=N, cutting the request off when left, the
+// time to the deadline, has run out. The request may be held longer than a plain request, so its
+// timeout is the wait plus the usual one. When the deadline cuts it off, the
+// ask is read once more without a wait, so the state returned is the one at
+// the deadline.
 func waitFetch(ctx context.Context, c *client, ref string) askFetch {
-	return func(wait int) (askView, json.RawMessage, error) {
+	return func(wait int, left time.Duration) (askView, json.RawMessage, error) {
+		wctx, cancel := context.WithTimeout(ctx, left)
+		defer cancel()
 		h := *c.http
 		h.Timeout = time.Duration(wait)*time.Second + requestTimeout
 		long := *c
 		long.http = &h
 		var raw json.RawMessage
 		query := url.Values{"wait": {strconv.Itoa(wait)}}
-		if err := long.do(ctx, "GET", askPath(ref, ""), query, nil, &raw); err != nil {
+		err := long.do(wctx, "GET", askPath(ref, ""), query, nil, &raw)
+		if err != nil && wctx.Err() != nil && ctx.Err() == nil {
+			raw = nil
+			err = c.do(ctx, "GET", askPath(ref, ""), nil, nil, &raw)
+		}
+		if err != nil {
 			return askView{}, nil, err
 		}
 		var a askView
-		err := json.Unmarshal(raw, &a)
+		err = json.Unmarshal(raw, &a)
 		return a, raw, err
 	}
 }

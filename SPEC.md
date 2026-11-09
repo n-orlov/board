@@ -1542,8 +1542,10 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
   bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
   `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until `D` after the raise. Each call asks for at most 300 s (the server's cap) and
-  never for more than the time left to the deadline, so the last wait is the remainder; no call is made once less than a whole
-  second is left or the deadline has passed. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
+  for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
+  remainder, and the client cuts the request off at the deadline itself, then reads the ask once more without a wait; the poll
+  therefore stays active to the actual deadline, sub-second remainder included, and sees any answer or withdrawal made before it.
+  No call is made once the deadline has passed, and exit 3 is reported only then. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
   `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
