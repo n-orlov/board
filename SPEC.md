@@ -1191,7 +1191,16 @@ message is flushed as it is written. A server with no change feed answers 503.
   sends **one** `event: reset` instead, with no `id` line and `data: {"reason":"too_many"}` or
   `{"reason":"unknown_id"}`, replays nothing and continues live; the client then refetches what it shows.
   Resume applies to the `events` topic and is ignored when the stream did not ask for it.
-- **`attention`**: accepted; it carries no message yet (the counts it will carry are §5.3's).
+- **`attention`**: one message, `event: attention` with no `id` line and `data:` the counts of §5.3 for the
+  whole board (the `counts` object of `GET /attention`, §6.8: `open_asks`, `done_not_closed`, `expired_leases`,
+  `overdue_watches`, `conflicts`, `total`) as one JSON line, sent **once on connect** and again **whenever they
+  differ from the ones last sent on that stream**; a change that leaves them equal sends nothing. They are
+  recomputed after every event the change feed delivers (§7.3), whichever topics the stream asked for, and at least
+  every 30 s (every `BOARD_STREAM_HEARTBEAT` when that is shorter), because an overdue watch or an expiring lease
+  changes with the clock and writes no event. A stream with only this topic receives no `board` message. The
+  counts are read the way `GET /attention` reads them, so the leases that ran out expire first. A read that fails
+  after the stream began is skipped and tried again at the next event or recheck; one that fails on connect is a
+  500 before the headers.
 - **Heartbeat**: a comment line, `: ping`, every `BOARD_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
   is idle, so a proxy keeps it open.
 - **Lifetime**: the stream outlives the server's write timeout, because it moves its own write deadline ahead

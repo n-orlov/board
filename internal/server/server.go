@@ -58,6 +58,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	}
 	if ops.hub != nil {
 		ops.hub.events = ops.events
+		ops.hub.attention = ops.attention
 		ops.waits = ops.hub
 	}
 	mux := http.NewServeMux()

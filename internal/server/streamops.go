@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/feed"
 )
@@ -49,7 +50,8 @@ func ParseHeartbeat(v string) (time.Duration, error) {
 // the server shuts down (http.Server.Shutdown does not end a handler).
 type streamHub struct {
 	feed      *feed.Feed
-	events    *events.Store // where a resuming stream reads what it missed; nil: every id is unknown
+	events    *events.Store    // where a resuming stream reads what it missed; nil: every id is unknown
+	attention *attention.Store // what the attention topic counts; nil: the topic sends nothing
 	heartbeat time.Duration
 	stop      chan struct{}
 	once      sync.Once
@@ -125,9 +127,10 @@ type streamResponse struct {
 }
 
 // VisitGetStreamResponse sends the headers, then the events a resuming client
-// missed, then one message per live event, flushed as written, and a comment
-// heartbeat while idle. It returns when the client disconnects, the server shuts
-// down or the feed ends the subscription.
+// missed, the attention counts, then one message per live event and one per
+// change of the counts, flushed as written, and a comment heartbeat while idle.
+// It returns when the client disconnects, the server shuts down or the feed ends
+// the subscription.
 func (r streamResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
 	sub := r.subscribe()
 	defer sub.close()
@@ -135,24 +138,47 @@ func (r streamResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
 	if err != nil {
 		return failure(http.StatusInternalServerError, "could not read the events to resume from").write(w)
 	}
-	out := &streamWriter{w: w, rc: http.NewResponseController(w)}
+	live := &liveStream{r: r, out: &streamWriter{w: w, rc: http.NewResponseController(w)}, events: sub.events,
+		skipThrough: missed.skipThrough, watch: r.attentionWatch()}
+	counts, _, err := live.firstCounts()
+	if err != nil {
+		return failure(http.StatusInternalServerError, "could not read the attention counts").write(w)
+	}
+	sendHeaders(w)
+	if !live.out.flush() || !live.out.replay(missed) || !live.sendFirst(counts) {
+		return nil
+	}
+	stop := live.startTimers()
+	defer stop()
+	for live.step() {
+	}
+	return nil
+}
+
+// sendHeaders answers 200 with the headers of an event stream.
+func sendHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	if !out.flush() || !out.replay(missed) {
-		return nil
+}
+
+// startTimers starts the heartbeat and, with the attention topic, the recheck
+// of the counts. The function it returns stops them.
+func (s *liveStream) startTimers() func() {
+	beat := time.NewTicker(s.r.hub.heartbeat)
+	s.beat = beat.C
+	if s.watch == nil {
+		return beat.Stop
 	}
-	beat := time.NewTicker(r.hub.heartbeat)
-	defer beat.Stop()
-	for r.step(out, sub.events, beat.C, missed.skipThrough) {
-	}
-	return nil
+	recheck := time.NewTicker(recheckEvery(s.r.hub.heartbeat))
+	s.recheck = recheck.C
+	return func() { beat.Stop(); recheck.Stop() }
 }
 
 // subscription is a stream's place in the change feed: the channel of live
-// events (nil when the stream did not ask for events, which blocks forever in a
+// events (nil when the stream asked for neither topic, which blocks forever in a
 // select), the feed position it began at and how to leave.
 type subscription struct {
 	events <-chan events.Event
@@ -160,9 +186,10 @@ type subscription struct {
 	close  func()
 }
 
-// subscribe joins the change feed when the stream asked for events.
+// subscribe joins the change feed when the stream asked for events or for the
+// attention counts, which are recomputed after each event.
 func (r streamResponse) subscribe() subscription {
-	if !r.topics.events {
+	if !r.topics.events && r.attentionWatch() == nil {
 		return subscription{close: func() {}}
 	}
 	sub := r.hub.feed.Subscribe()
@@ -210,20 +237,55 @@ func outcome(res events.Resume, err error) (missed, error) {
 	return missed{items: res.Items, skipThrough: res.From}, nil
 }
 
+// liveStream is a stream after its headers: what it waits on and what it has
+// already sent.
+type liveStream struct {
+	r           streamResponse
+	out         *streamWriter
+	events      <-chan events.Event
+	beat        <-chan time.Time
+	recheck     <-chan time.Time // nil without the attention topic
+	skipThrough int64
+	watch       *countsWatch // nil without the attention topic
+}
+
+// firstCounts reads the counts a connecting stream starts with, before the
+// headers go out so a failed read can still be answered as one.
+func (s *liveStream) firstCounts() (attention.Counts, bool, error) {
+	if s.watch == nil {
+		return attention.Counts{}, false, nil
+	}
+	return s.watch.poll(s.r.ctx)
+}
+
+// sendFirst sends the counts of the connection, when the stream has any.
+func (s *liveStream) sendFirst(c attention.Counts) bool {
+	return s.watch == nil || s.out.attention(c)
+}
+
 // step waits for the next thing to send and sends it. It reports false when the
 // stream is over: the client left, the server is shutting down, the feed ended
 // the subscription or a write failed.
-func (r streamResponse) step(out *streamWriter, events <-chan events.Event, beat <-chan time.Time, skipThrough int64) bool {
+func (s *liveStream) step() bool {
 	select {
-	case <-r.ctx.Done():
+	case <-s.r.ctx.Done():
 		return false
-	case <-r.hub.stop:
+	case <-s.r.hub.stop:
 		return false
-	case e, ok := <-events:
-		return ok && (e.N <= skipThrough || out.message(e))
-	case <-beat:
-		return out.comment("ping")
+	case e, ok := <-s.events:
+		return ok && s.onEvent(e)
+	case <-s.beat:
+		return s.out.comment("ping")
+	case <-s.recheck:
+		return s.sendCounts()
 	}
+}
+
+// onEvent sends a live event to a stream that asked for events (unless the
+// client already has it), then recomputes the counts, which an event may move.
+func (s *liveStream) onEvent(e events.Event) bool {
+	wanted := s.r.topics.events && e.N > s.skipThrough
+	return (!wanted || s.out.message(e)) && s.sendCounts()
 }
 
 // streamWriter writes the messages of a stream and flushes each one.
