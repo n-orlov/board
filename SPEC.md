@@ -1935,6 +1935,13 @@ never rides on colour alone. It is a status region whose accessible name is `Liv
 phone top bar, at the foot of the tablet icon rail (word under the dot) and above the email in the desktop sidebar foot
 (`data-testid="live-indicator"`, one per layout, only the one on screen is visible). Nothing in the UI polls on a timer.
 
+The **Initiatives list** subscribes with every event but notes and keys (`affectsInitiatives`: a row shows status, tags,
+task counts and live leases) and refreshes through `InitiativesStore.refresh`, which swaps the rows in place: the list is
+never `loading`, so no skeleton replaces it and the scroll position holds; a failed refresh keeps the rows and shows its
+error. The **initiative page** subscribes with the events that name its initiative (`concerns(slug)`) and reads the
+initiative, its tasks, its open asks and its notes again without the skeleton, so the scroll position, an expanded note
+body and an open dialog with what was typed in it all stay.
+
 **Settings → API keys** is the `#/settings/keys` view, linked from the navigation. It lists every key
 from `GET /api/v1/keys` as one `<table>` that is a dense table from 768 px up and one card per key
 below it (the same rows, so the `key-row`, `key-status`, `new-key` and `new-key-value` test ids keep
@@ -2311,7 +2318,7 @@ view that fragment selects (anything the table does not name is its first entry,
 its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Notes, Settings. The Attention entry
 (the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
 `live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
-danger colour on every nav surface, and the link's accessible name is "Attention, 3 items need attention" (the whole count, "1 item needs attention" for one). The phone tab bar holds all five entries,
+danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all five entries,
 each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but five fit, so none exists yet. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a

@@ -173,3 +173,8 @@ export class InitiativePageStore {
     this.set({ filter });
   }
 }
+
+/** The live-event predicate of the page of initiative `slug`: events that name that initiative (its tasks, leases, asks, notes). */
+export function concerns(slug: string): (event: { initiative?: string }) => boolean {
+  return (event) => event.initiative === slug;
+}

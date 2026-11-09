@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   InitiativePageStore,
+  concerns,
   leaseHolder,
   liveLeaseCount,
   summaryText,
@@ -262,5 +263,14 @@ describe('InitiativesApi.get and tasks', () => {
     );
     expect((await a.tasks('aa')).map((t) => t.ref)).toEqual(['aa-1', 'aa-2', 'aa-3']);
     expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/tasks?initiative=aa&status=all', '/api/v1/tasks?initiative=aa&status=all&after=aa-2']);
+  });
+});
+
+describe('concerns', () => {
+  it('matches the events that name the initiative and no other', () => {
+    const mine = concerns('aa');
+    expect(mine({ initiative: 'aa' })).toBe(true);
+    expect(mine({ initiative: 'bb' })).toBe(false);
+    expect(mine({})).toBe(false);
   });
 });

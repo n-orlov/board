@@ -236,6 +236,22 @@ export class InitiativesStore {
     this.set({ ...shown, loading: this.fetches.busy });
   }
 
+  /**
+   * Reads the list again for a live event: the rows stay on screen (no `loading`, so the scroll position holds) and a failed
+   * read keeps the list it had. Overlapping fetches obey the same newest-wins rule as `load`.
+   */
+  async refresh(): Promise<void> {
+    const ticket = this.fetches.begin();
+    let outcome: Partial<InitiativesState>;
+    try {
+      outcome = { initiatives: await this.api.list(this.current.filter), error: undefined };
+    } catch (e) {
+      outcome = { error: errorText(e) };
+    }
+    const shown = this.fetches.end(ticket) ? outcome : {};
+    this.set({ ...shown, loading: this.fetches.busy && this.current.loading });
+  }
+
   /** Switches the status filter and fetches the list under it. */
   async setFilter(filter: InitiativeFilter): Promise<void> {
     this.set({ filter });
@@ -256,4 +272,9 @@ export class InitiativesStore {
   clearFormError(): void {
     this.set({ formError: undefined });
   }
+}
+
+/** Whether a live event can change the Initiatives list: its rows show status, tags, task counts and live leases; notes and keys never. */
+export function affectsInitiatives(event: { type: string }): boolean {
+  return !event.type.startsWith('note_') && !event.type.startsWith('key_');
 }

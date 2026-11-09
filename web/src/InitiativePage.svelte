@@ -13,7 +13,7 @@
   import { absoluteTime, relativeTime } from './lib/format';
   import { countBadges } from './lib/counts';
   import { TASK_FILTERS, type TaskFilter } from './lib/initiativeFilters';
-  import { InitiativePageStore, liveLeaseCount, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
+  import { InitiativePageStore, concerns, liveLeaseCount, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import InitiativeEditForm from './InitiativeEditForm.svelte';
   import NewTaskDialog from './NewTaskDialog.svelte';
@@ -22,6 +22,7 @@
   import { InitiativesApi, toEditForm, type InitiativeEdit } from './lib/initiatives';
   import { renderMarkdown } from './lib/markdown';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
+  import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
   import { leasesText } from './lib/counts';
 
@@ -39,6 +40,8 @@
   $effect(() => {
     void store.load(param);
     void threads.load({ initiative: param });
+    // An event naming this initiative reads the page again in place: no skeleton, so scroll, expanded notes and open dialogs stay.
+    return live().subscribe(concerns(param), () => Promise.all([store.reload(param), threads.load({ initiative: param })]));
   });
 
   function open(which: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string }) {

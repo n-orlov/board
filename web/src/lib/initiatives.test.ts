@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InitiativesApi, InitiativesError, InitiativesStore, parseTags, toCreate, toEditForm, toPatch, type Initiative, type InitiativesState } from './initiatives';
+import { InitiativesApi, InitiativesError, InitiativesStore, affectsInitiatives, parseTags, toCreate, toEditForm, toPatch, type Initiative, type InitiativesState } from './initiatives';
 import type { Browser } from './session';
 
 const initiative = (slug: string, extra: Partial<Initiative> = {}): Initiative => ({
@@ -455,5 +455,83 @@ describe('InitiativesStore loading', () => {
     await a;
     expect(s.state).toMatchObject({ loading: false, error: 'newer' });
     expect(s.state.initiatives.map((i) => i.slug)).toEqual(['keep']);
+  });
+});
+
+describe('InitiativesStore refresh (a live event)', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  function gated() {
+    const gates: { resolve: (i: Initiative[]) => void; reject: (e: unknown) => void }[] = [];
+    const list = () => new Promise<Initiative[]>((resolve, reject) => gates.push({ resolve, reject }));
+    return { gates, list };
+  }
+  const make = (list: () => Promise<Initiative[]>) => new InitiativesStore({ list, create: async () => initiative('a') } as never, () => undefined);
+
+  it('swaps the rows without ever making the list loading, so the rows stay on screen', async () => {
+    const { gates, list } = gated();
+    const seen: boolean[] = [];
+    const s = new InitiativesStore({ list, create: async () => initiative('a') } as never, (st) => seen.push(st.loading));
+    const first = s.load();
+    gates[0]!.resolve([initiative('a')]);
+    await first;
+    seen.length = 0;
+    const again = s.refresh();
+    await tick();
+    expect(s.state.loading).toBe(false);
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['a']);
+    gates[1]!.resolve([initiative('a'), initiative('b')]);
+    await again;
+    expect(s.state.loading).toBe(false);
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['a', 'b']);
+    expect(seen).not.toContain(true);
+  });
+
+  it('keeps the rows it had when the read fails and says why', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    gates[0]!.resolve([initiative('a')]);
+    await first;
+    const again = s.refresh();
+    gates[1]!.reject(new InitiativesError(503, 'down'));
+    await again;
+    expect(s.state).toMatchObject({ loading: false, error: 'down' });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['a']);
+  });
+
+  it('drops an older read that lands after a newer one', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.refresh();
+    const second = s.refresh();
+    gates[1]!.resolve([initiative('new')]);
+    await second;
+    gates[0]!.resolve([initiative('old')]);
+    await first;
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['new']);
+  });
+
+  it('a first load still pending keeps the list loading after a refresh lands', async () => {
+    const { gates, list } = gated();
+    const s = make(list);
+    const first = s.load();
+    await tick();
+    const again = s.refresh();
+    gates[1]!.resolve([initiative('x')]);
+    await again;
+    expect(s.state.loading).toBe(true);
+    gates[0]!.resolve([initiative('old')]);
+    await first;
+    expect(s.state).toMatchObject({ loading: false });
+    expect(s.state.initiatives.map((i) => i.slug)).toEqual(['x']);
+  });
+});
+
+describe('affectsInitiatives', () => {
+  it('is true for every event that changes a row and false for notes and keys', () => {
+    for (const type of ['initiative_created', 'initiative_closed', 'task_created', 'task_done', 'lease_started', 'lease_expired', 'ask_raised']) {
+      expect(affectsInitiatives({ type }), type).toBe(true);
+    }
+    for (const type of ['note_posted', 'key_created', 'key_revoked']) expect(affectsInitiatives({ type }), type).toBe(false);
   });
 });

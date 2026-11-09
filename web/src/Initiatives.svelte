@@ -4,10 +4,11 @@
   import InitiativeForm from './InitiativeForm.svelte';
   import Toast from './Toast.svelte';
   import { absoluteTime, relativeTime } from './lib/format';
-  import { InitiativesApi, InitiativesStore, type InitiativeForm as FormValues, type InitiativesState } from './lib/initiatives';
+  import { InitiativesApi, InitiativesStore, affectsInitiatives, type InitiativeForm as FormValues, type InitiativesState } from './lib/initiatives';
   import { countsText, leasesText } from './lib/counts';
   import { INITIATIVE_FILTERS, emptyInitiativesText, type InitiativeFilter } from './lib/initiativeFilters';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
+  import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
 
   let { csrf }: { csrf: string } = $props();
@@ -20,6 +21,8 @@
 
   $effect(() => {
     void store.load();
+    // A change elsewhere refreshes the rows in place; a new fetch of the filter shown follows the store's own filter.
+    return live().subscribe(affectsInitiatives, () => store.refresh());
   });
 
   function openForm() {
