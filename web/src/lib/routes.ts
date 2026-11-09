@@ -23,6 +23,8 @@ export interface Route {
   param?: true;
   /** A route that is a page inside another view and has no navigation entry of its own. */
   parent?: string;
+  /** The count this entry's navigation link carries as a badge (the Attention total); a view without one has none. */
+  badge?: 'attention';
 }
 
 export const ROUTES = [
@@ -31,6 +33,7 @@ export const ROUTES = [
     hash: '#/attention',
     title: 'Attention',
     label: 'Attention',
+    badge: 'attention',
     icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
   },
   {
@@ -118,10 +121,32 @@ export interface NavEntry {
   icon: string;
   /** True for the entry of the view on screen: it gets `aria-current="page"`. */
   current: boolean;
+  /** The badge's visible text (`3`, `99+`), the empty string when there is none to show. */
+  badge: string;
+  /** The badge's words for assistive technology ("3 items need attention"), the empty string with no badge. */
+  badgeLabel: string;
 }
 
-/** One navigation entry per table entry that is not a page inside another view; the current one, or its parent, flagged. */
-export function navEntries(current: Route, table: readonly Route[]): NavEntry[] {
+/** The most the badge prints before it says "more": a total above it shows as `99+`. */
+export const BADGE_MAX = 99;
+
+/** The badge of a count: nothing at 0, the number up to 99, `99+` above it. */
+export function badgeText(total: number): string {
+  if (!(total > 0)) return '';
+  return total > BADGE_MAX ? `${BADGE_MAX}+` : String(total);
+}
+
+/** The accessible label of the badge: the whole count in words, even where the badge prints `99+`. */
+export function badgeLabel(total: number): string {
+  if (!(total > 0)) return '';
+  return `${total} ${total === 1 ? 'item needs' : 'items need'} attention`;
+}
+
+/**
+ * One navigation entry per table entry that is not a page inside another view; the current one, or its parent,
+ * flagged. An entry whose route has a `badge` carries the badge of `attentionTotal`, the stream's `counts.total`.
+ */
+export function navEntries(current: Route, table: readonly Route[], attentionTotal = 0): NavEntry[] {
   return table
     .filter((route) => route.parent === undefined)
     .map((route) => ({
@@ -130,5 +155,7 @@ export function navEntries(current: Route, table: readonly Route[]): NavEntry[] 
       label: route.label,
       icon: route.icon,
       current: route.id === current.id || route.id === current.parent,
+      badge: route.badge === 'attention' ? badgeText(attentionTotal) : '',
+      badgeLabel: route.badge === 'attention' ? badgeLabel(attentionTotal) : '',
     }));
 }

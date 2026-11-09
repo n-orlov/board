@@ -27,9 +27,19 @@
           href={entry.href}
           class="{link[variant]} text-text-muted hover:text-text aria-[current=page]:font-semibold aria-[current=page]:text-accent {variant === 'tabbar' ? '' : 'aria-[current=page]:bg-surface'}"
           aria-current={entry.current ? 'page' : undefined}
+          aria-label={entry.badgeLabel === '' ? undefined : `${entry.label}, ${entry.badgeLabel}`}
           title={variant === 'rail' ? entry.label : undefined}
         >
-          <Icon d={entry.icon} />
+          <span class="relative inline-flex">
+            <Icon d={entry.icon} />
+            {#if entry.badge !== ''}
+              <span
+                class="absolute -right-3 -top-2 min-w-5 rounded-full bg-danger px-1 text-center text-[11px] font-bold leading-5 text-surface-raised"
+                data-testid="attention-badge"
+                aria-hidden="true">{entry.badge}</span
+              >
+            {/if}
+          </span>
           <span class={variant === 'rail' ? 'sr-only' : ''}>{entry.label}</span>
         </a>
       </li>

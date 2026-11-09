@@ -2307,8 +2307,12 @@ with the Now panel open and a conflict, and the task page with a conflict, and `
 
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
-view that fragment selects (anything the table does not name is its first entry, Initiatives) and
-its navigation entry, so adding a view is one entry plus its component. The shell
+view that fragment selects (anything the table does not name is its first entry, Attention, the default view: `#/` lands on it) and
+its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Notes, Settings. The Attention entry
+(the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
+`live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
+danger colour on every nav surface, and the link's accessible name is "Attention, 3 items need attention" (the whole count, "1 item needs attention" for one). The phone tab bar holds all five entries,
+each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but five fit, so none exists yet. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
 fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-bottom)`;
@@ -2321,7 +2325,7 @@ every width. The first focusable element of the page is a "Skip to content" link
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:
 Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/` and `#/attention` (the Attention view), `#/initiatives`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>` and
-`#/settings/keys` as states and, at 390x844, 820x1180 and 1440x900, asserts the nav links are
+`#/settings/keys` as states (and asserts the table order, the default route, the badge at 0, 3 and 120 on a fed stand-in stream, and the tab bar's five 44 px targets at 390 px) and, at 390x844, 820x1180 and 1440x900, asserts the nav links are
 exactly the route table's (imported, not copied), the right entry carries `aria-current`, and
 navigating by nav click moves it. The page never scrolls horizontally (the same spec), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
 and from 768 px use `table-layout: fixed` with fixed widths for the short columns (status, tags,

@@ -156,6 +156,125 @@ for (const vp of viewports) {
   });
 }
 
+// The Attention badge is driven by the stream's `attention` message: the page gets a stand-in EventSource the test
+// feeds, so the counts are the test's, not whatever the board holds.
+async function feedStream(page: Page) {
+  await page.addInitScript(() => {
+    type Listener = (e: { data: string }) => void;
+    const w = window as unknown as { __streams: FakeStream[]; EventSource: unknown };
+    class FakeStream {
+      readyState = 1;
+      onopen: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() {
+        w.__streams = [...(w.__streams ?? []), this];
+        setTimeout(() => this.onopen?.({}), 0);
+      }
+      addEventListener(type: string, l: Listener) {
+        this.listeners.set(type, l);
+      }
+      close() {}
+    }
+    w.EventSource = FakeStream;
+  });
+}
+
+async function sendTotal(page: Page, total: number) {
+  await page.evaluate((n) => {
+    const w = window as unknown as { __streams: { listeners: Map<string, (e: { data: string }) => void> }[] };
+    const counts = { open_asks: n, done_not_closed: 0, expired_leases: 0, overdue_watches: 0, conflicts: 0, total: n };
+    for (const stream of w.__streams) stream.listeners.get('attention')?.({ data: JSON.stringify(counts) });
+  }, total);
+}
+
+test.describe('the route table and the navigation order', () => {
+  test('the table holds Attention first and Notes, and the default route is Attention', async ({ page }) => {
+    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'notes', 'keys']);
+    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes', 'Settings']);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const hash of ['/', '/#/', '/#/nowhere']) {
+      await page.goto(hash);
+      await expect(page.getByTestId('nav-sidebar').getByRole('link', { name: 'Attention' })).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId('section-open_asks').first()).toBeVisible();
+    }
+    const links = page.getByTestId('nav-sidebar').getByRole('link');
+    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/notes', '#/settings/keys']);
+  });
+});
+
+for (const vp of viewports) {
+  test.describe(`the Attention badge at ${vp.name}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const [total, text] of [
+      [0, ''],
+      [3, '3'],
+      [120, '99+'],
+    ] as const) {
+      test(`shows ${text === '' ? 'no badge' : text} for counts.total ${total}, with an accessible label`, async ({ page }) => {
+        await feedStream(page);
+        await page.goto('/#/tasks');
+        const nav = page.getByTestId(vp.nav);
+        await expect(nav).toBeVisible();
+        await sendTotal(page, total);
+        const badge = nav.getByTestId('attention-badge');
+        const link = nav.getByRole('link', { name: /^Attention/ });
+        if (total === 0) {
+          await expect(badge).toHaveCount(0);
+          await expect(link).toHaveAccessibleName('Attention');
+        } else {
+          await expect(badge).toHaveText(text);
+          await expect(link).toHaveAccessibleName(`Attention, ${total} items need attention`);
+        }
+        // No other entry carries a badge, and the page does not overflow.
+        await expect(nav.getByTestId('attention-badge')).toHaveCount(total === 0 ? 0 : 1);
+        await noHorizontalOverflow(page);
+        // The count follows the stream: back to 0 hides the badge, 3 again shows it.
+        await sendTotal(page, 0);
+        await expect(badge).toHaveCount(0);
+        await sendTotal(page, 3);
+        await expect(badge).toHaveText('3');
+      });
+    }
+  });
+}
+
+test.describe('the phone tab bar', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('holds Attention, Initiatives, Tasks, Notes and Settings, all of them fitting in 44 px targets at 390 px, even with the badge at 99+', async ({ page }) => {
+    await feedStream(page);
+    await page.goto('/#/attention');
+    const nav = page.getByTestId('nav-tabbar');
+    await expect(nav).toBeVisible();
+    await sendTotal(page, 120);
+    await expect(nav.getByTestId('attention-badge')).toHaveText('99+');
+    const links = nav.getByRole('link');
+    await expect(links).toHaveCount(5);
+    // Everything that fits is a link of its own; there is no "more" entry while the table fits the bar.
+    await expect(nav.getByRole('button')).toHaveCount(0);
+    const boxes = await links.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { name: el.textContent?.trim() ?? '', left: r.left, right: r.right, width: r.width, height: r.height };
+      }),
+    );
+    let previousRight = 0;
+    for (const box of boxes) {
+      expect(box.width, `${box.name} width`).toBeGreaterThanOrEqual(44);
+      expect(box.height, `${box.name} height`).toBeGreaterThanOrEqual(44);
+      expect(box.left, `${box.name} left edge`).toBeGreaterThanOrEqual(previousRight - 0.5);
+      expect(box.right, `${box.name} right edge`).toBeLessThanOrEqual(390.5);
+      previousRight = box.right;
+    }
+    // No label is clipped inside its link.
+    const clipped = await links.evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
+    expect(clipped).toEqual([]);
+    await noHorizontalOverflow(page);
+  });
+});
+
 test.describe('phone list with the tab bar', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

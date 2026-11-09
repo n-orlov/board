@@ -9,6 +9,7 @@
   import Shell from './Shell.svelte';
   import TaskPage from './TaskPage.svelte';
   import Tasks from './Tasks.svelte';
+  import { live } from './lib/live';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
   import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
 
@@ -29,11 +30,16 @@
   let param = $state(routeParam(window.location.hash, ROUTES));
   let signOutFailed = $state(false);
 
+  // The Attention badge in the navigation: the total of the stream's latest `attention` message.
+  let attentionTotal = $state(0);
+
   const session = new SessionController(browser, (s) => (auth = s), window.location.hash);
 
   $effect(() => {
     void session.start();
   });
+
+  $effect(() => live().onAttention((counts) => (attentionTotal = counts.total)));
 
   async function signOut() {
     signOutFailed = (await session.signOut()) === 'failed';
@@ -77,7 +83,7 @@
     >
   </SessionCard>
 {:else}
-  <Shell title={route.title} entries={navEntries(route, ROUTES)} email={auth.session.email} onsignout={signOut}>
+  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal)} email={auth.session.email} onsignout={signOut}>
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}

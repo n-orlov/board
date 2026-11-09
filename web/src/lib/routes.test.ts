@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, hashPath, navEntries, resolveRoute, routeParam, type Route } from './routes';
+import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -177,5 +177,72 @@ describe('hashPath', () => {
     expect(hashPath('#/tasks')).toBe('#/tasks');
     expect(hashPath('#/tasks?a=1?b')).toBe('#/tasks');
     expect(hashPath('')).toBe('');
+  });
+});
+
+describe('the navigation order', () => {
+  it('lists Attention, Initiatives, Tasks, Notes, then Settings, Attention first and the default', () => {
+    const entries = navEntries(ROUTES[0], ROUTES);
+    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'notes', 'keys']);
+    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes', 'Settings']);
+    expect(resolveRoute('', ROUTES).id).toBe('attention');
+  });
+});
+
+describe('badgeText', () => {
+  it.each([
+    [0, ''],
+    [-1, ''],
+    [Number.NaN, ''],
+    [1, '1'],
+    [3, '3'],
+    [99, '99'],
+    [100, '99+'],
+    [120, '99+'],
+  ])('prints %d as %j', (total, want) => {
+    expect(badgeText(total)).toBe(want);
+  });
+
+  it('caps at BADGE_MAX', () => {
+    expect(BADGE_MAX).toBe(99);
+  });
+});
+
+describe('badgeLabel', () => {
+  it.each([
+    [0, ''],
+    [1, '1 item needs attention'],
+    [3, '3 items need attention'],
+    [120, '120 items need attention'],
+  ])('words %d as %j, the whole count even where the badge says 99+', (total, want) => {
+    expect(badgeLabel(total)).toBe(want);
+  });
+});
+
+describe('the Attention badge on the navigation entries', () => {
+  it('rides on the Attention entry only, from the total handed in', () => {
+    for (const [total, text, label] of [
+      [0, '', ''],
+      [3, '3', '3 items need attention'],
+      [120, '99+', '120 items need attention'],
+    ] as const) {
+      const entries = navEntries(ROUTES[0], ROUTES, total);
+      expect(entries.map((e) => [e.id, e.badge, e.badgeLabel])).toEqual([
+        ['attention', text, label],
+        ['initiatives', '', ''],
+        ['tasks', '', ''],
+        ['notes', '', ''],
+        ['keys', '', ''],
+      ]);
+    }
+  });
+
+  it('has no badge anywhere without a total', () => {
+    expect(navEntries(ROUTES[0], ROUTES).every((e) => e.badge === '' && e.badgeLabel === '')).toBe(true);
+  });
+
+  it('puts the badge on whichever entry of the table names it', () => {
+    const table: Route[] = [{ ...synthetic[0] }, { ...synthetic[1], badge: 'attention' }];
+    expect(navEntries(table[0], table, 7).map((e) => e.badge)).toEqual(['', '7']);
   });
 });
