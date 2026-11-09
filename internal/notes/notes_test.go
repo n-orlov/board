@@ -239,6 +239,10 @@ func TestPostRefusalsWriteNothing(t *testing.T) {
 		{"long summary", New{Summary: strings.Repeat("x", 201)}, ErrInvalid, "summary"},
 		{"long body", New{Summary: "s", Body: strings.Repeat("x", 20001)}, ErrInvalid, "body"},
 		{"long resource", New{Summary: "s", Resource: strings.Repeat("x", 101)}, ErrInvalid, "resource"},
+		{"empty supplied resource", New{Summary: "s", ResourceSet: true}, ErrInvalid, "resource"},
+		{"blank resource", New{Summary: "s", Resource: "  \t "}, ErrInvalid, "resource"},
+		{"blank resource on a task", New{Task: "aa-1", Summary: "s", Resource: " ", ResourceSet: true}, ErrInvalid, "resource"},
+		{"long resource padded with spaces", New{Summary: "s", Resource: " " + strings.Repeat("x", 101)}, ErrInvalid, "resource"},
 		{"bad mention", New{Summary: "s", Mentions: []string{"a b"}}, ErrInvalid, "mention"},
 		{"unknown task", New{Summary: "s", Task: "aa-9"}, ErrNotFound, "aa-9"},
 		{"malformed task", New{Summary: "s", Task: "??"}, ErrNotFound, "??"},
@@ -445,5 +449,31 @@ func TestMigrationCreatesNotesAndCursors(t *testing.T) {
 	}
 	if _, err := w.ExecContext(ctx, `INSERT INTO cursors (actor_id, stream, position) VALUES (?, 'events', 'P3')`, actorID); err != nil {
 		t.Errorf("a cursor on the events stream: %v", err)
+	}
+}
+
+func TestNormalizeResourceBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   New
+		ok   bool
+		want string
+	}{
+		{"omitted", New{Summary: "s"}, true, ""},
+		{"one character", New{Summary: "s", Resource: "r", ResourceSet: true}, true, "r"},
+		{"one character after trimming", New{Summary: "s", Resource: "  r "}, true, "r"},
+		{"one hundred characters", New{Summary: "s", Resource: strings.Repeat("é", 100)}, true, strings.Repeat("é", 100)},
+		{"one hundred padded", New{Summary: "s", Resource: " " + strings.Repeat("x", 100) + " "}, true, strings.Repeat("x", 100)},
+		{"empty supplied", New{Summary: "s", ResourceSet: true}, false, ""},
+		{"blank", New{Summary: "s", Resource: " \t"}, false, ""},
+		{"one hundred and one", New{Summary: "s", Resource: strings.Repeat("é", 101)}, false, ""},
+	} {
+		got, err := tc.in.Normalize()
+		if (err == nil) != tc.ok || (tc.ok && got.Resource != tc.want) {
+			t.Errorf("%s: resource %q, err %v; want ok=%v resource %q", tc.name, got.Resource, err, tc.ok, tc.want)
+		}
+		if err != nil && !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", tc.name, err)
+		}
 	}
 }

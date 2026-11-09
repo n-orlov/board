@@ -88,6 +88,11 @@ Feature: Notes over HTTP
       Then the response status is 201
       And the response path "has_body" is "true"
 
+    Scenario: a one character resource is accepted
+      When I post a note with body "{'summary':'ok','resource':'r'}" as actor "claude@laptop"
+      Then the response status is 201
+      And the response path "resource" is "r"
+
     Scenario: a note on a closed task is still posted
       Given I close the task "aa-1" with body "{'resolution':'dropped'}" as actor "claude@laptop"
       When I post a note with body "{'task':'aa-1','summary':'after the fact'}" as actor "claude@laptop"
@@ -108,6 +113,10 @@ Feature: Notes over HTTP
         | {'summary':'<<s*201>>'}                                                                     |
         | {'summary':'ok','body':'<<b*20001>>'}                                                       |
         | {'summary':'ok','resource':'<<r*101>>'}                                                     |
+        | {'summary':'ok','resource':''}                                                              |
+        | {'summary':'ok','resource':'   '}                                                           |
+        | {'task':'aa-1','summary':'ok','resource':''}                                                |
+        | {'initiative':'aa','summary':'ok','resource':'<<r*100>>x'}                                  |
         | {'summary':'ok','mentions':['m1','m2','m3','m4','m5','m6','m7','m8','m9','m10','m11','m12','m13','m14','m15','m16','m17','m18','m19','m20','m21']} |
         | {'task':'aa-1','initiative':'bb','summary':'mismatch'}                                      |
 

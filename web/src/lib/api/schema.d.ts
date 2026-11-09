@@ -1592,7 +1592,7 @@ export interface components {
             task?: string;
             /** @description An initiative slug or ULID. With a task it must be the task's own initiative. */
             initiative?: string;
-            /** @description At most 100 characters. */
+            /** @description 1 to 100 characters once trimmed when supplied (an empty string is refused); leave it out for none. */
             resource?: string;
             /** @description At most 20 actor handles without whitespace. */
             mentions?: string[];

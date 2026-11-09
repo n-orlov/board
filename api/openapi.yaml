@@ -3268,7 +3268,7 @@ components:
           description: An initiative slug or ULID. With a task it must be the task's own initiative.
         resource:
           type: string
-          description: At most 100 characters.
+          description: 1 to 100 characters once trimmed when supplied (an empty string is refused); leave it out for none.
         mentions:
           type: array
           description: At most 20 actor handles without whitespace.

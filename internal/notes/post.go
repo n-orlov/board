@@ -18,19 +18,24 @@ import (
 // New is the request to post a note. Task is a task ref or ULID and Initiative
 // a slug or ULID; both may be empty (a broadcast), and both together must
 // agree. Resource is an optional `<type>:<name>` string and Mentions a list of
-// actor handles.
+// actor handles. A resource that is supplied, even as an empty or blank string
+// (ResourceSet, or any non-empty Resource), must be 1 to 100 characters once
+// trimmed; leaving it out (an empty Resource without ResourceSet) is allowed.
 type New struct {
 	Task       string
 	Initiative string
 	Summary    string
 	Body       string
 	Resource   string
-	Mentions   []string
+	// ResourceSet marks a resource that was supplied even if it is empty.
+	ResourceSet bool
+	Mentions    []string
 }
 
 // Normalize checks every field and returns the request with the summary,
 // resource and mentions trimmed and the mentions non-nil.
 func (n New) Normalize() (New, error) {
+	supplied := n.ResourceSet || n.Resource != ""
 	n.Resource = strings.TrimSpace(n.Resource)
 	for _, c := range []struct {
 		err  error
@@ -38,7 +43,7 @@ func (n New) Normalize() (New, error) {
 	}{
 		{domain.ValidateNoteSummary(n.Summary), "Send a summary of 1 to 200 characters on one line, and put the rest in body."},
 		{domain.ValidateNoteBody(n.Body), "Shorten the body to at most 20000 characters."},
-		{resourceError(n.Resource), "Send a resource of at most 100 characters such as host:build-1, or leave it out."},
+		{resourceError(n.Resource, supplied), "Send a resource of 1 to 100 characters such as host:build-1, or leave it out."},
 	} {
 		if c.err != nil {
 			return New{}, InvalidError{Msg: c.err.Error(), Next: c.next}
@@ -52,9 +57,9 @@ func (n New) Normalize() (New, error) {
 	return n, nil
 }
 
-func resourceError(r string) error {
-	if c := utf8.RuneCountInString(r); c > domain.MaxResourceLen {
-		return fmt.Errorf("resource must be at most %d characters, got %d", domain.MaxResourceLen, c)
+func resourceError(r string, supplied bool) error {
+	if c := utf8.RuneCountInString(r); supplied && (c < 1 || c > domain.MaxResourceLen) {
+		return fmt.Errorf("resource must be 1 to %d characters, got %d", domain.MaxResourceLen, c)
 	}
 	return nil
 }

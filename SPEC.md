@@ -559,7 +559,7 @@ broadcast), `ref_id` = the note's id, the one-line summary `note N3 on aa-1: <te
 **Store** (`internal/notes`). `Post` takes a `task` (ref or ULID), an `initiative` (slug or ULID), a `summary`, a
 `body`, a `resource` and `mentions`. The initiative of a note on a task is the task's, and a task with a different
 initiative is invalid; an unknown task or initiative is not found. A closed task or initiative still takes notes. The
-summary is 1 to 200 characters on one line, the body at most 20000, the resource at most 100 characters, the mentions at
+summary is 1 to 200 characters on one line, the body at most 20000, the resource (when supplied, even as an empty or blank string) 1 to 100 characters after trimming (leaving it out is allowed), the mentions at
 most 20 handles of at most 100 characters without whitespace (repeats dropped, order kept). A refused post writes no
 row, event or actor. `List` filters with AND by `since` (a note ULID or `N<n>`: the notes after it; an RFC 3339 time:
 the notes at or after that instant), `after` (the page cursor, a note ULID or `N<n>`), `task`, `initiative` (a task's

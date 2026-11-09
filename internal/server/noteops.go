@@ -85,7 +85,8 @@ func apiNote(k notes.Note, withBody bool) Note {
 }
 
 func noteRequest(b *NotePost) notes.New {
-	in := notes.New{Task: text(b.Task), Initiative: text(b.Initiative), Summary: b.Summary, Body: text(b.Body), Resource: text(b.Resource)}
+	in := notes.New{Task: text(b.Task), Initiative: text(b.Initiative), Summary: b.Summary, Body: text(b.Body), Resource: text(b.Resource),
+		ResourceSet: b.Resource != nil}
 	if b.Mentions != nil {
 		in.Mentions = *b.Mentions
 	}

@@ -60,12 +60,18 @@ func TestNoteFailureMapsEachErrorToItsStatusAndSubject(t *testing.T) {
 func TestNoteRequestCarriesEveryField(t *testing.T) {
 	task, ini, body, resource, mentions := "aa-1", "aa", "b", "host:x", []string{"a@b"}
 	got := noteRequest(&NotePost{Task: &task, Initiative: &ini, Summary: "s", Body: &body, Resource: &resource, Mentions: &mentions})
-	want := notes.New{Task: "aa-1", Initiative: "aa", Summary: "s", Body: "b", Resource: "host:x", Mentions: []string{"a@b"}}
+	want := notes.New{Task: "aa-1", Initiative: "aa", Summary: "s", Body: "b", Resource: "host:x", ResourceSet: true, Mentions: []string{"a@b"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("request = %+v, want %+v", got, want)
 	}
 	if bare := noteRequest(&NotePost{Summary: "s"}); bare.Mentions != nil || bare.Body != "" {
 		t.Errorf("bare request = %+v, want the defaults left to the store", bare)
+	} else if bare.ResourceSet {
+		t.Errorf("an omitted resource is marked supplied: %+v", bare)
+	}
+	empty := ""
+	if got := noteRequest(&NotePost{Summary: "s", Resource: &empty}); !got.ResourceSet || got.Resource != "" {
+		t.Errorf("an empty supplied resource = %+v, want it marked supplied", got)
 	}
 }
 

@@ -1296,7 +1296,7 @@ type NotePost struct {
 	// Mentions At most 20 actor handles without whitespace.
 	Mentions *[]string `json:"mentions,omitempty"`
 
-	// Resource At most 100 characters.
+	// Resource 1 to 100 characters once trimmed when supplied (an empty string is refused); leave it out for none.
 	Resource *string `json:"resource,omitempty"`
 
 	// Summary One line, 1 to 200 characters.
