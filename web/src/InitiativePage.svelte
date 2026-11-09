@@ -1,4 +1,12 @@
 <script lang="ts">
+  import AnswerForm from './AnswerForm.svelte';
+  import AskList from './AskList.svelte';
+  import NoteForm from './NoteForm.svelte';
+  import NoteList from './NoteList.svelte';
+  import TaskNoteForm from './TaskNoteForm.svelte';
+  import { orderAsks, type Ask } from './lib/asks';
+  import { newestFirst, type NoteForm as PostForm } from './lib/notes';
+  import { ThreadApi, ThreadStore, type ThreadState } from './lib/threads';
   import { taskHref } from './lib/taskPage';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
@@ -20,17 +28,22 @@
   let { csrf, param }: { csrf: string; param: string } = $props();
 
   let view: InitiativePageState = $state({ initiative: undefined, tasks: [], filter: 'not-closed', loading: true, error: undefined, dialogError: undefined });
-  let dialog: 'edit' | 'close' | 'reopen' | 'task' | undefined = $state(undefined);
+  let thread: ThreadState = $state({ asks: [], notes: [], bodies: {}, error: undefined, actionError: undefined });
+  let dialog: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string } | undefined = $state(undefined);
   let toast = $state('');
 
   const store = new InitiativePageStore(new InitiativesApi(currentBrowser(), () => csrf), (s) => (view = s));
 
+  const threads = new ThreadStore(new ThreadApi(currentBrowser(), () => csrf), (s) => (thread = s));
+
   $effect(() => {
     void store.load(param);
+    void threads.load({ initiative: param });
   });
 
-  function open(which: 'edit' | 'close' | 'reopen' | 'task') {
+  function open(which: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string }) {
     store.clearDialogError();
+    threads.clearActionError();
     dialog = which;
   }
 
@@ -51,7 +64,28 @@
   const closeIt = (dropped: number) => finish(store.close(param, dropped > 0), closedToast(param, dropped));
   const reopenIt = () => finish(store.reopen(param), `Initiative ${param} reopened`);
 
+  const scope = $derived({ initiative: param });
+  // An answer or a withdrawal can unblock tasks, so the tasks are read again with the asks.
+  async function settle(done: Promise<boolean>, message: string) {
+    if (await done) {
+      dialog = undefined;
+      toast = message;
+      void store.reload(param);
+    }
+  }
+  const answer = (ask: Ask, text: string) => settle(threads.answer(scope, ask.ref, text), `Answered ${ask.ref}`);
+  const withdraw = (askRef: string, text: string) => settle(threads.withdraw(scope, askRef, text), `Withdrew ${askRef}`);
+  const postNote = async (form: PostForm) => {
+    if (await threads.postNote(scope, form)) {
+      dialog = undefined;
+      toast = `Note posted on ${param}`;
+    }
+  };
+
   const now = new Date();
+  const asks = $derived(orderAsks(thread.asks));
+  const notes = $derived(newestFirst(thread.notes));
+  const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const pending = $derived(notClosedCount(view.tasks));
   const rows = $derived(taskRows(view.tasks, view.filter));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
@@ -161,6 +195,27 @@
         </tbody>
       </table>
     {/if}
+
+    {#if thread.error !== undefined}
+      <p role="alert" class="mt-6 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="thread-error">{thread.error}</p>
+    {/if}
+
+    <div class="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3"><h3 class="text-lg font-bold">Open asks</h3></div>
+    {#if asks.length === 0}
+      <p class="text-sm text-text-muted" data-testid="no-asks">No open asks.</p>
+    {:else}
+      <AskList {asks} testid="initiative-asks" showTask onanswer={(ask) => open({ answer: ask })} onwithdraw={(askRef) => open({ withdraw: askRef })} />
+    {/if}
+
+    <div class="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3">
+      <h3 class="text-lg font-bold">Notes</h3>
+      <button type="button" class={small} onclick={() => open('note')}>Post note</button>
+    </div>
+    {#if notes.length === 0}
+      <p class="text-sm text-text-muted" data-testid="no-notes">No notes.</p>
+    {:else}
+      <NoteList {notes} bodies={thread.bodies} testid="initiative-notes" showTask onexpand={(noteRef) => void threads.loadBody(noteRef)} />
+    {/if}
   {/if}
 </section>
 
@@ -170,6 +225,20 @@
   {@const initiative = view.initiative}
   {#if dialog === 'task'}
     <NewTaskDialog {csrf} initiative={initiative.slug} onclose={() => (dialog = undefined)} oncreated={taskCreated} />
+  {:else if dialog === 'note'}
+    <Dialog label="Post note" onclose={() => (dialog = undefined)} initialFocus="input[name=summary]">
+      <NoteForm heading="Post a note on {initiative.slug}" error={thread.actionError} onsubmit={postNote} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object' && 'answer' in dialog}
+    {@const target = dialog.answer}
+    <Dialog label="Answer ask" onclose={() => (dialog = undefined)} initialFocus="textarea[name=answer]">
+      <AnswerForm ask={target} error={thread.actionError} onsubmit={(text) => answer(target, text)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object'}
+    {@const askRef = dialog.withdraw}
+    <Dialog label="Withdraw ask" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Withdraw {askRef}" label="Reason (optional)" hint="Why the ask is no longer needed, in up to 200 characters." submitLabel="Withdraw" error={thread.actionError} onsubmit={(text) => withdraw(askRef, text)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
   {:else if dialog === 'edit'}
     <Dialog label="Edit initiative" onclose={() => (dialog = undefined)} initialFocus="input[name=title]">
       <InitiativeEditForm initial={toEditForm(initiative)} error={view.dialogError} onsave={save} oncancel={() => (dialog = undefined)} />

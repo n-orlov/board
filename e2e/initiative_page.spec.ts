@@ -370,5 +370,90 @@ for (const vp of viewports) {
       await expect(dialog(page, 'Close initiative')).toBeVisible();
       await api.dispose();
     });
+
+    test('the open asks of the initiative and its tasks are listed, and answering one from the page removes it', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-ia-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      const [task] = await fresh(api, slug, 1);
+      const onTask = (await post(api, '/api/v1/asks', { task, question: 'Which database?', details: 'Pick **one**.', options: ['sqlite', 'postgres'], blocking: true }, 201)).ref;
+      const onInitiative = (await post(api, '/api/v1/asks', { initiative: slug, question: 'Ship on Friday?' }, 201)).ref;
+      const settled = (await post(api, '/api/v1/asks', { initiative: slug, question: 'Already settled?' }, 201)).ref;
+      await post(api, `/api/v1/asks/${settled}/answer`, { answer: 'yes' }, 200);
+      await post(api, '/api/v1/asks', { question: 'A board-wide question?' }, 201);
+      await page.goto(`/#/i/${slug}`);
+
+      const asks = page.getByTestId('initiative-asks').getByTestId('ask');
+      await expect(asks).toHaveCount(2);
+      const one = page.locator(`[data-testid=ask][data-ref=${onTask}]`);
+      await expect(one.getByTestId('ask-question')).toHaveText('Which database?');
+      await expect(one.getByTestId('ask-asker')).toHaveText('playwright');
+      await expect(one.getByTestId('ask-blocking')).toHaveText('blocks its task');
+      await expect(one.getByTestId('ask-details').locator('strong')).toHaveText('one');
+      await expect(one.getByTestId('ask-task')).toHaveText(task);
+      await expect(one.getByTestId('ask-task')).toHaveAttribute('href', `#/t/${task}`);
+      const other = page.locator(`[data-testid=ask][data-ref=${onInitiative}]`);
+      await expect(other.getByTestId('ask-question')).toHaveText('Ship on Friday?');
+      await expect(other.getByTestId('ask-task')).toHaveCount(0);
+      await expect(page.locator(`[data-testid=ask][data-ref=${settled}]`)).toHaveCount(0);
+      await expect(taskRow(page, task).getByTestId('flag-blocked')).toHaveText('blocked');
+
+      await one.getByRole('button', { name: `Answer ${onTask}` }).click();
+      const answer = dialog(page, 'Answer ask');
+      await answer.getByRole('button', { name: 'postgres' }).click();
+      await answer.getByRole('button', { name: 'Send answer' }).click();
+      await expect(answer).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Answered ${onTask}`);
+      await expect(asks).toHaveCount(1);
+      await expect(taskRow(page, task).getByTestId('flag-blocked')).toHaveCount(0);
+
+      await other.getByRole('button', { name: `Withdraw ${onInitiative}` }).click();
+      const withdraw = dialog(page, 'Withdraw ask');
+      await withdraw.getByRole('button', { name: 'Withdraw' }).click();
+      await expect(withdraw).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Withdrew ${onInitiative}`);
+      await expect(page.getByTestId('no-asks')).toHaveText('No open asks.');
+      await api.dispose();
+    });
+
+    test('Post note puts a note on the initiative newest first, beside the notes on its tasks, and a body expands', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-in-${vp.name}`;
+      const api = await apiContext(playwright, baseURL);
+      const [task] = await fresh(api, slug, 1);
+      await post(api, '/api/v1/notes', { task, summary: 'Note on the task' }, 201);
+      await post(api, '/api/v1/notes', { summary: 'A broadcast' }, 201);
+      await page.goto(`/#/i/${slug}`);
+      const notes = page.getByTestId('initiative-notes').getByTestId('note');
+      await expect(notes).toHaveCount(1);
+      await expect(notes.first().getByTestId('note-task')).toHaveText(task);
+
+      await page.getByRole('button', { name: 'Post note' }).click();
+      const form = dialog(page, 'Post note');
+      await expect(form).toBeVisible();
+      await form.getByRole('button', { name: 'Post note' }).click();
+      await expect(form.getByTestId('dialog-error')).toHaveText('Write a summary.');
+      await form.getByLabel('Summary').fill('Phase one is done');
+      await form.getByLabel('Body (optional, Markdown)').fill('All **green**.');
+      await form.getByLabel('Resource (optional)').fill('host:build-2');
+      await form.getByRole('button', { name: 'Post note' }).click();
+      await expect(form).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Note posted on ${slug}`);
+
+      await expect(notes).toHaveCount(2);
+      await expect(notes.first().getByTestId('note-summary')).toHaveText('Phase one is done');
+      await expect(notes.nth(1).getByTestId('note-summary')).toHaveText('Note on the task');
+      await expect(notes.first().getByTestId('note-author')).toHaveText('operator');
+      await expect(notes.first().getByTestId('note-resource')).toHaveText('host:build-2');
+      await expect(notes.first().getByTestId('note-task')).toHaveCount(0);
+      const stored = await (await api.get(`/api/v1/notes?initiative=${slug}`)).json();
+      expect(stored.items.map((n: { summary: string }) => n.summary)).toEqual(['Note on the task', 'Phase one is done']);
+
+      const toggle = notes.first().getByRole('button', { name: /body of/ });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await toggle.click();
+      await expect(notes.first().getByTestId('note-body').locator('strong')).toHaveText('green');
+      await toggle.click();
+      await expect(notes.first().getByTestId('note-body')).toBeHidden();
+      await api.dispose();
+    });
   });
 }

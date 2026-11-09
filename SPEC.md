@@ -2240,6 +2240,25 @@ with options and details) that shows the blocked reason and is answered on the p
 answered and how, and the badge goes), an ask withdrawn with a reason, and a note posted from the sheet (an empty summary
 refused first) that lands above the earlier note and whose body expands and collapses.
 
+**Open asks and Notes on the initiative page** (R10). After the tasks table the page shows two more sections, read with the
+page (`ThreadApi` and `ThreadStore`, `web/src/lib/threads.ts`): the open asks (`GET /api/v1/asks?initiative=<slug>&state=open`,
+every page; the asks of the initiative and of its tasks, none of the answered or withdrawn ones) and the notes
+(`GET /api/v1/notes?initiative=<slug>&fields=summary`, every page; the notes on the initiative and on its tasks, no broadcasts).
+Either failing is one alert under the tasks, and the rest of the page stays. **Open asks** draws each ask the way the task page
+does (`AskList.svelte`, shared with it: ref, state, "blocks its task", question, asker, mode, details as safe Markdown, the
+state line) and adds the task the ask is on as a link to its page; an ask on the initiative itself has no task link. Its
+**Answer** and **Withdraw** buttons open the task page's sheets (`AnswerForm`, the optional Reason) and post
+`POST /asks/<ref>/answer` and `POST /asks/<ref>/withdraw`; a refusal shows in the open sheet, a success toasts ("Answered A3",
+"Withdrew A3"), reads the asks again (so the ask leaves the list) and reads the tasks again (a task that the ask blocked loses
+its `blocked` flag). With none open the section says "No open asks." **Notes** draws each note newest first like the task page
+(`NoteList.svelte`, shared with it: summary, author, relative time, resource, **Show body** and **Hide body**), with the task
+of a note that is on a task as a link. **Post note** beside the heading opens the task page's sheet (`NoteForm`, with the same
+checks) and posts `POST /notes` with `initiative` set to the page's slug and no task, toasts "Note posted on <slug>" and reads
+the lists again; with none the section says "No notes." `e2e/initiative_page.spec.ts` covers, at 390x844 and 1440x900, open
+asks raised through the API on a task and on the initiative (the answered one and a board-wide one are not listed) that are
+answered and withdrawn from the page, and a note posted from the sheet that lands above a note on a task and whose body
+expands and collapses.
+
 **Live leases and conflicts in the UI** (R11). The Initiatives list and the initiative page already print the live lease
 count of an initiative ("2 live leases", `leasesText`), and the Tasks view and the initiative page print the holder of each
 task's live lease. Two more places read every live lease of the board (`GET /api/v1/leases?state=live`, every page,
