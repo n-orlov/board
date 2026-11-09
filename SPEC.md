@@ -1124,10 +1124,27 @@ this; nothing in the UI polls.
 ### 7.2 Ask long-poll
 
 `GET /api/v1/asks/{id}?wait=N` (N ≤ 300) returns immediately if the ask is not `open`,
-otherwise holds the request until it is answered/withdrawn or N seconds pass. Implemented by an
-in-process notifier; with several replicas on Postgres, `LISTEN/NOTIFY` wakes the other
-replicas, and on SQLite (single replica) the in-process notifier suffices. A poll in flight
-marks the ask as "asker waiting" in the attention view.
+otherwise holds the request until it is answered/withdrawn or N seconds pass. The waiter
+subscribes to the change feed (§7.3), so an answer written through any replica wakes it; there is
+no `LISTEN/NOTIFY`. A poll in flight marks the ask as "asker waiting" in the attention view.
+
+### 7.3 The change feed
+
+The source of every live signal is the `events` table, tailed by `n` (the order of insertion) by the
+change feed of `internal/feed/`, one per `board serve`. It reads the rows after the last one it delivered
+every `BOARD_STREAM_POLL` (default `1s`, §13) and a write made through the same server wakes it at once,
+so a local write reaches a subscriber without waiting for the interval. Each subscriber (an SSE stream,
+§7.1; an ask waiter, §7.2) gets every event after the position its subscription began at, in order of `n`,
+once. A subscriber costs a channel, not a goroutine, and a subscriber that falls too far behind is ended
+so that it resynchronises (the stream sends `reset`) instead of holding the feed back.
+
+This is what lets several replicas share one database: nothing is sent between servers, each tails the
+table and so each sees every event, whichever server took the write. On Postgres, `n` is assigned when a
+row is inserted but visible when its transaction commits, so a row with a lower `n` can appear after one
+with a higher `n`. The feed never delivers past such a gap: it holds the later rows until the missing one
+commits, and treats a gap that stays open for two seconds as a rolled-back write and moves on. On SQLite
+there is one writer and no such gap. `board serve` refuses a `BOARD_STREAM_POLL` that is not a Go duration
+above zero (one stderr line, exit 1).
 
 ---
 
@@ -2152,6 +2169,7 @@ All configuration is by environment variable:
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
+| `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
 | `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check |

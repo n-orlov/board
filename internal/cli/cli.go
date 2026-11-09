@@ -13,6 +13,7 @@ import (
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
+	"github.com/n-orlov/board/internal/feed"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
@@ -145,6 +146,9 @@ func serve(stderr io.Writer, env Env) int {
 		return ExitError
 	}
 	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
+		return fail(stderr, err)
+	}
+	if _, err := feed.ParseInterval(env("BOARD_STREAM_POLL")); err != nil {
 		return fail(stderr, err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

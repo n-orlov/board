@@ -156,6 +156,16 @@ func TestServeRejectsAMalformedSweepInterval(t *testing.T) {
 	}
 }
 
+func TestServeRejectsAnUnreadableStreamPoll(t *testing.T) {
+	for _, v := range []string{"soon", "0", "0s", "-2s", "off"} {
+		var out, errb bytes.Buffer
+		if code := Run([]string{"serve"}, &out, &errb, envWith(map[string]string{"BOARD_STREAM_POLL": v})); code != ExitError ||
+			!strings.Contains(errb.String(), "BOARD_STREAM_POLL") || strings.Count(errb.String(), "\n") != 1 {
+			t.Errorf("BOARD_STREAM_POLL=%q: code=%d err=%q", v, code, errb.String())
+		}
+	}
+}
+
 // sessionsLeft counts the rows of the sessions table.
 func sessionsLeft(t *testing.T, st *store.Store) int {
 	t.Helper()
