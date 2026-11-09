@@ -1782,8 +1782,8 @@ argument to `board help` is the exit-2 usage error `usage: board help agent [--v
 **Protocol v0** was the text of Phase 0: identity, `board whoami`, the initiative commands and the
 output rules.
 
-**Protocol v1** is the current text. It is headed `board protocol v1`, fits 45 lines of 100 columns
-(a test holds the budget) and names no command or flag the build lacks (a test and the
+**Protocol v1** was the text of Phase 1. It was headed `board protocol v1`, fit 45 lines of 100 columns
+(a test holds the budget) and named no command or flag the build lacked (a test and the
 `help_agent.feature` scenario check each `` `board …` `` span against the command tree). On top of
 v0 it covers:
 
@@ -1803,8 +1803,25 @@ v0 it covers:
   `board task close <ref> --for operator`;
 - the exit codes 6 (state conflict) and 7 (conflict) next to those of v0.
 
-The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) and asks arrive with
-their commands, each bumping the version.
+**Protocol v2** is the current text. It is headed `board protocol v2`, replaces v1's wording
+rather than adding to it so as to keep the same budget (45 lines of 100 columns, held by a test),
+and names no command or flag the build lacks (the `help_agent.feature` scenario checks each
+`` `board …` `` span against the command tree, which lists `ask`, `ask show|ls|withdraw`,
+`answer`, `note`, `note show`, `notes` and `attention`). On top of v1 it covers:
+
+- asks: `board ask <task> "<question>" --option …` raises a `stop` ask (the default) and returns, so
+  the agent ends its turn and reads the answer in a later session with `board ask show A<n>` or
+  `board ask ls`; `--poll D` waits instead, exit 0 answered, 6 withdrawn and **3** still open at the
+  deadline (go on without the answer and check back); `--blocking` blocks the task meanwhile;
+  `board ask withdraw A<n>` when it no longer matters;
+- `board answer A<n> "<answer>" --relay` to record an answer a human gave in conversation;
+- notes: `board note "<summary>" --task <ref> --body -` (a broadcast without `--task` or `--init`),
+  `board notes --since last --ack` at check-in (`--ack` moves the cursor past the notes shown, a
+  `+` marks a body, `board note show N<n>` prints it) and `board attention` for what needs a human;
+- exit code 3 (an ask still open) next to the others.
+
+The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) arrive with their
+commands, each bumping the version.
 
 **Server side.** `GET /meta` answers `{version, protocol, principal, actor}`: the server binary's
 version (as `board version` prints it), the protocol version its binary embeds, the principal

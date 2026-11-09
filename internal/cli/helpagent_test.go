@@ -18,8 +18,8 @@ func TestHelpAgentPrintsTheEmbeddedProtocolAndMatchesTheGolden(t *testing.T) {
 	if code != ExitOK || errs != "" {
 		t.Fatalf("got %d %q", code, errs)
 	}
-	if !strings.HasPrefix(out, "board protocol v1\n") {
-		t.Fatalf("the text is not headed board protocol v1: %q", firstLine(out))
+	if !strings.HasPrefix(out, "board protocol v2\n") {
+		t.Fatalf("the text is not headed board protocol v2: %q", firstLine(out))
 	}
 	if *update {
 		if err := os.WriteFile(goldenPath, []byte(out), 0o600); err != nil {
@@ -98,7 +98,7 @@ func TestCommandsListsTheFlagsOfEachCommand(t *testing.T) {
 }
 
 func TestProtocolVersionIsTheNumberInTheHeader(t *testing.T) {
-	if v := ProtocolVersion(); v != 1 {
+	if v := ProtocolVersion(); v != 2 {
 		t.Fatalf("version %d", v)
 	}
 	defer func(old string) { protocolText = old }(protocolText)
@@ -115,7 +115,7 @@ func TestHelpAgentVersionPrintsJustTheNumberAndRecordsNothing(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "help", "agent", "--version")
-	if code != ExitOK || out != "1\n" || errs != "" || len(f.requests) != 0 {
+	if code != ExitOK || out != "2\n" || errs != "" || len(f.requests) != 0 {
 		t.Fatalf("got %d %q %q with %d requests", code, out, errs, len(f.requests))
 	}
 }
@@ -134,7 +134,7 @@ func TestHelpAgentRecordsTheVersionAsRead(t *testing.T) {
 		t.Fatalf("%d requests, want 1", len(f.requests))
 	}
 	r := f.requests[0]
-	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":1}` {
+	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":2}` {
 		t.Fatalf("request %s %s %q", r.Method, r.URL.Path, f.bodies[0])
 	}
 	if r.Header.Get("Board-Actor") != "claude:test" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer brd_") {
@@ -166,6 +166,15 @@ func TestHelpUsageErrors(t *testing.T) {
 		code, out, errs := runEnv(envWith(nil), args...)
 		if code != ExitUsage || out != "" || errs != HelpAgentUsage+"\n" {
 			t.Errorf("%v: got %d %q %q", args, code, out, errs)
+		}
+	}
+}
+
+func TestHelpAgentTextCoversAsksNotesAndAttention(t *testing.T) {
+	text := ProtocolText()
+	for _, want := range []string{"`board ask <task> ", "(stop, the default)", "--poll 10m", "exit 0 answered", "3 still", "`board answer ", "--relay", "`board note ", "`board notes --since last --ack`", "`board attention`", "`board note show "} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the text does not mention %s", want)
 		}
 	}
 }

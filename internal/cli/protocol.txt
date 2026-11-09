@@ -1,45 +1,45 @@
-board protocol v1
+board protocol v2
 
 The board is the shared tracker of what is being worked on. Read this once, then follow it.
 
 IDENTITY
-  Export these before any other command (the operator's instructions say what to put in them):
-    BOARD_URL        address of the board server
-    BOARD_API_KEY    this environment's key. Never print it, log it or commit it.
-    BOARD_ACTOR      your handle, for example claude:laptop:1a2b3c4d
-    BOARD_WAY_BACK   how a human gets back to your session
-  With BOARD_ACTOR unset the board acts as agent:<host>:<ppid>. Subagents never register:
-  they use their parent's handle. Check the setup with `board whoami`.
+  Export before any other command (the operator's instructions say what to put in them):
+    BOARD_URL (server address), BOARD_API_KEY (never print, log or commit it),
+    BOARD_ACTOR (your handle, e.g. claude:laptop:1a2b3c4d), BOARD_WAY_BACK (how a human gets back)
+  Unset BOARD_ACTOR acts as agent:<host>:<ppid>. Subagents never register: they use the parent's
+  handle. Check the setup with `board whoami`.
 
-INITIATIVES AND TASKS
-  An initiative groups related work under a slug of 2 to 40 characters of a-z, 0-9 and -.
-  A task is `<slug>-<n>`. Search before you create, and never duplicate an open one:
-    `board init ls`, `board init show phone-onboard`, `board task ls phone-onboard`
-    `board init add phone-onboard "Onboard the new phone" --tag work`
-    `board task add phone-onboard "Pair the watch"`; mark it done with `board task done <ref>`
-  Add `--json` to any command for the full object.
+INITIATIVES, TASKS, LEASES
+  A slug is 2-40 of a-z, 0-9 and -; a task is `<slug>-<n>`. Search before you create, never
+  duplicate an open one: `board init ls`, `board init show phone-onboard`,
+  `board task ls phone-onboard`. Then `board init add phone-onboard "Onboard" --tag work`,
+  `board task add phone-onboard "Pair"`, `board task done <ref>`. `--json` gives objects.
+  `board lease start <task> "<intent>" --res host-a --ttl 2h`; `board lease ls` shows all.
+  `board lease renew` at each milestone and at least every half TTL (else the lease expires);
+  `board lease end "<outcome>"` at the end. `board milestone <task> "<summary>"` records progress,
+  `board check <task> "<summary>"` a check. Before a risky shared action (reboot, deploy,
+  force-push, migration): `board now --resources host-a`.
+  `CONFLICT <resources>: L5 <holder> (<task>) "<intent>" exp 41m` and exit 7: another actor holds
+  a lease there, yours started anyway. Read their intent, then wait, coordinate or ask.
+  Never go on through a conflict on a destructive action.
 
-LEASES: say what you are working on
-  `board lease start <task> "<intent>" --res host-a --ttl 2h`   --res names what you touch
-  `board lease renew` at each milestone and at least every half TTL: it renews all your leases.
-  `board lease end "<outcome>"` when you stop; a lease you stop renewing expires on its own.
-  `board lease ls` shows who holds what. `board milestone <task> "<summary>"` records progress.
-  `board check <task> "<summary>"` records a check of a watch task.
+ASKS: a question only a human can answer
+  `board ask <task> "<question>" --option a --option b` raises it and returns (stop, the default).
+  End your turn; read the answer next session: `board ask show A3`, `board ask ls`.
+  `board ask <task> "<question>" --poll 10m` waits instead: exit 0 answered, 6 withdrawn, 3 still
+  open at the deadline (go on without it and check back). `--blocking` blocks the task meanwhile.
+  `board ask withdraw A3 "<reason>"` when it no longer matters. An answer the human gave you in
+  conversation: `board answer A3 "<answer>" --relay`.
 
-BEFORE A RISKY SHARED ACTION (reboot, deploy, force-push, migration)
-  Run `board now --resources host-a`. It lists your leases, the others' and the conflicts.
+NOTES AND ATTENTION
+  `board note "<summary>" --task <ref> --body -` (body on stdin); no `--task`/`--init`: broadcast.
+  At check-in read new notes: `board notes --since last --ack` (`--ack` moves your cursor past
+  those shown; `+` marks a body: `board note show N7`). `board attention` lists what needs a human.
 
-CONFLICTS
-  A line `CONFLICT <resources>: L5 <holder> (<task>) "<intent>" exp 41m` and exit 7 mean another
-  actor holds a lease on a resource you named. The lease is started anyway. Read their intent,
-  then wait, coordinate or ask the operator. Never go on through a conflict on a destructive action.
-
-CLOSING
-  Agents mark tasks done and never close one unless the operator asked you to in so many words.
-  Then use `board task close <ref> --for operator`.
-
-OUTPUT AND EXIT CODES
-  A write prints one line starting with "ok". An error prints one line on stderr that ends
-  with the next action, after an arrow: do what it says.
-  Exit codes: 0 ok, 1 error, 2 usage, 4 not found, 5 key refused, 6 state conflict, 7 CONFLICT.
+OUTPUT, EXIT CODES AND CLOSING
+  Agents mark tasks done and never close one unless the operator asked in so many words:
+  `board task close <ref> --for operator`.
+  A write prints one line starting with "ok". An error prints one line on stderr ending with
+  the next action after an arrow: do what it says. Exit codes: 0 ok, 1 error, 2 usage,
+  3 ask still open, 4 not found, 5 key refused, 6 state conflict, 7 CONFLICT.
   `board help agent` prints this text again and records that you read it.
