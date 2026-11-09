@@ -622,7 +622,7 @@ for (const vp of viewports) {
       });
     }
 
-    test('dialog acknowledge: the toast naming the lease and the Attention view hold the longest values without scrolling sideways', async ({ page, playwright, baseURL }) => {
+    test('dialog acknowledge: its sheet, the toast naming the lease and the Attention view hold the longest values without scrolling sideways', async ({ page, playwright, baseURL }) => {
       seeded2 ??= seedPhase2(playwright, baseURL);
       const seed = await seeded2;
       const api = await actorContext(playwright, baseURL, P2_ACTOR, P2_WAY_BACK);
@@ -634,6 +634,10 @@ for (const vp of viewports) {
       await expect(item).toBeVisible();
       await expectNoSidewaysScroll(page);
       await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
+      const dialog = await openDialog(page, `Acknowledge ${lease}`);
+      await expectNoSidewaysScroll(page);
+      await expectNothingPastRight(page, DIALOG_WITHIN, vp.size.width);
+      await dialog.getByRole('button', { name: 'Acknowledge lease' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`);
       await expectNoSidewaysScroll(page);
       await expectNothingPastRight(page, '[data-testid=toast]', vp.size.width);
@@ -659,7 +663,7 @@ for (const vp of viewports) {
     test('the Phase 2 list names the views, the six dialogs and the three live indicator states', () => {
       const names = PHASE2_STATES.map((s) => s.name);
       expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes', 'view #/notes broadcasts']);
-      // Acknowledge has no sheet: its own test above opens nothing and checks the toast it raises.
+      // Acknowledge has its own test above: its sheet, then the toast it raises, over a lease with the longest values.
       expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
         'answer ask',
         'withdraw ask',

@@ -312,7 +312,7 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
-    test('Acknowledge clears an expired lease at once', async ({ page, playwright, baseURL }) => {
+    test('Acknowledge asks for confirmation, then clears an expired lease', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `ack-${vp.name}`);
       const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Ran out' }, 201)).ref;
       const lease = (await post<{ lease: { ref: string } }>(api, '/api/v1/leases', { task, intent: 'slow edit', resources: [`repo:ack-${vp.name}`] }, 201)).lease.ref;
@@ -321,6 +321,13 @@ for (const vp of viewports) {
       const item = section(page, 'expired_leases').getByTestId('attention-item');
       await expect(item).toContainText(lease, FIVE_SECONDS);
       await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
+      const dialog = page.getByRole('dialog', { name: `Acknowledge ${lease}` });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(dialog).toBeHidden();
+      expect(await (await api.get(`/api/v1/leases/${lease}`)).json(), 'Cancel acknowledges nothing').not.toHaveProperty('acked_by');
+      await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
+      await dialog.getByRole('button', { name: 'Acknowledge lease' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`, FIVE_SECONDS);
       await expect(section(page, 'expired_leases').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
       expect(await (await api.get(`/api/v1/leases/${lease}`)).json()).toMatchObject({ acked_by: 'operator' });

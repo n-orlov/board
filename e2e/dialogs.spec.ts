@@ -281,16 +281,15 @@ test('the Phase 1 dialog list names the 9 dialogs', () => {
 
 // R13: the six Phase 2 dialogs held to the same bar, each opened by keyboard only from its own opener on the Attention or Notes
 // view: focus moves inside on open, Tab and Shift+Tab never leave and come round again, Escape closes with focus back on the
-// opener, and the dialog is a bottom sheet at the phone (its lower edge on the viewport's) and centred on the desktop. Acknowledge is
-// one of the six but opens nothing (its button posts at once and raises a toast), so its case holds that line: no dialog opens, so
-// nothing traps focus, and the keyboard goes on past the item.
+// opener, and the dialog is a bottom sheet at the phone (its lower edge on the viewport's) and centred on the desktop. Acknowledge's
+// dialog is its confirmation, opened over the seed's expired lease (Escape leaves the lease unacknowledged for the next viewport).
 const P2_SLUG = 'e2e-dlg-p2';
 const P2_ACTOR = 'dlg-p2';
 
-type P2Seed = { ask: string; doneTask: string; watch: string };
+type P2Seed = { ask: string; doneTask: string; watch: string; lease: string };
 let seededP2: Promise<P2Seed> | undefined;
 
-// One initiative with an open blocking ask (with options), a done task, an overdue watch task and a note.
+// One initiative with an open blocking ask (with options), a done task, an overdue watch task, an expired lease and a note.
 async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<P2Seed> {
   const api = await playwright.request.newContext({
     baseURL,
@@ -305,8 +304,11 @@ async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL:
   await post(api, `/api/v1/tasks/${doneTask}/done`, {}, 200);
   const watch = await task('Dlg p2 watch', { kind: 'watch', cadence_seconds: 900, next_check_at: '2020-01-01T00:00:00Z' });
   await post(api, '/api/v1/notes', { task: askTask, summary: 'Dlg p2 note', body: 'Body of the note.' }, 201);
+  const leaseTask = await task('Dlg p2 lease');
+  const lease = (await post(api, '/api/v1/leases', { task: leaseTask, intent: 'to acknowledge', resources: [`repo:dlg-p2-${Date.now()}`] }, 201)).lease.ref as string;
+  await expireLease(api, lease);
   await api.dispose();
-  return { ask, doneTask, watch };
+  return { ask, doneTask, watch, lease };
 }
 
 // Runs a lease out: its expiry moves into the past in the e2e store, then an API read expires it.
@@ -336,7 +338,7 @@ type P2Dialog = {
   go: (page: Page, seed: P2Seed) => Promise<Locator>;
 };
 
-// The finite list of Phase 2 dialogs this spec holds to the focus-trap bar; acknowledge is the one with no dialog (see above).
+// The finite list of Phase 2 dialogs this spec holds to the focus-trap bar.
 const PHASE2_DIALOGS: P2Dialog[] = [
   {
     name: 'answer ask',
@@ -361,6 +363,11 @@ const PHASE2_DIALOGS: P2Dialog[] = [
     name: 'close from attention',
     dialog: () => 'Close task',
     go: async (page, seed) => (await onAttention(page, seed.doneTask), attentionRow(page, seed.doneTask).getByRole('button', { name: `Close ${seed.doneTask}` })),
+  },
+  {
+    name: 'acknowledge',
+    dialog: (seed) => `Acknowledge ${seed.lease}`,
+    go: async (page, seed) => (await onAttention(page, seed.lease), attentionRow(page, seed.lease).getByRole('button', { name: `Acknowledge ${seed.lease}` })),
   },
   {
     name: 'record check from attention',
@@ -409,46 +416,18 @@ for (const vp of viewports) {
         await expect(opener).toBeFocused();
       });
     }
-
-    test('the acknowledge action opens no dialog: nothing traps focus and the keyboard goes on past the item', async ({ page, playwright, baseURL }) => {
-      seededP2 ??= seedPhase2(playwright, baseURL);
-      const seed = await seededP2;
-      const api = await playwright.request.newContext({
-        baseURL,
-        extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': P2_ACTOR, 'Board-Actor-Way-Back': `ralphctl status ${P2_ACTOR}` },
-      });
-      // Acknowledging removes the item, so each visit acknowledges an expired lease of its own.
-      const task = (await post(api, '/api/v1/tasks', { initiative: P2_SLUG, title: `Dlg p2 lease ${vp.name}` }, 201)).ref as string;
-      const lease = (await post(api, '/api/v1/leases', { task, intent: 'to acknowledge', resources: [`repo:dlg-p2-${vp.name}-${Date.now()}`] }, 201)).lease.ref as string;
-      await expireLease(api, lease);
-      await api.dispose();
-
-      await onAttention(page, seed.ask);
-      const opener = attentionRow(page, lease).getByRole('button', { name: `Acknowledge ${lease}` });
-      await expect(opener).toBeVisible();
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await tabTo(page, opener);
-      await page.keyboard.press('Enter');
-      await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`);
-      await expect(page.getByRole('dialog')).toHaveCount(0);
-      await expect(page.locator('[aria-modal=true]')).toHaveCount(0);
-
-      // No trap: the stops Tab visits are more than one, and none of them is inside a dialog.
-      const stops: string[] = [];
-      for (let i = 0; i < 6; i++) {
-        await page.keyboard.press('Tab');
-        expect(await focusIsInside(page), `Tab press ${i + 1} is not inside a dialog`).toBe(false);
-        stops.push(await focused(page));
-      }
-      expect(new Set(stops).size, 'Tab keeps moving through the page').toBeGreaterThan(1);
-    });
   });
 }
 
 test('the Phase 2 dialog list names the six dialogs', () => {
-  expect([...PHASE2_DIALOGS.map((d) => d.name), 'acknowledge'].sort()).toEqual(
-    ['acknowledge', 'answer ask', 'close from attention', 'post note', 'record check from attention', 'withdraw ask'],
-  );
+  expect(PHASE2_DIALOGS.map((d) => d.name)).toEqual([
+    'answer ask',
+    'withdraw ask',
+    'post note',
+    'close from attention',
+    'acknowledge',
+    'record check from attention',
+  ]);
 });
 
 // Every interactive element has a visible :focus-visible ring: read from computed style after keyboard focus.

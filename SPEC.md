@@ -2172,9 +2172,11 @@ the one `Dialog` over the ask read by `GET /asks/<ref>`: the question as its hea
 (`renderMarkdown`, so raw HTML shows as text), one button per suggested option that puts the option in the answer field, a free
 text field (16 px), **Send answer**, and a link to the ask's initiative. Withdraw (optional reason, at most 200 characters),
 Close (the four resolutions) and Record check (summary, 1 to 200 characters) open the same dialog forms the task page uses;
-Acknowledge posts at once. `AttentionActions` runs one action: an input that cannot be sent (an empty answer, a summary over
+Acknowledge opens the dialog as a confirmation ("Acknowledge L2": what acknowledging does, **Cancel** and **Acknowledge
+lease**), and only the confirm posts. `AttentionActions` runs one action: an input that cannot be sent (an empty answer, a summary over
 200 characters) and any refusal of the API (409 for an ask someone else answered first) are shown inline, inside the dialog
-(`dialog-error`) which stays open with the typed text, or on the item (`item-error`) for Acknowledge; a success closes the
+(`dialog-error`) which stays open with the typed text (an action run with no dialog open would show it on the item,
+`item-error`); a success closes the
 dialog and says so in the polite toast ("Answered A1", "Withdrew A1", "Task aa-1 closed as dropped", "Lease L2
 acknowledged", "Check recorded on aa-1"). Nothing refetches by itself: the acted-on item leaves its section when the stream's
 event (`ask_answered`, `ask_withdrawn`, `task_closed`, `lease_acked`, `check_recorded`) refreshes the view.
@@ -2373,8 +2375,8 @@ R13 extends it to Phase 2 in the same way, named in `PHASE2_STATES`: the views `
 filled: an open ask with 10 options of 80 characters and details of 20000 characters, a done task, an expired
 lease, an overdue watch and a conflict between two actors with 40-character handles and 200-character ways
 back) and `#/notes` (with bodies open and the filters filled, and the broadcasts), the dialogs answer ask,
-withdraw ask, post note, close from attention and record check from attention, and the toast that
-Acknowledge raises (it has no sheet). The live indicator is held to the bar in each of `live`, `offline` and
+withdraw ask, post note, close from attention, acknowledge and record check from attention, and for acknowledge also
+the toast it raises once confirmed. The live indicator is held to the bar in each of `live`, `offline` and
 `reconnecting`. No state scrolls sideways or reaches past the viewport at the four widths.
 
 **Session states.** The page is always in one state of `SessionController` (`web/src/lib/session.ts`):
@@ -2415,11 +2417,10 @@ inside, Tab and Shift+Tab never leave the dialog and come round to the stop they
 it with focus back on the opener.
 
 R13 extends the same spec to the six Phase 2 dialogs, a finite, named list: answer ask, withdraw ask, post note,
-close from attention and record check from attention, each opened by keyboard from its opener on the Attention
-or Notes view, plus acknowledge. At both viewports each of the five dialogs gets the checks above, and also sits on
-the viewport's lower edge at the phone (a bottom sheet) and clear of it at the desktop (centred). Acknowledge opens
-no dialog (its button posts at once and raises a toast), so its case holds that line: no `role=dialog` or
-`aria-modal` element appears, and Tab keeps moving through the page outside any dialog.
+close from attention, acknowledge (its confirmation, over an expired lease) and record check from attention, each
+opened by keyboard from its opener on the Attention or Notes view. At both viewports each of the six dialogs gets the
+checks above, and also sits on the viewport's lower edge at the phone (a bottom sheet) and clear of it at the desktop
+(centred).
 
 **Theme.** The account menu has a Theme control with three settings: **System** (the default),
 **Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
@@ -2477,8 +2478,7 @@ each opened over a seeded initiative with a watch task, links, a dependency, an 
 A link is at least 44 px wide as well as high, so a short link label (a two-letter reference) still meets the bar.
 R13 extends it to Phase 2 in the same way (`PHASE2_STATES`, phone only): the views `#/attention` (all five sections
 filled, with every row's action buttons and way-back copy button) and `#/notes` (a note body expanded), the sheets answer ask,
-withdraw ask, post note, close from attention and record check from attention, acknowledge (which opens no sheet: its state is the
-Attention view with the toast the action raises), and the live indicator reading live, offline and reconnecting. The indicator
+withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The indicator
 is a status region, not a control, so its states are measured as the page it sits on. A test names the views, the six dialogs and
 the three indicator states.
 
@@ -2494,7 +2494,7 @@ end lease, each opened over a seeded initiative with a watch task, a link, a dep
 expired and a live lease and a conflict. A test names the 3 views and the 9 dialogs, so a state cannot drop out of the
 list unnoticed. R13 extends it to the Phase 2 views and dialogs the same way (`PHASE2_STATES`): `#/attention` with its five
 sections filled, `#/notes` with a body expanded, the six dialogs answer ask, withdraw ask, post note, close from attention,
-acknowledge (the Attention view with the toast the action raises, over a lease the scan acknowledges itself) and record
+acknowledge (its confirmation sheet, over an expired lease of the scan's own) and record
 check from attention, and the live indicator reading live, offline and reconnecting; a test names them. A failing scan names the rule, the impact and the offending elements. Colour contrast is met by the design
 tokens in both themes, never by a per-element override.
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import AnswerForm from './AnswerForm.svelte';
   import Dialog from './Dialog.svelte';
+  import InitiativeConfirm from './InitiativeConfirm.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
   import TaskNoteForm from './TaskNoteForm.svelte';
   import Toast from './Toast.svelte';
@@ -77,6 +78,7 @@
     if (done !== undefined) toast = done;
   }
 
+  const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
   const choices = $derived(filterChoices(known, view.filter));
   const now = new Date();
   const chip =
@@ -197,7 +199,7 @@
                           class={action}
                           aria-label={actionName(kind, row.id)}
                           data-testid="action-{kind}"
-                          onclick={() => (kind === 'acknowledge' ? void perform(kind, row.id) : void actions.open(kind, row.id))}>{actionLabel(kind)}</button
+                          onclick={() => void actions.open(kind, row.id)}>{actionLabel(kind)}</button
                         >
                       {/each}
                     </div>
@@ -227,6 +229,10 @@
   {:else if acting.open.kind === 'check'}
     <Dialog label="Record check" onclose={() => actions.cancel()} initialFocus="input[name=text]">
       <TaskNoteForm heading="Record check on {target}" label="Summary" hint="What the check found, in up to 200 characters. The next check is due one cadence from now." submitLabel="Record check" error={acting.error} onsubmit={(summary) => perform('check', target, summary)} oncancel={() => actions.cancel()} />
+    </Dialog>
+  {:else if acting.open.kind === 'acknowledge'}
+    <Dialog label="Acknowledge {target}" onclose={() => actions.cancel()}>
+      <InitiativeConfirm heading="Acknowledge {target}" body={ACK_BODY} confirm="Acknowledge lease" error={acting.error} onconfirm={() => perform('acknowledge', target)} oncancel={() => actions.cancel()} />
     </Dialog>
   {:else if acting.open.kind === 'close'}
     <Dialog label="Close task" onclose={() => actions.cancel()} initialFocus="select[name=resolution]">

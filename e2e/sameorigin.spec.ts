@@ -289,13 +289,15 @@ const PHASE2_STATES: Phase2State[] = [
   {
     name: 'dialog acknowledge',
     open: async (page, seed, api) => {
-      // Acknowledging removes the item, so each visit acknowledges an expired lease of its own.
+      // Confirming removes the item, so each visit opens the sheet and acknowledges an expired lease of its own.
       const task = (await send(api, '/api/v1/tasks', { initiative: P2_SLUG, title: 'Origin p2 acknowledged lease' }, 201)).ref as string;
       const resource = `repo:origin-p2-${task}`;
       const lease = (await send(api, '/api/v1/leases', { task, intent: 'to acknowledge', resources: [resource] }, 201)).lease.ref as string;
       await expireLease(api, lease);
       await openAttention(page, seed);
       await attentionItem(page, lease).getByRole('button', { name: `Acknowledge ${lease}` }).click();
+      const dialog = await openDialog(page, `Acknowledge ${lease}`);
+      await dialog.getByRole('button', { name: 'Acknowledge lease' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`);
     },
   },

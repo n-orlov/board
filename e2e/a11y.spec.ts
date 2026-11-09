@@ -7,7 +7,7 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (the Attention view with its toast) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -490,8 +490,8 @@ const openAttention = async (page: Page, seed: Seed2) => {
 
 type Phase2State = { name: string; open: (page: Page, seed: Seed2, api: APIRequestContext) => Promise<void> };
 
-// The finite list of Phase 2 states this spec scans: 2 views and the six dialogs. Acknowledge opens no sheet: its state is the
-// Attention view with the toast the action raises, over a lease of its own that the scan acknowledges.
+// The finite list of Phase 2 states this spec scans: 2 views and the six dialogs. Acknowledge's state is its confirmation
+// sheet, opened over a lease of its own.
 const PHASE2_STATES: Phase2State[] = [
   {
     name: 'view #/attention',
@@ -550,13 +550,13 @@ const PHASE2_STATES: Phase2State[] = [
   {
     name: 'dialog acknowledge',
     open: async (page, seed, api) => {
-      // Acknowledging removes the item, so each scan acknowledges an expired lease of its own.
+      // Each scan opens the confirmation over an expired lease of its own, so no other state depends on it.
       const task = (await send(api, '/api/v1/tasks', { initiative: P2_SLUG, title: 'A11y p2 acknowledged lease' }, 201)).ref as string;
       const lease = (await send(api, '/api/v1/leases', { task, intent: 'to acknowledge', resources: ['repo:a11y-p2-ack'] }, 201)).lease.ref as string;
       await expireLease(api, lease);
       await openAttention(page, seed);
       await attentionItem(page, lease).getByRole('button', { name: `Acknowledge ${lease}` }).click();
-      await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`);
+      await openDialog(page, `Acknowledge ${lease}`);
     },
   },
   {

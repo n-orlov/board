@@ -316,7 +316,7 @@ const openAttention = async (page: Page, seed: Seed2) => {
 type Phase2State = { name: string; minimum: number; open: (page: Page, seed: Seed2) => Promise<void> };
 
 // The finite list of Phase 2 states this spec measures at the phone: 2 views, the six dialogs and the live indicator in 3 states.
-// Acknowledge opens no sheet: its state is the Attention view with the toast the action raises.
+// Acknowledge's state is its confirmation sheet.
 const PHASE2_STATES: Phase2State[] = [
   {
     name: 'view #/attention',
@@ -384,7 +384,7 @@ const PHASE2_STATES: Phase2State[] = [
     open: async (page, seed) => {
       await openAttention(page, seed);
       await attentionItem(page, seed.lease).getByRole('button', { name: `Acknowledge ${seed.lease}` }).click();
-      await expect(page.getByTestId('toast')).toHaveText(`Lease ${seed.lease} acknowledged`);
+      await openDialog(page, `Acknowledge ${seed.lease}`);
     },
   },
   {

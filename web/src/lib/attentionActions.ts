@@ -111,7 +111,7 @@ export interface ActionsState {
   ask: Ask | undefined;
   /** Why the last action was refused, shown inside the open dialog. */
   error: string | undefined;
-  /** Why the last action on an item with no dialog (Acknowledge) was refused, and the item. */
+  /** Why the last action run with no dialog open was refused, and the item it was run on. */
   itemError: { target: string; text: string } | undefined;
 }
 
