@@ -753,7 +753,7 @@ expired (§5.1):
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. **Phase 1 ships only the lease and conflict parts** (my leases, others' leases, conflicts); the ask, note and attention parts arrive with Phase 2 (§6.5). |
+| GET | `/now` | the agent check-in bundle: my live leases, live leases by others, conflicts touching my resources, open asks I raised (and answers), notes since my cursor that concern me (my tasks, my resources, mentions, broadcasts), attention counts. `?resources=` to check before starting. The complete shape is in §6.5. |
 | GET | `/attention` | §5.3, §6.8 |
 | GET/POST | `/initiatives` | list (filters: tag, status, closed_within) / create |
 | GET/PATCH | `/initiatives/{slug}` | read / update (title, description, tags, targets) |
@@ -1029,19 +1029,32 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   (§6.4) lists a task's live leases in `live_leases` and is `active` while it has one. Marking the task done or
   closing it leaves its leases live: they end by `/end` or by running out.
 
-- **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller, and **in Phase 1 it ships only its lease and
-  conflict parts**: it answers exactly `{actor, my_leases, others_leases, conflicts}` and carries no ask, note or
-  attention member (those arrive with Phase 2). Like every lease read it expires the due leases first, so a lease
-  past its expiry is left out and its one `lease_expired` event is written, with the sweeper off too; it writes
-  nothing else and does not upsert the actor. `actor` is the caller's handle. `my_leases` are the caller's live leases
-  (`Lease` documents, oldest first) with the task's `title` added beside the task `ref` and `expires_at`;
-  `others_leases` are the live leases of other actors, oldest first. `conflicts` are `{lease, holder, task, intent,
-  expires_at, resources}` (§5.2), each other live lease once in lease-number order, carrying only its shared
-  resources: those that hold a resource of one of the caller's live leases (another of the caller's own leases
-  on a different task included, a lease never conflicting with itself), and those of other actors that hold one of the
-  `resources` asked about. The caller's own leases never conflict with the resources asked about. `resources` is a
-  comma-separated list of at most 20 resources of 1 to 100 characters (repeats dropped); an empty entry or a bad one is **400**
-  with a `next`. Every list is `[]` when empty. It is a 503 without a store.
+- **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller. It answers exactly `{actor, my_leases,
+  others_leases, conflicts, my_asks, notes, notes_more, attention}`, every list `[]` when empty. Like every lease read it
+  expires the due leases first, so a lease past its expiry is left out and its one `lease_expired` event is written, with the
+  sweeper off too; it writes nothing else, does not upsert the actor and **moves no cursor** (the `notes` cursor stays where
+  it was, set or not). `actor` is the caller's handle. `my_leases` are the caller's live leases (`Lease` documents, oldest
+  first) with the task's `title` added beside the task `ref` and `expires_at`; `others_leases` are the live leases of other
+  actors, oldest first. `conflicts` are `{lease, holder, task, intent, expires_at, resources}` (§5.2), each other live lease
+  once in lease-number order, carrying only its shared resources: those that hold a resource of one of the caller's live
+  leases (another of the caller's own leases on a different task included, a lease never conflicting with itself), and those
+  of other actors that hold one of the `resources` asked about. The caller's own leases never conflict with the resources
+  asked about. `resources` is a comma-separated list of at most 20 resources of 1 to 100 characters (repeats dropped); an
+  empty entry or a bad one is **400** with a `next`.
+  - **`my_asks`** are `Ask` documents (§6.6), oldest first, of the asks the caller raised: every **open** one, and every
+    **answered** one (with its `answer`, `answered_by` and `channel`) whose `answered_at` is at or after the earlier of the
+    creation time of the note the caller's `notes` cursor holds and 24 hours before now (so an answer stays for at least a
+    day, and longer while the notes cursor lies further back); with no `notes` cursor it is the 24 hours alone. A withdrawn
+    ask and the asks of other actors are never listed.
+  - **`notes`** are `Note` summaries (§6.7, with `has_body` and no `body`), oldest first, of the notes **after the caller's
+    `notes` cursor** (all of them when none is set; a note at or before the cursor is acknowledged and absent) that concern
+    the caller: a note on a task the caller holds a live lease on, a note bound to a `resource` that one of the caller's live
+    leases holds, a note whose `mentions` hold the caller's handle exactly, or a broadcast (§4.7). A note on another actor's
+    task that is none of these is absent. At most 20 are listed (the oldest 20, so acking the list moves the cursor on
+    without skipping any) and **`notes_more`** is how many more concern the caller after them (0 when none).
+  - **`attention`** is the `counts` of §5.3 and §6.8 for the whole board, with no filter: `{open_asks, done_not_closed,
+    expired_leases, overdue_watches, conflicts, total}`, the same numbers `GET /api/v1/attention?fields=counts` answers.
+  - It is a 503 unless the lease, ask, note, cursor and attention stores are all behind the server.
 
 ### 6.6 Asks
 

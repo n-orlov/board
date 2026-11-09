@@ -10,8 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/attention"
+	"github.com/n-orlov/board/internal/checkin"
+	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/notes"
 )
 
 func TestLeaseOperationsAnswer503WithoutAStore(t *testing.T) {
@@ -22,7 +27,7 @@ func TestLeaseOperationsAnswer503WithoutAStore(t *testing.T) {
 	renew, _ := leaseOps{}.RenewLease(ctx, RenewLeaseRequestObject{Ref: "L1"})
 	end, _ := leaseOps{}.EndLease(ctx, EndLeaseRequestObject{Ref: "L1"})
 	ack, _ := leaseOps{}.AckLease(ctx, AckLeaseRequestObject{Ref: "L1"})
-	now, _ := leaseOps{}.GetNow(ctx, GetNowRequestObject{})
+	now, _ := nowOps{}.GetNow(ctx, GetNowRequestObject{})
 	for name, got := range map[string]any{"start": start, "list": list, "get": get, "renew": renew, "end": end, "ack": ack, "now": now} {
 		if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 			t.Errorf("%s without a store = %#v, want a 503 problem", name, got)
@@ -160,7 +165,8 @@ func TestRenewAndEndHandlersReadTheirOptionalBodies(t *testing.T) {
 }
 
 func TestNowWithoutAPrincipalIs401(t *testing.T) {
-	got, _ := leaseOps{leases: &leases.Store{}}.GetNow(context.Background(), GetNowRequestObject{})
+	full := nowOps{checkin: checkin.Store{Leases: &leases.Store{}, Asks: &asks.Store{}, Notes: &notes.Store{}, Cursors: &cursors.Store{}, Attention: &attention.Store{}}}
+	got, _ := full.GetNow(context.Background(), GetNowRequestObject{})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusUnauthorized {
 		t.Errorf("now without a principal = %#v, want 401", got)
 	}
@@ -194,10 +200,10 @@ func TestNowRoundTripThroughTheHandler(t *testing.T) {
 	s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-2","intent":"also","resources":["db:x","db:y"]}`, "codex@host")
 	rec := s.send(http.MethodGet, "/api/v1/now?resources=db:y,db:z", "", "claude@host")
 	doc := decode(t, rec)
-	if rec.Code != http.StatusOK || len(doc) != 4 {
-		t.Fatalf("now = %d %s, want exactly four members", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK || len(doc) != 8 {
+		t.Fatalf("now = %d %s, want exactly eight members", rec.Code, rec.Body)
 	}
-	for _, k := range []string{"actor", "my_leases", "others_leases", "conflicts"} {
+	for _, k := range []string{"actor", "my_leases", "others_leases", "conflicts", "my_asks", "notes", "notes_more", "attention"} {
 		if doc[k] == nil {
 			t.Errorf("now has no %s: %s", k, rec.Body)
 		}

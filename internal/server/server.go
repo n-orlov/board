@@ -61,6 +61,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 		ops.hub.attention = ops.attention
 		ops.waits = ops.hub
 	}
+	ops.nowOps = newNowOps(ops)
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
 	mux.Handle("GET /", http.FileServerFS(webui.Files()))

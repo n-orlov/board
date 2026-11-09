@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/checkin"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/leases"
 )
@@ -31,10 +33,28 @@ func apiNowLease(l leases.Lease) NowLease {
 	}
 }
 
-func apiNow(actor string, n leases.Now) Now {
+// nowOps is GET /api/v1/now (SPEC 6.5). It is built from the other operations'
+// stores once every option has been applied; without all of them it answers 503.
+type nowOps struct{ checkin checkin.Store }
+
+func newNowOps(o operations) nowOps {
+	return nowOps{checkin: checkin.Store{
+		Leases: o.leaseOps.leases, Asks: o.askOps.asks, Notes: o.notes, Cursors: o.cursorOps.cursors, Attention: o.attention,
+	}}
+}
+
+func (o nowOps) ready() (problemResponse, bool) {
+	c := o.checkin
+	off := c.Leases == nil || c.Asks == nil || c.Notes == nil || c.Cursors == nil || c.Attention == nil
+	return failure(http.StatusServiceUnavailable, "the check-in is not available"), off
+}
+
+func apiNow(actor string, r checkin.Result) Now {
+	n := r.Leases
 	out := Now{
 		Actor: actor, MyLeases: make([]NowLease, len(n.Mine)), OthersLeases: make([]Lease, len(n.Others)),
-		Conflicts: make([]LeaseConflict, len(n.Conflicts)),
+		Conflicts: make([]LeaseConflict, len(n.Conflicts)), MyAsks: make([]Ask, len(r.MyAsks)),
+		Notes: make([]Note, len(r.Notes)), NotesMore: r.NotesMore, Attention: apiCounts(r.Counts),
 	}
 	for i, l := range n.Mine {
 		out.MyLeases[i] = apiNowLease(l)
@@ -45,24 +65,32 @@ func apiNow(actor string, n leases.Now) Now {
 	for i, h := range n.Conflicts {
 		out.Conflicts[i] = apiConflict(h)
 	}
+	for i, k := range r.MyAsks {
+		out.MyAsks[i] = askOps{asks: &asks.Store{}}.apiAsk(k)
+	}
+	for i, k := range r.Notes {
+		out.Notes[i] = apiNote(k, false)
+	}
 	return out
 }
 
-// GetNow answers the caller's check-in: its live leases, those of the others and
-// the conflicts (SPEC 6.5). It writes nothing but the lease_expired events of the
-// leases it expires.
-func (o leaseOps) GetNow(ctx context.Context, req GetNowRequestObject) (GetNowResponseObject, error) {
-	who, bad := o.writer(ctx)
-	if bad != nil {
-		return *bad, nil
+// GetNow answers the caller's check-in (SPEC 6.5). It writes nothing but the
+// lease_expired events of the leases it expires, and moves no cursor.
+func (o nowOps) GetNow(ctx context.Context, req GetNowRequestObject) (GetNowResponseObject, error) {
+	if r, off := o.ready(); off {
+		return r, nil
+	}
+	who, r, ok := caller(ctx)
+	if !ok {
+		return r, nil
 	}
 	queried, err := queriedResources(req.Params.Resources)
 	if err != nil {
 		return failure(http.StatusBadRequest, err.Error()).withNext(nextNowResources), nil
 	}
-	n, err := o.leases.CheckIn(ctx, who.Actor, queried)
+	res, err := o.checkin.Check(ctx, who.Actor, queried)
 	if err != nil {
 		return nil, err
 	}
-	return GetNow200JSONResponse(apiNow(who.Actor, n)), nil
+	return GetNow200JSONResponse(apiNow(who.Actor, res)), nil
 }

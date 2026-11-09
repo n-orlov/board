@@ -11,10 +11,14 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/actors"
+	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/cursors"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/notes"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/tasks"
 )
@@ -46,6 +50,7 @@ func newKeyServer(t *testing.T) *keyServer {
 	}
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
 		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
+		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithCursors(&cursors.Store{Store: st}),
 		WithMeta(Build{Version: "v9.9.9", Protocol: 7}, &actors.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }

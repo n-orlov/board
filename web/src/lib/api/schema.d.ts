@@ -749,7 +749,7 @@ export interface paths {
         };
         /**
          * Check in
-         * @description The check-in bundle of the caller, in its lease and conflict parts (the ask, note and attention parts arrive with a later phase). After expiring the leases that are due it answers the `actor`, `my_leases` (the caller's live leases, each with its task ref, `title` and `expires_at`), `others_leases` (the live leases of other actors) and `conflicts`: the live leases that hold a resource of one of the caller's live leases, and those of other actors that hold one of the `resources` given, each with only the shared resources. `resources` is a comma-separated list of at most 20 resources of 1 to 100 characters, to check before starting.
+         * @description The check-in bundle of the caller. After expiring the leases that are due it answers the `actor`, `my_leases` (the caller's live leases, each with its task ref, `title` and `expires_at`), `others_leases` (the live leases of other actors) and `conflicts`: the live leases that hold a resource of one of the caller's live leases, and those of other actors that hold one of the `resources` given, each with only the shared resources. `my_asks` holds the asks the caller raised that are open, and those answered since the caller's `notes` cursor or in the last 24 hours (the later of the two limits reaches further back), each with its answer. `notes` holds the notes after the caller's `notes` cursor that are on a task the caller holds a live lease on, on a resource of one of its live leases, mention its handle, or are broadcasts: at most 20 summaries, oldest first, and `notes_more` is how many more there are. `attention` is the count of each attention section of the whole board (`GET /api/v1/attention?fields=counts`). Reading it moves no cursor. `resources` is a comma-separated list of at most 20 resources of 1 to 100 characters, to check before starting.
          */
         get: operations["getNow"];
         put?: never;
@@ -1331,7 +1331,7 @@ export interface components {
             /** @description The title of the lease's task. */
             title: string;
         };
-        /** @description The caller's check-in, in its lease and conflict parts. */
+        /** @description The caller's check-in. */
         Now: {
             /** @description The handle of the caller's actor. */
             actor: string;
@@ -1341,6 +1341,13 @@ export interface components {
             others_leases: components["schemas"]["Lease"][];
             /** @description The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors that hold one of the resources asked about, in lease-number order, each once. */
             conflicts: components["schemas"]["LeaseConflict"][];
+            /** @description The asks the caller raised that are open, and those answered since its `notes` cursor or in the last 24 hours, oldest first. */
+            my_asks: components["schemas"]["Ask"][];
+            /** @description The notes after the caller's `notes` cursor that concern it (on a task it holds a live lease on, on a resource of one of its live leases, mentioning it, or a broadcast): at most 20, oldest first, without bodies. */
+            notes: components["schemas"]["Note"][];
+            /** @description How many more notes concern the caller after the ones listed. */
+            notes_more: number;
+            attention: components["schemas"]["AttentionCounts"];
         };
         /** @description An actor involved in an item, with the way back the board has on record for it. */
         AttentionActor: {

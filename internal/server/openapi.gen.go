@@ -1306,16 +1306,28 @@ type NotePost struct {
 	Task *string `json:"task,omitempty"`
 }
 
-// Now The caller's check-in, in its lease and conflict parts.
+// Now The caller's check-in.
 type Now struct {
 	// Actor The handle of the caller's actor.
 	Actor string `json:"actor"`
 
+	// Attention The size of each section and their sum.
+	Attention AttentionCounts `json:"attention"`
+
 	// Conflicts The live leases that hold a resource of one of the caller's live leases, and the live leases of other actors that hold one of the resources asked about, in lease-number order, each once.
 	Conflicts []LeaseConflict `json:"conflicts"`
 
+	// MyAsks The asks the caller raised that are open, and those answered since its `notes` cursor or in the last 24 hours, oldest first.
+	MyAsks []Ask `json:"my_asks"`
+
 	// MyLeases The caller's live leases, oldest first.
 	MyLeases []NowLease `json:"my_leases"`
+
+	// Notes The notes after the caller's `notes` cursor that concern it (on a task it holds a live lease on, on a resource of one of its live leases, mentioning it, or a broadcast): at most 20, oldest first, without bodies.
+	Notes []Note `json:"notes"`
+
+	// NotesMore How many more notes concern the caller after the ones listed.
+	NotesMore int `json:"notes_more"`
 
 	// OthersLeases The live leases of other actors, oldest first.
 	OthersLeases []Lease `json:"others_leases"`

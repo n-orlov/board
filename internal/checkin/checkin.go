@@ -1,0 +1,108 @@
+package checkin
+
+import (
+	"context"
+	"time"
+
+	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/attention"
+	"github.com/n-orlov/board/internal/cursors"
+	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/board/internal/notes"
+)
+
+const (
+	// NotesLimit is the most note summaries a check-in lists.
+	NotesLimit = 20
+	// AnswerWindow is how long an answered ask stays in my_asks without the
+	// notes cursor having passed its answer.
+	AnswerWindow = 24 * time.Hour
+)
+
+// Store reads the five stores a check-in is made of. Now is the clock; nil
+// means time.Now.
+type Store struct {
+	Leases    *leases.Store
+	Asks      *asks.Store
+	Notes     *notes.Store
+	Cursors   *cursors.Store
+	Attention *attention.Store
+	Now       func() time.Time
+}
+
+// Result is a check-in: the lease and conflict parts, the actor's asks (open
+// ones and recently answered ones), the notes that concern it after its notes
+// cursor (at most NotesLimit, oldest first, without bodies) with how many more
+// there are, and the attention counts of the whole board.
+type Result struct {
+	Leases    leases.Now
+	MyAsks    []asks.Ask
+	Notes     []notes.Note
+	NotesMore int
+	Counts    attention.Counts
+}
+
+func (s Store) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// Check answers the check-in of the actor with the handle me, with queried
+// resources to check before starting. It expires the due leases (the only write)
+// and moves no cursor.
+func (s Store) Check(ctx context.Context, me string, queried []string) (Result, error) {
+	var (
+		r   Result
+		err error
+	)
+	if r.Leases, err = s.Leases.CheckIn(ctx, me, queried); err != nil {
+		return Result{}, err
+	}
+	cursor, err := s.Cursors.Get(ctx, me, cursors.StreamNotes)
+	if err != nil {
+		return Result{}, err
+	}
+	if r.MyAsks, err = s.myAsks(ctx, me, cursor); err != nil {
+		return Result{}, err
+	}
+	if r.Notes, r.NotesMore, err = s.Notes.Concerning(ctx, concern(me, cursor, r.Leases.Mine), NotesLimit); err != nil {
+		return Result{}, err
+	}
+	r.Counts, err = s.Attention.Counts(ctx, attention.Query{})
+	return r, err
+}
+
+// concern is what the notes of a check-in must concern: the tasks and resources
+// of the actor's live leases, its handle, and every broadcast.
+func concern(me, cursor string, mine []leases.Lease) notes.Concern {
+	c := notes.Concern{Handle: me, After: cursor}
+	seen := map[string]bool{}
+	for _, l := range mine {
+		c.Tasks = append(c.Tasks, l.Task)
+		for _, res := range l.Resources {
+			if !seen[res] {
+				seen[res] = true
+				c.Resources = append(c.Resources, res)
+			}
+		}
+	}
+	return c
+}
+
+// myAsks lists the actor's open asks and those answered since the notes cursor
+// note was posted or in the last AnswerWindow, whichever reaches further back.
+func (s Store) myAsks(ctx context.Context, me, cursor string) ([]asks.Ask, error) {
+	since := s.now().Add(-AnswerWindow)
+	if cursor != "" {
+		n, err := s.Notes.Get(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		if n.CreatedAt.Before(since) {
+			since = n.CreatedAt
+		}
+	}
+	return s.Asks.Mine(ctx, me, since)
+}
