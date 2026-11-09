@@ -2369,6 +2369,13 @@ filled with the longest accepted values (a 40-character slug, 200-character titl
 glyphs, descriptions of 20000 characters (the longest accepted) with long unbroken runs, 80-character link labels, 200-character summaries, intents and outcomes,
 20 resources of 100 characters, a conflict and an expired lease on the same task), and no state scrolls
 sideways or reaches past the viewport at the four widths.
+R13 extends it to Phase 2 in the same way, named in `PHASE2_STATES`: the views `#/attention` (all five sections
+filled: an open ask with 10 options of 80 characters and details of 20000 characters, a done task, an expired
+lease, an overdue watch and a conflict between two actors with 40-character handles and 200-character ways
+back) and `#/notes` (with bodies open and the filters filled, and the broadcasts), the dialogs answer ask,
+withdraw ask, post note, close from attention and record check from attention, and the toast that
+Acknowledge raises (it has no sheet). The live indicator is held to the bar in each of `live`, `offline` and
+`reconnecting`. No state scrolls sideways or reaches past the viewport at the four widths.
 
 **Session states.** The page is always in one state of `SessionController` (`web/src/lib/session.ts`):
 *loading* (it asks `GET /auth/session`), *signed-in* (the app shows), *redirecting* (the session answered
