@@ -1,5 +1,7 @@
 <script lang="ts">
+  import AnswerForm from './AnswerForm.svelte';
   import Dialog from './Dialog.svelte';
+  import NoteForm from './NoteForm.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
   import TaskDepForm from './TaskDepForm.svelte';
   import TaskEditForm from './TaskEditForm.svelte';
@@ -7,9 +9,11 @@
   import Toast from './Toast.svelte';
   import { taskConflictText, taskConflicts } from './lib/conflicts';
   import { nextCheckText } from './lib/durations';
+  import { blockedReasons, blockingLabel, canAct, modeLabel, orderAsks, stateLabel, stateLine, type Ask } from './lib/asks';
   import { absoluteTime, relativeTime } from './lib/format';
   import { taskBadges } from './lib/initiativePage';
   import { isSafeUrl, renderMarkdown } from './lib/markdown';
+  import { newestFirst, type NoteForm as PostForm } from './lib/notes';
   import { toneClasses } from './lib/presentation';
   import { currentBrowser } from './lib/session';
   import { taskActions } from './lib/taskActions';
@@ -19,8 +23,9 @@
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
-  let view: TaskPageState = $state({ task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [] });
-  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | { endLease: string } | undefined = $state(undefined);
+  let view: TaskPageState = $state({ task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [], asks: [], notes: [], bodies: {} });
+  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | undefined = $state(undefined);
+  let expanded: Record<string, boolean> = $state({});
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
 
@@ -50,7 +55,7 @@
     void store.loadCandidates();
   }
 
-  function openNote(kind: 'milestone' | 'check' | { endLease: string }) {
+  function openNote(kind: 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string }) {
     store.clearActionError();
     dialog = kind;
   }
@@ -72,6 +77,15 @@
   const milestone = (text: string) => finish(store.milestone(ref, text), `Milestone recorded on ${ref}`);
   const check = (text: string) => finish(store.recordCheck(ref, text), `Check recorded on ${ref}`);
   const endLease = (lease: string, outcome: string) => finish(store.endLease(ref, lease, outcome), `Lease ${lease} ended`);
+  const answer = (ask: Ask, text: string) => finish(store.answer(ref, ask.ref, text), `Answered ${ask.ref}`);
+  const withdraw = (askRef: string, text: string) => finish(store.withdraw(ref, askRef, text), `Withdrew ${askRef}`);
+  const postNote = (form: PostForm) => finish(store.postNote(ref, form), `Note posted on ${ref}`);
+
+  function toggleBody(noteRef: string) {
+    expanded[noteRef] = !expanded[noteRef];
+    if (expanded[noteRef]) void store.loadBody(noteRef);
+  }
+
   const ack = (lease: string) => finish(store.ackLease(ref, lease), `Lease ${lease} acknowledged`);
 
   const now = new Date();
@@ -79,6 +93,9 @@
   const leases = $derived(view.task === undefined ? [] : leaseRows(view.task, now));
   const expired = $derived(expiredRows(view.expired, now));
   const conflicts = $derived(view.task === undefined ? [] : taskConflicts(view.task.ref, view.live, new Date()));
+  const asks = $derived(orderAsks(view.asks));
+  const reasons = $derived(blockedReasons(view.asks));
+  const notes = $derived(newestFirst(view.notes));
   const timeline = $derived(eventRows(view.events, now));
   const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
@@ -122,6 +139,9 @@
           <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
         {/each}
       </div>
+      {#each reasons as reason (reason)}
+        <p class="mt-1 text-sm text-warning wrap-anywhere" data-testid="blocked-reason">{reason}</p>
+      {/each}
       <p class="mt-2 text-sm text-text-muted">
         Created <time datetime={task.created_at} title={absoluteTime(task.created_at)}>{relativeTime(task.created_at, now)}</time> by {task.created_by}
       </p>
@@ -212,6 +232,81 @@
           <li class="wrap-anywhere" data-ref={dep.ref}>
             <a class={link} href={taskHref(dep.ref)}><code class="font-mono">{dep.ref}</code><span>{dep.title}</span></a>
             <span class="{badge} border-border text-text-muted">{dep.status}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <div class={headingRow}><h3 class={heading}>Asks</h3></div>
+    {#if asks.length === 0}
+      <p class="text-sm text-text-muted" data-testid="no-asks">No asks.</p>
+    {:else}
+      <ul class="flex flex-col gap-2" data-testid="task-asks">
+        {#each asks as ask (ask.ref)}
+          <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="ask" data-ref={ask.ref} data-state={ask.state}>
+            <p>
+              <code class="font-mono text-text-muted" data-testid="ask-ref">{ask.ref}</code>
+              <span class="{badge} border-border text-text-muted" data-testid="ask-state">{stateLabel(ask.state)}</span>
+              {#if blockingLabel(ask) !== ''}<span class="{badge} border-warning text-warning" data-testid="ask-blocking">{blockingLabel(ask)}</span>{/if}
+            </p>
+            <p class="font-medium" data-testid="ask-question">{ask.question}</p>
+            <p class="text-text-muted">
+              asked by <span data-testid="ask-asker">{ask.asker}</span>, <span data-testid="ask-mode">{modeLabel(ask.mode)}</span>,
+              <time datetime={ask.created_at} title={absoluteTime(ask.created_at)}>{relativeTime(ask.created_at, now)}</time>
+            </p>
+            {#if ask.details !== ''}
+              <div class="description wrap-anywhere" data-testid="ask-details">{@html renderMarkdown(ask.details)}</div>
+            {/if}
+            <p class="text-text-muted" data-testid="ask-line">{stateLine(ask)}</p>
+            {#if ask.state === 'answered'}
+              <p data-testid="ask-answer"><span class="text-text-muted">Answer:</span> {ask.answer ?? ''}</p>
+            {/if}
+            {#if canAct(ask)}
+              <p class="mt-2 flex flex-wrap gap-2">
+                <button type="button" class={small} aria-label="Answer {ask.ref}" onclick={() => openNote({ answer: ask })}>Answer</button>
+                <button type="button" class={small} aria-label="Withdraw {ask.ref}" onclick={() => openNote({ withdraw: ask.ref })}>Withdraw</button>
+              </p>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <div class={headingRow}>
+      <h3 class={heading}>Notes</h3>
+      <button type="button" class={small} onclick={() => openNote('note')}>Post note</button>
+    </div>
+    {#if notes.length === 0}
+      <p class="text-sm text-text-muted" data-testid="no-notes">No notes.</p>
+    {:else}
+      <ul class="flex flex-col gap-2" data-testid="task-notes">
+        {#each notes as note (note.ref)}
+          <li class="rounded-md border border-border p-3 text-sm wrap-anywhere" data-testid="note" data-ref={note.ref}>
+            <p class="font-medium" data-testid="note-summary">{note.summary}</p>
+            <p class="text-text-muted">
+              <span data-testid="note-author">{note.author}</span> ·
+              <time datetime={note.created_at} title={absoluteTime(note.created_at)} data-testid="note-when">{relativeTime(note.created_at, now)}</time>
+              {#if note.resource !== undefined}· <span class="font-mono" data-testid="note-resource">{note.resource}</span>{/if}
+            </p>
+            {#if note.has_body}
+              <button
+                type="button"
+                class="{small} mt-2"
+                aria-expanded={expanded[note.ref] === true}
+                aria-controls="note-body-{note.ref}"
+                aria-label="{expanded[note.ref] === true ? 'Hide' : 'Show'} body of {note.ref}"
+                onclick={() => toggleBody(note.ref)}>{expanded[note.ref] === true ? 'Hide body' : 'Show body'}</button
+              >
+              <div id="note-body-{note.ref}" hidden={expanded[note.ref] !== true}>
+                {#if expanded[note.ref] === true}
+                  {#if view.bodies[note.ref] === undefined}
+                    <p class="text-text-muted">Loading…</p>
+                  {:else}
+                    <div class="description wrap-anywhere mt-2" data-testid="note-body">{@html renderMarkdown(view.bodies[note.ref] ?? '')}</div>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -309,6 +404,20 @@
   {:else if dialog === 'check'}
     <Dialog label="Record check" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
       <TaskNoteForm heading="Record check" label="Summary" hint="What the check found, in up to 200 characters. The next check is due one cadence from now." submitLabel="Record check" error={view.actionError} onsubmit={check} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'note'}
+    <Dialog label="Post note" onclose={() => (dialog = undefined)} initialFocus="input[name=summary]">
+      <NoteForm heading="Post a note on {task.ref}" error={view.actionError} onsubmit={postNote} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object' && 'answer' in dialog}
+    {@const target = dialog.answer}
+    <Dialog label="Answer ask" onclose={() => (dialog = undefined)} initialFocus="textarea[name=answer]">
+      <AnswerForm ask={target} error={view.actionError} onsubmit={(text) => answer(target, text)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object' && 'withdraw' in dialog}
+    {@const askRef = dialog.withdraw}
+    <Dialog label="Withdraw ask" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
+      <TaskNoteForm heading="Withdraw {askRef}" label="Reason (optional)" hint="Why the ask is no longer needed, in up to 200 characters." submitLabel="Withdraw" error={view.actionError} onsubmit={(text) => withdraw(askRef, text)} oncancel={() => (dialog = undefined)} />
     </Dialog>
   {:else if typeof dialog === 'object'}
     {@const lease = dialog.endLease}

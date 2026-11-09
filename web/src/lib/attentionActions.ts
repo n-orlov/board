@@ -8,15 +8,14 @@ import type { SectionKey } from './attention';
 import { errorText } from './fetches';
 import { problemText } from './keys';
 import type { Browser } from './session';
+import { answerProblem, reasonProblem } from './asks';
 import { RESOLUTIONS, summaryProblem } from './taskPage';
+
+export { ANSWER_LIMIT, REASON_LIMIT, answerProblem, reasonProblem } from './asks';
 import type { Resolution } from './tasks';
 
 export type Ask = components['schemas']['Ask'];
 export type ActionKind = 'answer' | 'withdraw' | 'close' | 'acknowledge' | 'check';
-
-/** The most an answer may hold, and the most a withdrawal's reason may hold. */
-export const ANSWER_LIMIT = 20000;
-export const REASON_LIMIT = 200;
 
 const ACTIONS: Record<SectionKey, readonly ActionKind[]> = {
   open_asks: ['answer', 'withdraw'],
@@ -70,22 +69,9 @@ export function initiativeHref(slug: string): string {
   return `#/i/${encodeURIComponent(slug)}`;
 }
 
-/** Why an answer cannot be sent: empty after trimming, or over the API's limit. Undefined when it can. */
-export function answerProblem(text: string): string | undefined {
-  const length = [...text.trim()].length;
-  if (length === 0) return 'Write an answer or pick one of the options.';
-  return length > ANSWER_LIMIT ? `An answer is at most ${ANSWER_LIMIT} characters; this one has ${length}.` : undefined;
-}
-
 /** Why a resolution cannot be sent: it is not one of the four. Undefined when it can. */
 export function resolutionProblem(value: string): string | undefined {
   return RESOLUTIONS.some((r) => r.value === value) ? undefined : 'Pick a resolution.';
-}
-
-/** Why a withdrawal's reason cannot be sent (it may be empty). */
-export function reasonProblem(text: string): string | undefined {
-  const length = [...text.trim()].length;
-  return length > REASON_LIMIT ? `A reason is at most ${REASON_LIMIT} characters; this one has ${length}.` : undefined;
 }
 
 /** What the action sends: the input check, the call and the toast that says it worked. */

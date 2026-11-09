@@ -552,5 +552,95 @@ for (const vp of viewports) {
       await expect(close).toHaveCount(0);
       await api.dispose();
     });
+
+    test('an ask raised through the API is listed with the blocked reason and is answered from the task page', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-ask-${vp.name}`);
+      const first = (await post(api, '/api/v1/asks', { task: ref, question: 'Which database?', details: 'Pick **one**.', options: ['sqlite', 'postgres'], mode: 'poll', blocking: true }, 201)).ref;
+      const second = (await post(api, '/api/v1/asks', { task: ref, question: 'Ship on Friday?' }, 201)).ref;
+      await page.goto(`/#/t/${ref}`);
+
+      await expect(page.getByTestId('flag-blocked')).toHaveText('blocked');
+      await expect(page.getByTestId('blocked-reason')).toHaveText(`blocked by ${first}: Which database?`);
+      const asks = page.getByTestId('ask');
+      await expect(asks).toHaveCount(2);
+      const one = page.locator(`[data-testid=ask][data-ref=${first}]`);
+      await expect(one.getByTestId('ask-question')).toHaveText('Which database?');
+      await expect(one.getByTestId('ask-asker')).toHaveText('playwright');
+      await expect(one.getByTestId('ask-mode')).toContainText('poll');
+      await expect(one.getByTestId('ask-blocking')).toHaveText('blocks its task');
+      await expect(one.getByTestId('ask-details').locator('strong')).toHaveText('one');
+
+      await one.getByRole('button', { name: `Answer ${first}` }).click();
+      const answer = dialog(page, 'Answer ask');
+      await expect(answer).toBeVisible();
+      await answer.getByRole('button', { name: 'postgres' }).click();
+      await expect(answer.getByRole('textbox', { name: 'Answer' })).toHaveValue('postgres');
+      await answer.getByRole('button', { name: 'Send answer' }).click();
+      await expect(answer).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Answered ${first}`);
+
+      // The answered ask goes below the open one and says who answered and how; nothing blocks the task any more.
+      await expect(asks.first().getAttribute('data-ref')).resolves.toBe(second);
+      await expect(asks.nth(1)).toHaveAttribute('data-ref', first);
+      await expect(one.getByTestId('ask-state')).toHaveText('Answered');
+      await expect(one.getByTestId('ask-answer')).toContainText('postgres');
+      await expect(one.getByTestId('ask-line')).toContainText('answered by');
+      await expect(one.getByTestId('ask-line')).toContainText('in the UI');
+      await expect(one.getByRole('button')).toHaveCount(0);
+      await expect(page.getByTestId('flag-blocked')).toHaveCount(0);
+      await expect(page.getByTestId('blocked-reason')).toHaveCount(0);
+
+      // Withdraw the other one with a reason; it goes below the answered one.
+      await page.locator(`[data-testid=ask][data-ref=${second}]`).getByRole('button', { name: `Withdraw ${second}` }).click();
+      const withdraw = dialog(page, 'Withdraw ask');
+      await withdraw.getByLabel('Reason (optional)').fill('not needed');
+      await withdraw.getByRole('button', { name: 'Withdraw' }).click();
+      await expect(withdraw).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Withdrew ${second}`);
+      await expect(asks.nth(1)).toHaveAttribute('data-ref', second);
+      await expect(page.locator(`[data-testid=ask][data-ref=${second}]`).getByTestId('ask-line')).toHaveText('withdrawn: not needed');
+      await api.dispose();
+    });
+
+    test('Post note adds a note newest first, and its body expands and collapses', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const ref = await seedTask(api, `e2e-tp-note-${vp.name}`);
+      await post(api, '/api/v1/notes', { task: ref, summary: 'Earlier note' }, 201);
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('note')).toHaveCount(1);
+      await expect(page.getByTestId('note').getByRole('button')).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Post note' }).click();
+      const form = dialog(page, 'Post note');
+      await expect(form).toBeVisible();
+      await form.getByRole('button', { name: 'Post note' }).click();
+      await expect(form.getByTestId('dialog-error')).toHaveText('Write a summary.');
+      await form.getByLabel('Summary').fill('Found the cause');
+      await form.getByLabel('Body (optional, Markdown)').fill('It was **the cache**.');
+      await form.getByLabel('Resource (optional)').fill('host:build-1');
+      await form.getByRole('button', { name: 'Post note' }).click();
+      await expect(form).toHaveCount(0);
+      await expect(page.getByTestId('toast')).toContainText(`Note posted on ${ref}`);
+
+      const notes = page.getByTestId('note');
+      await expect(notes).toHaveCount(2);
+      await expect(notes.first().getByTestId('note-summary')).toHaveText('Found the cause');
+      await expect(notes.nth(1).getByTestId('note-summary')).toHaveText('Earlier note');
+      await expect(notes.first().getByTestId('note-author')).not.toHaveText('');
+      await expect(notes.first().getByTestId('note-when')).toHaveText(/ago|now/);
+      await expect(notes.first().getByTestId('note-resource')).toHaveText('host:build-1');
+
+      await expect(notes.first().getByTestId('note-body')).toHaveCount(0);
+      const toggle = notes.first().getByRole('button', { name: /body of/ });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(notes.first().getByTestId('note-body').locator('strong')).toHaveText('the cache');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(notes.first().getByTestId('note-body')).toBeHidden();
+      await api.dispose();
+    });
   });
 }

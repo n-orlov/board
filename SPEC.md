@@ -2212,6 +2212,34 @@ removal, Milestone with refused summaries, Record check, End lease with a stale 
 expiry is moved into the past in the e2e store) at 390x844 and 1440x900; `a11y.spec.ts` scans the page and the three
 sheets, and `touch.spec.ts` measures them on the phone.
 
+**Asks and Notes on the task page** (R10). The page also reads the task's asks (`GET /api/v1/asks?task=<ref>&state=all`,
+every page) and notes (`GET /api/v1/notes?task=<ref>&fields=summary`, every page) with the rest, in one parallel read
+(`TasksApi.asksOf` and `notesOf`, `TaskPageStore`); either failing is the page's one alert. Between Blocking and Live leases it
+shows an **Asks** section: the asks of the task with the open ones first, then the answered, then the withdrawn, each state
+in raising order (`orderAsks`, `web/src/lib/asks.ts`). An ask prints its ref, a state badge, "blocks its task" (open) or
+"blocked its task" (settled) for a blocking ask, the question, who asked it, its mode ("poll: the asker polls for the answer"
+or "stop: the asker stops until answered") and when, its details as safe Markdown, and one line of state (`stateLine`: "asker
+waiting", "asker not waiting" or "asker stopped" for an open ask; "answered by alice in the UI", "... through the API" or
+"... relayed (on behalf of bob)" for an answered one, followed by the answer; "withdrawn: reason" for a withdrawn one). Only
+an open ask has **Answer** and **Withdraw** buttons. Answer opens the same sheet as the Attention view (`AnswerForm`: the
+question, details, one button per suggested option that fills the field, and a free-text field; empty or over 20000
+characters is refused in the sheet) and posts `POST /asks/<ref>/answer`; Withdraw opens a sheet with an optional Reason (at
+most 200 characters) and posts `POST /asks/<ref>/withdraw`. A refusal (an ask answered meanwhile is 409) shows in the open
+sheet, which stays open with what was typed; a success toasts ("Answered A3", "Withdrew A3") and reads the page again.
+**The blocked badge gives its reason**: for every open blocking ask the header prints "blocked by A3: <question>" under the
+badges (`blockedReasons`); the line and the badge go away together when the ask is answered or withdrawn. A **Notes**
+section follows, newest first (`newestFirst`; the API gives posting order): each note prints its summary, its author, a
+relative time (the absolute time in `title`) and its resource when it has one. A note with a body has a **Show body** button
+(`aria-expanded`, a 44 px target) that reads `GET /notes/<ref>` the first time and renders the body as safe Markdown;
+**Hide body** collapses it, and a body that was read is not read again. **Post note** (beside the Notes heading) opens a sheet
+with Summary (1 to 200 characters), an optional Markdown Body (at most 20000), an optional Resource (at most 100) and
+optional Mentions (handles separated by spaces or commas, at most 20, each once); `toNotePost` refuses a form that cannot
+be sent in the sheet before any request, and a good one posts `POST /notes` with `task` set to the page's task and toasts
+"Note posted on aa-1". `e2e/task_page.spec.ts` covers, at 390x844 and 1440x900, an ask raised through the API (blocking,
+with options and details) that shows the blocked reason and is answered on the page (it moves below the open ask, says who
+answered and how, and the badge goes), an ask withdrawn with a reason, and a note posted from the sheet (an empty summary
+refused first) that lands above the earlier note and whose body expands and collapses.
+
 **Live leases and conflicts in the UI** (R11). The Initiatives list and the initiative page already print the live lease
 count of an initiative ("2 live leases", `leasesText`), and the Tasks view and the initiative page print the holder of each
 task's live lease. Two more places read every live lease of the board (`GET /api/v1/leases?state=live`, every page,

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError } from './initiatives';
 import { depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
 import type { TaskListItem } from './initiatives';
+import type { Ask } from './asks';
+import type { Note } from './notes';
 import type { Lease, TaskDetail, TaskEvent } from './tasks';
 
 const NOW = new Date('2026-01-10T12:00:00Z');
@@ -76,6 +78,12 @@ function harness(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
     events: vi.fn(async () => [event(1)]),
     expiredLeases: vi.fn(async () => [] as Lease[]),
     liveLeases: vi.fn(async () => [] as Lease[]),
+    asksOf: vi.fn(async () => [{ ref: 'A1', state: 'open' }] as unknown as Ask[]),
+    notesOf: vi.fn(async () => [{ ref: 'N1' }, { ref: 'N2' }] as unknown as Note[]),
+    note: vi.fn(async () => ({ ref: 'N2', body: 'the body' }) as Note),
+    answerAsk: vi.fn(async () => ({}) as Ask),
+    withdrawAsk: vi.fn(async () => ({}) as Ask),
+    postNote: vi.fn(async () => ({}) as Note),
     openTasks: vi.fn(async () => [] as TaskListItem[]),
     addDep: vi.fn(async () => detail()),
     removeDep: vi.fn(async () => detail()),
@@ -99,7 +107,7 @@ const initial = { title: 'T', description: '', plannedStart: '', plannedEnd: '',
 describe('TaskPageStore', () => {
   it('starts loading, then holds the task and its events', async () => {
     const { store, states } = harness();
-    expect(store.state).toMatchObject({ task: undefined, events: [], expired: [], live: [], candidates: [], loading: true, error: undefined, actionError: undefined });
+    expect(store.state).toMatchObject({ task: undefined, events: [], expired: [], live: [], candidates: [], asks: [], notes: [], bodies: {}, loading: true, error: undefined, actionError: undefined });
     await store.load('aa-1');
     expect(states[0]).toMatchObject({ loading: true });
     expect(store.state.task?.ref).toBe('aa-1');
@@ -306,5 +314,73 @@ describe('TaskPageStore: dependencies, milestones, checks and leases', () => {
     const failing = harness({ openTasks: vi.fn(async () => Promise.reject(new InitiativesError(500, 'down'))) });
     await failing.store.loadCandidates();
     expect(failing.store.state).toMatchObject({ candidates: [], actionError: 'down' });
+  });
+});
+
+describe('TaskPageStore asks and notes', () => {
+  it('reads the asks and the notes with the task, and nothing of them survives a failed read', async () => {
+    const { store } = harness();
+    await store.load('aa-1');
+    expect(store.state.asks.map((a) => a.ref)).toEqual(['A1']);
+    expect(store.state.notes.map((n) => n.ref)).toEqual(['N1', 'N2']);
+    const failing = harness({ notesOf: vi.fn(async () => Promise.reject(new Error('no notes'))) });
+    await failing.store.load('aa-1');
+    expect(failing.store.state).toMatchObject({ error: 'no notes', asks: [], notes: [] });
+  });
+
+  it('answers and withdraws with the trimmed text, then reads the page again', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.answer('aa-1', 'A1', ' yes ')).toBe(true);
+    expect(await store.withdraw('aa-1', 'A1', ' no longer ')).toBe(true);
+    expect(api.answerAsk).toHaveBeenCalledWith('A1', 'yes');
+    expect(api.withdrawAsk).toHaveBeenCalledWith('A1', 'no longer');
+    expect(api.asksOf).toHaveBeenCalledTimes(3);
+  });
+
+  it('refuses an empty answer and an over-long reason without a request', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.answer('aa-1', 'A1', '  ')).toBe(false);
+    expect(store.state.actionError).toBe('Write an answer or pick one of the options.');
+    expect(await store.withdraw('aa-1', 'A1', 'x'.repeat(201))).toBe(false);
+    expect(store.state.actionError).toMatch(/at most 200/);
+    expect(api.answerAsk).not.toHaveBeenCalled();
+    expect(api.withdrawAsk).not.toHaveBeenCalled();
+  });
+
+  it('keeps the page and says why when the API refuses an answer', async () => {
+    const { store } = harness({ answerAsk: vi.fn(async () => Promise.reject(new InitiativesError(409, 'ask is not open'))) });
+    await store.load('aa-1');
+    expect(await store.answer('aa-1', 'A1', 'yes')).toBe(false);
+    expect(store.state.actionError).toBe('ask is not open');
+  });
+
+  it('posts a note on the task, and refuses a form that cannot be sent', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    const form = { summary: ' hello ', body: '', resource: '', mentions: 'bob' };
+    expect(await store.postNote('aa-1', form)).toBe(true);
+    expect(api.postNote).toHaveBeenCalledWith({ summary: 'hello', task: 'aa-1', mentions: ['bob'] });
+    expect(await store.postNote('aa-1', { ...form, summary: ' ' })).toBe(false);
+    expect(store.state.actionError).toBe('Write a summary.');
+    expect(api.postNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a note body once, when it is expanded, and says why when it cannot', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    await store.loadBody('N2');
+    await store.loadBody('N2');
+    expect(store.state.bodies).toEqual({ N2: 'the body' });
+    const bare = harness({ note: vi.fn(async () => ({ ref: 'N1' }) as Note) });
+    await bare.store.load('aa-1');
+    await bare.store.loadBody('N1');
+    expect(bare.store.state.bodies).toEqual({ N1: '' });
+    expect(api.note).toHaveBeenCalledTimes(1);
+    const failing = harness({ note: vi.fn(async () => Promise.reject(new Error('gone'))) });
+    await failing.store.load('aa-1');
+    await failing.store.loadBody('N2');
+    expect(failing.store.state).toMatchObject({ actionError: 'gone', bodies: {} });
   });
 });

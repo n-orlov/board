@@ -1,6 +1,8 @@
 // The filters of the Notes view (PRD R10): broadcast only, task, initiative, resource, author and mention. They live
 // in the URL fragment's query (`#/notes?broadcast=only&author=ralph`) so a reload keeps them. This module turns the
-// filter into that query and back, and into the query of `GET /notes`.
+// filter into that query and back, and into the query of `GET /notes`. It also holds the Post note form's checks and
+// the order a thread of notes is drawn in.
+import type { components } from './api/schema';
 
 export interface NotesFilter {
   /** Keep only the notes that have neither a task nor an initiative. */
@@ -76,4 +78,66 @@ export function apiQuery(filter: NotesFilter): URLSearchParams {
 /** Whether any field is set (the view offers "clear filters" then). */
 export function isFiltered(filter: NotesFilter): boolean {
   return filterToQuery(filter) !== '';
+}
+
+export type Note = components['schemas']['Note'];
+export type NotePost = components['schemas']['NotePost'];
+
+/** The most a note's summary, resource, body and mention list may hold. */
+export const SUMMARY_LIMIT = 200;
+export const RESOURCE_LIMIT = 100;
+export const BODY_LIMIT = 20000;
+export const MENTIONS_LIMIT = 20;
+
+/** What the Post note form holds; `mentions` is a list of handles separated by spaces or commas. */
+export interface NoteForm {
+  summary: string;
+  body: string;
+  resource: string;
+  mentions: string;
+}
+
+export const EMPTY_NOTE_FORM: NoteForm = { summary: '', body: '', resource: '', mentions: '' };
+
+/** The notes newest first (the API gives them in posting order). */
+export function newestFirst(notes: readonly Note[]): Note[] {
+  return [...notes].reverse();
+}
+
+/** The handles a mentions field names: split on spaces and commas, empty pieces dropped, repeats kept once. */
+export function parseMentions(text: string): string[] {
+  return [...new Set(text.split(/[\s,]+/).filter((h) => h !== ''))];
+}
+
+function chars(text: string): number {
+  return [...text].length;
+}
+
+function overLimit(what: string, text: string, limit: number): string | undefined {
+  const length = chars(text);
+  return length > limit ? `${what} is at most ${limit} characters; this one has ${length}.` : undefined;
+}
+
+/** Why a form cannot be sent: the first check it fails, in the order the fields are drawn. Undefined when it can. */
+export function noteProblem(form: NoteForm): string | undefined {
+  const mentions = parseMentions(form.mentions).length;
+  return (
+    (form.summary.trim() === '' ? 'Write a summary.' : undefined) ??
+    overLimit('A summary', form.summary.trim(), SUMMARY_LIMIT) ??
+    overLimit('A body', form.body, BODY_LIMIT) ??
+    overLimit('A resource', form.resource.trim(), RESOURCE_LIMIT) ??
+    (mentions > MENTIONS_LIMIT ? `A note mentions at most ${MENTIONS_LIMIT} actors; this one names ${mentions}.` : undefined)
+  );
+}
+
+/** The post a form makes for a note on `scope` (a task ref or an initiative slug), or the reason it cannot be sent. */
+export function toNotePost(form: NoteForm, scope: { task?: string; initiative?: string }): { ok: true; body: NotePost } | { ok: false; error: string } {
+  const problem = noteProblem(form);
+  if (problem !== undefined) return { ok: false, error: problem };
+  const mentions = parseMentions(form.mentions);
+  const body: NotePost = { summary: form.summary.trim(), ...scope };
+  if (form.body.trim() !== '') body.body = form.body;
+  if (form.resource.trim() !== '') body.resource = form.resource.trim();
+  if (mentions.length > 0) body.mentions = mentions;
+  return { ok: true, body };
 }

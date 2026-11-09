@@ -8,6 +8,8 @@ import { problemText } from './keys';
 import { InitiativesApi, InitiativesError, type InitiativeListItem, type TaskListItem } from './initiatives';
 import { toTaskCreate, type NewTaskForm, type TaskCreate } from './newTask';
 import { apiQuery, DEFAULT_TASKS_FILTER, type TasksFilter } from './taskFilters';
+import type { Ask } from './asks';
+import type { Note, NotePost } from './notes';
 import type { Browser } from './session';
 
 export type TaskDetail = components['schemas']['TaskDetail'];
@@ -168,6 +170,54 @@ export class TasksApi {
 
   ackLease(lease: string): Promise<Lease> {
     return this.write<Lease>('POST', `/api/v1/leases/${encodeURIComponent(lease)}/ack`, 'Acknowledging the lease');
+  }
+
+  /** Every ask of the task, whatever its state, in raising order. */
+  async asksOf(task: string): Promise<Ask[]> {
+    const items: Ask[] = [];
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ task, state: 'all', limit: EVENT_PAGE });
+      if (after !== undefined) query.set('after', after);
+      const response = await this.call(`/api/v1/asks?${query.toString()}`, 'Reading the asks', { headers: { Accept: 'application/json' } });
+      const page = (await response.json()) as components['schemas']['AskList'];
+      items.push(...page.items);
+      after = page.next_after;
+    } while (after !== undefined);
+    return items;
+  }
+
+  answerAsk(ask: string, answer: string): Promise<Ask> {
+    return this.write<Ask>('POST', `/api/v1/asks/${encodeURIComponent(ask)}/answer`, 'Answering the ask', { answer });
+  }
+
+  withdrawAsk(ask: string, reason: string): Promise<Ask> {
+    return this.write<Ask>('POST', `/api/v1/asks/${encodeURIComponent(ask)}/withdraw`, 'Withdrawing the ask', reason === '' ? {} : { reason });
+  }
+
+  /** Every note on the task, without bodies, in posting order. */
+  async notesOf(task: string): Promise<Note[]> {
+    const items: Note[] = [];
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ task, fields: 'summary', limit: EVENT_PAGE });
+      if (after !== undefined) query.set('after', after);
+      const response = await this.call(`/api/v1/notes?${query.toString()}`, 'Reading the notes', { headers: { Accept: 'application/json' } });
+      const page = (await response.json()) as components['schemas']['NoteList'];
+      items.push(...page.items);
+      after = page.next_after;
+    } while (after !== undefined);
+    return items;
+  }
+
+  /** One note with its body. */
+  async note(ref: string): Promise<Note> {
+    const response = await this.call(`/api/v1/notes/${encodeURIComponent(ref)}`, 'Reading the note', { headers: { Accept: 'application/json' } });
+    return (await response.json()) as Note;
+  }
+
+  postNote(body: NotePost): Promise<Note> {
+    return this.write<Note>('POST', '/api/v1/notes', 'Posting the note', body);
   }
 }
 

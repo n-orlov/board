@@ -80,3 +80,20 @@ export function canAct(ask: Pick<Ask, 'state'>): boolean {
 export function blockedReasons(asks: readonly Ask[]): string[] {
   return asks.filter((a) => a.state === 'open' && a.blocking).map((a) => `blocked by ${a.ref}: ${a.question}`);
 }
+
+/** The most an answer may hold, and the most a withdrawal's reason may hold. */
+export const ANSWER_LIMIT = 20000;
+export const REASON_LIMIT = 200;
+
+/** Why an answer cannot be sent: empty after trimming, or over the API's limit. Undefined when it can. */
+export function answerProblem(text: string): string | undefined {
+  const length = [...text.trim()].length;
+  if (length === 0) return 'Write an answer or pick one of the options.';
+  return length > ANSWER_LIMIT ? `An answer is at most ${ANSWER_LIMIT} characters; this one has ${length}.` : undefined;
+}
+
+/** Why a withdrawal's reason cannot be sent (it may be empty). */
+export function reasonProblem(text: string): string | undefined {
+  const length = [...text.trim()].length;
+  return length > REASON_LIMIT ? `A reason is at most ${REASON_LIMIT} characters; this one has ${length}.` : undefined;
+}

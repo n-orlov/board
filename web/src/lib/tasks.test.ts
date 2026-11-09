@@ -291,6 +291,45 @@ describe('TasksApi dependency, note and lease calls', () => {
     ]);
   });
 
+  it('reads every ask and every note of a task, following next_after through the pages', async () => {
+    const pages = async (url: string) => (url.includes('after=') ? json({ items: [{ ref: 'X2' }] }) : json({ items: [{ ref: 'X1' }], next_after: 'X1' }));
+    const { api: a, fetchFn } = api(pages);
+    expect((await a.asksOf('aa-1')).map((x) => x.ref)).toEqual(['X1', 'X2']);
+    expect((await a.notesOf('aa-1')).map((x) => x.ref)).toEqual(['X1', 'X2']);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual([
+      '/api/v1/asks?task=aa-1&state=all&limit=1000',
+      '/api/v1/asks?task=aa-1&state=all&limit=1000&after=X1',
+      '/api/v1/notes?task=aa-1&fields=summary&limit=1000',
+      '/api/v1/notes?task=aa-1&fields=summary&limit=1000&after=X1',
+    ]);
+  });
+
+  it('reads one note, answers and withdraws an ask and posts a note', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'N1', body: 'b' }));
+    expect((await a.note('N1')).body).toBe('b');
+    await a.answerAsk('A1', 'yes');
+    await a.withdrawAsk('A1', 'why');
+    await a.withdrawAsk('A1', '');
+    await a.postNote({ summary: 's', task: 'aa-1' });
+    expect(calls(fetchFn)).toEqual([
+      ['/api/v1/notes/N1', undefined, undefined],
+      ['/api/v1/asks/A1/answer', 'POST', '{"answer":"yes"}'],
+      ['/api/v1/asks/A1/withdraw', 'POST', '{"reason":"why"}'],
+      ['/api/v1/asks/A1/withdraw', 'POST', '{}'],
+      ['/api/v1/notes', 'POST', '{"summary":"s","task":"aa-1"}'],
+    ]);
+  });
+
+  it('names the failed action when an ask or note call is refused without a detail', async () => {
+    const { api: a } = api(async () => new Response('', { status: 500 }));
+    await expect(a.asksOf('aa-1')).rejects.toMatchObject({ message: 'Reading the asks failed (HTTP 500).' });
+    await expect(a.notesOf('aa-1')).rejects.toMatchObject({ message: 'Reading the notes failed (HTTP 500).' });
+    await expect(a.note('N1')).rejects.toMatchObject({ message: 'Reading the note failed (HTTP 500).' });
+    await expect(a.answerAsk('A1', 'x')).rejects.toMatchObject({ message: 'Answering the ask failed (HTTP 500).' });
+    await expect(a.withdrawAsk('A1', '')).rejects.toMatchObject({ message: 'Withdrawing the ask failed (HTTP 500).' });
+    await expect(a.postNote({ summary: 's' })).rejects.toMatchObject({ message: 'Posting the note failed (HTTP 500).' });
+  });
+
   it('names the failed action when a lease write is refused without a detail', async () => {
     const { api: a } = api(async () => new Response('', { status: 500 }));
     await expect(a.endLease('L1', '')).rejects.toMatchObject({ message: 'Ending the lease failed (HTTP 500).' });

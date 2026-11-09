@@ -7,7 +7,7 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // theme. `states` holds the 20 earlier states (the Attention view over an open ask and a conflict, and its Answer sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocker, a dependent and a conflict. 32 states x 2 viewports x 2 themes = 128 scans. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. 32 states x 2 viewports x 2 themes = 128 scans. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -276,6 +276,8 @@ async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL:
   await expireLease(api, old.lease.ref);
   const live = await send(api, '/api/v1/leases', { task: watch, intent: 'second try', resources: [P1_RESOURCE, 'repo:a11y-p1-b'] }, 201);
   await send(other, '/api/v1/leases', { task: dependent, intent: 'also here', resources: [P1_RESOURCE] }, 201);
+  await send(api, '/api/v1/asks', { task: watch, question: 'Keep watching?', details: 'Say **yes** or no.', options: ['yes', 'no'], mode: 'poll', blocking: true }, 201);
+  await send(api, '/api/v1/notes', { task: watch, summary: 'A note with a body', body: 'The **body** of the note.', resource: 'host:a11y' }, 201);
   await api.dispose();
   await other.dispose();
   return { watch, blocker, lease: live.lease.ref as string };
@@ -296,6 +298,9 @@ const taskPage = async (page: Page, seed: Seed) => {
   await expect(page.getByTestId('lease')).toHaveCount(1);
   await expect(page.getByTestId('expired-lease')).toHaveCount(1);
   await expect(page.getByTestId('conflict').first()).toBeVisible(); // the second actor holds the same resource
+  await expect(page.getByTestId('blocked-reason')).toContainText('Keep watching?'); // the blocking ask and the note are on the page
+  await page.getByRole('button', { name: /Show body of/ }).click();
+  await expect(page.getByTestId('note-body')).toBeVisible();
 };
 
 const initiativePage = async (page: Page) => {
