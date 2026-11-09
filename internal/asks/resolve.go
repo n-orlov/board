@@ -62,12 +62,9 @@ func (s Store) Answer(ctx context.Context, actor audit.Actor, principal, ref str
 }
 
 func (s Store) answer(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref string, in Reply) (Ask, error) {
-	cur, err := s.find(ctx, tx, ref)
+	cur, err := s.findOpen(ctx, tx, ref, "answer")
 	if err != nil {
 		return Ask{}, err
-	}
-	if cur.State != domain.AskOpen {
-		return Ask{}, notOpen(cur, "answer")
 	}
 	now := s.now()
 	d := s.Store.Dialect()
@@ -88,16 +85,9 @@ func (s Store) answer(ctx context.Context, tx *sql.Tx, actor audit.Actor, princi
 	if err := s.wonRace(ctx, tx, res, cur, "answer"); err != nil {
 		return Ask{}, err
 	}
-	data := map[string]any{"ref": cur.Ref, "channel": in.Channel}
-	if cur.Task != "" {
-		data["task"] = cur.Task
-	}
-	if in.OnBehalfOf != "" {
-		data["on_behalf_of"] = in.OnBehalfOf
-	}
 	err = audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
 		Principal: principal, OnBehalfOfID: onBehalf, Type: EventAnswered, InitiativeID: cur.InitiativeID, TaskID: cur.TaskID, RefID: cur.ID,
-		Summary: eventSummary(cur, "answered", in.Answer), Data: data,
+		Summary: eventSummary(cur, "answered", in.Answer), Data: answeredData(cur, in),
 	})
 	if err != nil {
 		return Ask{}, err
@@ -126,12 +116,9 @@ func (s Store) Withdraw(ctx context.Context, actor audit.Actor, principal, ref, 
 }
 
 func (s Store) withdraw(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref, reason string) (Ask, error) {
-	cur, err := s.find(ctx, tx, ref)
+	cur, err := s.findOpen(ctx, tx, ref, "withdraw")
 	if err != nil {
 		return Ask{}, err
-	}
-	if cur.State != domain.AskOpen {
-		return Ask{}, notOpen(cur, "withdraw")
 	}
 	now := s.now()
 	d := s.Store.Dialect()
@@ -147,6 +134,42 @@ func (s Store) withdraw(ctx context.Context, tx *sql.Tx, actor audit.Actor, prin
 	if err := s.wonRace(ctx, tx, res, cur, "withdraw"); err != nil {
 		return Ask{}, err
 	}
+	err = audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
+		Principal: principal, Type: EventWithdrawn, InitiativeID: cur.InitiativeID, TaskID: cur.TaskID, RefID: cur.ID,
+		Summary: eventSummary(cur, "withdrawn", reason), Data: withdrawnData(cur, reason),
+	})
+	if err != nil {
+		return Ask{}, err
+	}
+	return s.find(ctx, tx, cur.ID)
+}
+
+// findOpen reads the ask ref names and refuses one that is not open.
+func (s Store) findOpen(ctx context.Context, tx *sql.Tx, ref, action string) (Ask, error) {
+	cur, err := s.find(ctx, tx, ref)
+	if err != nil {
+		return Ask{}, err
+	}
+	if cur.State != domain.AskOpen {
+		return Ask{}, notOpen(cur, action)
+	}
+	return cur, nil
+}
+
+// answeredData is the data of an ask_answered event.
+func answeredData(cur Ask, in Reply) map[string]any {
+	data := map[string]any{"ref": cur.Ref, "channel": in.Channel}
+	if cur.Task != "" {
+		data["task"] = cur.Task
+	}
+	if in.OnBehalfOf != "" {
+		data["on_behalf_of"] = in.OnBehalfOf
+	}
+	return data
+}
+
+// withdrawnData is the data of an ask_withdrawn event.
+func withdrawnData(cur Ask, reason string) map[string]any {
 	data := map[string]any{"ref": cur.Ref}
 	if cur.Task != "" {
 		data["task"] = cur.Task
@@ -154,14 +177,7 @@ func (s Store) withdraw(ctx context.Context, tx *sql.Tx, actor audit.Actor, prin
 	if reason != "" {
 		data["reason"] = reason
 	}
-	err = audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
-		Principal: principal, Type: EventWithdrawn, InitiativeID: cur.InitiativeID, TaskID: cur.TaskID, RefID: cur.ID,
-		Summary: eventSummary(cur, "withdrawn", reason), Data: data,
-	})
-	if err != nil {
-		return Ask{}, err
-	}
-	return s.find(ctx, tx, cur.ID)
+	return data
 }
 
 // notOpen is the refusal of an action on an ask that is answered or withdrawn.

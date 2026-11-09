@@ -97,26 +97,35 @@ func (s Store) conditions(ctx context.Context, q Query) (*filter, error) {
 	if q.Actor != "" {
 		f.add(`a.handle = ?`, q.Actor)
 	}
+	if err := s.scopeFilter(ctx, f, q); err != nil {
+		return nil, err
+	}
+	if err := s.afterFilter(ctx, f, q.After); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// scopeFilter adds the task and initiative conditions, which need the database
+// to resolve a ref to an id.
+func (s Store) scopeFilter(ctx context.Context, f *filter, q Query) error {
 	if q.Task != "" {
 		t, err := s.findTask(ctx, s.Store.Reader(), q.Task)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		f.add(`k.task_id = ?`, t.ID)
 	}
 	if q.Initiative != "" {
 		ini, err := (initiatives.Store{Store: s.Store}).Get(ctx, q.Initiative)
 		if errors.Is(err, initiatives.ErrNotFound) {
-			return nil, fmt.Errorf("%w: initiative %s", ErrNotFound, q.Initiative)
+			return fmt.Errorf("%w: initiative %s", ErrNotFound, q.Initiative)
 		} else if err != nil {
-			return nil, err
+			return err
 		}
 		f.add(`k.initiative_id = ?`, ini.ID)
 	}
-	if err := s.afterFilter(ctx, f, q.After); err != nil {
-		return nil, err
-	}
-	return f, nil
+	return nil
 }
 
 // afterFilter adds the condition for the ask an after cursor names: its ref

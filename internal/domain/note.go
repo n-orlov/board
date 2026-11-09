@@ -68,13 +68,11 @@ func NormalizeMentions(handles []string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, h := range handles {
 		h = strings.TrimSpace(h)
-		switch {
-		case h == "":
+		if h == "" {
 			continue
-		case utf8.RuneCountInString(h) > MaxMentionLen:
-			return nil, fmt.Errorf("a mention must be at most %d characters", MaxMentionLen)
-		case strings.IndexFunc(h, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }) >= 0:
-			return nil, fmt.Errorf("a mention is a handle without spaces, got %q", h)
+		}
+		if err := checkMention(h); err != nil {
+			return nil, err
 		}
 		if !seen[h] {
 			seen[h] = true
@@ -85,6 +83,17 @@ func NormalizeMentions(handles []string) ([]string, error) {
 		return nil, fmt.Errorf("a note mentions at most %d handles, got %d", MaxMentions, len(out))
 	}
 	return out, nil
+}
+
+// checkMention refuses a handle that is too long or holds whitespace.
+func checkMention(h string) error {
+	switch {
+	case utf8.RuneCountInString(h) > MaxMentionLen:
+		return fmt.Errorf("a mention must be at most %d characters", MaxMentionLen)
+	case strings.IndexFunc(h, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }) >= 0:
+		return fmt.Errorf("a mention is a handle without spaces, got %q", h)
+	}
+	return nil
 }
 
 // NotePoint is a place in the notes: after the note with this ULID or number,

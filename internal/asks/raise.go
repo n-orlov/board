@@ -147,33 +147,51 @@ func eventSummary(k Ask, verb, text string) string {
 func (s Store) scopeOf(ctx context.Context, tx *sql.Tx, in New) (scope, error) {
 	var sc scope
 	if in.Task != "" {
-		t, err := s.findTask(ctx, tx, in.Task)
-		if err != nil {
+		var err error
+		if sc, err = s.taskScope(ctx, tx, in.Task); err != nil {
 			return scope{}, err
-		}
-		sc = scope{taskID: t.ID, taskRef: t.Ref, initiativeID: t.InitiativeID, slug: t.Slug}
-		if t.Status == "closed" {
-			return scope{}, ConflictError{Msg: "cannot raise an ask on task " + t.Ref + ": it is closed",
-				Next: "Reopen the task first, or raise the ask on an open task."}
 		}
 	}
 	if in.Initiative != "" {
-		ini, err := (initiatives.Store{Store: s.Store}).FindIn(ctx, tx, in.Initiative)
-		if errors.Is(err, initiatives.ErrNotFound) {
-			return scope{}, fmt.Errorf("%w: initiative %s", ErrNotFound, in.Initiative)
-		} else if err != nil {
+		var err error
+		if sc, err = s.initiativeScope(ctx, tx, sc, in.Initiative); err != nil {
 			return scope{}, err
 		}
-		if sc.taskID != "" && sc.initiativeID != ini.ID {
-			return scope{}, InvalidError{Msg: "task " + sc.taskRef + " does not belong to initiative " + ini.Slug,
-				Next: "Send the task alone: its initiative is derived from it."}
-		}
-		sc.initiativeID, sc.slug = ini.ID, ini.Slug
 	}
 	if sc.initiativeID == "" {
 		return sc, nil
 	}
 	return sc, s.initiativeOpen(ctx, tx, sc)
+}
+
+// taskScope is the scope of the task ref names, refused when the task is closed.
+func (s Store) taskScope(ctx context.Context, tx *sql.Tx, ref string) (scope, error) {
+	t, err := s.findTask(ctx, tx, ref)
+	if err != nil {
+		return scope{}, err
+	}
+	if t.Status == "closed" {
+		return scope{}, ConflictError{Msg: "cannot raise an ask on task " + t.Ref + ": it is closed",
+			Next: "Reopen the task first, or raise the ask on an open task."}
+	}
+	return scope{taskID: t.ID, taskRef: t.Ref, initiativeID: t.InitiativeID, slug: t.Slug}, nil
+}
+
+// initiativeScope is sc with the initiative slug names, refused when a task
+// already in sc belongs to another initiative.
+func (s Store) initiativeScope(ctx context.Context, tx *sql.Tx, sc scope, slug string) (scope, error) {
+	ini, err := (initiatives.Store{Store: s.Store}).FindIn(ctx, tx, slug)
+	if errors.Is(err, initiatives.ErrNotFound) {
+		return scope{}, fmt.Errorf("%w: initiative %s", ErrNotFound, slug)
+	} else if err != nil {
+		return scope{}, err
+	}
+	if sc.taskID != "" && sc.initiativeID != ini.ID {
+		return scope{}, InvalidError{Msg: "task " + sc.taskRef + " does not belong to initiative " + ini.Slug,
+			Next: "Send the task alone: its initiative is derived from it."}
+	}
+	sc.initiativeID, sc.slug = ini.ID, ini.Slug
+	return sc, nil
 }
 
 // initiativeOpen returns a ConflictError unless the initiative of sc is open.

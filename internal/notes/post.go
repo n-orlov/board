@@ -149,28 +149,34 @@ func eventSummary(k Note) string {
 // scopeOf resolves the task and initiative ids of the request through tx and
 // refuses a task outside the initiative.
 func (s Store) scopeOf(ctx context.Context, tx *sql.Tx, in New) (taskID, iniID string, err error) {
-	var taskIni, taskRef string
+	var t taskRow
 	if in.Task != "" {
-		t, err := s.findTask(ctx, tx, in.Task)
-		if err != nil {
+		if t, err = s.findTask(ctx, tx, in.Task); err != nil {
 			return "", "", err
 		}
-		taskID, taskIni, taskRef, iniID = t.ID, t.InitiativeID, t.Ref, t.InitiativeID
+		taskID, iniID = t.ID, t.InitiativeID
 	}
 	if in.Initiative == "" {
 		return taskID, iniID, nil
 	}
-	ini, err := (initiatives.Store{Store: s.Store}).FindIn(ctx, tx, in.Initiative)
-	if errors.Is(err, initiatives.ErrNotFound) {
-		return "", "", fmt.Errorf("%w: initiative %s", ErrNotFound, in.Initiative)
-	} else if err != nil {
+	ini, err := s.findInitiative(ctx, tx, in.Initiative)
+	if err != nil {
 		return "", "", err
 	}
-	if taskID != "" && taskIni != ini.ID {
-		return "", "", InvalidError{Msg: "task " + taskRef + " does not belong to initiative " + ini.Slug,
+	if taskID != "" && t.InitiativeID != ini.ID {
+		return "", "", InvalidError{Msg: "task " + t.Ref + " does not belong to initiative " + ini.Slug,
 			Next: "Send the task alone: its initiative is derived from it."}
 	}
 	return taskID, ini.ID, nil
+}
+
+// findInitiative reads the initiative slug names through tx.
+func (s Store) findInitiative(ctx context.Context, tx *sql.Tx, slug string) (initiatives.Initiative, error) {
+	ini, err := (initiatives.Store{Store: s.Store}).FindIn(ctx, tx, slug)
+	if errors.Is(err, initiatives.ErrNotFound) {
+		return ini, fmt.Errorf("%w: initiative %s", ErrNotFound, slug)
+	}
+	return ini, err
 }
 
 // taskRow is the part of a task a note needs.

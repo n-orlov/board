@@ -89,28 +89,45 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 		return err
 	}
 	f.resources(q.Resources)
-	switch q.Broadcast {
+	if err := f.broadcast(q.Broadcast); err != nil {
+		return err
+	}
+	if err := f.mention(q.Mention); err != nil {
+		return err
+	}
+	if q.Author != "" {
+		f.add(`a.handle = ?`, q.Author)
+	}
+	return nil
+}
+
+// broadcast adds the condition for a broadcast filter: none when it is empty.
+func (f *filter) broadcast(mode string) error {
+	switch mode {
 	case "":
 	case domain.BroadcastOnly:
 		f.add(broadcastSQL)
 	case domain.BroadcastExclude:
 		f.add(`NOT (` + broadcastSQL + `)`)
 	default:
-		return InvalidError{Msg: fmt.Sprintf("broadcast %q is not only or exclude", q.Broadcast),
+		return InvalidError{Msg: fmt.Sprintf("broadcast %q is not only or exclude", mode),
 			Next: "Send broadcast=only or broadcast=exclude, or leave it out."}
 	}
-	if q.Mention != "" {
-		// A plain substring test on the stored JSON list: portable and
-		// case-sensitive on both databases, with no LIKE wildcards to escape.
-		needle, err := json.Marshal(q.Mention)
-		if err != nil {
-			return fmt.Errorf("encode mention: %w", err)
-		}
-		f.add(`LENGTH(REPLACE(k.mentions, ?, '')) < LENGTH(k.mentions)`, string(needle))
+	return nil
+}
+
+// mention adds the condition for a mention filter: none when it is empty.
+func (f *filter) mention(handle string) error {
+	if handle == "" {
+		return nil
 	}
-	if q.Author != "" {
-		f.add(`a.handle = ?`, q.Author)
+	// A plain substring test on the stored JSON list: portable and
+	// case-sensitive on both databases, with no LIKE wildcards to escape.
+	needle, err := json.Marshal(handle)
+	if err != nil {
+		return fmt.Errorf("encode mention: %w", err)
 	}
+	f.add(`LENGTH(REPLACE(k.mentions, ?, '')) < LENGTH(k.mentions)`, string(needle))
 	return nil
 }
 
