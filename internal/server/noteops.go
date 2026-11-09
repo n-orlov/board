@@ -150,6 +150,52 @@ func noteQuery(p ListNotesParams, full bool) notes.Query {
 	return q
 }
 
+// ackRefused is the problem that stops an `ack=true` read: no principal to own
+// the cursor, or cursors that are not available. A read without ack is never
+// refused.
+func (o noteOps) ackRefused(ctx context.Context, ack bool) (problemResponse, bool) {
+	if !ack {
+		return problemResponse{}, false
+	}
+	if _, r, ok := caller(ctx); !ok {
+		return r, true
+	}
+	return o.cursors.ready()
+}
+
+// ackPage moves the caller's notes cursor to the last note of a non-empty page.
+func (o noteOps) ackPage(ctx context.Context, ack bool, page notes.Page) error {
+	if !ack || len(page.Items) == 0 {
+		return nil
+	}
+	who, _, _ := caller(ctx)
+	return o.cursors.cursors.Ack(ctx, who.AuditActor(), cursors.StreamNotes, page.Items[len(page.Items)-1].ID)
+}
+
+func apiNoteList(page notes.Page, full bool) NoteList {
+	items := make([]Note, len(page.Items))
+	for i, k := range page.Items {
+		items[i] = apiNote(k, full)
+	}
+	return NoteList{Items: items, NextAfter: optionalText(page.NextAfter)}
+}
+
+// page reads the page of notes a query asks for, resolving since=cursor first.
+// The problem is what the client is answered with when the read is refused.
+func (o noteOps) page(ctx context.Context, p ListNotesParams, full bool) (notes.Page, *problemResponse, error) {
+	since, problem, err := o.cursors.readFrom(ctx, cursors.StreamNotes, text(p.Since))
+	if problem != nil || err != nil {
+		return notes.Page{}, problem, err
+	}
+	q := noteQuery(p, full)
+	q.Since = since
+	page, err := o.notes.List(ctx, q)
+	if failed, ok := noteFailure(err); ok {
+		return notes.Page{}, &failed, nil
+	}
+	return page, nil, err
+}
+
 // ListNotes lists a page of notes. `since=cursor` reads after the caller's
 // notes cursor and `ack=true` moves that cursor to the last note returned.
 func (o noteOps) ListNotes(ctx context.Context, req ListNotesRequestObject) (ListNotesResponseObject, error) {
@@ -160,32 +206,18 @@ func (o noteOps) ListNotes(ctx context.Context, req ListNotesRequestObject) (Lis
 	if bad != nil {
 		return noteResult[ListNotesResponseObject](*bad)
 	}
-	ack := req.Params.Ack != nil && *req.Params.Ack
-	who, r, ok := caller(ctx)
-	if !ok && ack {
+	ack := wantsAck(req.Params.Ack)
+	if r, refused := o.ackRefused(ctx, ack); refused {
 		return r, nil
 	}
-	if r, off := o.cursors.ready(); off && ack {
-		return r, nil
-	}
-	since, problem, err := o.cursors.readFrom(ctx, cursors.StreamNotes, text(req.Params.Since))
+	page, problem, err := o.page(ctx, req.Params, full)
 	if problem != nil || err != nil {
 		return orProblem[ListNotesResponseObject](problem, err)
 	}
-	q := noteQuery(req.Params, full)
-	q.Since = since
-	page, err := o.notes.List(ctx, q)
-	if err != nil {
-		return noteResult[ListNotesResponseObject](err)
+	if err := o.ackPage(ctx, ack, page); err != nil {
+		return nil, err
 	}
-	if ack && len(page.Items) > 0 {
-		if err := o.cursors.cursors.Ack(ctx, who.AuditActor(), cursors.StreamNotes, page.Items[len(page.Items)-1].ID); err != nil {
-			return nil, err
-		}
-	}
-	items := make([]Note, len(page.Items))
-	for i, k := range page.Items {
-		items[i] = apiNote(k, full)
-	}
-	return ListNotes200JSONResponse(NoteList{Items: items, NextAfter: optionalText(page.NextAfter)}), nil
+	return ListNotes200JSONResponse(apiNoteList(page, full)), nil
 }
+
+func wantsAck(p *bool) bool { return p != nil && *p }

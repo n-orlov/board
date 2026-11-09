@@ -1119,11 +1119,9 @@ paths:
             type: string
       responses:
         "200":
-          description: The stream. The response carries `Cache-Control` no-cache and `X-Accel-Buffering` no.
-          content:
-            text/event-stream:
-              schema:
-                type: string
+          description: >-
+            The stream, `Content-Type: text/event-stream`, with `Cache-Control` no-cache and `X-Accel-Buffering` no.
+            The body is not described as a schema: a generated reader for it would be code the server never runs.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

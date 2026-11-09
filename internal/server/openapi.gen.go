@@ -6617,47 +6617,12 @@ type GetStreamResponseObject interface {
 	VisitGetStreamResponse(w http.ResponseWriter) error
 }
 
-type GetStream200TexteventStreamResponse struct {
-	Body          io.Reader
-	ContentLength int64
+type GetStream200Response struct {
 }
 
-func (response GetStream200TexteventStreamResponse) VisitGetStreamResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	if response.ContentLength != 0 {
-		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
-	}
+func (response GetStream200Response) VisitGetStreamResponse(w http.ResponseWriter) error {
 	w.WriteHeader(200)
-
-	if closer, ok := response.Body.(io.ReadCloser); ok {
-		defer func() { _ = closer.Close() }()
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		// If w doesn't support flushing, fall back to io.Copy.
-		_, err := io.Copy(w, response.Body)
-		return err
-	}
-	// text/event-stream messages are typically small; use a
-	// modest buffer and flush after each chunk so clients see
-	// events immediately instead of waiting on OS buffering.
-	buf := make([]byte, 4096)
-	for {
-		n, err := response.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-			flusher.Flush()
-		}
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-	}
+	return nil
 }
 
 type GetStream400ApplicationProblemPlusJSONResponse struct {

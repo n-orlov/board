@@ -2628,14 +2628,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The stream. The response carries `Cache-Control` no-cache and `X-Accel-Buffering` no. */
+            /** @description The stream, `Content-Type: text/event-stream`, with `Cache-Control` no-cache and `X-Accel-Buffering` no. The body is not described as a schema: a generated reader for it would be code the server never runs. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "text/event-stream": string;
-                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
