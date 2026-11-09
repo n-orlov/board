@@ -22,6 +22,19 @@ type nowView struct {
 	MyLeases     []nowLease     `json:"my_leases"`
 	OthersLeases []leaseView    `json:"others_leases"`
 	Conflicts    []conflictView `json:"conflicts"`
+	MyAsks       []askView      `json:"my_asks"`
+	Notes        []noteView     `json:"notes"`
+	NotesMore    int            `json:"notes_more"`
+	Attention    nowAttention   `json:"attention"`
+}
+
+// nowAttention is the size of each attention section.
+type nowAttention struct {
+	OpenAsks      int `json:"open_asks"`
+	DoneNotClosed int `json:"done_not_closed"`
+	ExpiredLeases int `json:"expired_leases"`
+	OverdueWatch  int `json:"overdue_watches"`
+	Conflicts     int `json:"conflicts"`
 }
 
 type nowLease struct {
@@ -72,8 +85,9 @@ func fetchNow(p parsedArgs, env Env) (json.RawMessage, nowView, error) {
 	return raw, v, json.Unmarshal(raw, &v)
 }
 
-// nowText is the check-in: who I am, then the sections `my leases`, `others`
-// and `conflicts`, each one line per item, `none` for an empty one.
+// nowText is the check-in: who I am, then the sections `my leases`, `others`,
+// `conflicts`, `my asks` and `notes`, each one line per item, `none` for an
+// empty one, and the `attention` line with the counts.
 func nowText(v nowView, now time.Time) string {
 	mine := make([]string, len(v.MyLeases))
 	for i, l := range v.MyLeases {
@@ -88,14 +102,46 @@ func nowText(v nowView, now time.Time) string {
 		conflicts[i] = conflictLine(c, now)
 	}
 	return "you: " + v.Actor + "\n" +
-		nowSection("my leases", mine, "board lease ls --mine") +
-		nowSection("others", others, "board lease ls") +
-		nowSection("conflicts", conflicts, "board lease ls")
+		nowSection("my leases", mine, 0, "board lease ls --mine") +
+		nowSection("others", others, 0, "board lease ls") +
+		nowSection("conflicts", conflicts, 0, "board lease ls") +
+		nowSection("my asks", myAskLines(v.MyAsks, now), 0, "board ask ls --mine") +
+		nowSection("notes", noteLines(v.Notes, now), v.NotesMore, "board notes --since last") +
+		attentionLine(v.Attention) + "\n"
+}
+
+// myAskLines is one line per ask of mine: the ask line of `ask ls`, and for an
+// answered ask `ANSWERED ` in front and the answer, on one line, at the end.
+func myAskLines(asks []askView, now time.Time) []string {
+	lines := make([]string, len(asks))
+	for i, a := range asks {
+		lines[i] = askLine(a, now)
+		if a.State == "answered" {
+			lines[i] = "ANSWERED " + lines[i] + ": " + strconv.Quote(strings.Join(strings.Fields(a.Answer), " "))
+		}
+	}
+	return lines
+}
+
+// noteLines is one line per note, as `board notes` prints it.
+func noteLines(notes []noteView, now time.Time) []string {
+	lines := make([]string, len(notes))
+	for i, n := range notes {
+		lines[i] = noteLine(n, now)
+	}
+	return lines
+}
+
+// attentionLine is `attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1`.
+func attentionLine(a nowAttention) string {
+	return fmt.Sprintf("attention: asks %d · done %d · expired %d · overdue %d · conflicts %d",
+		a.OpenAsks, a.DoneNotClosed, a.ExpiredLeases, a.OverdueWatch, a.Conflicts)
 }
 
 // nowSection is a heading and up to nowCap lines under it, then the
-// `+K more → <command>` line; an empty section is the heading and `none`.
-func nowSection(name string, lines []string, more string) string {
+// `+K more → <command>` line, K counting the lines past the cap and the
+// `extra` items the server left out; an empty section is the heading and `none`.
+func nowSection(name string, lines []string, extra int, more string) string {
 	if len(lines) == 0 {
 		return name + ": none\n"
 	}
@@ -103,10 +149,12 @@ func nowSection(name string, lines []string, more string) string {
 	b.WriteString(name + ":\n")
 	for i, line := range lines {
 		if i == nowCap {
-			b.WriteString("  +" + strconv.Itoa(len(lines)-nowCap) + " more → " + more + "\n")
 			break
 		}
 		b.WriteString("  " + line + "\n")
+	}
+	if left := max(len(lines)-nowCap, 0) + extra; left > 0 {
+		b.WriteString("  +" + strconv.Itoa(left) + " more → " + more + "\n")
 	}
 	return b.String()
 }

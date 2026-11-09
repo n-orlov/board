@@ -1512,17 +1512,26 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   either way; `--json` prints no `CONFLICT` line (the `conflicts` array carries them) and still exits 7. A no-argument renewal
   counts the conflicts of every lease it renewed.
 - `board now [--resources r1,r2] [--json]` calls `GET /api/v1/now` (`--resources` is sent as the `resources` query, repeated
-  flags joined by `,`) and prints the check-in in this phase's lease and conflict parts: `you: <handle>`, then three sections in
-  this order, each a heading line and one line per item indented by two spaces. `my leases:` lists my live leases as `L<n>  <task>
+  flags joined by `,`) and prints the check-in: `you: <handle>`, then five sections in this order, each a heading line and one
+  line per item indented by two spaces, then the `attention` line. `my leases:` lists my live leases as `L<n>  <task>
   <title>  "<intent>"  res a,b  exp 1h52m`, `others:` lists the live leases of other actors as `L<n>  <task>  <holder>  "<intent>"
   res a,b  exp 41m` and `conflicts:` lists the conflicts as the `CONFLICT` lines of `lease start` (the live leases that hold a
-  resource of one of my live leases, and those of others that hold a resource given with `--resources`). The `res` part is
-  absent for a lease without resources, and an empty section is its heading and `none` on one line (`others: none`). Each
-  section shows at most 5 lines (§8.1), then `  +K more → board lease ls` (`board lease ls --mine` for my leases); `now` has no
-  `--limit` or `--all`. **Exit 7** when the answer holds any conflict, else 0; the output is printed either way, and `--json`
-  prints the server's answer as it came (all items, no cap) and exits 7 the same. A resource list the server refuses (an
-  empty entry, over 20 resources) exits 1 with its message; extra arguments or an unknown flag exit 2 with `usage: board now
-  [--resources r1,r2] [--json]`. Asks, notes and the attention line arrive with later phases.
+  resource of one of my live leases, and those of others that hold a resource given with `--resources`). `my asks:` lists
+  `my_asks` of the answer, the asks I raised that are open and those answered since my `notes` cursor or in the last 24 hours, in
+  the line form of `board ask ls` (`A<n>  open  <task>  <asker>  "<question>"  asked 3m ago`); an answered ask starts with
+  `ANSWERED ` and ends with the answer, on one line (white space collapsed) and quoted: `ANSWERED A2  answered  aa-2  me  "Ship
+  it?"  answered by nik@phone 1m ago: "yes, ship"`. `notes:` lists the notes of the answer, the unread ones that concern me, in the
+  line form of `board notes` (`N<n>  3m ago  <author>  <task|initiative|broadcast>  [<resource>]  <summary>`, ending `  +` when the
+  note has a body). Reading `now` moves no cursor; `board notes --since last --ack` does. The `res` part is absent for a lease
+  without resources, and an empty section is its heading and `none` on one line (`others: none`, `my asks: none`, `notes: none`).
+  Each section shows at most 5 lines (§8.1), then `  +K more → <command>`: `board lease ls --mine` for my leases, `board lease
+  ls` for the others and the conflicts, `board ask ls --mine` for my asks, and for the notes `board notes --since last`, where `K`
+  also counts the `notes_more` notes the server left out; `now` has no `--limit` or `--all`. The last line is always
+  `attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1`, the counts of the five sections of `board attention` for the
+  whole board (all zeros when nothing needs the operator). **Exit 7** when the answer holds any conflict, else 0; the output is
+  printed either way, and `--json` prints the server's answer as it came (all items, no cap) and exits 7 the same. A resource list
+  the server refuses (an empty entry, over 20 resources) exits 1 with its message; extra arguments or an unknown flag exit 2 with
+  `usage: board now [--resources r1,r2] [--json]`.
 - `board ask <task> "<question>" [--details file|-] [--option a]... [--stop] [--blocking] [--json]` calls `POST /api/v1/asks` (the task
   as a ref in either letter case, `--details` the text of a file or, with `-`, of standard input, `--option` repeatable) and prints
   `ok ask A<n> raised` (`--json`: the ask). The ask is a `stop` ask: `--stop`, the default, is accepted for clarity, and the ask is

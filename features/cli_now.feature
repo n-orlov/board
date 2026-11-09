@@ -1,7 +1,9 @@
 Feature: The check-in from the command line
-  board now prints who I am and three sections, my leases, others and conflicts,
-  one line each. A conflict line starts with CONFLICT. It exits 7 when a conflict
-  touches one of my live leases or a resource given with --resources, else 0.
+  board now prints who I am and five sections, my leases, others, conflicts, my
+  asks and notes, one line each, then an attention line with the counts. A
+  conflict line starts with CONFLICT and an answered ask of mine starts with
+  ANSWERED. It exits 7 when a conflict touches one of my live leases or a
+  resource given with --resources, else 0.
 
   Background:
     Given a new database for the board commands
@@ -16,17 +18,20 @@ Feature: The check-in from the command line
     When I run the client 'board now' as actor "claude@laptop"
     Then the exit code is 0
     And stderr is empty
-    And stdout has 4 lines
+    And stdout has 7 lines
     And stdout line 1 matches '^you: claude@laptop$'
     And stdout line 2 matches '^my leases: none$'
     And stdout line 3 matches '^others: none$'
     And stdout line 4 matches '^conflicts: none$'
+    And stdout line 5 matches '^my asks: none$'
+    And stdout line 6 matches '^notes: none$'
+    And stdout line 7 matches '^attention: asks 0 · done 0 · expired 0 · overdue 0 · conflicts 0$'
 
   Scenario: my lease is listed under my leases only
     Given I run the client 'board lease start aa-1 "wiring" --ttl 3h --res repo:x' as actor "claude@laptop"
     When I run the client 'board now' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout has 5 lines
+    And stdout has 8 lines
     And stdout line 2 matches '^my leases:$'
     And stdout line 3 matches '^  L1  aa-1  Task 1  "wiring"  res repo:x  exp (3h|2h59m)$'
     And stdout line 4 matches '^others: none$'
@@ -104,11 +109,86 @@ Feature: The check-in from the command line
     And I run the client 'board lease start aa-9 "f"' as actor "codex@laptop"
     When I run the client 'board now' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout has 10 lines
+    And stdout has 13 lines
     And stdout line 4 matches '^  L1  aa-4  codex@laptop  "a"'
     And stdout line 8 matches '^  L5  aa-8  codex@laptop  "e"'
     And stdout line 9 matches '^  \+1 more → board lease ls$'
     And stdout line 10 matches '^conflicts: none$'
+
+  Scenario: my asks lists an open ask and an answered one with ANSWERED and the answer
+    Given I run the client 'board ask aa-1 "Which port?"' as actor "claude@laptop"
+    And I run the client 'board ask aa-2 "Ship it?" --blocking' as actor "claude@laptop"
+    And I run the client 'board ask aa-3 "Somebody else asks"' as actor "codex@laptop"
+    And I run the client 'board answer A2 "yes, ship"' as actor "operator@laptop"
+    When I run the client 'board now' as actor "claude@laptop"
+    Then the exit code is 0
+    And stderr is empty
+    And stdout line 5 matches '^my asks:$'
+    And stdout line 6 matches '^  A1  open  aa-1  claude@laptop  "Which port\?"  asked (just now|\d+m ago)$'
+    And stdout line 7 matches '^  ANSWERED A2  answered  aa-2  claude@laptop  "Ship it\?"  \(blocking\)  answered by operator@laptop (just now|\d+m ago): "yes, ship"$'
+    And stdout line 8 matches '^notes: none$'
+    And stdout line 9 matches '^attention: asks 2 · done 0 · expired 0 · overdue 0 · conflicts 0$'
+    And stdout has 9 lines
+
+  Scenario: another actor sees none of my asks
+    Given I run the client 'board ask aa-1 "Which port?"' as actor "claude@laptop"
+    When I run the client 'board now' as actor "codex@laptop"
+    Then stdout line 5 matches '^my asks: none$'
+    And stdout line 7 matches '^attention: asks 1 '
+
+  Scenario: notes lists the notes that concern me and leaves out the others
+    Given I run the client 'board lease start aa-1 "wiring"' as actor "claude@laptop"
+    And I run the client 'board note "on my task" --task aa-1' as actor "codex@laptop"
+    And I run the client 'board note "on another task" --task aa-2' as actor "codex@laptop"
+    And I run the client 'board note "psst" --init aa --mention claude@laptop' as actor "codex@laptop"
+    And the standard input holds "the details"
+    And I run the client 'board note "everyone listen" --body -' as actor "codex@laptop"
+    When I run the client 'board now' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout line 6 matches '^my asks: none$'
+    And stdout line 7 matches '^notes:$'
+    And stdout line 8 matches '^  N1  (just now|\d+m ago)  codex@laptop  aa-1  on my task$'
+    And stdout line 9 matches '^  N3  (just now|\d+m ago)  codex@laptop  aa  psst$'
+    And stdout line 10 matches '^  N4  (just now|\d+m ago)  codex@laptop  broadcast  everyone listen  \+$'
+    And stdout line 11 matches '^attention: asks 0 '
+    And stdout has 11 lines
+    When I run the client 'board notes --since last --ack' as actor "claude@laptop"
+    And I run the client 'board now' as actor "claude@laptop"
+    Then stdout line 7 matches '^notes: none$'
+
+  Scenario: the notes section shows five lines and then how to see the rest
+    Given I run the client 'board note "n1"' as actor "codex@laptop"
+    And I run the client 'board note "n2"' as actor "codex@laptop"
+    And I run the client 'board note "n3"' as actor "codex@laptop"
+    And I run the client 'board note "n4"' as actor "codex@laptop"
+    And I run the client 'board note "n5"' as actor "codex@laptop"
+    And I run the client 'board note "n6"' as actor "codex@laptop"
+    And I run the client 'board note "n7"' as actor "codex@laptop"
+    When I run the client 'board now' as actor "claude@laptop"
+    Then stdout line 6 matches '^notes:$'
+    And stdout line 7 matches '^  N1 '
+    And stdout line 11 matches '^  N5 '
+    And stdout line 12 matches '^  \+2 more → board notes --since last$'
+    And stdout line 13 matches '^attention: '
+
+  Scenario: the attention line counts what needs the operator
+    Given I run the client 'board lease start aa-2 "testing" --res repo:y' as actor "codex@laptop"
+    And I run the client 'board lease start aa-1 "wiring" --res repo:y' as actor "claude@laptop"
+    And I run the client 'board ask aa-3 "Which port?"' as actor "codex@laptop"
+    And I run the client 'board task done aa-3' as actor "codex@laptop"
+    When I run the client 'board now' as actor "claude@laptop"
+    Then the exit code is 7
+    And stdout line 10 matches '^attention: asks 1 · done 1 · expired 0 · overdue 0 · conflicts 1$'
+
+  Scenario: --json carries the new parts and the exit code does not change
+    Given I run the client 'board ask aa-1 "Which port?"' as actor "claude@laptop"
+    And I run the client 'board note "everyone listen"' as actor "codex@laptop"
+    When I run the client 'board now --json' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout JSON path "my_asks" has 1 items
+    And stdout JSON path "my_asks.0.ref" is "A1"
+    And stdout JSON path "notes" has 1 items
+    And stdout JSON path "attention.open_asks" is "1"
 
   Scenario: a malformed command line exits 2 and a resource the server refuses exits 1
     When I run the client 'board now extra' as actor "claude@laptop"
