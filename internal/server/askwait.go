@@ -83,15 +83,19 @@ func (r askWaitResponse) limits(w *waiter) (timeout <-chan time.Time, asOf <-cha
 
 // hold waits and returns the ask after it, with poll_seen_at set to the end of
 // the wait. With until, an end that no read made by until found is replaced by
-// the read made as until passed: the ask as it stood then.
+// the read made as until passed: the ask as it stood then. That read is timed
+// before any write of the wait is made, so a write held up by the writer, begin's
+// included, does not move it.
 func (r askWaitResponse) hold() (asks.Ask, error) {
 	w := &waiter{ctx: r.ctx, store: r.ops.asks, hub: r.ops.waits, k: r.ask, sub: r.ops.waits.feed.Subscribe()}
 	defer func() { w.sub.Close() }()
-	if err := w.begin(); err != nil || w.k.State != domain.AskOpen {
-		return w.k, err
-	}
+	// The limits come first: the read at until is timed from here, not from
+	// when begin's write (which waits for the writer) comes back.
 	timeout, asOf, stop := r.limits(w)
 	defer stop()
+	if over, err := r.begin(w, asOf); over || err != nil {
+		return w.k, err
+	}
 	beat := time.NewTicker(r.touchEvery())
 	defer beat.Stop()
 	if err := w.run(timeout, beat.C, asOf); err != nil {
@@ -101,6 +105,15 @@ func (r askWaitResponse) hold() (asks.Ask, error) {
 		w.take(<-asOf)
 	}
 	return w.end()
+}
+
+// begin starts the wait and says whether it is over already: the ask was found
+// ended, and by a read that came back by until, or until's own read is the answer.
+func (r askWaitResponse) begin(w *waiter, asOf <-chan snapshot) (over bool, err error) {
+	if err := w.begin(); err != nil {
+		return false, err
+	}
+	return w.k.State != domain.AskOpen && (asOf == nil || !w.foundLate(*r.until)), nil
 }
 
 // run steps the wait until it is over: the ask ended, the read at until came

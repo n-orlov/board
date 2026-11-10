@@ -34,6 +34,9 @@ type liveAskBoard struct {
 	// delay holds back every response to a read of the ask this long (not the
 	// raise's, so the deadline stays a second after the raise)
 	delay time.Duration
+	// early holds back every read of the ask this long before the server
+	// handles it, so the end can take the writer first
+	early time.Duration
 	// holdTx, when set, holds the end's transaction open from its first clock
 	// read until it is closed, every read in it giving the time of the first
 	holdTx chan struct{}
@@ -79,11 +82,18 @@ func newLiveAskBoard(t *testing.T) *liveAskBoard {
 // done.
 func (b *liveAskBoard) delayed(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		d, early := b.delay, b.early
+		b.mu.Unlock()
+		if r.Method == http.MethodGet && early > 0 {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(early):
+			}
+		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, r)
-		b.mu.Lock()
-		d := b.delay
-		b.mu.Unlock()
 		if r.Method != http.MethodGet {
 			d = 0
 		}
@@ -298,6 +308,47 @@ func TestAskPollLiveEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
 			}
 			if code != ExitTimeout || out != stillOpen || took < time.Second {
 				t.Errorf("withdraw=%v delay %s: got %d %q after %s, want exit 3 at the deadline", c.withdraw, delay, code, out, took)
+			}
+		}
+	}
+}
+
+// An answer or withdrawal whose transaction already holds the writer when the
+// poll's first read reaches the server (so the server's write marking the poll
+// waits for it) and commits after the deadline leaves the ask open at the
+// deadline: exit 3 with the still-open line, the deadline sampled on its own
+// timer and not once that first write is let through. With the responses held
+// back too, and with the end taking the writer before the poll even starts.
+func TestAskPollLiveEndHoldingTheWriterBeforeThePollReachesTheServerExitsThree(t *testing.T) {
+	for _, c := range []struct{ early, delay, endAt time.Duration }{
+		{300 * time.Millisecond, 0, 100 * time.Millisecond},
+		{300 * time.Millisecond, 400 * time.Millisecond, 100 * time.Millisecond},
+		{100 * time.Millisecond, 0, 20 * time.Millisecond},
+	} {
+		for _, e := range endCases {
+			b := newLiveAskBoard(t)
+			b.early, b.delay = c.early, c.delay
+			release := make(chan struct{})
+			b.holdTx = release
+			start := time.Now()
+			done := b.endAt(start, c.endAt, e.withdraw)
+			atDeadline := b.stateAt(start, 1050*time.Millisecond)
+			go func() {
+				time.Sleep(time.Until(start.Add(1300 * time.Millisecond)))
+				close(release)
+			}()
+			code, out, took := b.runLivePoll()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if s := <-atDeadline; s != "open" {
+				t.Fatalf("%+v withdraw=%v: the ask was %q at the deadline, want still open", c, e.withdraw, s)
+			}
+			if k, err := b.reads.Get(context.Background(), "A1"); err != nil || k.State == "open" {
+				t.Fatalf("%+v withdraw=%v: the end did not commit (%v)", c, e.withdraw, err)
+			}
+			if code != ExitTimeout || out != stillOpen || took < time.Second {
+				t.Errorf("%+v withdraw=%v: got %d %q after %s, want exit 3 at the deadline", c, e.withdraw, code, out, took)
 			}
 		}
 	}

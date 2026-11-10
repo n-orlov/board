@@ -352,6 +352,71 @@ func testAWaitWithUntilAnswersAtUntil(t *testing.T, st *store.Store, held bool) 
 	}
 }
 
+// A wait that starts while an end already holds the writer (so marking the poll
+// at its start waits for it) and whose end commits after until answers with the
+// ask still open: until is timed from the wait's start, not from when that
+// first write comes back. Answers and withdrawals; and the same when the end is
+// held across a renewal of the poll instead (a touch interval shorter than the
+// wait). An end committed before until, with the wait started after it, is
+// still the answer.
+func TestAWaitWithUntilIgnoresAnEndHoldingTheWriterBeforeTheWaitStarted(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		for _, withdraw := range []bool{false, true} {
+			for _, touch := range []time.Duration{time.Hour, 50 * time.Millisecond} {
+				testAWaitUntilWithEndHoldingTheWriter(t, openStore(t, dbs.New(t)), withdraw, touch)
+			}
+		}
+	})
+}
+
+func testAWaitUntilWithEndHoldingTheWriter(t *testing.T, st *store.Store, withdraw bool, touch time.Duration) {
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := askRig(t, st, newToken(t, st), newTestClock(), touch)
+	ref := r.raiseAsk()
+	start := time.Now()
+	until := start.Add(600 * time.Millisecond)
+	release := make(chan struct{})
+	var once sync.Once
+	ender := &asks.Store{Store: st, Now: func() time.Time {
+		once.Do(func() { <-release })
+		return start
+	}}
+	ended := make(chan error, 1)
+	go func() {
+		if withdraw {
+			_, err := ender.Withdraw(context.Background(), audit.Actor{Handle: "claude@host"}, "key:x", ref, "moved on")
+			ended <- err
+			return
+		}
+		_, err := ender.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", ref, asks.Reply{Answer: "late"})
+		ended <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // the end holds the writer now
+	go func() {
+		time.Sleep(time.Until(until.Add(300 * time.Millisecond)))
+		close(release)
+	}()
+	w := r.startWait(ref, untilQuery("5", until))
+	w.ends(t)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	if w.status != http.StatusOK || w.state != "open" {
+		t.Errorf("withdraw=%v touch=%s: the wait ended with %d %q, want 200 open", withdraw, touch, w.status, w.state)
+	}
+	if k, err := (&asks.Store{Store: st}).Get(context.Background(), ref); err != nil || k.State == "open" {
+		t.Errorf("withdraw=%v touch=%s: the end did not commit (%v)", withdraw, touch, err)
+	}
+	// started after the end committed, with until still ahead: the end counts
+	w = r.startWait(ref, untilQuery("5", time.Now().Add(time.Minute)))
+	w.ends(t)
+	if w.state == "open" {
+		t.Errorf("withdraw=%v touch=%s: a wait started after the end's commit still saw the ask open", withdraw, touch)
+	}
+}
+
 func TestAWaitEndsWithTheOpenAskWhenTheServerShutsDown(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))

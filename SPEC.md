@@ -1241,7 +1241,10 @@ state) or N seconds pass (200 with the still-open ask). A `wait` outside the ran
 `&until=<instant>` (RFC 3339, allowed with `wait` only: `until` alone is 400 with a `next`) is a deadline for the hold, by
 the server's clock: when it comes before the N seconds run out (it may also be already past, or a fraction of a second
 away), the hold ends at `until` instead, and the response is the ask as the server reads it as `until` passes. That read
-runs on the readers, by its own timer, so no write holding the database's writer delays it, and what it finds is exactly
+runs on the readers, by its own timer, which is armed as the request is handled, before the wait makes any write: marking the
+poll at the start waits for the database's writer, and an answer or withdrawal already holding it (committing only after `until`)
+neither delays that read nor shows in it, so the response is the still-open ask, however long the first write was held up. No write
+holding the writer delays the read, and what it finds is exactly
 what had committed by then: an answer or withdrawal whose transaction committed before `until` is in it, and one whose
 transaction was still open at `until` is not, even if it commits (and is stamped `answered_at`/`withdrawn_at` before
 `until`) before the response is sent. An end that a read during the hold finds by `until` ends the hold at once; one that
@@ -1575,7 +1578,8 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   therefore gives exit 0 or 6 even when that answer arrives after the deadline, even when every response is delayed, and even when
   the end's `ended_at` is after the deadline because the server's clock read after the commit was delayed; an ask still open at the
   deadline gives the line `A<n> still open → board ask show A<n>` and exit **3** even when its end commits a moment later, with a
-  stamp from before the deadline and before that answer arrives; `board ask show` then shows the later end. The only read time that
+  stamp from before the deadline and before that answer arrives, and even when that end's transaction was already holding the
+  database's writer, so that the server's first write for the poll waited for it, before the poll's first call reached the server; `board ask show` then shows the later end. The only read time that
   matters is the server's read as the deadline passes; it comes as the server's timer fires, which is an instant (the timer's
   latency, normally well under a millisecond) after the deadline, and an end that commits inside that instant is counted as
   committed by the deadline. The end's stamp is used only against the deadline: the server floors it to the millisecond, so a stamp
