@@ -221,7 +221,15 @@ func (w *waiter) begin() error {
 	if err := w.reread(w.ctx); err != nil || w.k.State != domain.AskOpen {
 		return err
 	}
-	return w.store.Touch(w.ctx, w.k.ID)
+	return w.touch(w.ctx)
+}
+
+// touch marks the poll and wakes the change feed, so the ask_polling event a
+// mark may append reaches the streams of this server at once.
+func (w *waiter) touch(ctx context.Context) error {
+	err := w.store.Touch(ctx, w.k.ID)
+	w.hub.feed.Notify()
+	return err
 }
 
 func (w *waiter) reread(ctx context.Context) error {
@@ -256,7 +264,7 @@ func (w *waiter) step(timeout, beat <-chan time.Time, asOf <-chan snapshot) (don
 // renew marks the poll again and reads the ask, which also covers a feed that
 // missed a change.
 func (w *waiter) renew() error {
-	if err := w.store.Touch(w.ctx, w.k.ID); err != nil {
+	if err := w.touch(w.ctx); err != nil {
 		return err
 	}
 	return w.reread(w.ctx)
@@ -335,7 +343,7 @@ func adoptedMark(ctx context.Context, store *asks.Store, k asks.Ask, until time.
 func (w *waiter) finish(ctx context.Context) (asks.Ask, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := w.store.Touch(ctx, w.k.ID); err != nil {
+	if err := w.touch(ctx); err != nil {
 		return w.k, err
 	}
 	err := w.reread(ctx)

@@ -177,7 +177,7 @@ describe('rowsFor', () => {
 });
 
 describe('affectsAttention', () => {
-  it.each([['ask_raised'], ['task_done'], ['lease_expired'], ['check_recorded'], ['initiative_updated']])('keeps %s', (type) => {
+  it.each([['ask_raised'], ['ask_polling'], ['task_done'], ['lease_expired'], ['check_recorded'], ['initiative_updated']])('keeps %s', (type) => {
     expect(affectsAttention({ type })).toBe(true);
   });
   it.each([['note_posted'], ['key_created'], ['key_revoked']])('ignores %s', (type) => {

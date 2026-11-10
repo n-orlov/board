@@ -497,7 +497,7 @@ Event types (closed set in v1, extended by migration):
 `task_created`, `task_updated`, `task_done`, `task_reopened`, `task_closed`,
 `dep_added`, `dep_removed`,
 `lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`, `lease_acked`,
-`ask_raised`, `ask_answered`, `ask_withdrawn`,
+`ask_raised`, `ask_answered`, `ask_withdrawn`, `ask_polling` (§7.2),
 `check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
 `key_created` and `key_revoked` record an API key being made or revoked over HTTP (§3.3); they have no
 `initiative_id` or `task_id`.
@@ -1299,6 +1299,16 @@ and at its end (also when the client has left). A call that returns at once beca
 `asker_waiting` is derived from it: true when the ask is `open`, its mode is `poll` and `poll_seen_at` is within the last
 60 seconds, so a poll-mode asker counts as waiting for a minute after its last wait ended, and a `stop`-mode ask never
 does.
+
+A poll mark that makes the asker of an open `poll` ask waiting, because the ask was not waiting just before it (no `poll_seen_at`
+yet, or one older than 60 seconds), appends an `ask_polling` event (`ref_id` the ask's ULID, the task and the initiative as they
+apply, `data` `{ref, waiting: true}`, principal `system:poll`, made by the asker) in the same transaction as the mark. That
+is how a change of the displayed `asker_waiting` reaches the change feed (§7.3), so every open view that shows it (Attention,
+the task page, the initiative page) refreshes through its stream, on every replica sharing the database, without a reload
+and without polling. A mark that renews a poll already counted as waiting writes no event, nor does a mark on an ask that
+is not open or is not a `poll` ask, nor does the passing of the 60 seconds, which is time and not a write.
+`e2e/asker-waiting.spec.ts` opens each of those views at phone and desktop size showing "asker not waiting", starts a real held
+wait, and requires the label to read "asker waiting" within five seconds with no reload.
 
 ### 7.3 The change feed
 

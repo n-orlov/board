@@ -85,6 +85,18 @@ Feature: Ask long-poll
     Then the response path "state" is "open"
     And the response path "asker_waiting" is "false"
 
+  Scenario: a wait that makes the asker waiting appends one ask_polling event, and only that wait
+    Then exactly 0 ask_polling events exist for the ask "A1"
+    When I request the ask "A1" waiting "1" seconds as actor "claude@laptop"
+    Then exactly 1 ask_polling event exists for the ask "A1"
+    And the latest ask_polling event of the ask "A1" is on the task "aa-1" and the initiative "aa"
+    And the latest ask_polling event of the ask "A1" has principal "system:poll" and actor "claude@laptop"
+    When I request the ask "A1" waiting "1" seconds as actor "claude@laptop"
+    Then exactly 1 ask_polling event exists for the ask "A1"
+    When the poll of the ask "A1" was last seen 61 seconds ago
+    And I request the ask "A1" waiting "1" seconds as actor "claude@laptop"
+    Then exactly 2 ask_polling events exist for the ask "A1"
+
   Scenario: an ask in stop mode is never waiting
     When I raise an ask with body "{'question':'Anything?'}" as actor "claude@laptop"
     And I request the ask "A2" waiting "1" seconds as actor "claude@laptop"

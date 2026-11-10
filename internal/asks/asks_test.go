@@ -470,7 +470,7 @@ func TestWaitingNeedsAnOpenPollAskSeenWithinTheLastMinute(t *testing.T) {
 	}
 }
 
-func TestTouchSetsPollSeenAtToTheClockAndWritesNoEvent(t *testing.T) {
+func TestTouchSetsPollSeenAtToTheClockAndAppendsOneEventWhenTheAskerStartsWaiting(t *testing.T) {
 	e := newEnv(t)
 	k := e.raise(t, New{Question: "q?", Mode: "poll"})
 	before := e.counts(t)
@@ -488,14 +488,67 @@ func TestTouchSetsPollSeenAtToTheClockAndWritesNoEvent(t *testing.T) {
 	if !e.S.Waiting(got) {
 		t.Error("a poll ask just touched is not waiting")
 	}
+	typ, principal, summary := e.lastEvent(t)
+	if typ != EventPolling || principal != "system:poll" || summary != "ask A1 asker waiting" {
+		t.Errorf("last event = %q by %q %q, want ask_polling by system:poll %q", typ, principal, summary, "ask A1 asker waiting")
+	}
+	if after := e.counts(t); after != [3]int{before[0], before[1] + 1, before[2]} {
+		t.Errorf("counts after Touch = %v, want one more event than %v and nothing else", after, before)
+	}
 	e.Clock.now = e.Clock.now.Add(61 * time.Second)
 	if e.S.Waiting(got) {
 		t.Error("a poll ask touched 61 s ago is still waiting")
 	}
-	if after := e.counts(t); after != before {
-		t.Errorf("counts after Touch = %v, want %v", after, before)
-	}
 	if err := e.S.Touch(ctx, "01ARZ3NDEKTSV4RRFFQ69G5FAV"); err != nil {
 		t.Errorf("Touch of an unknown id = %v, want nil", err)
+	}
+}
+
+func TestTouchWritesAnEventOnlyWhenTheDisplayedWaitingStateChanges(t *testing.T) {
+	e := newEnv(t)
+	k := e.raise(t, New{Question: "q?", Mode: "poll"})
+	events := func() int { return e.counts(t)[1] }
+	touch := func(after time.Duration) int {
+		t.Helper()
+		e.Clock.now = e.Clock.now.Add(after)
+		if err := e.S.Touch(ctx, k.ID); err != nil {
+			t.Fatal(err)
+		}
+		return events()
+	}
+	n := events()
+	for step, tc := range []struct {
+		after time.Duration
+		added int
+	}{
+		{time.Second, 1},      // first poll: not waiting before, waiting now
+		{30 * time.Second, 0}, // a renewal of a poll that still counts as waiting
+		{60 * time.Second, 0}, // the 60 s boundary still counts as waiting
+		{61 * time.Second, 1}, // the asker had stopped waiting and starts again
+		{time.Second, 0},
+	} {
+		got := touch(tc.after)
+		if got != n+tc.added {
+			t.Errorf("step %d: events = %d, want %d", step, got, n+tc.added)
+		}
+		n = got
+	}
+}
+
+func TestTouchWritesNoEventForAStopAskOrAnAskThatIsNotOpen(t *testing.T) {
+	e := newEnv(t)
+	stop := e.raise(t, New{Question: "s?"})
+	ended := e.raise(t, New{Question: "e?", Mode: "poll"})
+	if _, err := e.S.Withdraw(ctx, me, "key:t", ended.Ref, ""); err != nil {
+		t.Fatal(err)
+	}
+	before := e.counts(t)
+	for _, id := range []string{stop.ID, ended.ID} {
+		if err := e.S.Touch(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := e.counts(t); after != before {
+		t.Errorf("counts after touching a stop ask and a withdrawn ask = %v, want %v", after, before)
 	}
 }
