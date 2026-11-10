@@ -22,6 +22,7 @@
 //	                                               # judge one lane's reports
 //	mutationgate -config ci/quality.json -excludes internal/server
 //	                                               # one gremlins -E regexp per out-of-scope file
+//	                                               # (a part: internal/server#ops)
 //
 // Exit codes: 0 pass, 1 gate failed, 2 usage or config error.
 package main
@@ -53,31 +54,74 @@ type config struct {
 	// code a phase introduced or changed (internal/server, internal/cli) is
 	// measured over the phase's own files without a per-test bound raised.
 	Scopes map[string][]string `json:"scopes"`
+	// Parts splits one scoped package's files into named parts, each of which
+	// is its own unit: a lane lists it as "internal/server#ops", gremlins runs
+	// the package once per part with every file outside the part excluded, and
+	// the part has its own report and its own efficacy judgement against the
+	// same floor. It exists because gremlins re-runs a package's whole suite
+	// for every mutant, so one lane cannot always hold a large package's
+	// mutants inside its 30-minute stage timeout (none is raised). The parts of
+	// a package are disjoint and together are exactly its scope, so splitting
+	// never leaves a scoped file unmeasured.
+	Parts map[string]map[string][]string `json:"parts"`
 	// Lanes splits Packages into groups that ci/mutation.sh runs, and the
 	// Jenkinsfile runs as separate stages, each under its own timeout: a
 	// gremlins run of a package re-runs the package's whole suite for every
 	// mutant, and one stage cannot hold them all in 30 minutes. Every package
-	// is in exactly one lane. No lanes means one lane, "all".
+	// is in exactly one lane (a package with Parts: each of its parts, written
+	// "package#part"). No lanes means one lane, "all".
 	Lanes map[string][]string `json:"lanes"`
 }
 
 // allLane is the lane name that selects every package.
 const allLane = "all"
 
-// lanePackages returns the packages of a lane in the configured order, or an
+// partSep separates a package from the name of one of its parts in a unit.
+const partSep = "#"
+
+// splitUnit splits a unit into its package directory and part ("" for a unit
+// that is a whole package).
+func splitUnit(unit string) (pkg, part string) {
+	pkg, part, _ = strings.Cut(unit, partSep)
+	return pkg, part
+}
+
+// units returns what gremlins runs and the gate judges, in the configured
+// order: a package, or for a package with Parts each of its parts by name.
+func (c config) units() []string {
+	var out []string
+	for _, p := range c.Packages {
+		parts, ok := c.Parts[p]
+		if !ok {
+			out = append(out, p)
+			continue
+		}
+		names := make([]string, 0, len(parts))
+		for n := range parts {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			out = append(out, p+partSep+n)
+		}
+	}
+	return out
+}
+
+// lanePackages returns the units of a lane in the configured order, or an
 // error for a lane the config does not define.
 func (c config) lanePackages(lane string) ([]string, error) {
 	if lane == "" || lane == allLane {
-		return c.Packages, nil
+		return c.units(), nil
 	}
 	in, ok := c.Lanes[lane]
 	if !ok {
 		return nil, fmt.Errorf("unknown lane %q (lanes: %s)", lane, strings.Join(c.laneNames(), ", "))
 	}
 	var out []string
-	for _, p := range c.Packages {
-		if slices.Contains(in, p) {
-			out = append(out, p)
+	for _, u := range c.units() {
+		if slices.Contains(in, u) {
+			out = append(out, u)
 		}
 	}
 	return out, nil
@@ -97,6 +141,9 @@ func (c config) laneNames() []string {
 // two lanes would be measured twice, and a lane naming a package the gate does
 // not list measures something the gate never judges.
 func (c config) checkLanes() error {
+	if err := c.checkParts(); err != nil {
+		return err
+	}
 	if len(c.Lanes) == 0 {
 		return nil
 	}
@@ -106,12 +153,64 @@ func (c config) checkLanes() error {
 			return err
 		}
 	}
-	for _, p := range c.Packages {
-		if _, ok := seen[p]; !ok {
-			return fmt.Errorf("%s is in no lane, so no stage would measure it", p)
+	for _, u := range c.units() {
+		if _, ok := seen[u]; !ok {
+			return fmt.Errorf("%s is in no lane, so no stage would measure it", u)
 		}
 	}
 	return nil
+}
+
+// checkParts fails a config whose parts would measure less than the scope
+// they split, or measure a file twice: a part belongs to a scoped package, and
+// the parts of a package are non-empty, disjoint, and together exactly its
+// scope.
+func (c config) checkParts() error {
+	for _, pkg := range sortedKeys(c.Parts) {
+		scope, ok := c.Scopes[pkg]
+		if !slices.Contains(c.Packages, pkg) || !ok {
+			return fmt.Errorf("parts for %s, which is not a scoped package of mutation_go.packages", pkg)
+		}
+		if err := checkPartsOf(pkg, scope, c.Parts[pkg]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkPartsOf checks that parts are non-empty, disjoint and exactly scope.
+func checkPartsOf(pkg string, scope []string, parts map[string][]string) error {
+	owner := map[string]string{}
+	for _, name := range sortedKeys(parts) {
+		if len(parts[name]) == 0 {
+			return fmt.Errorf("%s: part %q lists no file", pkg, name)
+		}
+		for _, f := range parts[name] {
+			if prev, dup := owner[f]; dup {
+				return fmt.Errorf("%s: %s is in parts %q and %q, so it would be mutated twice", pkg, f, prev, name)
+			}
+			if !slices.Contains(scope, f) {
+				return fmt.Errorf("%s: part %q lists %s, which is not in the package's scope", pkg, name, f)
+			}
+			owner[f] = name
+		}
+	}
+	for _, f := range scope {
+		if _, ok := owner[f]; !ok {
+			return fmt.Errorf("%s: scoped file %s is in no part, so no stage would measure it", pkg, f)
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns the keys of m in order.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // checkLane checks one lane and records its packages in seen (package -> lane).
@@ -122,8 +221,9 @@ func (c config) checkLane(name string, seen map[string]string) error {
 	if len(c.Lanes[name]) == 0 {
 		return fmt.Errorf("lane %q lists no package", name)
 	}
+	units := c.units()
 	for _, p := range c.Lanes[name] {
-		if !slices.Contains(c.Packages, p) {
+		if !slices.Contains(units, p) {
 			return fmt.Errorf("lane %q lists %s, which is not in mutation_go.packages", name, p)
 		}
 		if prev, dup := seen[p]; dup {
@@ -197,10 +297,11 @@ func tally(data []byte) (counts, error) {
 	return c, nil
 }
 
-// reportName is the file a package's report lives in: internal/domain ->
-// internal-domain.json. ci/mutation.sh writes the same names.
+// reportName is the file a unit's report lives in: internal/domain ->
+// internal-domain.json, and a part internal/server#ops ->
+// internal-server-ops.json. ci/mutation.sh writes the same names.
 func reportName(pkg string) string {
-	return strings.ReplaceAll(strings.Trim(pkg, "./"), "/", "-") + ".json"
+	return strings.NewReplacer("/", "-", partSep, "-").Replace(strings.Trim(pkg, "./")) + ".json"
 }
 
 // judge is one package's verdict: a failure message, or "" when it passes.
@@ -263,18 +364,31 @@ func evaluatePackage(cfg config, dir, pkg string) (string, bool) {
 // matches). root is the module root; a package with no scope has no
 // exclusion. A scoped file that does not exist is an error: a scope that
 // names nothing real would silently measure less than it claims.
-func excludes(cfg config, root, pkg string) ([]string, error) {
-	pkg = strings.Trim(pkg, "./")
+func excludes(cfg config, root, unit string) ([]string, error) {
+	pkg, part := splitUnit(strings.Trim(unit, "./"))
 	scope, ok := cfg.Scopes[pkg]
 	if !ok {
 		return nil, nil
 	}
-	if len(scope) == 0 {
-		return nil, fmt.Errorf("%s: its scope lists no file", pkg)
+	if part != "" {
+		scope, ok = cfg.Parts[pkg][part]
+		if !ok {
+			return nil, fmt.Errorf("%s: no part %q", pkg, part)
+		}
 	}
 	present, err := nonTestGoFiles(filepath.Join(root, pkg))
 	if err != nil {
 		return nil, err
+	}
+	return outOfScope(pkg, scope, present)
+}
+
+// outOfScope returns one anchored regexp per file of present that scope does
+// not list. A scoped file that is not in present, or a scope with no file, is
+// an error.
+func outOfScope(pkg string, scope []string, present map[string]bool) ([]string, error) {
+	if len(scope) == 0 {
+		return nil, fmt.Errorf("%s: its scope lists no file", pkg)
 	}
 	for _, f := range scope {
 		if !present[f] {

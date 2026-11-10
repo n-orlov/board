@@ -46,6 +46,10 @@ type mutationGoConfig struct {
 	FailOnNoMutants bool     `json:"fail_on_no_mutants"`
 	// Scopes narrows a package to the listed files (ci/mutationgate).
 	Scopes map[string][]string `json:"scopes"`
+	// Parts splits a scoped package's files into units that are measured and
+	// judged separately (ci/mutationgate). They always sum to the scope, which
+	// narrowedScopes holds to the base's, so they cannot loosen the gate.
+	Parts map[string]map[string][]string `json:"parts"`
 	// Lanes groups Packages into the Jenkins mutation stages (ci/mutationgate).
 	Lanes map[string][]string `json:"lanes"`
 }

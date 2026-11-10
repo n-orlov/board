@@ -154,7 +154,9 @@ pipeline {
     // suite for every mutant, so the packages are split into the lanes of
     // mutation_go.lanes and each lane is its own stage under its own 30-minute
     // timeout (none is raised): the Phase 2 logic packages, internal/server
-    // and internal/cli (both narrowed to their Phase 2 files), then
+    // (narrowed to its Phase 2 files and split into two parts, ops and
+    // streams, because one stage measured it in over 25 minutes), then
+    // internal/cli (narrowed to its Phase 2 files), then
     // `Mutation`, which runs the base lane (internal/domain, internal/store)
     // and Stryker over web/src/lib. Every main build and the extended lane.
     stage('Mutation logic') {
@@ -172,7 +174,7 @@ pipeline {
       }
     }
 
-    stage('Mutation server') {
+    stage('Mutation server ops') {
       when {
         anyOf {
           branch 'main'
@@ -182,7 +184,22 @@ pipeline {
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json server'
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json server-ops'
+        }
+      }
+    }
+
+    stage('Mutation server streams') {
+      when {
+        anyOf {
+          branch 'main'
+          environment name: 'CI_NIGHTLY', value: 'true'
+        }
+      }
+      options { timeout(time: 30, unit: 'MINUTES') }
+      steps {
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json server-streams'
         }
       }
     }

@@ -395,9 +395,126 @@ func TestTheShippedLanesPartitionThePackagesAndEveryLaneStaysWithinTheOldBounds(
 		union = append(union, pkgs...)
 	}
 	sort.Strings(union)
-	want := append([]string(nil), cfg.Packages...)
+	want := cfg.units()
 	sort.Strings(want)
 	if strings.Join(union, ",") != strings.Join(want, ",") {
 		t.Fatalf("lanes cover %v, packages are %v", union, want)
+	}
+}
+
+// partedConfig splits internal/server's scope into two parts, run in two lanes.
+const partedConfig = `{"mutation_go":{"enabled":true,"efficacy":80,"fail_on_no_mutants":true,
+"packages":["internal/store","internal/server"],
+"scopes":{"internal/server":["a.go","b.go","c.go"]},
+"parts":{"internal/server":{"x":["a.go"],"y":["b.go","c.go"]}},
+"lanes":{"base":["internal/store"],"sx":["internal/server#x"],"sy":["internal/server#y"]}}}`
+
+func TestAPartIsItsOwnUnitWithItsOwnReportAndJudgement(t *testing.T) {
+	if got := reportName("internal/server#x"); got != "internal-server-x.json" {
+		t.Fatalf("reportName of a part = %q", got)
+	}
+	if code, out := laneRun(t, partedConfig, []string{"-list"}, nil); code != 0 ||
+		out != "internal/store\ninternal/server#x\ninternal/server#y\n" {
+		t.Fatalf("units of all lanes: exit %d %q", code, out)
+	}
+	if code, out := laneRun(t, partedConfig, []string{"-list", "-lane", "sy"}, nil); code != 0 || out != "internal/server#y\n" {
+		t.Fatalf("lane sy: exit %d %q", code, out)
+	}
+	// A part passing says nothing about its sibling: the other part's report is
+	// missing, and a part below the floor fails although the package as a whole
+	// would pass.
+	ok := map[string]string{"internal-server-x.json": gremlinsReport(9, 1, 0, 0)}
+	if code, out := laneRun(t, partedConfig, []string{"-lane", "sx"}, ok); code != 0 {
+		t.Fatalf("lane sx: exit %d\n%s", code, out)
+	}
+	if code, out := laneRun(t, partedConfig, []string{"-lane", "sy"}, ok); code != 1 || !strings.Contains(out, "internal/server#y: FAILED, report") {
+		t.Fatalf("lane sy without its report: exit %d\n%s", code, out)
+	}
+	low := map[string]string{"internal-server-x.json": gremlinsReport(9, 1, 0, 0), "internal-server-y.json": gremlinsReport(3, 1, 0, 0)}
+	if code, out := laneRun(t, partedConfig, []string{"-lane", "sy"}, low); code != 1 || !strings.Contains(out, "efficacy 75.00% is below the floor 80.00%") {
+		t.Fatalf("part y at 75%%: exit %d\n%s", code, out)
+	}
+}
+
+func TestAPartExcludesEveryFileOutsideItself(t *testing.T) {
+	root, cfgPath := moduleWith(t, partedConfig, "internal/server", "a.go", "b.go", "c.go", "d.go", "a_test.go")
+	cfg, _, err := loadLane(cfgPath, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for unit, want := range map[string][]string{
+		"internal/server#x": {"^b\\.go$", "^c\\.go$", "^d\\.go$"},
+		"internal/server#y": {"^a\\.go$", "^d\\.go$"},
+	} {
+		got, err := excludes(cfg, root, unit)
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("excludes(%s) = %v, %v; want %v", unit, got, err, want)
+		}
+	}
+	if _, err := excludes(cfg, root, "internal/server#nope"); err == nil {
+		t.Error("a part that does not exist was accepted")
+	}
+}
+
+func TestPartsMustSplitTheScopeExactly(t *testing.T) {
+	const head = `{"mutation_go":{"enabled":true,"efficacy":80,"fail_on_no_mutants":true,"packages":["p","q"],`
+	for name, tc := range map[string]struct{ config, want string }{
+		"a file in two parts": {head + `"scopes":{"p":["a.go","b.go"]},"parts":{"p":{"x":["a.go","b.go"],"y":["b.go"]}},"lanes":{"l":["p#x","p#y","q"]}}}`,
+			"b.go is in parts"},
+		"a scoped file in no part": {head + `"scopes":{"p":["a.go","b.go"]},"parts":{"p":{"x":["a.go"]}},"lanes":{"l":["p#x","q"]}}}`,
+			"b.go is in no part"},
+		"a part file outside the scope": {head + `"scopes":{"p":["a.go"]},"parts":{"p":{"x":["a.go","z.go"]}},"lanes":{"l":["p#x","q"]}}}`,
+			"z.go, which is not in the package's scope"},
+		"an empty part": {head + `"scopes":{"p":["a.go"]},"parts":{"p":{"x":["a.go"],"y":[]}},"lanes":{"l":["p#x","p#y","q"]}}}`,
+			"lists no file"},
+		"parts of an unscoped package": {head + `"parts":{"q":{"x":["a.go"]}},"lanes":{"l":["p","q#x"]}}}`,
+			"not a scoped package"},
+		"a part in no lane": {head + `"scopes":{"p":["a.go","b.go"]},"parts":{"p":{"x":["a.go"],"y":["b.go"]}},"lanes":{"l":["p#x","q"]}}}`,
+			"p#y is in no lane"},
+		"a part in two lanes": {head + `"scopes":{"p":["a.go","b.go"]},"parts":{"p":{"x":["a.go"],"y":["b.go"]}},"lanes":{"l":["p#x","p#y","q"],"m":["p#x"]}}}`,
+			"p#x is in lanes"},
+		"the whole package in a lane while it has parts": {head + `"scopes":{"p":["a.go"]},"parts":{"p":{"x":["a.go"]}},"lanes":{"l":["p","p#x","q"]}}}`,
+			"p, which is not in mutation_go.packages"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if code, out := laneRun(t, tc.config, []string{"-list"}, nil); code != 2 || !strings.Contains(out, tc.want) {
+				t.Fatalf("exit %d, want 2 naming %q:\n%s", code, tc.want, out)
+			}
+		})
+	}
+}
+
+func TestTheShippedPartsSplitTheServerScopeIntoTwoLanes(t *testing.T) {
+	data, err := os.ReadFile("../quality.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all struct {
+		MutationGo config `json:"mutation_go"`
+	}
+	if err := json.Unmarshal(data, &all); err != nil {
+		t.Fatal(err)
+	}
+	cfg := all.MutationGo
+	if err := cfg.checkLanes(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Parts["internal/server"]) != 2 {
+		t.Fatalf("internal/server parts = %v, want two", cfg.Parts["internal/server"])
+	}
+	// Every part is judged on its own and is run by a lane of its own.
+	lanes := map[string]string{}
+	for lane, units := range cfg.Lanes {
+		for _, u := range units {
+			lanes[u] = lane
+		}
+	}
+	if lanes["internal/server#ops"] == "" || lanes["internal/server#ops"] == lanes["internal/server#streams"] {
+		t.Fatalf("the two server parts share a lane or have none: %v", lanes)
+	}
+	for _, unit := range cfg.units() {
+		if _, err := excludes(cfg, "../..", unit); err != nil {
+			t.Errorf("%s: %v", unit, err)
+		}
 	}
 }

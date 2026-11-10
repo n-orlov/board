@@ -19,6 +19,8 @@
 # under its own 30-minute timeout, none raised): one stage cannot hold every
 # package's mutants. The lane "all" (the default) is every package plus
 # Stryker. Stryker runs in the lane "base" and in "all", and only there.
+# A package split into parts (mutation_go.parts) is run once per part, a part
+# written "internal/server#ops", with its own report and its own judgement.
 # Each lane judges and replaces only its own packages' reports, so the lanes
 # leave the reports of all of them in the one directory ci/quality.sh reads.
 set -eu
@@ -56,10 +58,11 @@ mkdir -p "$outdir"
 
 packages=$(go run ./ci/mutationgate -config "$config" -list -lane "$lane")
 for pkg in $packages; do
-    rm -f "${outdir:?}/$(printf '%s' "$pkg" | tr '/' '-').json"
+    rm -f "${outdir:?}/$(printf '%s' "$pkg" | tr '/#' '--').json"
 done
 for pkg in $packages; do
-    name=$(printf '%s' "$pkg" | tr '/' '-')
+    name=$(printf '%s' "$pkg" | tr '/#' '--')
+    dir=${pkg%%#*}
     # A package with a scope in quality.json is narrowed to its listed files:
     # every other file of it is excluded (one -E per file, from mutationgate).
     set --
@@ -67,7 +70,7 @@ for pkg in $packages; do
         set -- "$@" -E "$pattern"
     done
     echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags)"
-    gremlins unleash "./$pkg" --timeout-coefficient "$timeout_coefficient" "$@" -o "$outdir/$name.json"
+    gremlins unleash "./$dir" --timeout-coefficient "$timeout_coefficient" "$@" -o "$outdir/$name.json"
 done
 
 status=0

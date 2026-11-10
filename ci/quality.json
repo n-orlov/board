@@ -60,7 +60,8 @@
                 "internal/feed",
                 "internal/notes"
             ],
-            "server": ["internal/server"],
+            "server-ops": ["internal/server#ops"],
+            "server-streams": ["internal/server#streams"],
             "cli": ["internal/cli"]
         },
         "scopes": {
@@ -82,6 +83,23 @@
                 "notes.go",
                 "now.go"
             ]
+        },
+        "parts": {
+            "internal/server": {
+                "ops": [
+                    "askops.go",
+                    "attentionops.go",
+                    "cursorops.go",
+                    "eventops.go",
+                    "noteops.go",
+                    "nowops.go"
+                ],
+                "streams": [
+                    "askwait.go",
+                    "streamattention.go",
+                    "streamops.go"
+                ]
+            }
         },
         "fail_on_no_mutants": true
     },

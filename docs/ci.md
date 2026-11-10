@@ -107,9 +107,10 @@ The clone is of the committed HEAD, so commit before running it.
 | Quality | `ci/image-build.sh`, `ci/image-check.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
 | Stability | `ci/stability.sh 3` on the agent | extended lane only |
 | Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | every `main` build and the extended lane |
-| Mutation server | the same command, lane `server` | same |
+| Mutation server ops | the same command, lane `server-ops` (`internal/server#ops`) | same |
+| Mutation server streams | the same command, lane `server-streams` (`internal/server#streams`) | same |
 | Mutation cli | the same command, lane `cli` | same |
-| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all four |
+| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all five |
 
 The extended lane is the nightly `main` build (03:17) or a build with the
 `EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
@@ -252,8 +253,14 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   `mutation_go.scopes` in `ci/quality.json`: `ci/mutationgate -excludes <pkg>`
   prints one `--exclude-files` regexp per other non-test file, and
   `ci/mutation.sh` passes them to gremlins (a scoped file that does not exist
-  fails). `mutation_go.lanes` partitions the packages into the four stages
-  above (a package in no lane, or two, fails `ci/mutationgate`, and a test
+  fails). One stage measured `internal/server` in over 25 of its 30 minutes on
+  the agent, so `mutation_go.parts` splits its scope into two disjoint parts
+  (`ops` and `streams`, together exactly the scope, which `ci/mutationgate`
+  checks): each part is a unit `internal/server#ops` that gremlins runs with
+  every file outside the part excluded, with its own report
+  (`internal-server-ops.json`) and its own judgement against the same floor.
+  `mutation_go.lanes` partitions the packages' units into the five stages
+  above (a unit in no lane, or two, fails `ci/mutationgate`, and a test
   holds the Jenkinsfile to one stage per lane): each stage keeps the 30-minute
   timeout the single stage had, which is why the packages are split instead of
   the timeout raised. `ci/mutation.sh [outdir [config [lane]]]` runs one lane

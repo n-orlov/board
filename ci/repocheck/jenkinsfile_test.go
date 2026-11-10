@@ -64,7 +64,7 @@ func stageBefore(jf, first, second string) bool {
 // run in order, so removing one fails here, and each runs its command.
 func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
-	want := []string{"CI image", "Lint", "Suite", "Allure smoke", "Quality", "Stability", "Mutation logic", "Mutation server", "Mutation cli", "Mutation"}
+	want := []string{"CI image", "Lint", "Suite", "Allure smoke", "Quality", "Stability", "Mutation logic", "Mutation server ops", "Mutation server streams", "Mutation cli", "Mutation"}
 	if got := jenkinsStages(jf); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("stages = %q, want %q", got, want)
 	}
@@ -460,7 +460,7 @@ func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
 	if err := json.Unmarshal([]byte(readRepoFile(t, "ci", "quality.json")), &all); err != nil {
 		t.Fatal(err)
 	}
-	stageOf := map[string]string{"base": "Mutation", "logic": "Mutation logic", "server": "Mutation server", "cli": "Mutation cli"}
+	stageOf := map[string]string{"base": "Mutation", "logic": "Mutation logic", "server-ops": "Mutation server ops", "server-streams": "Mutation server streams", "cli": "Mutation cli"}
 	covered := map[string]bool{}
 	for lane, pkgs := range all.MutationGo.Lanes {
 		name, ok := stageOf[lane]
@@ -485,7 +485,8 @@ func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
 			}
 		}
 		for _, p := range pkgs {
-			covered[p] = true
+			pkg, _, _ := strings.Cut(p, "#") // a unit "internal/server#ops" measures part of internal/server
+			covered[pkg] = true
 		}
 	}
 	for _, p := range all.MutationGo.Packages {

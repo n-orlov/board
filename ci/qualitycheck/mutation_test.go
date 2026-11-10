@@ -18,7 +18,7 @@ func writeMutationReports(t *testing.T, domain, store string) string {
 	dir := t.TempDir()
 	reports := map[string]string{}
 	for _, pkg := range configuredMutationPackages(t) {
-		reports[strings.ReplaceAll(pkg, "/", "-")+".json"] = mutationReportOK
+		reports[strings.NewReplacer("/", "-", "#", "-").Replace(pkg)+".json"] = mutationReportOK
 	}
 	reports["internal-domain.json"], reports["internal-store.json"] = domain, store
 	for name, content := range reports {
@@ -49,8 +49,9 @@ func TestMutationGateRunsTheGateToolOverTheReports(t *testing.T) {
 	}
 }
 
-// configuredMutationPackages is mutation_go.packages of the real
-// ci/quality.json.
+// configuredMutationPackages is the units of mutation_go.packages of the real
+// ci/quality.json: a package, or "package#part" for each part of a package
+// with mutation_go.parts.
 func configuredMutationPackages(t *testing.T) []string {
 	t.Helper()
 	m := realQualityJSON(t)
@@ -60,8 +61,17 @@ func configuredMutationPackages(t *testing.T) []string {
 	}
 	var pkgs []string
 	list, _ := sec["packages"].([]any)
+	parts, _ := sec["parts"].(map[string]any)
 	for _, p := range list {
-		pkgs = append(pkgs, p.(string))
+		pkg := p.(string)
+		split, ok := parts[pkg].(map[string]any)
+		if !ok {
+			pkgs = append(pkgs, pkg)
+			continue
+		}
+		for name := range split {
+			pkgs = append(pkgs, pkg+"#"+name)
+		}
 	}
 	return pkgs
 }
