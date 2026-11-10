@@ -115,6 +115,32 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
+// pollingEvents counts the ask_polling events in the store: the changes of an
+// asker's displayed waiting state that reached the change feed.
+func pollingEvents(t *testing.T, st *store.Store) int {
+	t.Helper()
+	var n int
+	if err := st.Reader().QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM events WHERE type = 'ask_polling'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// askerWaiting reads asker_waiting of the ask through the server.
+func (r *rig) askerWaiting(ref string) bool {
+	r.t.Helper()
+	resp := r.do(http.MethodGet, "/api/v1/asks/"+ref, "", r.token)
+	defer func() { _ = resp.Body.Close() }()
+	var doc struct {
+		AskerWaiting bool `json:"asker_waiting"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		r.t.Fatal(err)
+	}
+	return doc.AskerWaiting
+}
+
 func TestAWaitSetsPollSeenAtAtItsStartAndAtItsEnd(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
@@ -139,6 +165,14 @@ func TestAWaitSetsPollSeenAtAtItsStartAndAtItsEnd(t *testing.T) {
 		}
 		if p := polledAt(t, as, ref); p == nil || !p.Equal(end) {
 			t.Errorf("poll_seen_at after the wait = %v, want the end of the wait %v", p, end)
+		}
+		// The start made the asker waiting: one event. The end's mark renews a
+		// poll still counted as waiting: none.
+		if n := pollingEvents(t, st); n != 1 {
+			t.Errorf("ask_polling events after a wait's start and end = %d, want 1", n)
+		}
+		if !r.askerWaiting(ref) {
+			t.Error("asker_waiting is false right after the wait")
 		}
 	})
 }
@@ -168,10 +202,68 @@ func TestAHeldWaitRenewsPollSeenAtOnEveryInterval(t *testing.T) {
 		if p := polledAt(t, as, ref); !p.After(first) {
 			t.Errorf("poll_seen_at = %v, want later than %v", p, first)
 		}
+		if n := pollingEvents(t, st); n != 1 {
+			t.Errorf("ask_polling events after the start and three renewals = %d, want 1", n)
+		}
 		r.answer(ref)
 		w.ends(t)
 		if w.state != "answered" {
 			t.Errorf("state after the answer = %q", w.state)
+		}
+		if n := pollingEvents(t, st); n != 1 {
+			t.Errorf("ask_polling events after the answer ended the wait = %d, want 1", n)
+		}
+	})
+}
+
+// Every change of the displayed asker_waiting state of a held wait reaches the
+// feed: a renewal that finds the previous mark older than the 60 seconds the
+// asker counts as waiting turns it from not waiting to waiting again, and that
+// is an event, where a renewal inside the window is none.
+func TestAHeldWaitAppendsAnEventForEveryReturnToWaiting(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		st := migrated(t, dbs)
+		clock := newTestClock()
+		r, as := askRig(t, st, newToken(t, st), clock, 20*time.Millisecond)
+		ref := r.raiseAsk()
+		w := r.startWait(ref, "30")
+		eventually(t, "the first ask_polling event", func() bool { return pollingEvents(t, st) == 1 })
+		clock.Advance(30 * time.Second) // inside the window: renewals append none
+		eventually(t, "a renewal inside the window", func() bool { p := polledAt(t, as, ref); return p != nil && p.Equal(clock.Now()) })
+		if n := pollingEvents(t, st); n != 1 {
+			t.Fatalf("a renewal inside the 60 s window appended an event: %d events", n)
+		}
+		clock.Advance(61 * time.Second) // the asker stopped waiting, the next renewal is waiting again
+		eventually(t, "the second ask_polling event", func() bool { return pollingEvents(t, st) == 2 })
+		if !r.askerWaiting(ref) {
+			t.Error("asker_waiting is false while the wait is held")
+		}
+		r.answer(ref)
+		w.ends(t)
+	})
+}
+
+// A wait on an ask that cannot show an asker waiting, a stop ask or an answered
+// one, marks nothing that changes the display, so it appends no event; a second
+// poll ask is counted on its own.
+func TestAWaitAppendsItsEventToItsOwnAskOnly(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		st := migrated(t, dbs)
+		r, _ := askRig(t, st, newToken(t, st), newTestClock(), time.Hour)
+		answered := r.raiseAsk()
+		r.answer(answered)
+		r.startWait(answered, "1").ends(t)
+		if n := pollingEvents(t, st); n != 0 {
+			t.Fatalf("a wait on an answered ask appended %d events", n)
+		}
+		a, b := r.raiseAsk(), r.raiseAsk()
+		r.startWait(a, "1").ends(t)
+		if n := pollingEvents(t, st); n != 1 || r.askerWaiting(b) || !r.askerWaiting(a) {
+			t.Errorf("after a wait on one of two asks: events = %d, waiting(a) = %v, waiting(b) = %v; want 1, true, false", n, r.askerWaiting(a), r.askerWaiting(b))
+		}
+		r.startWait(b, "1").ends(t)
+		if n := pollingEvents(t, st); n != 2 {
+			t.Errorf("after a wait on each ask: events = %d, want 2", n)
 		}
 	})
 }
@@ -208,6 +300,9 @@ func testAWaitEndsWhenTheClientLeaves(t *testing.T, query string) {
 		cancel()
 		<-done
 		eventually(t, "poll_seen_at at the end of the abandoned wait", func() bool { p := polledAt(t, as, ref); return p != nil && p.Equal(left) })
+		if n := pollingEvents(t, st); n != 1 {
+			t.Errorf("ask_polling events after an abandoned wait = %d, want 1", n)
+		}
 	})
 }
 
