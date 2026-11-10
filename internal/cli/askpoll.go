@@ -63,8 +63,11 @@ type askFetch func(wait int, until time.Time) read
 
 // pollAsk waits for the ask to leave `open` by repeating fetch until the
 // deadline. now is the clock. It returns the last read: still open when the
-// deadline came first, as the ask stood when it passed (the server judges an
-// end by its commit mark against until), whatever a later read would find. An answer or withdrawal whose stamp places it after
+// deadline came first, as the ask stood when it passed, whatever a later read
+// would find: the server counts an end at until only on proof its COMMIT had
+// returned by then (a read that came back by until and saw it, or a clock
+// read after the COMMIT that is at or before until), never on a stamp or mark
+// taken before the COMMIT. An answer or withdrawal whose stamp places it after
 // the deadline (endedAfter) did not take effect by it, so the ask is then
 // still open too.
 func pollAsk(first read, deadline time.Time, now func() time.Time, fetch askFetch) read {
@@ -92,8 +95,8 @@ const stampPrecision = time.Millisecond
 // then happened at s or up to a millisecond later. A stamp carrying a
 // sub-millisecond part is taken as exact. A stamp in the millisecond the
 // deadline falls in, but before it, is no proof either way (the end happened
-// before or after the deadline), so the server's answer, which judged the end
-// by its commit mark, decides: it counts. An ask that is open, or
+// before or after the deadline), so the server's answer, which counts an end
+// only on proof of its COMMIT, decides: it counts. An ask that is open, or
 // whose stamp is missing or unreadable, did not end after it.
 func endedAfter(a askView, deadline time.Time) bool {
 	stamp := ""
