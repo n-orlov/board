@@ -154,3 +154,41 @@ func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhileTheReadersAr
 		}
 	}
 }
+
+// An end whose COMMIT returns after the deadline is exit 3 with the still-open
+// line even when the write of its real-clock commit mark is held as well: the
+// mark is sampled after that COMMIT, so it is after the deadline, and taking a
+// mark persisted late must not turn it into proof.
+func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhenItsMarkWriteIsHeldToo(t *testing.T) {
+	for _, e := range endCases {
+		for _, release := range []time.Duration{1100 * time.Millisecond, 1300 * time.Millisecond} {
+			registerMarkHold(t)
+			code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, release, func(b *liveAskBoard, start time.Time) {
+				b.early = 200 * time.Millisecond
+				mark := b.holdMarkWrites()
+				go func() {
+					time.Sleep(time.Until(start.Add(1500 * time.Millisecond)))
+					close(mark.release)
+				}()
+			})
+			if code != ExitTimeout || out != stillOpen {
+				t.Errorf("withdraw=%v release=%s: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, release, code, out, took)
+			}
+		}
+	}
+}
+
+// The same end is exit 3 when the COMMIT returns only just after the deadline
+// and the readers are taken across it, however briefly after: no tolerance
+// is given to a COMMIT that returned after the deadline.
+func TestAskPollLiveEndWhoseCommitReturnsJustAfterTheDeadlineIsOpenWhileTheReadersAreTaken(t *testing.T) {
+	for _, e := range endCases {
+		code, out, took := pollCommitHeldEnd(t, e.withdraw, 700*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
+			b.early = 200 * time.Millisecond
+			b.hogReaders(start, 900*time.Millisecond, 1450*time.Millisecond)
+		})
+		if code != ExitTimeout || out != stillOpen {
+			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, code, out, took)
+		}
+	}
+}
