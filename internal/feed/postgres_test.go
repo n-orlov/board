@@ -87,7 +87,7 @@ func startFeed(t *testing.T, st *store.Store) *Subscription {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() { cancel(); waitDone(t, done) })
 	return s
 }
 

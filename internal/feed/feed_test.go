@@ -135,10 +135,10 @@ func TestPollDeliversInOrderOnceToEverySubscriber(t *testing.T) {
 	f := NewAt(src, 0, Options{})
 	a, b := f.Subscribe(), f.Subscribe()
 	src.put(1, 2, 3)
-	f.Poll(context.Background())
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
+	pollWithin(context.Background(), t, f)
 	src.put(4)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	for name, s := range map[string]*Subscription{"a": a, "b": b} {
 		if got := drain(s); !equal(got, []int64{1, 2, 3, 4}) {
 			t.Errorf("subscriber %s got %v", name, got)
@@ -154,7 +154,7 @@ func TestSubscriptionAfterMarksWhereTheFeedWas(t *testing.T) {
 	if s.After != 2 {
 		t.Fatalf("After = %d, want 2", s.After)
 	}
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{3}) {
 		t.Errorf("got %v, want only the event after 2", got)
 	}
@@ -172,7 +172,7 @@ func TestNewStartsAtTheNewestEventAndReportsAnUnreadableTable(t *testing.T) {
 	}
 	s := f.Subscribe()
 	src.put(5)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{5}) {
 		t.Errorf("got %v, want only 5", got)
 	}
@@ -191,17 +191,17 @@ func TestALazyFeedStartsAtTheNewestEventOnceTheTableCanBeRead(t *testing.T) {
 	if s.After != 0 {
 		t.Errorf("a subscription before the first read starts at %d, want 0", s.After)
 	}
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); len(got) != 0 {
 		t.Errorf("an unreadable table delivered %v", got)
 	}
 	src.err = nil
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); len(got) != 0 {
 		t.Errorf("the first readable poll replayed %v, want none of the existing events", got)
 	}
 	src.put(4)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{4}) {
 		t.Errorf("got %v, want only 4", got)
 	}
@@ -216,21 +216,21 @@ func TestAGapHoldsLaterEventsForAsLongAsAWriterThatHeldItIsOpen(t *testing.T) {
 	s := f.Subscribe()
 	src.put(1, 3, 4)
 	src.setWriters("w2", "w9")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1}) {
 		t.Fatalf("before the gap closes got %v, want [1]", got)
 	}
 	// However long it stays open, and whoever else comes and goes.
 	for range 50 {
 		src.setWriters("w2", "w10")
-		f.Poll(context.Background())
+		pollWithin(context.Background(), t, f)
 	}
 	if got := drain(s); len(got) != 0 {
 		t.Fatalf("delivered %v across a gap whose writer is still open", got)
 	}
 	src.commit(2)
 	src.setWriters("w10")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{2, 3, 4}) {
 		t.Errorf("after the gap closed got %v, want [2 3 4]", got)
 	}
@@ -242,21 +242,21 @@ func TestAGapClosedByItsOwnCommitNeedsNoWriterToEnd(t *testing.T) {
 	s := f.Subscribe()
 	src.put(1, 3)
 	src.setWriters("w2", "w4")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	src.commit(2)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1, 2, 3}) {
 		t.Fatalf("got %v, want [1 2 3]", got)
 	}
 	// The closed gap leaves nothing behind: a later gap waits on its own writers.
 	src.commit(5)
 	src.setWriters("w4")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); len(got) != 0 {
 		t.Fatalf("delivered %v across the new gap at 4", got)
 	}
 	src.setWriters()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{5}) {
 		t.Errorf("got %v, want [5] once w4 ended without committing 4", got)
 	}
@@ -268,23 +268,23 @@ func TestAGapWhoseWritersHaveAllEndedIsARolledBackWrite(t *testing.T) {
 	s := f.Subscribe()
 	src.put(1, 3, 4, 6)
 	src.setWriters("w2")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1}) {
 		t.Fatalf("got %v, want [1]", got)
 	}
 	src.setWriters("w7") // w2 ended; w7 began after the read and draws above 6
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{3, 4, 6}) {
 		t.Fatalf("got %v, want [3 4 6]", got)
 	}
 	// 8 skips 7, which w7 may still commit: a new gap, with its own writers.
 	src.put(8)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); len(got) != 0 {
 		t.Fatalf("a second gap was skipped at once: %v", got)
 	}
 	src.setWriters()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{8}) {
 		t.Errorf("got %v, want [8]", got)
 	}
@@ -295,7 +295,7 @@ func TestAGapWithNoWriterLeftIsResolvedInTheSamePoll(t *testing.T) {
 	f := NewAt(src, 0, Options{})
 	s := f.Subscribe()
 	src.put(1, 3)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1, 3}) {
 		t.Errorf("got %v, want [1 3]: no writer can still commit 2", got)
 	}
@@ -307,14 +307,14 @@ func TestAWriterThatCommitsAsTheGapSettlesIsNotSkipped(t *testing.T) {
 	s := f.Subscribe()
 	src.put(1, 3, 4)
 	src.setWriters("w2")
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	// w2 commits 2 right after the feed sees it gone from the writers: the
 	// table must be read after that check, or 2 would be lost.
 	src.mu.Lock()
 	src.writers = nil
 	src.onWriters = func() { src.commit(2) }
 	src.mu.Unlock()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1, 2, 3, 4}) {
 		t.Errorf("got %v, want [1 2 3 4]", got)
 	}
@@ -326,17 +326,17 @@ func TestAnUnreadableWriterListIsReportedAndSkipsNothing(t *testing.T) {
 	f := NewAt(src, 0, Options{Report: func(err error) { reported = append(reported, err) }})
 	s := f.Subscribe()
 	src.put(1, 3)
-	f.Poll(context.Background()) // opening the gap fails
+	pollWithin(context.Background(), t, f) // opening the gap fails
 	src.mu.Lock()
 	src.writerErr = nil
 	src.writers = []string{"w2"}
 	src.mu.Unlock()
-	f.Poll(context.Background()) // opens it
+	pollWithin(context.Background(), t, f) // opens it
 	src.mu.Lock()
 	src.writerErr = errors.New("pg_locks down")
 	src.writers = nil
 	src.mu.Unlock()
-	f.Poll(context.Background()) // cannot tell whether w2 ended
+	pollWithin(context.Background(), t, f) // cannot tell whether w2 ended
 	if len(reported) != 2 {
 		t.Errorf("reported %v, want two errors", reported)
 	}
@@ -346,7 +346,7 @@ func TestAnUnreadableWriterListIsReportedAndSkipsNothing(t *testing.T) {
 	src.mu.Lock()
 	src.writerErr = nil
 	src.mu.Unlock()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{3}) {
 		t.Errorf("got %v, want [3]", got)
 	}
@@ -356,8 +356,8 @@ func TestNoGapAsksForNoWriters(t *testing.T) {
 	src := &fakeSource{}
 	f := NewAt(src, 0, Options{})
 	src.put(1, 2, 3)
-	f.Poll(context.Background())
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
+	pollWithin(context.Background(), t, f)
 	if src.asked != 0 {
 		t.Errorf("asked for the writers %d times without a gap", src.asked)
 	}
@@ -372,7 +372,7 @@ func TestAFullBatchIsFollowedByTheNext(t *testing.T) {
 	src.put(all...)
 	f := NewAt(src, 0, Options{Buffer: len(all)})
 	s := f.Subscribe()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, all) {
 		t.Errorf("delivered %d events, want %d", len(got), len(all))
 	}
@@ -383,10 +383,10 @@ func TestASlowSubscriberIsEndedAndTheOthersAreNot(t *testing.T) {
 	f := NewAt(src, 0, Options{Buffer: 2})
 	slow := f.Subscribe()
 	src.put(1, 2)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	fast := f.Subscribe()
 	src.put(3, 4)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(slow); !equal(got, []int64{1, 2}) {
 		t.Errorf("slow got %v", got)
 	}
@@ -407,14 +407,14 @@ func TestCloseEndsASubscriptionOnceAndNothingMoreArrives(t *testing.T) {
 	s := f.Subscribe()
 	s.Close()
 	s.Close()
-	if _, ok := <-s.Events(); ok {
+	if stillOpen(t, s) {
 		t.Error("the channel is open after Close")
 	}
 	if err := s.Err(); err != nil {
 		t.Errorf("Err after Close = %v", err)
 	}
 	src.put(1)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if len(f.subs) != 0 {
 		t.Errorf("%d subscriptions left", len(f.subs))
 	}
@@ -425,20 +425,20 @@ func TestAFailedPollIsReportedAndTheNextOneRecovers(t *testing.T) {
 	var reported []error
 	f := NewAt(src, 0, Options{Report: func(err error) { reported = append(reported, err) }})
 	s := f.Subscribe()
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if len(reported) != 1 {
 		t.Fatalf("reported %v", reported)
 	}
 	src.err = nil
 	src.put(1)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	if got := drain(s); !equal(got, []int64{1}) {
 		t.Errorf("got %v", got)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	src.err = errors.New("canceled")
-	f.Poll(ctx)
+	pollWithin(ctx, t, f)
 	if len(reported) != 1 {
 		t.Errorf("an error after the context ended was reported: %v", reported)
 	}
@@ -457,7 +457,7 @@ func TestRunEndsEverySubscriptionWhenItsContextEnds(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return")
 	}
-	if _, ok := <-s.Events(); ok {
+	if stillOpen(t, s) {
 		t.Error("the channel is open after Run ended")
 	}
 	if err := s.Err(); !errors.Is(err, context.Canceled) {
@@ -503,6 +503,70 @@ func insertEvent(t *testing.T, tx *sql.Tx, st *store.Store, summary string) {
 	}
 	if err := audit.AppendAs(ctx, tx, st.Dialect(), id, t0, audit.Event{Principal: "tester", Type: "note_posted", Summary: summary}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// testWait bounds every wait on the feed's goroutines: a feed that stops
+// delivering or never returns fails the test at once, instead of leaving a
+// blocked test to the go test timeout (a mutant of the feed that stalls is
+// then killed in seconds, not timed out).
+const testWait = 5 * time.Second
+
+// pollWithin is f.Poll with a bound: a poll loop that never ends (the
+// mutant of a stop condition) fails the test after testWait rather than
+// holding it until the go test timeout. The spinning goroutine ends with the
+// test binary.
+func pollWithin(ctx context.Context, t *testing.T, f *Feed) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { f.Poll(ctx); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(testWait):
+		t.Fatalf("Poll did not return within %v", testWait)
+	}
+}
+
+// waitDone waits for the goroutine running the feed to end.
+func waitDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(testWait):
+		t.Errorf("Run did not return within %v", testWait)
+	}
+}
+
+// awaitPoll waits for the signalled source to report a finished read.
+func awaitPoll(t *testing.T, polled <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-polled:
+	case <-time.After(testWait):
+		t.Fatalf("the feed read nothing within %v", testWait)
+	}
+}
+
+// sendTick fires one poll tick by hand.
+func sendTick(t *testing.T, ch chan<- time.Time, at time.Time) {
+	t.Helper()
+	select {
+	case ch <- at:
+	case <-time.After(testWait):
+		t.Fatalf("the feed took no tick within %v", testWait)
+	}
+}
+
+// stillOpen reports whether the subscription's channel is open, waiting for
+// it to deliver or close for a bounded time.
+func stillOpen(t *testing.T, s *Subscription) bool {
+	t.Helper()
+	select {
+	case _, ok := <-s.Events():
+		return ok
+	case <-time.After(testWait):
+		t.Fatalf("the channel neither delivered nor closed within %v", testWait)
+		return true
 	}
 }
 
@@ -577,16 +641,16 @@ func TestASubscriberReceivesAWriteAtTheNextPollTick(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.Run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+	defer func() { cancel(); waitDone(t, done) }()
 
-	<-src.polled // the first read is over: the feed now waits for a tick
+	awaitPoll(t, src.polled) // the first read is over: the feed now waits for a tick
 	appendEvent(t, st, "remote write")
 	select {
 	case e := <-s.Events():
 		t.Fatalf("delivered %q before any tick or wake", e.Summary)
 	case <-time.After(50 * time.Millisecond):
 	}
-	ticks.ch <- t0 // the one tick that ends the poll interval
+	sendTick(t, ticks.ch, t0) // the one tick that ends the poll interval
 	if e := receive(t, s); e.Summary != "remote write" || e.N != 1 {
 		t.Errorf("got %+v", e)
 	}
@@ -604,7 +668,7 @@ func TestASubscriberReceivesAWriteWithinOnePollIntervalOnARealTimer(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.Run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+	defer func() { cancel(); waitDone(t, done) }()
 
 	start := time.Now()
 	appendEvent(t, st, "tick me")
@@ -628,9 +692,9 @@ func TestALocalWriteIsDeliveredBeforeThePollIntervalElapses(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.Run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+	defer func() { cancel(); waitDone(t, done) }()
 
-	<-src.polled
+	awaitPoll(t, src.polled)
 	appendEvent(t, st, "local write")
 	f.Notify()
 	f.Notify() // wakes coalesce and never block
@@ -658,7 +722,7 @@ func TestAnUnsubscribedSubscriberLeaksNoGoroutine(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.Run(ctx); close(done) }()
-	defer func() { cancel(); <-done }()
+	defer func() { cancel(); waitDone(t, done) }()
 	appendEvent(t, st, "warm up")
 	warm := f.Subscribe()
 	receive(t, warm)
@@ -697,9 +761,9 @@ func TestARowAtOrBelowThePositionIsNeverDeliveredAgain(t *testing.T) {
 	f := NewAt(replaying{src}, 0, Options{})
 	s := f.Subscribe()
 	src.put(1, 2)
-	f.Poll(context.Background())
+	pollWithin(context.Background(), t, f)
 	src.put(4)
-	f.Poll(context.Background()) // 3 never committed and nobody holds it
+	pollWithin(context.Background(), t, f) // 3 never committed and nobody holds it
 	if got := drain(s); !equal(got, []int64{1, 2, 4}) {
 		t.Errorf("got %v, want [1 2 4] with nothing twice", got)
 	}

@@ -148,9 +148,60 @@ pipeline {
       }
     }
 
-    // The Go mutation gate (SPEC 15.4): gremlins over internal/domain and
-    // internal/store, efficacy >= 80 % per package from ci/quality.json, a
-    // package with no mutant fails. Every main build and the extended lane.
+    // The Go mutation gate (SPEC 15.4): gremlins over every package in
+    // ci/quality.json's mutation_go.packages, efficacy >= 80 % per package, a
+    // package with no mutant fails. A gremlins run re-runs a package's whole
+    // suite for every mutant, so the packages are split into the lanes of
+    // mutation_go.lanes and each lane is its own stage under its own 30-minute
+    // timeout (none is raised): the Phase 2 logic packages, internal/server
+    // and internal/cli (both narrowed to their Phase 2 files), then
+    // `Mutation`, which runs the base lane (internal/domain, internal/store)
+    // and Stryker over web/src/lib. Every main build and the extended lane.
+    stage('Mutation logic') {
+      when {
+        anyOf {
+          branch 'main'
+          environment name: 'CI_NIGHTLY', value: 'true'
+        }
+      }
+      options { timeout(time: 30, unit: 'MINUTES') }
+      steps {
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic'
+        }
+      }
+    }
+
+    stage('Mutation server') {
+      when {
+        anyOf {
+          branch 'main'
+          environment name: 'CI_NIGHTLY', value: 'true'
+        }
+      }
+      options { timeout(time: 30, unit: 'MINUTES') }
+      steps {
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json server'
+        }
+      }
+    }
+
+    stage('Mutation cli') {
+      when {
+        anyOf {
+          branch 'main'
+          environment name: 'CI_NIGHTLY', value: 'true'
+        }
+      }
+      options { timeout(time: 30, unit: 'MINUTES') }
+      steps {
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json cli'
+        }
+      }
+    }
+
     stage('Mutation') {
       when {
         anyOf {
@@ -161,7 +212,7 @@ pipeline {
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-          sh 'ci/run.sh ci/mutation.sh'
+          sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json base'
         }
       }
     }

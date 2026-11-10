@@ -106,7 +106,10 @@ The clone is of the committed HEAD, so commit before running it.
 | Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |
 | Quality | `ci/image-build.sh`, `ci/image-check.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
 | Stability | `ci/stability.sh 3` on the agent | extended lane only |
-| Mutation | `ci/run.sh ci/mutation.sh` | every `main` build and the extended lane; other branches skip it |
+| Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | every `main` build and the extended lane |
+| Mutation server | the same command, lane `server` | same |
+| Mutation cli | the same command, lane `cli` | same |
+| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all four |
 
 The extended lane is the nightly `main` build (03:17) or a build with the
 `EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
@@ -212,7 +215,7 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 | `govulncheck` | zero reachable | runs |
 | `trivy` | HIGH, CRITICAL on the source | runs |
 | `trivy_image` | HIGH, CRITICAL on the image | runs (`trivy image --input ci-results/board-image.tar`; fails when the tar, which `ci/image-build.sh` writes, is missing or empty) |
-| `mutation_go` | efficacy 80, `internal/domain` and `internal/store`, zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
+| `mutation_go` | efficacy 80 per package, `internal/domain`, `internal/store` and the Phase 2 application logic (see below), zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
 | `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
 | `sbom_frontend` | CycloneDX of `web/package.json` and `web/package-lock.json` (dev dependencies included: all of the frontend's are), non-empty | runs |
@@ -230,7 +233,10 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 - `ci/mutation.sh` and `ci/mutationgate`: the Go mutation gate, the command of
   the Jenkins Mutation stage (every `main` build and the extended lane). The
   script runs `gremlins unleash` over each package in `mutation_go.packages`
-  (`internal/domain`, `internal/store`), writes one JSON report per package to
+  (`internal/domain`, `internal/store`, and the application logic Phase 2
+  introduced or changed: `internal/asks`, `internal/attention`,
+  `internal/checkin`, `internal/cursors`, `internal/events`, `internal/feed`,
+  `internal/notes`, `internal/server`, `internal/cli`), writes one JSON report per package to
   `ci-results/mutation/` and then runs `mutationgate`, which reads the
   threshold from `ci/quality.json` and fails when
   - a package's efficacy (gremlins' definition, killed over killed plus lived)
@@ -239,6 +245,29 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
     out): a gate that measured nothing has not passed (`fail_on_no_mutants`),
     or
   - a package's report is missing or unreadable.
+
+  `internal/server` and `internal/cli` hold older Phase 1 code beside Phase 2's,
+  and a gremlins run of a package re-runs that package's whole test suite for
+  every mutant, so each is narrowed to the Phase 2 files listed under
+  `mutation_go.scopes` in `ci/quality.json`: `ci/mutationgate -excludes <pkg>`
+  prints one `--exclude-files` regexp per other non-test file, and
+  `ci/mutation.sh` passes them to gremlins (a scoped file that does not exist
+  fails). `mutation_go.lanes` partitions the packages into the four stages
+  above (a package in no lane, or two, fails `ci/mutationgate`, and a test
+  holds the Jenkinsfile to one stage per lane): each stage keeps the 30-minute
+  timeout the single stage had, which is why the packages are split instead of
+  the timeout raised. `ci/mutation.sh [outdir [config [lane]]]` runs one lane
+  (default `all`, every package plus Stryker; Stryker also runs in `base`) and
+  `ci/mutationgate -lane` judges only that lane's reports; every lane writes into
+  `ci-results/mutation/`, where `ci/quality.sh` judges them all. gremlins takes a
+  package's per-mutant bound from the time of its covered `go test` run, which
+  go's test cache can answer in milliseconds, so `ci/mutation.sh` runs with
+  `GOFLAGS=-count=1`: the covered run is a real run, and `--timeout-coefficient
+  60` multiplies the suite's real duration (without it every `internal/server`
+  and `internal/cli` mutant timed out unjudged). The efficacy floor, `--timeout-coefficient 60` and gremlins' default
+  worker count apply to every package alike; nothing is raised for the
+  scoped ones. `ci/qualitycheck` reports a scope narrowed against the base as a
+  loosening, like a dropped package.
   Counts come from the per-mutation statuses, since gremlins' summary fields
   omit timed-out and not-covered mutants. The script passes
   `--timeout-coefficient 60`: with a warm build cache gremlins' default bound

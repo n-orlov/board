@@ -10,10 +10,18 @@ import (
 const mutationReportOK = `{"files":[{"file_name":"a.go","mutations":[{"status":"KILLED"},{"status":"KILLED"},{"status":"KILLED"},{"status":"KILLED"},{"status":"LIVED"}]}]}`
 const mutationReportLow = `{"files":[{"file_name":"a.go","mutations":[{"status":"KILLED"},{"status":"LIVED"}]}]}`
 
+// writeMutationReports writes one report per package ci/quality.json
+// configures: domain and store get the given content, every other package a
+// passing one.
 func writeMutationReports(t *testing.T, domain, store string) string {
 	t.Helper()
 	dir := t.TempDir()
-	for name, content := range map[string]string{"internal-domain.json": domain, "internal-store.json": store} {
+	reports := map[string]string{}
+	for _, pkg := range configuredMutationPackages(t) {
+		reports[strings.ReplaceAll(pkg, "/", "-")+".json"] = mutationReportOK
+	}
+	reports["internal-domain.json"], reports["internal-store.json"] = domain, store
+	for name, content := range reports {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -39,4 +47,21 @@ func TestMutationGateRunsTheGateToolOverTheReports(t *testing.T) {
 	if err != nil || ok || !strings.Contains(out, "below the floor") {
 		t.Fatalf("a package at 50%%: ok=%v err=%v %s", ok, err, out)
 	}
+}
+
+// configuredMutationPackages is mutation_go.packages of the real
+// ci/quality.json.
+func configuredMutationPackages(t *testing.T) []string {
+	t.Helper()
+	m := realQualityJSON(t)
+	sec, ok := m["mutation_go"].(map[string]any)
+	if !ok {
+		t.Fatal("ci/quality.json has no mutation_go section")
+	}
+	var pkgs []string
+	list, _ := sec["packages"].([]any)
+	for _, p := range list {
+		pkgs = append(pkgs, p.(string))
+	}
+	return pkgs
 }

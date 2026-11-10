@@ -8,6 +8,7 @@
 package repocheck
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -63,7 +64,7 @@ func stageBefore(jf, first, second string) bool {
 // run in order, so removing one fails here, and each runs its command.
 func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
-	want := []string{"CI image", "Lint", "Suite", "Allure smoke", "Quality", "Stability", "Mutation"}
+	want := []string{"CI image", "Lint", "Suite", "Allure smoke", "Quality", "Stability", "Mutation logic", "Mutation server", "Mutation cli", "Mutation"}
 	if got := jenkinsStages(jf); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("stages = %q, want %q", got, want)
 	}
@@ -426,8 +427,8 @@ func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 	}
 	body, _ := jenkinsStage(jf, "Mutation")
 	lines := jenkinsfileLines(body)
-	if !anyLineContains(lines, "sh 'ci/run.sh ci/mutation.sh'") {
-		t.Errorf("the Mutation stage does not run `ci/run.sh ci/mutation.sh`:\n%s", body)
+	if !anyLineContains(lines, "sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json base'") {
+		t.Errorf("the Mutation stage does not run `ci/run.sh ci/mutation.sh` over the base lane:\n%s", body)
 	}
 	for _, want := range []string{"anyOf", "branch 'main'", "environment name: 'CI_NIGHTLY', value: 'true'"} {
 		if !anyLineContains(lines, want) {
@@ -439,6 +440,61 @@ func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 	}
 	if !anyLineContains(jenkinsfileLines(jf), "ci-results/mutation/*.json") {
 		t.Error("the gremlins reports in ci-results/mutation/ are not archived")
+	}
+}
+
+// TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout: ci/quality.json's
+// mutation_go.lanes partition the gremlins packages, and the Jenkinsfile runs
+// every lane as one stage (the base lane in `Mutation`, which also runs
+// Stryker), each on every main build and the extended lane, each failing the
+// build when red, none with a timeout past the 30 minutes the single Mutation
+// stage always had. A lane without a stage would never be measured by CI.
+func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
+	jf := readRepoFile(t, "Jenkinsfile")
+	var all struct {
+		MutationGo struct {
+			Packages []string            `json:"packages"`
+			Lanes    map[string][]string `json:"lanes"`
+		} `json:"mutation_go"`
+	}
+	if err := json.Unmarshal([]byte(readRepoFile(t, "ci", "quality.json")), &all); err != nil {
+		t.Fatal(err)
+	}
+	stageOf := map[string]string{"base": "Mutation", "logic": "Mutation logic", "server": "Mutation server", "cli": "Mutation cli"}
+	covered := map[string]bool{}
+	for lane, pkgs := range all.MutationGo.Lanes {
+		name, ok := stageOf[lane]
+		if !ok {
+			t.Errorf("lane %q has no stage in this test's table: add its stage to the Jenkinsfile and here", lane)
+			continue
+		}
+		body, found := jenkinsStage(jf, name)
+		if !found {
+			t.Errorf("lane %q: no stage %q in the Jenkinsfile", lane, name)
+			continue
+		}
+		lines := jenkinsfileLines(body)
+		for _, want := range []string{
+			"sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json " + lane + "'",
+			"options { timeout(time: 30, unit: 'MINUTES') }",
+			"branch 'main'", "environment name: 'CI_NIGHTLY', value: 'true'",
+			"catchError(buildResult: 'FAILURE'",
+		} {
+			if !anyLineContains(lines, want) {
+				t.Errorf("stage %q lacks %q:\n%s", name, want, body)
+			}
+		}
+		for _, p := range pkgs {
+			covered[p] = true
+		}
+	}
+	for _, p := range all.MutationGo.Packages {
+		if !covered[p] {
+			t.Errorf("%s is in no lane, so no Jenkins stage measures it", p)
+		}
+	}
+	if len(all.MutationGo.Lanes) != len(stageOf) {
+		t.Errorf("lanes %v, want exactly %d (one per Jenkins mutation stage)", all.MutationGo.Lanes, len(stageOf))
 	}
 }
 

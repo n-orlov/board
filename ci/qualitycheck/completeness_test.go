@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -85,9 +86,28 @@ func specGaps(cfg config) []string {
 		for _, p := range cfg.MutationGo.Packages {
 			have[p] = true
 		}
-		for _, p := range []string{"internal/domain", "internal/store"} {
+		// Phase 1's packages, then the handwritten Go application logic
+		// Phase 2 introduced or changed.
+		for _, p := range []string{"internal/domain", "internal/store", "internal/asks", "internal/attention",
+			"internal/checkin", "internal/cursors", "internal/events", "internal/feed", "internal/notes",
+			"internal/server", "internal/cli"} {
 			if !have[p] {
 				g = append(g, "mutation_go.packages: "+p+" is not measured")
+			}
+		}
+		for p, files := range cfg.MutationGo.Scopes {
+			if !have[p] || len(files) == 0 {
+				g = append(g, "mutation_go.scopes: "+p+" is scoped to nothing or is not a measured package")
+			}
+		}
+		for _, f := range []string{"askops.go", "askwait.go", "attentionops.go", "cursorops.go", "noteops.go", "streamops.go"} {
+			if scope, ok := cfg.MutationGo.Scopes["internal/server"]; ok && !slices.Contains(scope, f) {
+				g = append(g, "mutation_go.scopes: internal/server lacks "+f)
+			}
+		}
+		for _, f := range []string{"askpoll.go", "asks.go", "attention.go", "notes.go"} {
+			if scope, ok := cfg.MutationGo.Scopes["internal/cli"]; ok && !slices.Contains(scope, f) {
+				g = append(g, "mutation_go.scopes: internal/cli lacks "+f)
 			}
 		}
 		if !cfg.MutationGo.FailOnNoMutants {
@@ -169,7 +189,11 @@ func TestSpecGapsCatchesARemovedDisabledOrLoosenedGate(t *testing.T) {
 		{"trivy_image", []loosening{{"severity", "CRITICAL"}, {"severity", "HIGH"}, {"severity", ""}}},
 		{"mutation_go", []loosening{
 			{"efficacy", 79.0}, {"packages", []any{"internal/domain"}}, {"packages", []any{"internal/store"}},
-			{"packages", []any{}}, {"fail_on_no_mutants", false}}},
+			{"packages", []any{}}, {"fail_on_no_mutants", false},
+			{"packages", []any{"internal/domain", "internal/store"}},
+			{"scopes", map[string]any{"internal/server": []any{"askops.go"}}},
+			{"scopes", map[string]any{"internal/cli": []any{"asks.go"}}},
+			{"scopes", map[string]any{"internal/audit": []any{}}}}},
 		{"stryker", []loosening{{"break", 79.0}, {"module_break", 79.0}, {"path", "web/src"}}},
 		{"sbom_module", nil},
 		{"sbom_frontend", nil},

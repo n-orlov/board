@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -260,5 +261,33 @@ func TestLooserThresholdsCatchesTheSection154Gates(t *testing.T) {
 	}
 	if p := looserThresholds(on, on); len(p) != 0 {
 		t.Errorf("an unchanged file reported %v", p)
+	}
+}
+
+// TestLooserThresholdsCatchesANarrowedMutationScope: a package the base
+// mutated whole may not be narrowed to some files, and a scope may not drop a
+// file the base listed; a package the base did not measure may be scoped, and
+// a wider scope is not a loosening.
+func TestLooserThresholdsCatchesANarrowedMutationScope(t *testing.T) {
+	mk := func(pkgs []string, scopes map[string][]string) config {
+		return config{MutationGo: mutationGoConfig{Enabled: true, Efficacy: 80, Packages: pkgs, FailOnNoMutants: true, Scopes: scopes}}
+	}
+	whole := mk([]string{"a", "b"}, nil)
+	scoped := mk([]string{"a", "b"}, map[string][]string{"b": {"x.go", "y.go"}})
+	if p := looserThresholds(whole, scoped); len(p) != 1 || !strings.Contains(p[0], `"b" is narrowed`) {
+		t.Errorf("narrowing a whole package: %v", p)
+	}
+	fewer := mk([]string{"a", "b"}, map[string][]string{"b": {"x.go"}})
+	if p := looserThresholds(scoped, fewer); len(p) != 1 || !strings.Contains(p[0], "dropped y.go") {
+		t.Errorf("dropping a scoped file: %v", p)
+	}
+	if p := looserThresholds(fewer, scoped); len(p) != 0 {
+		t.Errorf("a wider scope reported %v", p)
+	}
+	if p := looserThresholds(mk([]string{"a"}, nil), scoped); len(p) != 0 {
+		t.Errorf("scoping a package the base did not measure reported %v", p)
+	}
+	if p := looserThresholds(scoped, scoped); len(p) != 0 {
+		t.Errorf("an unchanged scope reported %v", p)
 	}
 }

@@ -36,7 +36,53 @@
     "mutation_go": {
         "enabled": true,
         "efficacy": 80,
-        "packages": ["internal/domain", "internal/store"],
+        "packages": [
+            "internal/domain",
+            "internal/store",
+            "internal/asks",
+            "internal/attention",
+            "internal/checkin",
+            "internal/cursors",
+            "internal/events",
+            "internal/feed",
+            "internal/notes",
+            "internal/server",
+            "internal/cli"
+        ],
+        "lanes": {
+            "base": ["internal/domain", "internal/store"],
+            "logic": [
+                "internal/asks",
+                "internal/attention",
+                "internal/checkin",
+                "internal/cursors",
+                "internal/events",
+                "internal/feed",
+                "internal/notes"
+            ],
+            "server": ["internal/server"],
+            "cli": ["internal/cli"]
+        },
+        "scopes": {
+            "internal/server": [
+                "askops.go",
+                "askwait.go",
+                "attentionops.go",
+                "cursorops.go",
+                "eventops.go",
+                "noteops.go",
+                "nowops.go",
+                "streamattention.go",
+                "streamops.go"
+            ],
+            "internal/cli": [
+                "askpoll.go",
+                "asks.go",
+                "attention.go",
+                "notes.go",
+                "now.go"
+            ]
+        },
         "fail_on_no_mutants": true
     },
     "stryker": {

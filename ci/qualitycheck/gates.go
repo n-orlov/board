@@ -44,6 +44,10 @@ type mutationGoConfig struct {
 	Efficacy        float64  `json:"efficacy"`
 	Packages        []string `json:"packages"`
 	FailOnNoMutants bool     `json:"fail_on_no_mutants"`
+	// Scopes narrows a package to the listed files (ci/mutationgate).
+	Scopes map[string][]string `json:"scopes"`
+	// Lanes groups Packages into the Jenkins mutation stages (ci/mutationgate).
+	Lanes map[string][]string `json:"lanes"`
 }
 
 // strykerConfig is the Stryker gate over the frontend logic modules:
@@ -112,6 +116,39 @@ func prefixAll(prefix string, in []string) []string {
 	return out
 }
 
+// narrowedScopes reports a package the base mutated that the current file
+// measures over fewer files: a scope the base did not have, or a file the
+// base's scope listed and the current one does not. A package the base did
+// not measure may be scoped freely, since its scope only decides what is
+// newly measured.
+func narrowedScopes(base, current mutationGoConfig) []string {
+	var p []string
+	measured := map[string]bool{}
+	for _, pkg := range base.Packages {
+		measured[pkg] = true
+	}
+	for pkg, files := range current.Scopes {
+		if !measured[pkg] {
+			continue
+		}
+		baseFiles, had := base.Scopes[pkg]
+		if !had {
+			p = append(p, fmt.Sprintf("mutation_go.scopes: %q is narrowed to %d files (base mutated the whole package)", pkg, len(files)))
+			continue
+		}
+		keep := map[string]bool{}
+		for _, f := range files {
+			keep[f] = true
+		}
+		for _, f := range baseFiles {
+			if !keep[f] {
+				p = append(p, fmt.Sprintf("mutation_go.scopes: %q dropped %s (base measured it)", pkg, f))
+			}
+		}
+	}
+	return p
+}
+
 // looserMutation reports a mutation gate switched off, an efficacy floor
 // lowered, a package dropped, or the zero-mutant failure switched off.
 func looserMutation(base, current mutationGoConfig) []string {
@@ -132,5 +169,5 @@ func looserMutation(base, current mutationGoConfig) []string {
 	if base.FailOnNoMutants && !current.FailOnNoMutants {
 		p = append(p, "mutation_go.fail_on_no_mutants: switched off (base had it on)")
 	}
-	return p
+	return append(p, narrowedScopes(base, current)...)
 }
