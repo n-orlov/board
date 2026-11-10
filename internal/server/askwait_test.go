@@ -474,15 +474,15 @@ func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
 func TestAWaitOnAnOpenAskWithoutAFeedAnswers503AndOnAnAnsweredOneAnswersAtOnce(t *testing.T) {
 	wait := 5
 	o := askOps{asks: &asks.Store{}}
-	got := o.read(context.Background(), asks.Ask{State: "open"}, &wait, nil)
+	got := o.read(context.Background(), asks.Ask{State: "open"}, time.Now(), &wait, nil)
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 		t.Errorf("a wait without a feed = %#v, want a 503 problem", got)
 	}
-	got = o.read(context.Background(), asks.Ask{State: "answered"}, &wait, nil)
+	got = o.read(context.Background(), asks.Ask{State: "answered"}, time.Now(), &wait, nil)
 	if _, ok := got.(GetAsk200JSONResponse); !ok {
 		t.Errorf("a wait on an answered ask = %#v, want the ask at once", got)
 	}
-	got = o.read(context.Background(), asks.Ask{State: "open"}, nil, nil)
+	got = o.read(context.Background(), asks.Ask{State: "open"}, time.Now(), nil, nil)
 	if _, ok := got.(GetAsk200JSONResponse); !ok {
 		t.Errorf("an open ask without wait = %#v, want the ask at once", got)
 	}

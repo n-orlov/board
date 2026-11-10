@@ -62,10 +62,11 @@ func invalid(err error, next string) error {
 // withdrawn. PollSeenAt is when a long poll on the ask last held or returned.
 // EndedAt is the clock read just after the transaction that answered or
 // withdrew the ask committed (stampEnd): nil while it is open, and for an end
-// whose stamp was never written. EndCommitAt is the real clock read inside
-// that transaction as the last thing before its commit (endTx), to the
-// nanosecond: the end had not committed at any instant at or before it. It is
-// nil while the ask is open, and for an end recorded before it was kept.
+// whose stamp was never written. EndCommitAt is the real clock read after that
+// transaction's COMMIT returned (stampEnd), to the nanosecond: the end had
+// committed at that instant or earlier, so a mark at or before an instant
+// proves the end committed by it. It is nil while the ask is open, for an end
+// whose mark was never written and for one recorded before it was kept.
 type Ask struct {
 	N              int64
 	ID             string
@@ -100,6 +101,17 @@ type Store struct {
 	Store *store.Store
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// MarkClock is the real clock an end's commit mark reads once the end's
+	// COMMIT has returned; nil means time.Now. It is never the injectable Now:
+	// the deadlines the mark is compared with are real instants.
+	MarkClock func() time.Time
+}
+
+func (s Store) markNow() time.Time {
+	if s.MarkClock != nil {
+		return s.MarkClock().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (s Store) now() time.Time {

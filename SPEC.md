@@ -441,7 +441,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 | withdrawn_at, withdraw_reason | nullable | set when the ask is withdrawn; the reason is at most 200 characters |
 | poll_seen_at | ts, nullable | when a long poll (§7.2) on the ask last held or returned; null until one has |
 | ended_at | ts, nullable | the server's clock read just after the answer or withdrawal committed, rounded up to the millisecond (migration `00007_ask_ended_at`) |
-| end_commit_ns | bigint, nullable | the end's commit mark: the server's real clock in UTC nanoseconds, read inside the answering or withdrawing transaction immediately before it commits (migration `00008_ask_end_commit`); internal, not in the ask document |
+| end_commit_ns | bigint, nullable | the end's commit mark: the server's real clock in UTC nanoseconds, read after the answering or withdrawing transaction's COMMIT returned and written in a statement of its own (migration `00008_ask_end_commit`); internal, not in the ask document |
 
 An ask's short ref is `A<n>`: `n` is the table's auto-incrementing key (`domain.FormatAskRef`; read back by
 `domain.ParseAskRef` with `A` in either case and a positive `n`). Every read takes `A<n>` or the ULID, in either letter
@@ -462,13 +462,16 @@ commits; once it has committed, `Answer` and `Withdraw` read the clock again and
 millisecond, as `ended_at`, so `ended_at` is never earlier than the moment the end took effect (became visible to readers),
 however long the commit took. It is an upper bound only: that clock read can itself come arbitrarily late, so `ended_at`
 does not say when the end took effect, and nothing decides a deadline by it (`board ask --poll` uses §7.2's `until`). `ended_at` is null while the ask is open; it is written once, and a failure to write it
-leaves the end standing without one (as do ends recorded before the column existed). The same transaction, as its last
-statement, after every other statement and clock read of it and immediately before it commits, writes the end's commit
-mark `end_commit_ns`: the server's real clock (not the store's injectable one, since the deadlines it is compared with
-are real instants), to the nanosecond. The end therefore became visible only after its mark, so a reader at any instant at
-or before the mark cannot have seen it, however early `answered_at`/`withdrawn_at` are. `Ask.AsOf(t)` is the ask as it
-stood at `t`: an ask whose end is marked at or after `t` is returned `open`, with every field of the end cleared; an open
-ask, one whose end is marked before `t`, and an end without a mark (recorded before the column existed) are returned as read.
+leaves the end standing without one (as do ends recorded before the column existed). The end's commit mark `end_commit_ns` is read only after the transaction's COMMIT has
+returned: `Answer` and `Withdraw` read the server's real clock (not the store's injectable one, since the deadlines it is compared with
+are real instants), to the nanosecond, and write it in a statement of its own, before the clock read for `ended_at`, so a
+delayed read of that clock cannot delay it. The end had therefore committed by its mark: a mark at or before an instant proves the end
+committed by that instant. Nothing read before the COMMIT is such proof: a mark taken inside the transaction, however late in it,
+does not say when the COMMIT returned, and neither do `answered_at`, `withdrawn_at` or any other clock read inside the
+transaction, however early they are. `Ask.AsOf(t)` is the ask as it stood at `t`, judged by the mark alone: an open ask and an
+end marked at or before `t` are returned as read; an end marked after `t`, and an end without a mark (the write of the mark
+failed or has not run yet, or the end was recorded before the column existed), are returned `open`, with every field of the end cleared.
+A caller that holds other proof (a read of the ask that came back by `t` and found it ended, §7.2) does not call `AsOf`.
 
 ### 4.6 `events`
 
@@ -1248,21 +1251,28 @@ state) or N seconds pass (200 with the still-open ask). A `wait` outside the ran
 `&until=<instant>` (RFC 3339, allowed with `wait` only: `until` alone is 400 with a `next`) is a deadline for the hold, by
 the server's clock, taken at its full precision (fractional seconds to the nanosecond, never rounded to the millisecond): when it comes before the N seconds run out (it may also be already past, or a fraction of a second
 away), the hold ends at `until` instead, and the response is the ask as it stood at `until` (`Ask.AsOf`, §4.5): an answer
-or withdrawal is in it only when its transaction committed before `until`, which the server decides by the end's commit
-mark, never by when it reads the ask. An end marked at or after `until` had not committed by `until`, so the response is
-the still-open ask, without the end's fields, however early the end's `answered_at`/`withdrawn_at` and however late the
-server finds it committed; an end marked before `until` is in the response. The read as `until` passes runs on the
+or withdrawal is in it only when the server has evidence that its transaction's COMMIT returned by `until`, never by when the
+server first reads the ask after `until` or by a clock read inside the end's transaction.
+Two kinds of evidence are sufficient, and either one counts the end: (a) a read of the ask that came back at or before `until`
+(the wait's first read, a wake or a renewal read, or the read of an ask already ended when the request arrived) found it
+ended, even when the end's mark has not been written yet or is later than `until`; (b) the end's commit mark, a real-clock reading taken
+after its COMMIT returned (§4.5), is at or before `until`, however late the ask is first read. An end whose COMMIT returned after `until` is never
+answered ended: the response is the still-open ask, without the end's fields. `answered_at`, `withdrawn_at`, `ended_at` and any
+clock read inside the end's transaction (including a mark taken before the COMMIT) are no such proof, however early they are and however late the server
+finds the end committed. When neither (a) nor (b) holds, the end is not counted. That is the case where the end committed
+before `until` but the server's first read of the ask and every real-clock reading made after the end's COMMIT both fall after `until`:
+no input the server holds then tells it from an end that committed after `until`, so it answers the still-open ask, and `board ask --poll` (§8.3)
+exits 3 on it. That strict case is a disclosed residual, not a promise. The read as `until` passes runs on the
 readers, by its own timer, armed as the request is handled, before the wait makes any write (marking the poll at the start
 waits for the database's writer), but whether that read comes late does not change the answer: neither the timer's
 latency, nor every reader being busy across `until`, nor an answer or withdrawal already holding the writer before the
 request reached the server (committing only after `until`), nor the request itself reaching the handler only after
-`until` counts an end that committed after `until`. A request handled after `until` that finds the ask ended by such an
-end answers at once with the still-open ask. The mark is the end's last act before its commit, so the commit statement
-itself is the one part of an end marked before `until` that can still be running at `until`; no statement or clock read
-of the end comes after the mark. An end recorded without a mark (before migration `00008`) is taken as read. An end that a
-read during the hold finds by `until` ends the hold at once; one that such a read finds only after `until` (a wake or
+`until` counts an end that committed after `until`; and an end held across `until` with its last statement run before it, its COMMIT returning only after,
+is never counted. A request handled after `until` that finds the ask ended by such an
+end answers at once with the still-open ask. An end that a
+read during the hold finds by `until` (it came back at or before `until`) ends the hold at once and counts, whatever its mark; one that such a read finds only after `until` (a wake or
 renewal read that came back late) is replaced by the read at `until`, which is not repeated, and the response is that ask
-as it stood at `until`, however late it reaches the client.
+as it stood at `until` (judged by (b) alone), however late it reaches the client.
 Marking the poll at the end (below) waits at most 5 seconds for the writer and does not change the answer.
 
 Waiters are woken by the events feed (§7.3), not by `LISTEN/NOTIFY`: a wait subscribes to the feed, then reads the
@@ -1587,11 +1597,18 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   passed.
   The outcome is decided by when the end took effect, that is, when its transaction committed, never by when a response
   carrying it arrived, when the server read the ask, or when anything about it was stamped: the answer to the last call is the
-  ask as it stood at the deadline (§7.2: the server compares the end's commit mark with `until`), and it is final however late
-  it reaches the client. An answer or withdrawal committed before the deadline therefore gives exit 0 or 6 even when that
-  answer arrives after the deadline, even when every response is delayed, even when the server reads the ask only after the
-  deadline, and even when the end's `ended_at` is after the deadline because the server's clock read after the commit was
-  delayed; an ask still open at the deadline gives the line `A<n> still open → board ask show A<n>` and exit **3** even when
+  ask as it stood at the deadline (§7.2: the server counts an end only on evidence that its COMMIT returned by `until`: a read
+  of the ask that came back by `until` and found it ended, or the end's post-COMMIT real-clock mark at or before `until`), and
+  it is final however late it reaches the client. A pre-COMMIT mark, `answered_at`, `withdrawn_at` and any clock read taken inside
+  the end's transaction are no such evidence. An answer or withdrawal whose COMMIT returned before the deadline therefore gives
+  exit 0 or 6 even when that answer arrives after the deadline, even when every response is delayed, even when the server's
+  first read of the ask comes only after the deadline (its mark, read right after the COMMIT, is then at or before the
+  deadline), even when the end's `ended_at` is after the deadline because the server's clock read for it came late, and even
+  when its mark is read only after the deadline while a call held from before the deadline reads the end in time. The one
+  case it does not give exit 0 or 6 for is an end whose COMMIT returned before the deadline but with every server read of
+  the ask and every real-clock reading after that COMMIT falling after the deadline: no input the server holds tells that end
+  from one committed after the deadline, so the call answers the still-open ask and the poll exits 3 (a disclosed residual, §7.2);
+  an ask still open at the deadline gives the line `A<n> still open → board ask show A<n>` and exit **3** even when
   its end commits a moment later, with a stamp from before the deadline and before that answer arrives, even when that end's
   transaction was already holding the database's writer, so that the server's first write for the poll waited for it, before
   the poll's first call reached the server, even when that first call reaches the server only after the deadline, by which

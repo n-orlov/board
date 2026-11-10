@@ -54,24 +54,34 @@ type askWaitResponse struct {
 // timeout shorter than the wait does not cut it.
 func (r askWaitResponse) VisitGetAskResponse(w http.ResponseWriter) error {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(r.max + streamWriteWindow))
-	k, err := r.hold()
+	k, proven, err := r.hold()
 	switch {
 	case err != nil:
 		return failure(http.StatusInternalServerError, "could not read the ask").write(w)
 	case r.ctx.Err() != nil:
 		return nil // the client left
 	}
-	return GetAsk200JSONResponse(r.ops.apiAsk(atUntil(k, r.until))).VisitGetAskResponse(w)
+	return GetAsk200JSONResponse(r.ops.apiAsk(atUntil(k, r.until, proven))).VisitGetAskResponse(w)
 }
 
-// atUntil is k as it stood at until, when there is one: an end whose commit
-// mark is at or after until had not committed by it, however early its stamps
-// and whenever the wait read it, so k is then still open (asks.Ask.AsOf).
-func atUntil(k asks.Ask, until *time.Time) asks.Ask {
-	if until == nil {
+// atUntil is k as it stood at until, when there is one. An end is in it only
+// when there is proof it committed by until: proven, a read of the ask that came
+// back at or before until saw it ended, or its commit mark, read after the end's
+// COMMIT returned, is at or before until (asks.Ask.AsOf). Any other end had not
+// committed by until as far as the server can tell, however early its stamps
+// (answered_at, withdrawn_at, anything read inside its transaction) and however
+// late the ask is read, so k is then still open.
+func atUntil(k asks.Ask, until *time.Time, proven bool) asks.Ask {
+	if until == nil || proven {
 		return k
 	}
 	return k.AsOf(*until)
+}
+
+// readProves says a read of the ask that found it in state, and came back at
+// readBack, proves its end committed by until.
+func readProves(state string, readBack time.Time, until *time.Time) bool {
+	return until != nil && state != domain.AskOpen && !readBack.After(*until)
 }
 
 func (r askWaitResponse) touchEvery() time.Duration {
@@ -92,29 +102,31 @@ func (r askWaitResponse) limits(w *waiter) (timeout <-chan time.Time, asOf <-cha
 }
 
 // hold waits and returns the ask after it, with poll_seen_at set to the end of
-// the wait. With until, an end that no read made by until found is replaced by
-// the read made as until passed: the ask as it stood then. That read is timed
-// before any write of the wait is made, so a write held up by the writer, begin's
-// included, does not move it.
-func (r askWaitResponse) hold() (asks.Ask, error) {
-	w := &waiter{ctx: r.ctx, store: r.ops.asks, hub: r.ops.waits, k: r.ask, sub: r.ops.waits.feed.Subscribe()}
+// the wait, and whether a read that came back by until found it ended (proven).
+// With until, an end that no read made by until found is replaced by the read
+// made as until passed: the ask as it stood then. That read is timed before any
+// write of the wait is made, so a write held up by the writer, begin's included,
+// does not move it.
+func (r askWaitResponse) hold() (k asks.Ask, proven bool, err error) {
+	w := &waiter{ctx: r.ctx, store: r.ops.asks, hub: r.ops.waits, k: r.ask, sub: r.ops.waits.feed.Subscribe(), until: r.until}
 	defer func() { w.sub.Close() }()
 	// The limits come first: the read at until is timed from here, not from
 	// when begin's write (which waits for the writer) comes back.
 	timeout, asOf, stop := r.limits(w)
 	defer stop()
 	if over, err := r.begin(w, asOf); over || err != nil {
-		return w.k, err
+		return w.k, w.proven, err
 	}
 	beat := time.NewTicker(r.touchEvery())
 	defer beat.Stop()
 	if err := w.run(timeout, beat.C, asOf); err != nil {
-		return w.k, err
+		return w.k, w.proven, err
 	}
 	if asOf != nil && w.foundLate(*r.until) {
 		w.take(<-asOf)
 	}
-	return w.end()
+	k, err = w.end()
+	return k, w.proven, err
 }
 
 // begin starts the wait and says whether it is over already: the ask was found
@@ -152,6 +164,9 @@ type snapshot struct {
 
 // waiter is one held wait: the ask as last read and its place in the change feed.
 //   - readTime is when the last read of the ask came back;
+//   - until is the deadline of the wait, if any, and proven is set once a read
+//     that came back at or before it found the ask ended: that end committed by
+//     until, however the ask is read after;
 //   - final is set once k is the ask as read when until passed, or the read
 //     that failed then; err is that read's error.
 type waiter struct {
@@ -163,6 +178,8 @@ type waiter struct {
 	readTime time.Time
 	final    bool
 	err      error
+	until    *time.Time
+	proven   bool
 }
 
 // readAt reads the ask once at, on the readers, so a write holding the writer
@@ -210,6 +227,7 @@ func (w *waiter) reread(ctx context.Context) error {
 	k, err := w.store.Get(ctx, w.k.ID)
 	if err == nil {
 		w.k, w.readTime = k, time.Now()
+		w.proven = w.proven || readProves(k.State, w.readTime, w.until)
 	}
 	return err
 }

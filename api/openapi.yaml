@@ -1481,10 +1481,12 @@ paths:
         least every 30 seconds and at the end, which is what makes `asker_waiting` true for a `poll` ask. With
         `until` as well (allowed with `wait` only, else 400), the hold also ends at that instant, by the server's
         clock, when it comes before the N seconds do, and the response is the ask as it stood at `until`, however late
-        the server reads it and however late it reaches the client: an answer or withdrawal whose transaction reached its
-        commit only at or after `until` (by the commit mark it writes as its last act before committing) is left out,
-        the ask answered still open, and one that committed before `until` is in it. A request handled after `until`
-        that finds the ask ended that way answers at once with the still-open ask.
+        the server reads it and however late it reaches the client: an answer or withdrawal is in it only when there is
+        proof its COMMIT returned by `until`, either a read of the ask that came back at or before `until` and found it
+        ended, or the commit mark the server reads after the COMMIT returned being at or before `until`. One whose COMMIT
+        returned after `until` is left out, the ask answered still open, whatever clock reading inside its transaction
+        (`answered_at`, `withdrawn_at`) says. A request handled after `until` that finds the ask ended without such
+        proof answers at once with the still-open ask.
       security:
         - bearerAuth: []
         - cookieAuth: []

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
@@ -117,51 +116,50 @@ func (s Store) Withdraw(ctx context.Context, actor audit.Actor, principal, ref, 
 	return s.stampEnd(ctx, out), nil
 }
 
-// commitClock is the real clock an end's commit mark reads: the deadline a
-// long poll is judged by is a real instant too, whatever clock Now is.
-var commitClock = time.Now
-
 // endTx runs f, which answers or withdraws one ask, in a transaction on the
-// writer, and commits when f returns nil. As the last thing before the commit,
-// after every statement and clock read of f, it writes the ask's commit mark
-// (end_commit_ns): the real clock then, to the nanosecond. The end therefore
-// commits after its mark, and a read made at any instant at or before the mark
-// cannot have seen it (SPEC 4.5, 7.2).
+// writer, and commits when f returns nil. It reads no clock after f: the end's
+// commit mark is read by stampEnd, once the COMMIT has returned (SPEC 4.5).
 func (s Store) endTx(ctx context.Context, f func(*sql.Tx) (Ask, error)) (Ask, error) {
 	var out Ask
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		k, err := f(tx)
-		if err != nil {
-			return err
-		}
-		at := commitClock().UTC()
-		q := s.Store.Dialect().Rebind(`UPDATE asks SET end_commit_ns = ? WHERE id = ?`)
-		if _, err := tx.ExecContext(ctx, q, at.UnixNano(), k.ID); err != nil {
-			return fmt.Errorf("mark the end: %w", err)
-		}
-		k.EndCommitAt = &at
 		out = k
-		return nil
+		return err
 	})
 	return out, err
 }
 
-// stampEnd records the ended_at of k, which the transaction that answered or
-// withdrew it has just committed, and returns k with it. The clock is read only
-// now, after the commit, and rounded up to the stored whole millisecond, so
-// ended_at is never before the end took effect, which answered_at and
-// withdrawn_at, read inside the transaction, can be by however long the commit
-// took (`board ask --poll` relies on this, SPEC §8.3). The write runs even when
-// the caller has gone and changes nothing once a stamp is set; if it fails, the
-// end stands without one.
+// stampEnd records the commit mark and the ended_at of k, which the
+// transaction that answered or withdrew it has just committed, and returns k
+// with them. Each clock is read only now, after the COMMIT returned.
+//
+// The commit mark (end_commit_ns) is read and written first: the real clock to
+// the nanosecond. The end had committed by it, so a mark at or before a
+// deadline proves the end committed by the deadline, and nothing read before
+// the COMMIT does. It is written in a statement of its own, before the store's
+// clock is read for ended_at, so a delayed read of that clock cannot delay it.
+//
+// ended_at is the store's clock rounded up to the stored whole millisecond, so
+// it is never before the end took effect, which answered_at and withdrawn_at,
+// read inside the transaction, can be by however long the commit took
+// (SPEC §8.3).
+//
+// Both write once, even when the caller has gone; if one fails, the end stands
+// without it.
 func (s Store) stampEnd(ctx context.Context, k Ask) Ask {
-	ms := store.EncodeBound(s.now())
-	q := s.Store.Dialect().Rebind(`UPDATE asks SET ended_at = ? WHERE id = ? AND ended_at IS NULL`)
-	if _, err := s.Store.Writer().ExecContext(context.WithoutCancel(ctx), q, ms, k.ID); err != nil {
-		return k
+	ctx = context.WithoutCancel(ctx)
+	d := s.Store.Dialect()
+	mark := s.markNow()
+	q := d.Rebind(`UPDATE asks SET end_commit_ns = ? WHERE id = ? AND end_commit_ns IS NULL`)
+	if _, err := s.Store.Writer().ExecContext(ctx, q, mark.UnixNano(), k.ID); err == nil {
+		k.EndCommitAt = &mark
 	}
-	at := store.DecodeTime(ms)
-	k.EndedAt = &at
+	ms := store.EncodeBound(s.now())
+	q = d.Rebind(`UPDATE asks SET ended_at = ? WHERE id = ? AND ended_at IS NULL`)
+	if _, err := s.Store.Writer().ExecContext(ctx, q, ms, k.ID); err == nil {
+		at := store.DecodeTime(ms)
+		k.EndedAt = &at
+	}
 	return k
 }
 

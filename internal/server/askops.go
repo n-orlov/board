@@ -136,17 +136,18 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 	if err != nil {
 		return askResult[GetAskResponseObject](err)
 	}
-	return o.read(ctx, k, req.Params.Wait, req.Params.Until), nil
+	return o.read(ctx, k, time.Now(), req.Params.Wait, req.Params.Until), nil
 }
 
-// read answers with the ask k: at once, or after a wait when one was asked for
-// and the ask is still open, ending at until if that comes first. With until,
-// an ask found ended is answered as it stood at until (atUntil): open, without
-// a wait, when its end had not committed by then.
-func (o askOps) read(ctx context.Context, k asks.Ask, wait *int, until *time.Time) GetAskResponseObject {
+// read answers with the ask k, whose read came back at readBack: at once, or
+// after a wait when one was asked for and the ask is still open, ending at until
+// if that comes first. With until, an ask found ended is answered as it stood at
+// until (atUntil): ended when that read came back by until or the end's commit
+// mark is at or before it, and else open, without a wait.
+func (o askOps) read(ctx context.Context, k asks.Ask, readBack time.Time, wait *int, until *time.Time) GetAskResponseObject {
 	switch {
 	case wait == nil || k.State != domain.AskOpen:
-		return GetAsk200JSONResponse(o.apiAsk(atUntil(k, until)))
+		return GetAsk200JSONResponse(o.apiAsk(atUntil(k, until, readProves(k.State, readBack, until))))
 	case o.waits == nil:
 		return failure(http.StatusServiceUnavailable, "waiting for an ask is not available")
 	}
