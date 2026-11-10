@@ -129,26 +129,26 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 	if r, off := o.ready(); off {
 		return r, nil
 	}
-	if p := askWaitProblem(req.Params.Wait); p != nil {
+	if p := askWaitProblem(req.Params.Wait, req.Params.Until); p != nil {
 		return *p, nil
 	}
 	k, err := o.asks.Get(ctx, req.Ref)
 	if err != nil {
 		return askResult[GetAskResponseObject](err)
 	}
-	return o.read(ctx, k, req.Params.Wait), nil
+	return o.read(ctx, k, req.Params.Wait, req.Params.Until), nil
 }
 
 // read answers with the ask k: at once, or after a wait when one was asked for
-// and the ask is still open.
-func (o askOps) read(ctx context.Context, k asks.Ask, wait *int) GetAskResponseObject {
+// and the ask is still open, ending at until if that comes first.
+func (o askOps) read(ctx context.Context, k asks.Ask, wait *int, until *time.Time) GetAskResponseObject {
 	switch {
 	case wait == nil || k.State != domain.AskOpen:
 		return GetAsk200JSONResponse(o.apiAsk(k))
 	case o.waits == nil:
 		return failure(http.StatusServiceUnavailable, "waiting for an ask is not available")
 	}
-	return askWaitResponse{ctx: ctx, ops: o, ask: k, max: time.Duration(*wait) * time.Second}
+	return askWaitResponse{ctx: ctx, ops: o, ask: k, max: time.Duration(*wait) * time.Second, until: until}
 }
 
 // ListAsks lists a page of asks.

@@ -459,7 +459,8 @@ Each write appends `ask_raised`, `ask_answered` or `ask_withdrawn` (with the tas
 apply) in the same transaction as the change. `answered_at` and `withdrawn_at` are stamped inside that transaction, before it
 commits; once it has committed, `Answer` and `Withdraw` read the clock again and store it, rounded up to the next whole
 millisecond, as `ended_at`, so `ended_at` is never earlier than the moment the end took effect (became visible to readers),
-however long the commit took. `ended_at` is null while the ask is open; it is written once, and a failure to write it
+however long the commit took. It is an upper bound only: that clock read can itself come arbitrarily late, so `ended_at`
+does not say when the end took effect, and nothing decides a deadline by it (`board ask --poll` uses §7.2's `until`). `ended_at` is null while the ask is open; it is written once, and a failure to write it
 leaves the end standing without one (as do ends recorded before the column existed).
 
 ### 4.6 `events`
@@ -1237,6 +1238,17 @@ message is flushed as it is written. A server with no change feed answers 503.
 the ask at once if it is not `open`, otherwise holds the request until it is answered or withdrawn (200 with the new
 state) or N seconds pass (200 with the still-open ask). A `wait` outside the range is refused before the ask is looked up; a valid one on an ask that does not exist is 404.
 
+`&until=<instant>` (RFC 3339, allowed with `wait` only: `until` alone is 400 with a `next`) is a deadline for the hold, by
+the server's clock: when it comes before the N seconds run out (it may also be already past, or a fraction of a second
+away), the hold ends at `until` instead, and the response is the ask as the server reads it as `until` passes. That read
+runs on the readers, by its own timer, so no write holding the database's writer delays it, and what it finds is exactly
+what had committed by then: an answer or withdrawal whose transaction committed before `until` is in it, and one whose
+transaction was still open at `until` is not, even if it commits (and is stamped `answered_at`/`withdrawn_at` before
+`until`) before the response is sent. An end that a read during the hold finds by `until` ends the hold at once; one that
+such a read finds only after `until` (a wake or renewal read that came back late) is replaced by the read at `until`. The
+ask is not read again after that read, so the response states the ask as of `until` however late it reaches the client.
+Marking the poll at the end (below) waits at most 5 seconds for the writer and does not change the answer.
+
 Waiters are woken by the events feed (§7.3), not by `LISTEN/NOTIFY`: a wait subscribes to the feed, then reads the
 ask, and re-reads it when an `ask_answered` or `ask_withdrawn` event of that ask arrives. An answer written through any
 replica on the same database therefore ends the wait within the feed's tail interval (`BOARD_STREAM_POLL`), and one
@@ -1549,30 +1561,27 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `show`, `ls` or `withdraw` is the subcommand and any other starts a new ask; flags may precede the task.
 - `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
   bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
-  `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until the deadline: `D` after the raise, rounded up to a whole millisecond (the
-  precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Each call asks for at most 300 s (the server's cap) and
-  for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
-  remainder, and the client cuts the request off at the deadline itself; the poll therefore stays active to the actual deadline,
-  sub-second remainder included. No wait is started once the deadline has passed (only the one plain read below), and exit 3 is
-  reported only then.
+  `GET /api/v1/asks/<ref>?wait=N&until=<deadline>` calls (§7.2) until the deadline: `D` after the raise, rounded up to a whole
+  millisecond (the precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Every call carries the
+  deadline as `until` and asks for at most 300 s (the server's cap). Once the deadline is at most 300 s away, the call asks for the
+  time left rounded up to a whole second (the server takes no shorter wait) and the server ends it at the deadline itself, so the
+  poll stays active to the actual deadline, sub-second remainder included. Further away, a call asks for what lies beyond one capped
+  call (at most 300 s, at least 1 s), so it ends a whole 300 s before the deadline and the last call is always one the server ends at
+  the deadline: a 700 s poll waits 300 s, 100 s, then 300 s. No call is cut off at the deadline, and none is started once it has
+  passed.
   The outcome is decided by when the end took effect, that is, when its transaction committed, never by when a response
-  carrying it arrived: an answer or withdrawal committed by the deadline gives exit 0 or 6 even when the read that finds it comes
-  back after the deadline, and an ask still open at the deadline gives exit 3 even when a later read finds it ended. The end's stamp
-  (`answered_at`, `withdrawn_at`) cannot tell the two apart, since the server takes it inside the answering transaction, before it
-  commits. Two things can: the end's `ended_at` (§4.5), which the server reads after the commit, so an `ended_at` not after the
-  deadline proves the commit was by then; and a read that came back by the deadline with the ask ended (the server read the ask
-  before answering), provided its stamp is not after the deadline either (the server floors the stamp to the millisecond, so a stamp
-  `s` counts only when `s + 1 ms ≤ deadline`; one with its own sub-millisecond part is taken as exact). Once the deadline is at most
-  300 s away, the client also reads the ask plainly 200 ms before it, beside the held wait, and takes the first read to find an end,
-  so an end committed before then is reported by the deadline even when the held call's response is delayed. When the deadline cuts
-  the held wait off without an end, the client reads the ask once more, plainly, after the deadline, and counts an end that read finds
-  only by its `ended_at`: one committed in the last moments before the deadline gives exit 0 or 6 (reported slightly after the
-  deadline), whereas one committed after the deadline, whatever its stamp, has an `ended_at` after it and gives the line
-  `A<n> still open → …` and exit **3**, and `board ask show` then shows the later end; an end without an `ended_at` counts only through a
-  read that came back by the deadline. With `--json` the last ask read is printed with the same exit code (if the read after the
-  deadline fails, the ask the plain read saw open is printed, with exit 3). `ended_at` and the deadline are compared across the
-  server's and the client's clocks, as the stamps are. The client's
-  request timeout for a call is its wait plus 30 s. The end is one stdout
+  carrying it arrived or when anything about it was stamped: the answer to the last call is the ask as the server read it as the
+  deadline passed (§7.2), and it is final however late it reaches the client. An answer or withdrawal committed before the deadline
+  therefore gives exit 0 or 6 even when that answer arrives after the deadline, even when every response is delayed, and even when
+  the end's `ended_at` is after the deadline because the server's clock read after the commit was delayed; an ask still open at the
+  deadline gives the line `A<n> still open → board ask show A<n>` and exit **3** even when its end commits a moment later, with a
+  stamp from before the deadline and before that answer arrives; `board ask show` then shows the later end. The only read time that
+  matters is the server's read as the deadline passes; it comes as the server's timer fires, which is an instant (the timer's
+  latency, normally well under a millisecond) after the deadline, and an end that commits inside that instant is counted as
+  committed by the deadline. The end's stamp is used only against the deadline: the server floors it to the millisecond, so a stamp
+  `s` counts as in time only when `s + 1 ms ≤ deadline` (one with its own sub-millisecond part is taken as exact), and an end stamped
+  later gives exit 3 too. The deadline is compared on the server's clock (`until`), as the stamps are. With `--json` the last ask
+  read is printed with the same exit code. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
   `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the

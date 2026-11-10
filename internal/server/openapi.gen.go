@@ -1814,6 +1814,9 @@ type ListAsksParams struct {
 type GetAskParams struct {
 	// Wait Seconds to hold the request while the ask is open, 1 to 300.
 	Wait *int `form:"wait,omitempty" json:"wait,omitempty"`
+
+	// Until The instant the hold ends at, if before `wait` runs out; the response is then the ask as read when it passes. Only with `wait`.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
 }
 
 // GetAttentionParams defines parameters for GetAttention.
@@ -2394,6 +2397,10 @@ func (siw *ServerInterfaceWrapper) GetAsk(w http.ResponseWriter, r *http.Request
 	// ------------- Optional query parameter "wait" -------------
 
 	bind.check("wait", runtime.BindQueryParameterWithOptions("form", true, false, "wait", r.URL.Query(), &params.Wait, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "until" -------------
+
+	bind.check("until", runtime.BindQueryParameterWithOptions("form", true, false, "until", r.URL.Query(), &params.Until, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"}))
 
 	if bind.failed {
 		return

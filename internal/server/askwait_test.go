@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/feed"
 	"github.com/n-orlov/board/internal/store"
 )
@@ -173,6 +176,12 @@ func TestAHeldWaitRenewsPollSeenAtOnEveryInterval(t *testing.T) {
 }
 
 func TestAWaitEndsWhenTheClientLeavesAndMarksThePoll(t *testing.T) {
+	for _, query := range []string{"?wait=60", "?wait=60&until=" + url.QueryEscape(time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano))} {
+		t.Run(query, func(t *testing.T) { testAWaitEndsWhenTheClientLeaves(t, query) })
+	}
+}
+
+func testAWaitEndsWhenTheClientLeaves(t *testing.T, query string) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -182,7 +191,7 @@ func TestAWaitEndsWhenTheClientLeavesAndMarksThePoll(t *testing.T) {
 		r, as := askRig(t, st, newToken(t, st), clock, time.Hour)
 		ref := r.raiseAsk()
 		ctx, cancel := context.WithCancel(context.Background())
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, r.base+"/api/v1/asks/"+ref+"?wait=60", nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, r.base+"/api/v1/asks/"+ref+query, nil)
 		req.Header.Set("Authorization", "Bearer "+r.token)
 		req.Header.Set(ActorHeader, "tester@host")
 		done := make(chan struct{})
@@ -230,13 +239,116 @@ func TestAWaitIsRefusedOutsideOneToThreeHundredAndAnswers503WithoutAFeed(t *test
 			t.Errorf("wait=%d = %#v, %v, want a 400 problem", n, got, err)
 		}
 	}
+	until := time.Now()
 	for _, n := range []int{1, 300} {
-		if p := askWaitProblem(&n); p != nil {
+		if p := askWaitProblem(&n, nil); p != nil {
 			t.Errorf("wait=%d refused: %+v", n, p)
 		}
+		if p := askWaitProblem(&n, &until); p != nil {
+			t.Errorf("wait=%d with until refused: %+v", n, p)
+		}
 	}
-	if askWaitProblem(nil) != nil {
+	if askWaitProblem(nil, nil) != nil {
 		t.Error("no wait refused")
+	}
+	got, err := o.GetAsk(context.Background(), GetAskRequestObject{Ref: "A1", Params: GetAskParams{Until: &until}})
+	if p, ok := got.(problemResponse); err != nil || !ok || p.status != http.StatusBadRequest || p.next == "" {
+		t.Errorf("until without wait = %#v, %v, want a 400 problem with a next", got, err)
+	}
+}
+
+// untilQuery is ?wait=seconds&until=at.
+func untilQuery(seconds string, at time.Time) string {
+	return seconds + "&until=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
+}
+
+// A wait with until ends at until, sub-second included, with the ask still
+// open, when nothing ends it first; until after the wait's own end changes
+// nothing; until already past answers at once.
+func TestAWaitWithUntilEndsAtUntil(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		testAWaitWithUntilEndsAtUntil(t, openStore(t, dbs.New(t)))
+	})
+}
+
+func testAWaitWithUntilEndsAtUntil(t *testing.T, st *store.Store) {
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r, as := askRig(t, st, newToken(t, st), newTestClock(), time.Hour)
+	ref := r.raiseAsk()
+	for _, c := range []struct {
+		query    string
+		min, max time.Duration
+	}{
+		{untilQuery("1", time.Now().Add(300*time.Millisecond)), 300 * time.Millisecond, 900 * time.Millisecond},
+		{untilQuery("1", time.Now().Add(time.Hour)), time.Second, 1900 * time.Millisecond},
+		{untilQuery("5", time.Now().Add(-time.Minute)), 0, 500 * time.Millisecond},
+	} {
+		started := time.Now()
+		w := r.startWait(ref, c.query)
+		w.ends(t)
+		took := time.Since(started)
+		if w.status != http.StatusOK || w.state != "open" || took < c.min || took > c.max {
+			t.Errorf("%s: %d %q after %s, want 200 open after %s to %s", c.query, w.status, w.state, took, c.min, c.max)
+		}
+	}
+	if polledAt(t, as, ref) == nil {
+		t.Error("the waits did not mark the poll")
+	}
+}
+
+// A wait with until answers with the ask as read when until passes, whatever
+// happens to it after: an end whose transaction is still open at until is not
+// in the answer, though it commits before the server answers (on SQLite,
+// marking the poll waits for the writer it holds); an end committed before
+// until is.
+func TestAWaitWithUntilAnswersWithTheAskAsReadAtUntil(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		for _, held := range []bool{true, false} {
+			testAWaitWithUntilAnswersAtUntil(t, openStore(t, dbs.New(t)), held)
+		}
+	})
+}
+
+func testAWaitWithUntilAnswersAtUntil(t *testing.T, st *store.Store, held bool) {
+	{
+		if err := st.Migrate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		r, _ := askRig(t, st, newToken(t, st), newTestClock(), time.Hour)
+		ref := r.raiseAsk()
+		until := time.Now().Add(500 * time.Millisecond)
+		release := make(chan struct{})
+		var once sync.Once
+		ender := &asks.Store{Store: st, Now: func() time.Time {
+			if held {
+				once.Do(func() { <-release })
+			}
+			return until.Add(-400 * time.Millisecond)
+		}}
+		w := r.startWait(ref, untilQuery("5", until))
+		ended := make(chan error, 1)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_, err := ender.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", ref, asks.Reply{Answer: "late"})
+			ended <- err
+		}()
+		go func() {
+			time.Sleep(time.Until(until.Add(200 * time.Millisecond)))
+			close(release)
+		}()
+		w.ends(t)
+		if err := <-ended; err != nil {
+			t.Fatal(err)
+		}
+		want := "answered"
+		if held {
+			want = "open"
+		}
+		if w.status != http.StatusOK || w.state != want {
+			t.Errorf("held=%v: the wait ended with %d %q, want 200 %q", held, w.status, w.state, want)
+		}
 	}
 }
 
@@ -279,7 +391,7 @@ func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
 		}
 		w := &waiter{ctx: context.Background(), store: as, hub: hub, k: k, sub: f.Subscribe()}
 		w.sub.Close() // the feed ended it: the channel is closed
-		if done, err := w.step(nil, nil); done || err != nil {
+		if done, err := w.step(nil, nil, nil); done || err != nil {
 			t.Fatalf("step on an ended subscription = %v, %v, want to go on", done, err)
 		}
 		select {
@@ -296,15 +408,15 @@ func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
 func TestAWaitOnAnOpenAskWithoutAFeedAnswers503AndOnAnAnsweredOneAnswersAtOnce(t *testing.T) {
 	wait := 5
 	o := askOps{asks: &asks.Store{}}
-	got := o.read(context.Background(), asks.Ask{State: "open"}, &wait)
+	got := o.read(context.Background(), asks.Ask{State: "open"}, &wait, nil)
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 		t.Errorf("a wait without a feed = %#v, want a 503 problem", got)
 	}
-	got = o.read(context.Background(), asks.Ask{State: "answered"}, &wait)
+	got = o.read(context.Background(), asks.Ask{State: "answered"}, &wait, nil)
 	if _, ok := got.(GetAsk200JSONResponse); !ok {
 		t.Errorf("a wait on an answered ask = %#v, want the ask at once", got)
 	}
-	got = o.read(context.Background(), asks.Ask{State: "open"}, nil)
+	got = o.read(context.Background(), asks.Ask{State: "open"}, nil, nil)
 	if _, ok := got.(GetAsk200JSONResponse); !ok {
 		t.Errorf("an open ask without wait = %#v, want the ask at once", got)
 	}

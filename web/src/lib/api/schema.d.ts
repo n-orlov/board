@@ -625,7 +625,7 @@ export interface paths {
         };
         /**
          * Read an ask
-         * @description Reads one ask by `A<n>` ref or ULID in either letter case, with its task ref, initiative slug, asker, `answered_by`, `on_behalf_of`, `channel`, times and the derived `asker_waiting`. 404 for none. With `wait=N` (1 to 300 seconds, anything else is 400) it returns at once when the ask is not open, otherwise holds the request until the ask is answered or withdrawn (the new state, 200) or N seconds pass (the still-open ask, 200). The change feed wakes the wait, so an answer written through another server on the same database ends it within the feed's tail interval. While a wait is held the ask's `poll_seen_at` is set to now at the start, at least every 30 seconds and at the end, which is what makes `asker_waiting` true for a `poll` ask.
+         * @description Reads one ask by `A<n>` ref or ULID in either letter case, with its task ref, initiative slug, asker, `answered_by`, `on_behalf_of`, `channel`, times and the derived `asker_waiting`. 404 for none. With `wait=N` (1 to 300 seconds, anything else is 400) it returns at once when the ask is not open, otherwise holds the request until the ask is answered or withdrawn (the new state, 200) or N seconds pass (the still-open ask, 200). The change feed wakes the wait, so an answer written through another server on the same database ends it within the feed's tail interval. While a wait is held the ask's `poll_seen_at` is set to now at the start, at least every 30 seconds and at the end, which is what makes `asker_waiting` true for a `poll` ask. With `until` as well (allowed with `wait` only, else 400), the hold also ends at that instant, by the server's clock, when it comes before the N seconds do: the server then reads the ask as the instant passes, on a read no write can hold up, and answers with it, so the response is the ask as it stood at `until` however late it reaches the client. An end that a read during the hold finds only after `until` is replaced by that read.
          */
         get: operations["getAsk"];
         put?: never;
@@ -2920,6 +2920,8 @@ export interface operations {
             query?: {
                 /** @description Seconds to hold the request while the ask is open, 1 to 300. */
                 wait?: number;
+                /** @description The instant the hold ends at, if before `wait` runs out; the response is then the ask as read when it passes. Only with `wait`. */
+                until?: string;
             };
             header?: never;
             path: {
