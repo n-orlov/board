@@ -188,14 +188,62 @@ func TestPollAskCountsAMillisecondStampOnlyWhenItsMillisecondIsOverByTheDeadline
 		if c.state == "withdrawn" {
 			a = askView{Ref: "A1", State: c.state, WithdrawnAt: c.stamp}
 		}
-		clock := &pollClock{t: start}
-		fetch := func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
-			clock.t = deadline.Add(time.Millisecond) // the read lands after the deadline
-			return a, nil, nil
+		for _, read := range []struct {
+			at   time.Time
+			code int
+		}{
+			{deadline, c.code}, // the read comes back at the deadline: the stamp decides
+			{deadline.Add(time.Microsecond), ExitTimeout}, // after it: the end may have committed late, whatever the stamp
+		} {
+			clock := &pollClock{t: start}
+			fetch := func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
+				clock.t = read.at
+				return a, nil, nil
+			}
+			got, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, fetch)
+			if err != nil || pollExit(got.State) != read.code {
+				t.Errorf("%s at %s read at %s: got %q exit %d (%v), want exit %d", c.state, c.stamp,
+					read.at.Format(time.RFC3339Nano), got.State, pollExit(got.State), err, read.code)
+			}
 		}
-		got, _, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, fetch)
-		if err != nil || pollExit(got.State) != c.code {
-			t.Errorf("%s at %s: got %q exit %d (%v), want exit %d", c.state, c.stamp, got.State, pollExit(got.State), err, c.code)
+	}
+}
+
+// An end read by a call that came back after the deadline is not counted even
+// when its stamp is well before the deadline: the stamp is taken before the
+// transaction commits, so the ask may still have been open at the deadline.
+func TestPollAskDoesNotCountAnEndReadAfterTheDeadline(t *testing.T) {
+	start := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	deadline := start.Add(10 * time.Second)
+	for _, c := range []struct {
+		state  string
+		stamp  time.Duration // from start
+		readAt time.Duration // when the call returns, from start
+		code   int
+	}{
+		{"answered", 9 * time.Second, 10 * time.Second, ExitOK},
+		{"withdrawn", 9 * time.Second, 10 * time.Second, ExitConflict},
+		{"answered", 9 * time.Second, 10*time.Second + time.Nanosecond, ExitTimeout},
+		{"withdrawn", 9 * time.Second, 10*time.Second + time.Nanosecond, ExitTimeout},
+		{"answered", time.Second, time.Minute, ExitTimeout},
+		{"withdrawn", 5 * time.Second, 10*time.Second + 75*time.Millisecond, ExitTimeout},
+	} {
+		stamp := start.Add(c.stamp).Format(time.RFC3339Nano)
+		a := askView{Ref: "A1", State: c.state, AnsweredAt: stamp}
+		if c.state == "withdrawn" {
+			a = askView{Ref: "A1", State: c.state, WithdrawnAt: stamp}
+		}
+		clock := &pollClock{t: start}
+		calls := 0
+		fetch := func(_ int, _ time.Duration) (askView, json.RawMessage, error) {
+			calls++
+			clock.t = start.Add(c.readAt)
+			return a, json.RawMessage(`{"read":1}`), nil
+		}
+		got, raw, err := pollAsk(askView{Ref: "A1", State: "open"}, nil, deadline, clock.now, fetch)
+		if err != nil || pollExit(got.State) != c.code || calls != 1 || string(raw) != `{"read":1}` {
+			t.Errorf("%s stamped %s read at %s: got %q exit %d raw %s after %d calls (%v), want exit %d",
+				c.state, c.stamp, c.readAt, got.State, pollExit(got.State), raw, calls, err, c.code)
 		}
 	}
 }

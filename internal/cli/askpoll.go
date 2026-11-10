@@ -43,16 +43,16 @@ func nextWait(left time.Duration) (int, bool) {
 }
 
 // askFetch reads the ask once, holding the request open up to wait seconds but
-// not past left, the time to the deadline: a read cut off by the deadline returns the ask as the
-// server has it then, so an answer or withdrawal made before the deadline is
-// never missed.
+// not past left, the time to the deadline. An answer or withdrawal it returns
+// counts only when the call came back by the deadline (endedInTime); a call
+// cut off by the deadline still returns the ask as it is then, for --json.
 type askFetch func(wait int, left time.Duration) (askView, json.RawMessage, error)
 
 // pollAsk waits for the ask to leave `open` by repeating fetch until the
 // deadline has elapsed. now is the clock. It returns the last ask read: still
-// open when the deadline came first, and also when a read made after the
-// deadline finds the ask ended only after it (the answer or withdrawal was not
-// in time).
+// open when the deadline came first, and also when an answer or withdrawal it
+// reads is not proven effective by the deadline (endedInTime): as of the
+// deadline the ask was then still open, whatever a later read finds.
 func pollAsk(first askView, raw json.RawMessage, deadline time.Time, now func() time.Time, fetch askFetch) (askView, json.RawMessage, error) {
 	a := first
 	for a.State == "open" {
@@ -65,14 +65,25 @@ func pollAsk(first askView, raw json.RawMessage, deadline time.Time, now func() 
 		if a, raw, err = fetch(wait, left); err != nil {
 			return a, raw, err
 		}
-		if endedAfter(a, deadline) {
-			// Read after the deadline, but the ask ended only then: as of the
-			// deadline it was still open, so the poll outcome is a timeout.
+		if a.State != "open" && !endedInTime(a, deadline, now()) {
 			a.State = "open"
 			break
 		}
 	}
 	return a, raw, nil
+}
+
+// endedInTime says the answer or withdrawal a, read by a call that returned at
+// readAt, was effective by deadline. It is only when the read came back by the
+// deadline: the server read the ask before it answered, so the end was
+// committed by then. A read that returns after the deadline proves nothing
+// about when the end took effect, whatever its stamp says, since a stamp is
+// taken inside the transaction, before it commits, and the commit can come
+// after the deadline. The stamp must also not be after the deadline
+// (endedAfter), so a server clock ahead of the client's never counts an end
+// the server itself dates late.
+func endedInTime(a askView, deadline, readAt time.Time) bool {
+	return !readAt.After(deadline) && !endedAfter(a, deadline)
 }
 
 // stampPrecision is the precision of the server's answered_at and withdrawn_at:
@@ -143,8 +154,9 @@ func askPoll(p parsedArgs, body map[string]any, seconds int64, stdout, stderr io
 // waitFetch reads the ask with ?wait=N, cutting the request off when left, the
 // time to the deadline, has run out. The request may be held longer than a plain request, so its
 // timeout is the wait plus the usual one. When the deadline cuts it off, the
-// ask is read once more without a wait, so the state returned is the one at
-// the deadline.
+// ask is read once more without a wait, so the ask printed with --json is the
+// one at the end of the poll; that read is made after the deadline, so an end
+// it finds is not counted (pollAsk).
 func waitFetch(ctx context.Context, c *client, ref string) askFetch {
 	return func(wait int, left time.Duration) (askView, json.RawMessage, error) {
 		wctx, cancel := context.WithTimeout(ctx, left)
