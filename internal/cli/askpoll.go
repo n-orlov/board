@@ -151,34 +151,125 @@ func askPoll(p parsedArgs, body map[string]any, seconds int64, stdout, stderr io
 	return printPollEnd(a, raw, p.has("--json"), stdout)
 }
 
-// waitFetch reads the ask with ?wait=N, cutting the request off when left, the
-// time to the deadline, has run out. The request may be held longer than a plain request, so its
-// timeout is the wait plus the usual one. When the deadline cuts it off, the
-// ask is read once more without a wait, so the ask printed with --json is the
-// one at the end of the poll; that read is made after the deadline, so an end
-// it finds is not counted (pollAsk).
-func waitFetch(ctx context.Context, c *client, ref string) askFetch {
-	return func(wait int, left time.Duration) (askView, json.RawMessage, error) {
-		wctx, cancel := context.WithTimeout(ctx, left)
-		defer cancel()
+// probeLead is how long before the deadline waitFetch reads the ask plainly,
+// beside the long wait still held: a read that comes back by the deadline
+// proves what the ask was by then, which one made after the deadline cannot.
+const probeLead = 200 * time.Millisecond
+
+// read is the result of one request: the ask and its raw body, or the error.
+type read struct {
+	a   askView
+	raw json.RawMessage
+	err error
+}
+
+// ended says the read found an answer or a withdrawal.
+func (r read) ended() bool { return r.err == nil && r.a.State != "open" }
+
+// getAsk reads the ask once with the given query. A wait may hold the request
+// longer than a plain read, so a wait of wait seconds raises the client's timeout
+// to the wait plus the usual one.
+func getAsk(ctx context.Context, c *client, ref string, wait int) read {
+	use, query := c, url.Values(nil)
+	if wait > 0 {
 		h := *c.http
 		h.Timeout = time.Duration(wait)*time.Second + requestTimeout
 		long := *c
 		long.http = &h
-		var raw json.RawMessage
-		query := url.Values{"wait": {strconv.Itoa(wait)}}
-		err := long.do(wctx, "GET", askPath(ref, ""), query, nil, &raw)
-		if err != nil && wctx.Err() != nil && ctx.Err() == nil {
-			raw = nil
-			err = c.do(ctx, "GET", askPath(ref, ""), nil, nil, &raw)
-		}
-		if err != nil {
-			return askView{}, nil, err
-		}
-		var a askView
-		err = json.Unmarshal(raw, &a)
-		return a, raw, err
+		use, query = &long, url.Values{"wait": {strconv.Itoa(wait)}}
 	}
+	var r read
+	if r.err = use.do(ctx, "GET", askPath(ref, ""), query, nil, &r.raw); r.err == nil {
+		r.err = json.Unmarshal(r.raw, &r.a)
+	}
+	return r
+}
+
+// waitFetch reads the ask with ?wait=N, cutting the request off when left, the
+// time to the deadline, has run out. Once the deadline is at most the server's
+// cap away, it also reads the ask plainly probeLead before it, beside the wait,
+// and the first read to find an end is the result. An end is thus seen by a read
+// that comes back by the deadline when it was committed before the read, even if
+// the held wait's own response is delayed past the deadline, while one committed
+// after the deadline is never seen by a read that came back in time. When the
+// deadline cuts the wait off without an end, the result is the plain read's ask,
+// still open; without one (it failed) the ask is read once more without a wait,
+// after the deadline, so --json prints the ask as it is then; pollAsk does not
+// count an end that read finds.
+func waitFetch(ctx context.Context, c *client, ref string) askFetch {
+	return func(wait int, left time.Duration) (askView, json.RawMessage, error) {
+		wctx, cancel := context.WithTimeout(ctx, left)
+		defer cancel()
+		held := make(chan read, 1)
+		go func() { held <- getAsk(wctx, c, ref, wait) }()
+		pr := &probeRead{ch: make(chan read, 1), pending: left <= maxAskWait*time.Second}
+		if pr.pending {
+			go func() { pr.ch <- probe(wctx, c, ref, left-probeLead) }()
+		}
+		for {
+			select {
+			case r := <-pr.ch:
+				if pr.take(r) {
+					return r.a, r.raw, nil
+				}
+			case r := <-held:
+				if !cutByDeadline(ctx, wctx, r) {
+					return r.a, r.raw, r.err
+				}
+				return afterCut(ctx, c, ref, pr)
+			}
+		}
+	}
+}
+
+// cutByDeadline says the held wait failed because the deadline cut it off (wctx
+// ended) and not because of its own error or the command's end (ctx).
+func cutByDeadline(ctx, wctx context.Context, r read) bool {
+	return r.err != nil && wctx.Err() != nil && ctx.Err() == nil
+}
+
+// probeRead is the plain read before the deadline: pending while it is still on
+// its way, then seen once it came back with the ask still open.
+type probeRead struct {
+	ch      chan read
+	pending bool
+	seen    *read
+}
+
+// take records the probe's result and says it found an end.
+func (p *probeRead) take(r read) bool {
+	p.pending = false
+	if r.err == nil && !r.ended() {
+		p.seen = &r
+	}
+	return r.ended()
+}
+
+// probe reads the ask plainly once delay has passed (at once when it is not
+// positive); it fails with the context's error if that ends first.
+func probe(ctx context.Context, c *client, ref string, delay time.Duration) read {
+	select {
+	case <-time.After(max(delay, 0)):
+		return getAsk(ctx, c, ref, 0)
+	case <-ctx.Done():
+		return read{err: ctx.Err()}
+	}
+}
+
+// afterCut is the result of a wait the deadline cut off: the ask as the plain
+// read before the deadline saw it (waiting for that read, if it is still on its
+// way, which the cut ends too), else one read now, after the deadline.
+func afterCut(ctx context.Context, c *client, ref string, p *probeRead) (askView, json.RawMessage, error) {
+	if p.pending {
+		if r := <-p.ch; p.take(r) {
+			return r.a, r.raw, nil
+		}
+	}
+	if p.seen != nil {
+		return p.seen.a, p.seen.raw, nil
+	}
+	r := getAsk(ctx, c, ref, 0)
+	return r.a, r.raw, r.err
 }
 
 // printPollEnd prints how the wait ended and returns the exit code: an answer

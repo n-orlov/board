@@ -18,13 +18,14 @@ import (
 
 // liveAskBoard serves the routes `board ask --poll` uses from a real SQLite
 // asks.Store, in real time: the raise, a ?wait= read held until the ask leaves
-// open or the client goes, and a plain read, which runs plain first.
+// open or the client goes, and a plain read.
 type liveAskBoard struct {
-	t     *testing.T
-	s     *asks.Store
-	mu    sync.Mutex
-	ref   string
-	plain func()
+	t   *testing.T
+	s   *asks.Store
+	mu  sync.Mutex
+	ref string
+	// delay holds the response of a ?wait= read that finds the end this long
+	delay time.Duration
 }
 
 func newLiveAskBoard(t *testing.T) *liveAskBoard {
@@ -61,12 +62,16 @@ func (b *liveAskBoard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.write(w, http.StatusCreated, k)
 		return
 	}
-	if r.URL.Query().Get("wait") == "" && b.plain != nil {
-		b.plain()
-	}
 	for {
 		k, err := b.s.Get(ctx, b.askRef())
 		if err != nil || k.State != "open" || r.URL.Query().Get("wait") == "" {
+			if err == nil && r.URL.Query().Get("wait") != "" && b.delay > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(b.delay):
+				}
+			}
 			if err == nil {
 				b.write(w, http.StatusOK, k)
 			}
@@ -98,13 +103,13 @@ func (b *liveAskBoard) end(withdraw bool) error {
 }
 
 // runLivePoll runs `board ask aa-1 "Which port?" --poll 1s` against b, and
-// returns its exit code and output, when it started and how long it took.
-func runLivePoll(b *liveAskBoard) (int, string, time.Time, time.Duration) {
+// returns its exit code and output and how long it took.
+func runLivePoll(b *liveAskBoard) (int, string, time.Duration) {
 	srv := httptest.NewServer(b)
 	defer srv.Close()
 	started := time.Now()
 	code, out, _ := runEnv((&fakeBoard{}).env(srv), "ask", "aa-1", "Which port?", "--poll", "1s")
-	return code, out, started, time.Since(started)
+	return code, out, time.Since(started)
 }
 
 // An answer or withdrawal committed before the deadline ends `board ask --poll
@@ -127,7 +132,7 @@ func TestAskPollLiveCountsAnEndCommittedBeforeTheDeadline(t *testing.T) {
 			time.Sleep(300 * time.Millisecond)
 			done <- b.end(c.withdraw)
 		}()
-		code, out, _, took := runLivePoll(b)
+		code, out, took := runLivePoll(b)
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +144,7 @@ func TestAskPollLiveCountsAnEndCommittedBeforeTheDeadline(t *testing.T) {
 
 // An answer or withdrawal whose transaction takes its stamp before the deadline
 // but commits after it leaves the ask open at the deadline: the poll exits 3,
-// though the read after the deadline finds the end with a stamp before it.
+// though a read after the deadline finds the end with a stamp before it.
 func TestAskPollLiveEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
 	for _, withdraw := range []bool{false, true} {
 		b := newLiveAskBoard(t)
@@ -153,35 +158,71 @@ func TestAskPollLiveEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
 			}
 			return now
 		}
-		var stamp time.Time
 		var endErr error
 		done := make(chan error, 1)
-		b.plain = func() { // the read after the deadline cut the wait off
-			time.Sleep(75 * time.Millisecond)
-			if k, err := b.s.Get(context.Background(), b.askRef()); err != nil || k.State != "open" {
-				t.Errorf("after the deadline the ask is %q (%v), want still open", k.State, err)
-			}
-			stamp = <-sampled
-			close(release)
-			endErr = <-done // committed: this read finds the end
-		}
+		var after sync.WaitGroup
+		after.Add(1)
+		begin := time.Now() // the deadline is a second after the raise, which is after this
 		go func() {
+			defer after.Done()
 			for b.askRef() == "" {
 				time.Sleep(time.Millisecond)
 			}
 			time.Sleep(500 * time.Millisecond) // half way to the deadline
 			armed.Store(true)
-			done <- b.end(withdraw)
+			go func() { done <- b.end(withdraw) }()
+			stamp := <-sampled
+			time.Sleep(1100*time.Millisecond - time.Since(begin)) // past the deadline
+			if k, err := b.s.Get(context.Background(), b.askRef()); err != nil || k.State != "open" {
+				t.Errorf("after the deadline the ask is %q (%v), want still open", k.State, err)
+			}
+			close(release)
+			endErr = <-done // committed after the deadline, its stamp from before it
+			if !stamp.Before(begin.Add(time.Second)) {
+				t.Errorf("withdraw=%v: the stamp %s is not before the deadline", withdraw, stamp)
+			}
 		}()
-		code, out, started, took := runLivePoll(b)
+		code, out, took := runLivePoll(b)
+		after.Wait()
 		if endErr != nil {
 			t.Fatal(endErr)
 		}
 		if code != ExitTimeout || out != "A1 still open → board ask show A1\n" || took < time.Second {
 			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 at the deadline", withdraw, code, out, took)
 		}
-		if k, _ := b.s.Get(context.Background(), b.askRef()); k.State == "open" || stamp.IsZero() || !stamp.Before(started.Add(time.Second)) {
-			t.Errorf("withdraw=%v: the end was not committed after a stamp taken before the deadline: %q stamp %s", withdraw, k.State, stamp)
+		if k, _ := b.s.Get(context.Background(), b.askRef()); k.State == "open" {
+			t.Errorf("withdraw=%v: the end was never committed", withdraw)
+		}
+	}
+}
+
+// An answer or withdrawal committed before the deadline whose held wait is
+// answered only after it (the response is delayed) is still exit 0 or 6: the
+// plain read before the deadline finds it, whatever the delay and whether the
+// end came early or late in the poll.
+func TestAskPollLiveEndCommittedBeforeTheDeadlineWithADelayedWaitResponse(t *testing.T) {
+	for _, c := range []struct {
+		withdraw bool
+		code     int
+		at       time.Duration // when the end commits, from the raise
+	}{
+		{false, ExitOK, 50 * time.Millisecond},
+		{true, ExitConflict, 50 * time.Millisecond},
+		{false, ExitOK, 700 * time.Millisecond},
+		{true, ExitConflict, 700 * time.Millisecond},
+	} {
+		b := newLiveAskBoard(t)
+		b.delay = 1100 * time.Millisecond
+		go func() {
+			for b.askRef() == "" {
+				time.Sleep(time.Millisecond)
+			}
+			time.Sleep(c.at)
+			_ = b.end(c.withdraw)
+		}()
+		code, out, took := runLivePoll(b)
+		if code != c.code || took > time.Second {
+			t.Errorf("withdraw=%v at %s: got %d %q after %s, want exit %d within the deadline", c.withdraw, c.at, code, out, took, c.code)
 		}
 	}
 }

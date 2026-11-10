@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -346,33 +347,87 @@ func TestAskPollAnAnswerAfterTheDeadlineExitsThree(t *testing.T) {
 	}
 }
 
-func TestWaitFetchStopsAtTheDeadlineAndReadsTheAskThen(t *testing.T) {
-	var waits []string
+// heldAskServer holds every ?wait= request until the client goes (an open ask
+// nobody answers) and serves each plain read from plain, recording the requests.
+func heldAskServer(t *testing.T, plain func(n int, w http.ResponseWriter)) (*client, *[]string) {
+	var mu sync.Mutex
+	var reqs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		mu.Lock()
+		kind := "plain"
 		if r.URL.Query().Get("wait") != "" {
-			waits = append(waits, r.URL.Query().Get("wait"))
-			select { // an open ask: hold the request
+			kind = "wait=" + r.URL.Query().Get("wait")
+		}
+		reqs = append(reqs, kind)
+		n := len(reqs)
+		mu.Unlock()
+		if kind != "plain" {
+			select {
 			case <-r.Context().Done():
 			case <-time.After(5 * time.Second):
 			}
 			return
 		}
-		waits = append(waits, "plain")
-		_, _ = w.Write([]byte(`{"ref":"A1","state":"answered","answered_by":"nik","answer":"x"}`))
+		plain(n, w)
 	}))
-	defer srv.Close()
-	c := &client{base: srv.URL, http: srv.Client(), key: "k"}
+	t.Cleanup(srv.Close)
+	return &client{base: srv.URL, http: srv.Client(), key: "k"}, &reqs
+}
+
+// The deadline cuts a held wait off and the result is the ask as the plain read
+// before the deadline saw it: still open, with no read made after the deadline.
+func TestWaitFetchStopsAtTheDeadlineWithTheAskTheProbeRead(t *testing.T) {
+	c, reqs := heldAskServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"ref":"A1","state":"open"}`))
+	})
 	started := time.Now()
-	a, _, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond)
-	if err != nil || a.State != "answered" {
-		t.Fatalf("got %v %v", a, err)
+	a, raw, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond)
+	took := time.Since(started)
+	if err != nil || a.State != "open" || string(raw) != `{"ref":"A1","state":"open"}` {
+		t.Fatalf("got %v %s %v", a, raw, err)
 	}
-	if took := time.Since(started); took < 300*time.Millisecond || took > 2*time.Second {
+	if took < 300*time.Millisecond || took > 2*time.Second {
 		t.Errorf("returned after %s, want at the deadline", took)
 	}
-	if len(waits) != 2 || waits[0] != "1" || waits[1] != "plain" {
-		t.Errorf("requests %v", waits)
+	if len(*reqs) != 2 || (*reqs)[0] != "wait=1" || (*reqs)[1] != "plain" {
+		t.Errorf("requests %v", *reqs)
+	}
+}
+
+// A plain read made before the deadline finds an end the held wait never
+// delivers (its response is delayed past the deadline): that end is the result,
+// at the time of the read, not at the deadline.
+func TestWaitFetchFindsAnEndTheHeldWaitDeliversLate(t *testing.T) {
+	for _, state := range []string{"answered", "withdrawn"} {
+		c, _ := heldAskServer(t, func(_ int, w http.ResponseWriter) {
+			_, _ = w.Write([]byte(`{"ref":"A1","state":"` + state + `"}`))
+		})
+		started := time.Now()
+		a, _, err := waitFetch(context.Background(), c, "A1")(2, 1500*time.Millisecond)
+		took := time.Since(started)
+		if err != nil || a.State != state {
+			t.Fatalf("%s: got %v %v", state, a, err)
+		}
+		if took < 1200*time.Millisecond || took > 1450*time.Millisecond {
+			t.Errorf("%s: returned after %s, want 200 ms before the deadline", state, took)
+		}
+	}
+}
+
+// A plain read before the deadline that fails leaves one read after it, so the
+// result is still the ask as it is then.
+func TestWaitFetchReadsAfterTheDeadlineOnlyWhenTheProbeFailed(t *testing.T) {
+	c, reqs := heldAskServer(t, func(n int, w http.ResponseWriter) {
+		if n == 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ref":"A1","state":"answered"}`))
+	})
+	a, _, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond)
+	if err != nil || a.State != "answered" || len(*reqs) != 3 || (*reqs)[2] != "plain" {
+		t.Errorf("got %v %v after %v", a, err, *reqs)
 	}
 }
 

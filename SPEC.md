@@ -1546,20 +1546,23 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `GET /api/v1/asks/<ref>?wait=N` calls (§7.2) until the deadline: `D` after the raise, rounded up to a whole millisecond (the
   precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Each call asks for at most 300 s (the server's cap) and
   for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
-  remainder, and the client cuts the request off at the deadline itself, then reads the ask once more without a wait; the poll
-  therefore stays active to the actual deadline, sub-second remainder included. No call is made once the deadline has passed,
-  and exit 3 is reported only then. Only an answer or withdrawal in effect (committed) by the deadline gives exit 0 or 6, and
-  the client counts one only when the call that returned it came back by the deadline: the server read the ask before
-  answering, so the end was committed by then. A stamp (`answered_at`, `withdrawn_at`) cannot show this on its own, since the
-  server takes it inside the answering transaction, before that commits, and the commit can come after the deadline; so an end
-  returned by a call that comes back after the deadline (a held call answered just as it is cut off, or the final read) is
-  not counted, whatever its stamp, and the ask counts as still open at the deadline. An end committed shortly before the
-  deadline whose call comes back only after it is therefore also reported as exit 3 (`board ask show` then shows it). A
-  counted end must also have a stamp not after the deadline (a server clock running ahead of the client's never counts an end
-  the server dates late): the server stores the stamp floored to the millisecond, so a stamp `s` says the end was made in
-  `[s, s+1 ms)`, and it counts only when `s + 1 ms ≤ deadline` (a stamp carrying its own sub-millisecond part is taken as
-  exact, counting when at or before the deadline). An end that is not counted gives the line `A<n> still open → …` and exit
-  **3**, and nothing more is read (with `--json` the ask as read, in its later state, is printed with exit 3). The client's request timeout for a call is its wait plus 30 s. The end is one stdout
+  remainder, and the client cuts the request off at the deadline itself; the poll therefore stays active to the actual deadline,
+  sub-second remainder included. No call is made once the deadline has passed, and exit 3 is reported only then.
+  An answer or withdrawal that was committed by the deadline gives exit 0 or 6, an ask still open at the deadline gives exit 3
+  even if a later read finds it ended, and the two are told apart by when a read came back, not by the end's stamp (`answered_at`,
+  `withdrawn_at`), which the server takes inside the answering transaction, before it commits, so a stamp before the deadline does
+  not show a commit before it. A read that comes back by the deadline with the ask ended proves the end was committed by then (the
+  server read the ask before answering). So once the deadline is at most 300 s away, the client also reads the ask plainly 200 ms
+  before it, beside the held wait, and takes the first read to find an end: an end committed before that read is counted even when the
+  held call's own response is delayed past the deadline, whereas one committed after the deadline is seen by no read that came back
+  in time, whatever its stamp, so the ask counts as still open at the deadline and `board ask show` then shows the later end. An end
+  committed in the last 200 ms counts when the held call returns it by the deadline. A counted end must also have a stamp not after
+  the deadline (a server clock running ahead of the client's never counts an end the server dates late): the server stores the stamp
+  floored to the millisecond, so a stamp `s` says the end was made in `[s, s+1 ms)`, and it counts only when `s + 1 ms ≤ deadline` (a
+  stamp carrying its own sub-millisecond part is taken as exact, counting when at or before the deadline). An end that is not counted
+  gives the line `A<n> still open → …` and exit **3** (with `--json` the ask as the last read before the deadline saw it is printed with
+  exit 3; only when that read failed is the ask read once more, after the deadline, and an end it finds is not counted). The client's
+  request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
   `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
