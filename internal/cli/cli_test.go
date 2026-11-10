@@ -41,19 +41,43 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestServeRejectsUnknownMigrateMode(t *testing.T) {
-	var out, errb bytes.Buffer
 	env := func(k string) string {
 		if k == "BOARD_MIGRATE" {
 			return "sometimes"
 		}
 		return ""
 	}
-	if code := Run([]string{"serve"}, &out, &errb, env); code != ExitError || !strings.Contains(errb.String(), "BOARD_MIGRATE") {
-		t.Fatalf("got code=%d err=%q", code, errb.String())
+	if code, errs := runServe(t, env); code != ExitError || !strings.Contains(errs, "BOARD_MIGRATE") {
+		t.Fatalf("got code=%d err=%q", code, errs)
 	}
 }
 
 func envWith(kv map[string]string) Env { return func(k string) string { return kv[k] } }
+
+// serveRefusalBound is how long runServe waits for `board serve` to return.
+// A refusal returns in milliseconds; the bound only turns a serve that started
+// serving instead into a failure.
+const serveRefusalBound = 10 * time.Second
+
+// runServe runs `board serve` with env and returns its exit code and stderr.
+// Each caller expects serve to refuse and return at once. A serve that starts
+// serving instead stops only on SIGINT or SIGTERM, so without a bound the test
+// would block until the package's own timeout (gremlins sets that to 60 times
+// the covered run, far past the Mutation stage's 30 minutes): it fails after
+// serveRefusalBound instead.
+func runServe(t *testing.T, env Env) (int, string) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- Run([]string{"serve"}, &out, &errb, env) }()
+	select {
+	case code := <-done:
+		return code, errb.String()
+	case <-time.After(serveRefusalBound):
+		t.Fatalf("board serve did not return within %v: it is serving instead of refusing", serveRefusalBound)
+		return 0, ""
+	}
+}
 
 func TestAdminUsageErrors(t *testing.T) {
 	for _, args := range [][]string{{"admin"}, {"admin", "bogus"}, {"admin", "migrate", "extra"}} {
@@ -141,27 +165,24 @@ func TestServeUntilRefusesADatabaseNewerThanTheBinary(t *testing.T) {
 }
 
 func TestServeReportsAListenFailureFromTheEnvironment(t *testing.T) {
-	var out, errb bytes.Buffer
 	env := envWith(map[string]string{"BOARD_DB_URL": sqliteURL(t), "BOARD_LISTEN": "not-an-address"})
-	if code := Run([]string{"serve"}, &out, &errb, env); code != ExitError || !strings.Contains(errb.String(), "listen") {
-		t.Fatalf("code=%d err=%q", code, errb.String())
+	if code, errs := runServe(t, env); code != ExitError || !strings.Contains(errs, "listen") {
+		t.Fatalf("code=%d err=%q", code, errs)
 	}
 }
 
 func TestServeRejectsAMalformedSweepInterval(t *testing.T) {
-	var out, errb bytes.Buffer
-	if code := Run([]string{"serve"}, &out, &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "soon"})); code != ExitError ||
-		!strings.Contains(errb.String(), "BOARD_SWEEP_INTERVAL") {
-		t.Fatalf("got code=%d err=%q", code, errb.String())
+	if code, errs := runServe(t, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "soon"})); code != ExitError ||
+		!strings.Contains(errs, "BOARD_SWEEP_INTERVAL") {
+		t.Fatalf("got code=%d err=%q", code, errs)
 	}
 }
 
 func TestServeRejectsAnUnreadableStreamPoll(t *testing.T) {
 	for _, v := range []string{"soon", "0", "0s", "-2s", "off"} {
-		var out, errb bytes.Buffer
-		if code := Run([]string{"serve"}, &out, &errb, envWith(map[string]string{"BOARD_STREAM_POLL": v})); code != ExitError ||
-			!strings.Contains(errb.String(), "BOARD_STREAM_POLL") || strings.Count(errb.String(), "\n") != 1 {
-			t.Errorf("BOARD_STREAM_POLL=%q: code=%d err=%q", v, code, errb.String())
+		if code, errs := runServe(t, envWith(map[string]string{"BOARD_STREAM_POLL": v})); code != ExitError ||
+			!strings.Contains(errs, "BOARD_STREAM_POLL") || strings.Count(errs, "\n") != 1 {
+			t.Errorf("BOARD_STREAM_POLL=%q: code=%d err=%q", v, code, errs)
 		}
 	}
 }

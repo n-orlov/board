@@ -16,10 +16,9 @@ import (
 
 func TestServeRejectsAnUnreadableStreamHeartbeat(t *testing.T) {
 	for _, v := range []string{"soon", "0", "0s", "-2s", "off"} {
-		var out, errb bytes.Buffer
-		if code := Run([]string{"serve"}, &out, &errb, envWith(map[string]string{"BOARD_STREAM_HEARTBEAT": v})); code != ExitError ||
-			!strings.Contains(errb.String(), "BOARD_STREAM_HEARTBEAT") || strings.Count(errb.String(), "\n") != 1 {
-			t.Errorf("BOARD_STREAM_HEARTBEAT=%q: code=%d err=%q", v, code, errb.String())
+		if code, errs := runServe(t, envWith(map[string]string{"BOARD_STREAM_HEARTBEAT": v})); code != ExitError ||
+			!strings.Contains(errs, "BOARD_STREAM_HEARTBEAT") || strings.Count(errs, "\n") != 1 {
+			t.Errorf("BOARD_STREAM_HEARTBEAT=%q: code=%d err=%q", v, code, errs)
 		}
 	}
 }
