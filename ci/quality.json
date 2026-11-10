@@ -46,11 +46,16 @@
             "internal/events",
             "internal/feed",
             "internal/notes",
+            "internal/audit",
+            "internal/tasks",
             "internal/server",
             "internal/cli"
         ],
         "lanes": {
-            "base": ["internal/domain", "internal/store"],
+            "base": [
+                "internal/domain",
+                "internal/store"
+            ],
             "logic": [
                 "internal/asks",
                 "internal/attention",
@@ -58,14 +63,29 @@
                 "internal/cursors",
                 "internal/events",
                 "internal/feed",
-                "internal/notes"
+                "internal/notes",
+                "internal/audit",
+                "internal/tasks"
             ],
-            "server-ops": ["internal/server#ops"],
-            "server-streams": ["internal/server#streams"],
-            "cli": ["internal/cli"]
+            "server-ops": [
+                "internal/server#ops"
+            ],
+            "server-streams": [
+                "internal/server#streams"
+            ],
+            "cli": [
+                "internal/cli#views"
+            ],
+            "server-core": [
+                "internal/server#core"
+            ],
+            "cli-core": [
+                "internal/cli#core"
+            ]
         },
         "scopes": {
             "internal/server": [
+                "api.go",
                 "askops.go",
                 "askwait.go",
                 "attentionops.go",
@@ -73,15 +93,26 @@
                 "eventops.go",
                 "noteops.go",
                 "nowops.go",
+                "server.go",
                 "streamattention.go",
-                "streamops.go"
+                "streamops.go",
+                "taskops.go"
             ],
             "internal/cli": [
+                "args.go",
                 "askpoll.go",
                 "asks.go",
                 "attention.go",
+                "cli.go",
+                "initedit.go",
                 "notes.go",
-                "now.go"
+                "now.go",
+                "tree.go"
+            ],
+            "internal/tasks": [
+                "list.go",
+                "task.go",
+                "tasks.go"
             ]
         },
         "parts": {
@@ -98,10 +129,31 @@
                     "askwait.go",
                     "streamattention.go",
                     "streamops.go"
+                ],
+                "core": [
+                    "api.go",
+                    "server.go",
+                    "taskops.go"
+                ]
+            },
+            "internal/cli": {
+                "core": [
+                    "args.go",
+                    "cli.go",
+                    "initedit.go",
+                    "tree.go"
+                ],
+                "views": [
+                    "askpoll.go",
+                    "asks.go",
+                    "attention.go",
+                    "notes.go",
+                    "now.go"
                 ]
             }
         },
-        "fail_on_no_mutants": true
+        "fail_on_no_mutants": true,
+        "phase_base": "d3056d6c4f0e6a1509be31d912560f92a020a81c"
     },
     "stryker": {
         "enabled": true,

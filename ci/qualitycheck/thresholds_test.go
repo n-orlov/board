@@ -291,3 +291,20 @@ func TestLooserThresholdsCatchesANarrowedMutationScope(t *testing.T) {
 		t.Errorf("an unchanged scope reported %v", p)
 	}
 }
+
+// TestLooserThresholdsCatchesARemovedPhaseBase: without phase_base the check
+// that every file the phase changed is measured has nothing to diff from, so
+// removing it loosens the gate; setting or moving it does not.
+func TestLooserThresholdsCatchesARemovedPhaseBase(t *testing.T) {
+	mk := func(base string) config {
+		return config{MutationGo: mutationGoConfig{Enabled: true, Efficacy: 80, Packages: []string{"a"}, FailOnNoMutants: true, PhaseBase: base}}
+	}
+	if p := looserThresholds(mk("abc"), mk("")); len(p) != 1 || !strings.Contains(p[0], "mutation_go.phase_base: removed") {
+		t.Errorf("removing phase_base: %v", p)
+	}
+	for _, tc := range [][2]string{{"", "abc"}, {"abc", "def"}, {"abc", "abc"}} {
+		if p := looserThresholds(mk(tc[0]), mk(tc[1])); len(p) != 0 {
+			t.Errorf("phase_base %q -> %q reported %v", tc[0], tc[1], p)
+		}
+	}
+}

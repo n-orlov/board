@@ -2,8 +2,10 @@
 # ci/mutation.sh -- the Go mutation gate's entry point (SPEC 15.4, the
 # Jenkins Mutation stage's command). Runs gremlins over every package listed
 # in ci/quality.json's mutation_go.packages (the Phase 0/1 domain and store
-# plus the Phase 2 application logic; internal/server and internal/cli are
-# narrowed to the files in mutation_go.scopes), writes one JSON report per
+# plus the Phase 2 application logic; internal/server, internal/cli and
+# internal/tasks are narrowed to the files in mutation_go.scopes, and
+# `ci/mutationgate -unmeasured` lists any application file changed since
+# mutation_go.phase_base that no unit measures), writes one JSON report per
 # package, then runs
 # ci/mutationgate, which fails below mutation_go.efficacy or when a package
 # generated no mutant. It then runs Stryker over web/src/lib and fails below

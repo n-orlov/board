@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -278,7 +279,8 @@ func TestTheShippedConfigScopesOnlyPackagesItMutates(t *testing.T) {
 	}
 	// The handwritten application logic Phase 2 introduced or changed.
 	for _, p := range []string{"internal/domain", "internal/store", "internal/asks", "internal/attention", "internal/checkin",
-		"internal/cursors", "internal/events", "internal/feed", "internal/notes", "internal/server", "internal/cli"} {
+		"internal/cursors", "internal/events", "internal/feed", "internal/notes", "internal/audit", "internal/tasks",
+		"internal/server", "internal/cli"} {
 		if !in[p] {
 			t.Errorf("%s is not mutated", p)
 		}
@@ -484,7 +486,7 @@ func TestPartsMustSplitTheScopeExactly(t *testing.T) {
 	}
 }
 
-func TestTheShippedPartsSplitTheServerScopeIntoTwoLanes(t *testing.T) {
+func TestTheShippedPartsGiveEveryPartOfAPackageALaneOfItsOwn(t *testing.T) {
 	data, err := os.ReadFile("../quality.json")
 	if err != nil {
 		t.Fatal(err)
@@ -499,22 +501,189 @@ func TestTheShippedPartsSplitTheServerScopeIntoTwoLanes(t *testing.T) {
 	if err := cfg.checkLanes(); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Parts["internal/server"]) != 2 {
-		t.Fatalf("internal/server parts = %v, want two", cfg.Parts["internal/server"])
+	if len(cfg.Parts["internal/server"]) != 3 || len(cfg.Parts["internal/cli"]) != 2 {
+		t.Fatalf("parts = %v, want internal/server in three and internal/cli in two", cfg.Parts)
 	}
-	// Every part is judged on its own and is run by a lane of its own.
+	// Every part is judged on its own and is run by a lane no sibling part
+	// shares, so no stage holds two parts of one package's mutants.
 	lanes := map[string]string{}
 	for lane, units := range cfg.Lanes {
 		for _, u := range units {
 			lanes[u] = lane
 		}
 	}
-	if lanes["internal/server#ops"] == "" || lanes["internal/server#ops"] == lanes["internal/server#streams"] {
-		t.Fatalf("the two server parts share a lane or have none: %v", lanes)
+	for pkg, parts := range cfg.Parts {
+		used := map[string]string{}
+		for name := range parts {
+			unit := pkg + partSep + name
+			lane := lanes[unit]
+			if lane == "" {
+				t.Errorf("%s is in no lane", unit)
+			} else if prev, dup := used[lane]; dup {
+				t.Errorf("%s and %s share lane %q", prev, unit, lane)
+			}
+			used[lane] = unit
+		}
 	}
 	for _, unit := range cfg.units() {
 		if _, err := excludes(cfg, "../..", unit); err != nil {
 			t.Errorf("%s: %v", unit, err)
+		}
+	}
+}
+
+// phaseRepo makes a git repository whose first commit holds before (path ->
+// content) and whose working tree then holds after (a nil content deletes the
+// file), and returns its root and the first commit's sha.
+func phaseRepo(t *testing.T, before, after map[string]*string) (root, base string) {
+	t.Helper()
+	root = t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(files map[string]*string) {
+		for f, content := range files {
+			p := filepath.Join(root, filepath.FromSlash(f))
+			if content == nil {
+				if err := os.Remove(p); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(*content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	git("init", "-q")
+	write(before)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base = git("rev-parse", "HEAD")
+	write(after)
+	git("add", "-A")
+	git("commit", "-q", "-m", "phase")
+	return root, base
+}
+
+func src(s string) *string { return &s }
+
+// The rule: every handwritten application file the phase added or changed is
+// measured by some unit. A changed file left out of a package's scope, or in a
+// package the gate does not list, is reported; a test file, a generated file,
+// a deleted file, a file outside internal/ and cmd/, and a file a unit does
+// measure are not.
+func TestUnmeasuredListsEveryChangedApplicationFileNoUnitMeasures(t *testing.T) {
+	code := src("package x\n\nfunc F() int { return 1 }\n")
+	changed := src("package x\n\nfunc F() int { return 2 }\n")
+	root, base := phaseRepo(t, map[string]*string{
+		"internal/server/taskops.go": code, "internal/server/askops.go": code, "internal/server/old.go": code,
+		"internal/audit/audit.go": code, "internal/gone/gone.go": code, "internal/server/server_test.go": code,
+	}, map[string]*string{
+		"internal/server/taskops.go":     changed, // scoped package, not in its scope: reported
+		"internal/server/askops.go":      changed, // in the scope: measured
+		"internal/audit/audit.go":        changed, // a package the gate does not list: reported
+		"internal/tasks/tasks.go":        code,    // a new file in a new, unlisted package: reported
+		"internal/asks/raise.go":         code,    // a new file of a package mutated whole: measured
+		"internal/server/server_test.go": changed, // a test file: not application code
+		"internal/server/openapi.gen.go": src("// Code generated by oapi-codegen. DO NOT EDIT.\npackage x\n"),
+		"cmd/board/main.go":              code, // an application root other than internal/: reported
+		"ci/tool/main.go":                code, // tooling, not application code
+		"internal/gone/gone.go":          nil,  // deleted: nothing left to mutate
+	})
+	cfg := config{
+		Packages:  []string{"internal/server", "internal/asks"},
+		Scopes:    map[string][]string{"internal/server": {"askops.go"}},
+		PhaseBase: base,
+	}
+	got, err := unmeasured(cfg, root)
+	want := []string{"cmd/board/main.go", "internal/audit/audit.go", "internal/server/taskops.go", "internal/tasks/tasks.go"}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, %v; want %v", got, err, want)
+	}
+	// Measuring them clears the list: a scope that names the file, and the
+	// unlisted packages listed (mutated whole).
+	cfg.Scopes["internal/server"] = []string{"askops.go", "taskops.go"}
+	cfg.Packages = append(cfg.Packages, "internal/audit", "internal/tasks", "cmd/board")
+	if got, err := unmeasured(cfg, root); err != nil || len(got) != 0 {
+		t.Fatalf("after measuring them: %v, %v", got, err)
+	}
+}
+
+func TestUnmeasuredFlagExitsOneOnAGapAndTwoWithoutABase(t *testing.T) {
+	root, base := phaseRepo(t, map[string]*string{"internal/a/a.go": src("package a\n")},
+		map[string]*string{"internal/a/a.go": src("package a\n\nvar V = 1\n"), "internal/b/b.go": src("package b\n")})
+	t.Chdir(root)
+	for name, tc := range map[string]struct {
+		config string
+		code   int
+		want   string
+	}{
+		"a gap": {`{"mutation_go":{"enabled":true,"efficacy":80,"packages":["internal/a"],"phase_base":"` + base + `"}}`,
+			1, "internal/b/b.go: changed since " + base + " but no mutation unit measures it\n"},
+		"no gap": {`{"mutation_go":{"enabled":true,"efficacy":80,"packages":["internal/a","internal/b"],"phase_base":"` + base + `"}}`,
+			0, ""},
+		"no phase_base": {`{"mutation_go":{"enabled":true,"efficacy":80,"packages":["internal/a"]}}`,
+			2, "phase_base is not set"},
+		"a base git does not know": {`{"mutation_go":{"enabled":true,"efficacy":80,"packages":["internal/a"],"phase_base":"0123456789abcdef"}}`,
+			2, "git diff 0123456789abcdef"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := filepath.Join(t.TempDir(), "quality.json")
+			if err := os.WriteFile(cfg, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errb bytes.Buffer
+			code := run([]string{"-config", cfg, "-unmeasured"}, &out, &errb)
+			if code != tc.code || !strings.Contains(out.String()+errb.String(), tc.want) || (tc.code == 0 && out.Len() != 0) {
+				t.Fatalf("exit %d, want %d naming %q:\n%s%s", code, tc.code, tc.want, out.String(), errb.String())
+			}
+		})
+	}
+}
+
+// The shipped config measures every handwritten application file Phase 2
+// introduced or changed: none is left out of mutation_go.
+func TestTheShippedConfigMeasuresEveryApplicationFileThePhaseChanged(t *testing.T) {
+	data, err := os.ReadFile("../quality.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all struct {
+		MutationGo config `json:"mutation_go"`
+	}
+	if err := json.Unmarshal(data, &all); err != nil {
+		t.Fatal(err)
+	}
+	cfg := all.MutationGo
+	if !strings.HasPrefix(cfg.PhaseBase, "d3056d6") {
+		t.Fatalf("phase_base = %q, want the Phase 2 start d3056d6", cfg.PhaseBase)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := unmeasured(cfg, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Phase 2 application files no mutation unit measures: %v", got)
+	}
+	// The files review found missing are measured by a unit of their own lane.
+	for _, f := range []string{"internal/server/taskops.go", "internal/cli/cli.go", "internal/audit/audit.go",
+		"internal/tasks/tasks.go", "internal/server/server.go"} {
+		if !cfg.measures(f) {
+			t.Errorf("%s is not measured", f)
 		}
 	}
 }

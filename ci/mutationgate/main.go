@@ -20,6 +20,9 @@
 //	                                               # one lane's packages
 //	mutationgate -config ci/quality.json -dir d -lane logic
 //	                                               # judge one lane's reports
+//	mutationgate -config ci/quality.json -unmeasured
+//	                                               # application files changed since phase_base
+//	                                               # that no unit measures (exit 1 if any)
 //	mutationgate -config ci/quality.json -excludes internal/server
 //	                                               # one gremlins -E regexp per out-of-scope file
 //	                                               # (a part: internal/server#ops)
@@ -34,6 +37,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -71,6 +76,14 @@ type config struct {
 	// is in exactly one lane (a package with Parts: each of its parts, written
 	// "package#part"). No lanes means one lane, "all".
 	Lanes map[string][]string `json:"lanes"`
+	// PhaseBase is the commit the current phase started from. Every
+	// handwritten application file (a non-test, non-generated .go file under
+	// internal/ or cmd/) added or changed since it must be measured by some
+	// unit: its package is listed and, if scoped, its file is in the scope.
+	// -unmeasured lists the ones that are not, and a test of the shipped
+	// config requires none, so the scope cannot silently fall behind the
+	// phase's code.
+	PhaseBase string `json:"phase_base"`
 }
 
 // allLane is the lane name that selects every package.
@@ -446,6 +459,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	list := fs.Bool("list", false, "print the configured packages and exit")
 	lane := fs.String("lane", allLane, "judge or list only this lane of mutation_go.lanes")
 	excl := fs.String("excludes", "", "print, one per line, the gremlins --exclude-files regexps that keep `package` to its configured scope, and exit")
+	unmeas := fs.Bool("unmeasured", false, "print each application file changed since phase_base that no unit measures; exit 1 if there is one")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -457,6 +471,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case *list:
 		printLines(stdout, pkgs)
+	case *unmeas:
+		return reportUnmeasured(cfg, stdout, stderr)
 	case *excl != "":
 		lines, err := excludesFromCwd(cfg, *excl)
 		if err != nil {
@@ -498,6 +514,103 @@ func excludesFromCwd(cfg config, pkg string) ([]string, error) {
 		return nil, err
 	}
 	return excludes(cfg, root, pkg)
+}
+
+// appRoots are the module directories that hold the product's application
+// code; everything else (ci/, features/, e2e/) is tooling or tests.
+var appRoots = []string{"internal", "cmd"}
+
+// generatedRE is Go's marker for a generated file (go help generate).
+var generatedRE = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
+
+// measures reports whether some unit of the config mutates file, a
+// slash-separated path relative to the module root.
+func (c config) measures(file string) bool {
+	dir, name := path.Split(file)
+	dir = strings.TrimSuffix(dir, "/")
+	if !slices.Contains(c.Packages, dir) {
+		return false
+	}
+	scope, ok := c.Scopes[dir]
+	return !ok || slices.Contains(scope, name)
+}
+
+// changedSince lists the files under appRoots that differ between base and
+// the working tree and still exist (git diff, deletions left out).
+func changedSince(root, base string) ([]string, error) {
+	if base == "" {
+		return nil, errors.New("mutation_go.phase_base is not set, so the phase's changed files cannot be listed")
+	}
+	args := append([]string{"diff", "--name-only", "--no-renames", "--diff-filter=d", base, "--"}, appRoots...)
+	cmd := exec.Command("git", args...) //nolint:gosec // G204: git diff against the base commit the repository's own config names
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff %s: %w", base, err)
+	}
+	return strings.Fields(string(out)), nil
+}
+
+// unmeasured returns, sorted, each handwritten application file changed
+// since the config's phase_base (a non-test .go file that is not generated)
+// that no unit measures.
+func unmeasured(cfg config, root string) ([]string, error) {
+	changed, err := changedSince(root, cfg.PhaseBase)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, f := range changed {
+		needs, err := needsUnit(cfg, root, f)
+		if err != nil {
+			return nil, err
+		}
+		if needs {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// needsUnit reports whether a changed file is handwritten application code
+// (a non-test, non-generated .go file) that no unit of cfg measures.
+func needsUnit(cfg config, root, f string) (bool, error) {
+	if !strings.HasSuffix(f, ".go") || strings.HasSuffix(f, "_test.go") || cfg.measures(f) {
+		return false, nil
+	}
+	generated, err := isGenerated(filepath.Join(root, filepath.FromSlash(f)))
+	return !generated, err
+}
+
+// isGenerated reports whether the Go file at path carries the generated-code
+// marker.
+func isGenerated(path string) (bool, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: a path git diff listed inside the repository
+	if err != nil {
+		return false, err
+	}
+	return generatedRE.Match(data), nil
+}
+
+// reportUnmeasured prints the unmeasured files of the working directory's
+// module and returns the exit code: 0 none, 1 some, 2 an error.
+func reportUnmeasured(cfg config, stdout, stderr io.Writer) int {
+	root, err := os.Getwd()
+	if err == nil {
+		var files []string
+		if files, err = unmeasured(cfg, root); err == nil {
+			for _, f := range files {
+				_, _ = fmt.Fprintf(stdout, "%s: changed since %s but no mutation unit measures it\n", f, cfg.PhaseBase)
+			}
+			if len(files) > 0 {
+				return 1
+			}
+			return 0
+		}
+	}
+	_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
+	return 2
 }
 
 func printLines(w io.Writer, lines []string) {

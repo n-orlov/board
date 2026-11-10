@@ -109,8 +109,10 @@ The clone is of the committed HEAD, so commit before running it.
 | Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | every `main` build and the extended lane |
 | Mutation server ops | the same command, lane `server-ops` (`internal/server#ops`) | same |
 | Mutation server streams | the same command, lane `server-streams` (`internal/server#streams`) | same |
-| Mutation cli | the same command, lane `cli` | same |
-| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all five |
+| Mutation server core | the same command, lane `server-core` (`internal/server#core`) | same |
+| Mutation cli | the same command, lane `cli` (`internal/cli#views`) | same |
+| Mutation cli core | the same command, lane `cli-core` (`internal/cli#core`) | same |
+| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all seven |
 
 The extended lane is the nightly `main` build (03:17) or a build with the
 `EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
@@ -236,8 +238,9 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   script runs `gremlins unleash` over each package in `mutation_go.packages`
   (`internal/domain`, `internal/store`, and the application logic Phase 2
   introduced or changed: `internal/asks`, `internal/attention`,
-  `internal/checkin`, `internal/cursors`, `internal/events`, `internal/feed`,
-  `internal/notes`, `internal/server`, `internal/cli`), writes one JSON report per package to
+  `internal/audit`, `internal/checkin`, `internal/cursors`, `internal/events`,
+  `internal/feed`, `internal/notes`, `internal/tasks`, `internal/server`,
+  `internal/cli`), writes one JSON report per package to
   `ci-results/mutation/` and then runs `mutationgate`, which reads the
   threshold from `ci/quality.json` and fails when
   - a package's efficacy (gremlins' definition, killed over killed plus lived)
@@ -247,19 +250,28 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
     or
   - a package's report is missing or unreadable.
 
-  `internal/server` and `internal/cli` hold older Phase 1 code beside Phase 2's,
-  and a gremlins run of a package re-runs that package's whole test suite for
-  every mutant, so each is narrowed to the Phase 2 files listed under
-  `mutation_go.scopes` in `ci/quality.json`: `ci/mutationgate -excludes <pkg>`
+  `internal/server`, `internal/cli` and `internal/tasks` hold older Phase 1
+  code beside Phase 2's, and a gremlins run of a package re-runs that
+  package's whole test suite for every mutant, so each is narrowed to the
+  files Phase 2 introduced or changed, listed under `mutation_go.scopes` in
+  `ci/quality.json` (a listed file is mutated whole, its older lines
+  included). `mutation_go.phase_base` is the commit Phase 2 started from:
+  `ci/mutationgate -unmeasured` runs `git diff` against it and prints every
+  non-test `.go` file under `internal/` or `cmd/` changed since then that no
+  unit measures (generated files, marked `Code generated ... DO NOT EDIT.`,
+  are left out), exiting 1 if there is one, and a test of the shipped config
+  requires none, so a Phase 2 file left out of the scope fails the Suite.
+  `ci/mutationgate -excludes <pkg>`
   prints one `--exclude-files` regexp per other non-test file, and
   `ci/mutation.sh` passes them to gremlins (a scoped file that does not exist
   fails). One stage measured `internal/server` in over 25 of its 30 minutes on
-  the agent, so `mutation_go.parts` splits its scope into two disjoint parts
-  (`ops` and `streams`, together exactly the scope, which `ci/mutationgate`
-  checks): each part is a unit `internal/server#ops` that gremlins runs with
+  the agent, so `mutation_go.parts` splits its scope into three disjoint
+  parts (`ops`, `streams` and `core`), and `internal/cli`'s into two (`views`
+  and `core`), each set together exactly its scope, which `ci/mutationgate`
+  checks: each part is a unit `internal/server#ops` that gremlins runs with
   every file outside the part excluded, with its own report
   (`internal-server-ops.json`) and its own judgement against the same floor.
-  `mutation_go.lanes` partitions the packages' units into the five stages
+  `mutation_go.lanes` partitions the packages' units into the seven stages
   above (a unit in no lane, or two, fails `ci/mutationgate`, and a test
   holds the Jenkinsfile to one stage per lane): each stage keeps the 30-minute
   timeout the single stage had, which is why the packages are split instead of

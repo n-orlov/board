@@ -52,6 +52,9 @@ type mutationGoConfig struct {
 	Parts map[string]map[string][]string `json:"parts"`
 	// Lanes groups Packages into the Jenkins mutation stages (ci/mutationgate).
 	Lanes map[string][]string `json:"lanes"`
+	// PhaseBase is the commit the phase started from; ci/mutationgate
+	// requires every application file changed since it to be measured.
+	PhaseBase string `json:"phase_base"`
 }
 
 // strykerConfig is the Stryker gate over the frontend logic modules:
@@ -170,8 +173,19 @@ func looserMutation(base, current mutationGoConfig) []string {
 			p = append(p, fmt.Sprintf("mutation_go.packages: %q dropped (base measured it)", pkg))
 		}
 	}
+	p = append(p, droppedMutationChecks(base, current)...)
+	return append(p, narrowedScopes(base, current)...)
+}
+
+// droppedMutationChecks reports the zero-mutant failure switched off, or the
+// phase_base check (every file the phase changed is measured) removed.
+func droppedMutationChecks(base, current mutationGoConfig) []string {
+	var p []string
 	if base.FailOnNoMutants && !current.FailOnNoMutants {
 		p = append(p, "mutation_go.fail_on_no_mutants: switched off (base had it on)")
 	}
-	return append(p, narrowedScopes(base, current)...)
+	if base.PhaseBase != "" && current.PhaseBase == "" {
+		p = append(p, "mutation_go.phase_base: removed (base checked every file changed since it is measured)")
+	}
+	return p
 }

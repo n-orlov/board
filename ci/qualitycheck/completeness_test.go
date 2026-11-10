@@ -90,7 +90,7 @@ func specGaps(cfg config) []string {
 		// Phase 2 introduced or changed.
 		for _, p := range []string{"internal/domain", "internal/store", "internal/asks", "internal/attention",
 			"internal/checkin", "internal/cursors", "internal/events", "internal/feed", "internal/notes",
-			"internal/server", "internal/cli"} {
+			"internal/audit", "internal/tasks", "internal/server", "internal/cli"} {
 			if !have[p] {
 				g = append(g, "mutation_go.packages: "+p+" is not measured")
 			}
@@ -100,15 +100,26 @@ func specGaps(cfg config) []string {
 				g = append(g, "mutation_go.scopes: "+p+" is scoped to nothing or is not a measured package")
 			}
 		}
-		for _, f := range []string{"askops.go", "askwait.go", "attentionops.go", "cursorops.go", "noteops.go", "streamops.go"} {
+		for _, f := range []string{"askops.go", "askwait.go", "attentionops.go", "cursorops.go", "noteops.go", "streamops.go",
+			"taskops.go", "server.go", "api.go"} {
 			if scope, ok := cfg.MutationGo.Scopes["internal/server"]; ok && !slices.Contains(scope, f) {
 				g = append(g, "mutation_go.scopes: internal/server lacks "+f)
 			}
 		}
-		for _, f := range []string{"askpoll.go", "asks.go", "attention.go", "notes.go"} {
+		for _, f := range []string{"askpoll.go", "asks.go", "attention.go", "notes.go", "cli.go", "args.go", "initedit.go", "tree.go"} {
 			if scope, ok := cfg.MutationGo.Scopes["internal/cli"]; ok && !slices.Contains(scope, f) {
 				g = append(g, "mutation_go.scopes: internal/cli lacks "+f)
 			}
+		}
+		for _, f := range []string{"list.go", "task.go", "tasks.go"} {
+			if scope, ok := cfg.MutationGo.Scopes["internal/tasks"]; ok && !slices.Contains(scope, f) {
+				g = append(g, "mutation_go.scopes: internal/tasks lacks "+f)
+			}
+		}
+		// ci/mutationgate checks every application file changed since this
+		// commit is measured; without it that check has nothing to diff from.
+		if cfg.MutationGo.PhaseBase == "" {
+			g = append(g, "mutation_go.phase_base: not set, so no check that the phase's changed files are measured")
 		}
 		if !cfg.MutationGo.FailOnNoMutants {
 			g = append(g, "mutation_go.fail_on_no_mutants: a run with no mutant must fail")
@@ -193,7 +204,11 @@ func TestSpecGapsCatchesARemovedDisabledOrLoosenedGate(t *testing.T) {
 			{"packages", []any{"internal/domain", "internal/store"}},
 			{"scopes", map[string]any{"internal/server": []any{"askops.go"}}},
 			{"scopes", map[string]any{"internal/cli": []any{"asks.go"}}},
-			{"scopes", map[string]any{"internal/audit": []any{}}}}},
+			{"scopes", map[string]any{"internal/audit": []any{}}},
+			{"scopes", map[string]any{"internal/tasks": []any{"list.go"}}},
+			{"scopes", map[string]any{"internal/server": []any{"askops.go", "askwait.go", "attentionops.go",
+				"cursorops.go", "noteops.go", "streamops.go", "server.go", "api.go"}}},
+			{"phase_base", ""}}},
 		{"stryker", []loosening{{"break", 79.0}, {"module_break", 79.0}, {"path", "web/src"}}},
 		{"sbom_module", nil},
 		{"sbom_frontend", nil},
