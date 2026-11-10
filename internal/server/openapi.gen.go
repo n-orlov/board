@@ -593,6 +593,9 @@ type Ask struct {
 	// Details At most 20000 characters. Empty when none was given.
 	Details string `json:"details"`
 
+	// EndedAt The server's clock read just after the answer or withdrawal committed, rounded up to the millisecond, so never before the end took effect (`answered_at` and `withdrawn_at` are read before the commit). Absent while the ask is open, and for an end recorded without one.
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+
 	// Id The ask's ULID.
 	Id string `json:"id"`
 

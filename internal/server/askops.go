@@ -82,7 +82,7 @@ func (o askOps) apiAsk(k asks.Ask) Ask {
 		Question: k.Question, Details: k.Details, Options: k.Options, Mode: AskMode(k.Mode), Blocking: k.Blocking,
 		State: AskState(k.State), Answer: optionalText(k.Answer), AnsweredBy: optionalText(k.AnsweredBy),
 		OnBehalfOf: optionalText(k.OnBehalfOf), CreatedAt: k.CreatedAt, AnsweredAt: k.AnsweredAt, WithdrawnAt: k.WithdrawnAt,
-		WithdrawReason: optionalText(k.WithdrawReason), AskerWaiting: o.asks.Waiting(k),
+		WithdrawReason: optionalText(k.WithdrawReason), EndedAt: k.EndedAt, AskerWaiting: o.asks.Waiting(k),
 	}
 	if k.Channel != "" {
 		c := AskChannel(k.Channel)

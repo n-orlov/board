@@ -26,6 +26,9 @@ type liveAskBoard struct {
 	ref string
 	// delay holds the response of a ?wait= read that finds the end this long
 	delay time.Duration
+	// plainDelay holds the response of every plain read this long
+	plainDelay time.Duration
+	raisedAt   time.Time
 }
 
 func newLiveAskBoard(t *testing.T) *liveAskBoard {
@@ -57,9 +60,21 @@ func (b *liveAskBoard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			b.t.Error(err)
 		}
 		b.mu.Lock()
-		b.ref = k.Ref
+		b.ref, b.raisedAt = k.Ref, time.Now()
 		b.mu.Unlock()
 		b.write(w, http.StatusCreated, k)
+		return
+	}
+	if r.URL.Query().Get("wait") == "" && b.plainDelay > 0 {
+		k, err := b.s.Get(ctx, b.askRef()) // read now, answered later
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(b.plainDelay):
+		}
+		if err == nil {
+			b.write(w, http.StatusOK, k)
+		}
 		return
 	}
 	for {
@@ -83,6 +98,25 @@ func (b *liveAskBoard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+// endAt answers or withdraws the ask at after from its raise, and reports
+// whether it had committed before the poll's deadline (a second after the raise
+// at the earliest, since the CLI starts its clock once the raise returns).
+func (b *liveAskBoard) endAt(after time.Duration, withdraw bool) <-chan bool {
+	done := make(chan bool, 1)
+	go func() {
+		for b.askRef() == "" {
+			time.Sleep(time.Millisecond)
+		}
+		b.mu.Lock()
+		raised := b.raisedAt
+		b.mu.Unlock()
+		time.Sleep(time.Until(raised.Add(after)))
+		err := b.end(withdraw)
+		done <- err == nil && time.Since(raised) < time.Second
+	}()
+	return done
 }
 
 func (b *liveAskBoard) askRef() string {
@@ -223,6 +257,102 @@ func TestAskPollLiveEndCommittedBeforeTheDeadlineWithADelayedWaitResponse(t *tes
 		code, out, took := runLivePoll(b)
 		if code != c.code || took > time.Second {
 			t.Errorf("withdraw=%v at %s: got %d %q after %s, want exit %d within the deadline", c.withdraw, c.at, code, out, took, c.code)
+		}
+	}
+}
+
+// An answer or withdrawal committed after the plain read before the deadline
+// found the ask open, but still before the deadline, whose held wait is
+// answered only after the deadline (the response is delayed), is exit 0 or 6:
+// the read after the deadline finds it, and its ended_at proves it took effect
+// in time.
+func TestAskPollLiveEndCommittedAfterTheProbeBeforeTheDeadline(t *testing.T) {
+	for _, c := range []struct {
+		withdraw bool
+		code     int
+		out      string
+		at       time.Duration
+	}{
+		{false, ExitOK, "ok A1 answered by nik@host: 8080\n", 870 * time.Millisecond},
+		{true, ExitConflict, "A1 withdrawn: moved on\n", 870 * time.Millisecond},
+		{false, ExitOK, "ok A1 answered by nik@host: 8080\n", 950 * time.Millisecond},
+		{true, ExitConflict, "A1 withdrawn: moved on\n", 950 * time.Millisecond},
+	} {
+		b := newLiveAskBoard(t)
+		b.delay = 1100 * time.Millisecond
+		inTime := b.endAt(c.at, c.withdraw)
+		code, out, took := runLivePoll(b)
+		if !<-inTime {
+			t.Fatalf("withdraw=%v at %s: the end did not commit before the deadline", c.withdraw, c.at)
+		}
+		if code != c.code || out != c.out || took < time.Second {
+			t.Errorf("withdraw=%v at %s: got %d %q after %s, want %d %q at the deadline", c.withdraw, c.at, code, out, took, c.code, c.out)
+		}
+	}
+}
+
+// When every response is delayed past the deadline, plain reads included, an
+// end committed early in the poll is still exit 0 or 6: only the read after the
+// deadline comes back, and the end's ended_at, not the time the response came
+// back, says it took effect in time.
+func TestAskPollLiveEveryResponseDelayedCountsAnEndCommittedInTime(t *testing.T) {
+	for _, c := range []struct {
+		withdraw bool
+		code     int
+	}{{false, ExitOK}, {true, ExitConflict}} {
+		b := newLiveAskBoard(t)
+		b.delay, b.plainDelay = 1100*time.Millisecond, 400*time.Millisecond
+		inTime := b.endAt(300*time.Millisecond, c.withdraw)
+		code, out, took := runLivePoll(b)
+		if !<-inTime {
+			t.Fatalf("withdraw=%v: the end did not commit before the deadline", c.withdraw)
+		}
+		if code != c.code || took < 1400*time.Millisecond {
+			t.Errorf("withdraw=%v: got %d %q after %s, want exit %d once the delayed read is back", c.withdraw, code, out, took, c.code)
+		}
+	}
+}
+
+// With every response delayed, an end whose transaction takes its stamp before
+// the deadline but commits after it is exit 3: the read after the deadline
+// finds it, with a stamp before the deadline but an ended_at after it.
+func TestAskPollLiveEveryResponseDelayedEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
+	for _, withdraw := range []bool{false, true} {
+		b := newLiveAskBoard(t)
+		b.delay, b.plainDelay = 1100*time.Millisecond, 400*time.Millisecond
+		var armed atomic.Bool
+		release := make(chan struct{})
+		b.s.Now = func() time.Time {
+			now := time.Now()
+			if armed.CompareAndSwap(true, false) { // the end's stamp: hold its transaction open
+				<-release
+			}
+			return now
+		}
+		done := make(chan error, 1)
+		go func() {
+			for b.askRef() == "" {
+				time.Sleep(time.Millisecond)
+			}
+			time.Sleep(500 * time.Millisecond)
+			armed.Store(true)
+			go func() { done <- b.end(withdraw) }()
+			b.mu.Lock()
+			raised := b.raisedAt
+			b.mu.Unlock()
+			time.Sleep(time.Until(raised.Add(1050 * time.Millisecond))) // past the deadline, before the last read
+			close(release)
+		}()
+		code, out, took := runLivePoll(b)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		k, err := b.s.Get(context.Background(), b.askRef())
+		if err != nil || k.EndedAt == nil || !k.EndedAt.After(b.raisedAt.Add(time.Second)) {
+			t.Fatalf("withdraw=%v: ended_at %v (%v), want after the deadline", withdraw, k.EndedAt, err)
+		}
+		if code != ExitTimeout || out != "A1 still open → board ask show A1\n" || took < time.Second {
+			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3", withdraw, code, out, took)
 		}
 	}
 }

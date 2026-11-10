@@ -440,6 +440,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 | created_at, answered_at | | |
 | withdrawn_at, withdraw_reason | nullable | set when the ask is withdrawn; the reason is at most 200 characters |
 | poll_seen_at | ts, nullable | when a long poll (§7.2) on the ask last held or returned; null until one has |
+| ended_at | ts, nullable | the server's clock read just after the answer or withdrawal committed, rounded up to the millisecond (migration `00007_ask_ended_at`) |
 
 An ask's short ref is `A<n>`: `n` is the table's auto-incrementing key (`domain.FormatAskRef`; read back by
 `domain.ParseAskRef` with `A` in either case and a positive `n`). Every read takes `A<n>` or the ULID, in either letter
@@ -455,7 +456,11 @@ is allowed with `relay` only. `Withdraw` takes an optional reason. Answering or 
 a conflict naming its state and changes no row, event or actor. `List` filters by `state` (`open` by default, `answered`,
 `withdrawn` or `all`), asker, task and initiative, ordered by `id`, with `limit` and an `after` cursor (`A<n>` or ULID).
 Each write appends `ask_raised`, `ask_answered` or `ask_withdrawn` (with the task, the initiative and `ref_id` set as they
-apply) in the same transaction as the change.
+apply) in the same transaction as the change. `answered_at` and `withdrawn_at` are stamped inside that transaction, before it
+commits; once it has committed, `Answer` and `Withdraw` read the clock again and store it, rounded up to the next whole
+millisecond, as `ended_at`, so `ended_at` is never earlier than the moment the end took effect (became visible to readers),
+however long the commit took. `ended_at` is null while the ask is open; it is written once, and a failure to write it
+leaves the end standing without one (as do ends recorded before the column existed).
 
 ### 4.6 `events`
 
@@ -597,7 +602,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), and `00007_ask_ended_at` adds `asks.ended_at`. The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -1093,8 +1098,9 @@ is §7.2.
   that ask; any other text is **400**. `next_after`, the ULID of the last item, is present exactly when more asks
   follow.
 - **The ask document** (`Ask`): `{id, ref, task?, initiative?, asker, question, details, options, mode, blocking, state,
-  answer?, answered_by?, on_behalf_of?, channel?, created_at, answered_at?, withdrawn_at?, withdraw_reason?,
-  asker_waiting}`. `task` is the task's ref, `initiative` its slug, `asker` the handle of the actor that raised
+  answer?, answered_by?, on_behalf_of?, channel?, created_at, answered_at?, withdrawn_at?, withdraw_reason?, ended_at?,
+  asker_waiting}`. `ended_at` (§4.5) is present once the ask is answered or withdrawn and bounds when the end took effect
+  from above. `task` is the task's ref, `initiative` its slug, `asker` the handle of the actor that raised
   it, `state` `open`, `answered` or `withdrawn`, and absent optional fields are omitted. `asker_waiting` is derived: true
   when the ask is open, its mode is `poll` and a long poll on it (`poll_seen_at`, §4.5) was seen within the last 60
   seconds, so it is false until a long poll has run.
@@ -1547,21 +1553,25 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Each call asks for at most 300 s (the server's cap) and
   for the time left to the deadline rounded up to a whole second (the server takes no shorter wait), so the last wait is the
   remainder, and the client cuts the request off at the deadline itself; the poll therefore stays active to the actual deadline,
-  sub-second remainder included. No call is made once the deadline has passed, and exit 3 is reported only then.
-  An answer or withdrawal that was committed by the deadline gives exit 0 or 6, an ask still open at the deadline gives exit 3
-  even if a later read finds it ended, and the two are told apart by when a read came back, not by the end's stamp (`answered_at`,
-  `withdrawn_at`), which the server takes inside the answering transaction, before it commits, so a stamp before the deadline does
-  not show a commit before it. A read that comes back by the deadline with the ask ended proves the end was committed by then (the
-  server read the ask before answering). So once the deadline is at most 300 s away, the client also reads the ask plainly 200 ms
-  before it, beside the held wait, and takes the first read to find an end: an end committed before that read is counted even when the
-  held call's own response is delayed past the deadline, whereas one committed after the deadline is seen by no read that came back
-  in time, whatever its stamp, so the ask counts as still open at the deadline and `board ask show` then shows the later end. An end
-  committed in the last 200 ms counts when the held call returns it by the deadline. A counted end must also have a stamp not after
-  the deadline (a server clock running ahead of the client's never counts an end the server dates late): the server stores the stamp
-  floored to the millisecond, so a stamp `s` says the end was made in `[s, s+1 ms)`, and it counts only when `s + 1 ms ≤ deadline` (a
-  stamp carrying its own sub-millisecond part is taken as exact, counting when at or before the deadline). An end that is not counted
-  gives the line `A<n> still open → …` and exit **3** (with `--json` the ask as the last read before the deadline saw it is printed with
-  exit 3; only when that read failed is the ask read once more, after the deadline, and an end it finds is not counted). The client's
+  sub-second remainder included. No wait is started once the deadline has passed (only the one plain read below), and exit 3 is
+  reported only then.
+  The outcome is decided by when the end took effect, that is, when its transaction committed, never by when a response
+  carrying it arrived: an answer or withdrawal committed by the deadline gives exit 0 or 6 even when the read that finds it comes
+  back after the deadline, and an ask still open at the deadline gives exit 3 even when a later read finds it ended. The end's stamp
+  (`answered_at`, `withdrawn_at`) cannot tell the two apart, since the server takes it inside the answering transaction, before it
+  commits. Two things can: the end's `ended_at` (§4.5), which the server reads after the commit, so an `ended_at` not after the
+  deadline proves the commit was by then; and a read that came back by the deadline with the ask ended (the server read the ask
+  before answering), provided its stamp is not after the deadline either (the server floors the stamp to the millisecond, so a stamp
+  `s` counts only when `s + 1 ms ≤ deadline`; one with its own sub-millisecond part is taken as exact). Once the deadline is at most
+  300 s away, the client also reads the ask plainly 200 ms before it, beside the held wait, and takes the first read to find an end,
+  so an end committed before then is reported by the deadline even when the held call's response is delayed. When the deadline cuts
+  the held wait off without an end, the client reads the ask once more, plainly, after the deadline, and counts an end that read finds
+  only by its `ended_at`: one committed in the last moments before the deadline gives exit 0 or 6 (reported slightly after the
+  deadline), whereas one committed after the deadline, whatever its stamp, has an `ended_at` after it and gives the line
+  `A<n> still open → …` and exit **3**, and `board ask show` then shows the later end; an end without an `ended_at` counts only through a
+  read that came back by the deadline. With `--json` the last ask read is printed with the same exit code (if the read after the
+  deadline fails, the ask the plain read saw open is printed, with exit 3). `ended_at` and the deadline are compared across the
+  server's and the client's clocks, as the stamps are. The client's
   request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is

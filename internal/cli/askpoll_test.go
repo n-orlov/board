@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -375,23 +376,43 @@ func heldAskServer(t *testing.T, plain func(n int, w http.ResponseWriter)) (*cli
 	return &client{base: srv.URL, http: srv.Client(), key: "k"}, &reqs
 }
 
-// The deadline cuts a held wait off and the result is the ask as the plain read
-// before the deadline saw it: still open, with no read made after the deadline.
-func TestWaitFetchStopsAtTheDeadlineWithTheAskTheProbeRead(t *testing.T) {
-	c, reqs := heldAskServer(t, func(_ int, w http.ResponseWriter) {
-		_, _ = w.Write([]byte(`{"ref":"A1","state":"open"}`))
+// The deadline cuts a held wait off and the ask is read once more after it: the
+// result is that read's ask, whose ended_at pollAsk judges, and not the one the
+// plain read before the deadline saw.
+func TestWaitFetchReadsTheAskAgainAfterTheDeadline(t *testing.T) {
+	c, reqs := heldAskServer(t, func(n int, w http.ResponseWriter) {
+		_, _ = w.Write([]byte(`{"ref":"A1","state":"open","n":` + strconv.Itoa(n) + `}`))
 	})
 	started := time.Now()
 	a, raw, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond)
 	took := time.Since(started)
-	if err != nil || a.State != "open" || string(raw) != `{"ref":"A1","state":"open"}` {
+	if err != nil || a.State != "open" || string(raw) != `{"ref":"A1","state":"open","n":3}` {
 		t.Fatalf("got %v %s %v", a, raw, err)
 	}
 	if took < 300*time.Millisecond || took > 2*time.Second {
 		t.Errorf("returned after %s, want at the deadline", took)
 	}
-	if len(*reqs) != 2 || (*reqs)[0] != "wait=1" || (*reqs)[1] != "plain" {
+	if len(*reqs) != 3 || (*reqs)[0] != "wait=1" || (*reqs)[1] != "plain" || (*reqs)[2] != "plain" {
 		t.Errorf("requests %v", *reqs)
+	}
+}
+
+// When the read after the deadline fails, the result is the ask the plain read
+// before the deadline saw open; when that one failed too, the error.
+func TestWaitFetchFallsBackToTheProbeWhenTheLastReadFails(t *testing.T) {
+	c, _ := heldAskServer(t, func(n int, w http.ResponseWriter) {
+		if n == 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ref":"A1","state":"open"}`))
+	})
+	if a, raw, err := waitFetch(context.Background(), c, "A1")(1, 300*time.Millisecond); err != nil || a.State != "open" || string(raw) != `{"ref":"A1","state":"open"}` {
+		t.Errorf("got %v %s %v", a, raw, err)
+	}
+	failing, _ := heldAskServer(t, func(_ int, w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) })
+	if _, _, err := waitFetch(context.Background(), failing, "A1")(1, 300*time.Millisecond); err == nil {
+		t.Error("both reads failed, want an error")
 	}
 }
 
@@ -415,9 +436,9 @@ func TestWaitFetchFindsAnEndTheHeldWaitDeliversLate(t *testing.T) {
 	}
 }
 
-// A plain read before the deadline that fails leaves one read after it, so the
+// A plain read before the deadline that fails leaves the read after it, so the
 // result is still the ask as it is then.
-func TestWaitFetchReadsAfterTheDeadlineOnlyWhenTheProbeFailed(t *testing.T) {
+func TestWaitFetchReadsAfterTheDeadlineWhenTheProbeFailed(t *testing.T) {
 	c, reqs := heldAskServer(t, func(n int, w http.ResponseWriter) {
 		if n == 2 {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -565,5 +586,33 @@ func TestAskPollRefusalsKeepTheirExitCodes(t *testing.T) {
 	code, out, errs := runEnv(f.env(srv), "ask", "zz-9", "q", "--poll", "5m")
 	if code != ExitNotFound || out != "" || !strings.Contains(errs, "board task ls") {
 		t.Errorf("got %d %q %q", code, out, errs)
+	}
+}
+
+// endedInTime counts an end by its ended_at whenever it was read, by the time
+// the read came back otherwise, and never an open ask or an ended_at after the
+// deadline.
+func TestEndedInTimeTrustsEndedAtOverTheReadTime(t *testing.T) {
+	deadline := time.Date(2026, 3, 4, 12, 0, 1, 0, time.UTC)
+	stamp := deadline.Add(-time.Second).Format(time.RFC3339Nano)
+	late := deadline.Add(time.Hour)
+	for _, c := range []struct {
+		name   string
+		a      askView
+		readAt time.Time
+		want   bool
+	}{
+		{"ended_at at the deadline, read late", askView{State: "answered", AnsweredAt: stamp, EndedAt: "2026-03-04T12:00:01Z"}, late, true},
+		{"ended_at before the deadline, read late", askView{State: "withdrawn", WithdrawnAt: stamp, EndedAt: "2026-03-04T12:00:00.999Z"}, late, true},
+		{"ended_at 1ms after the deadline, read late", askView{State: "answered", AnsweredAt: stamp, EndedAt: "2026-03-04T12:00:01.001Z"}, late, false},
+		{"ended_at after the deadline, read in time", askView{State: "answered", AnsweredAt: stamp, EndedAt: "2026-03-04T12:00:01.001Z"}, deadline, true},
+		{"no ended_at, read late", askView{State: "withdrawn", WithdrawnAt: stamp}, late, false},
+		{"no ended_at, read in time", askView{State: "withdrawn", WithdrawnAt: stamp}, deadline, true},
+		{"unreadable ended_at, read late", askView{State: "answered", AnsweredAt: stamp, EndedAt: "soon"}, late, false},
+		{"open with an ended_at", askView{State: "open", EndedAt: "2026-03-04T12:00:00Z"}, late, false},
+	} {
+		if got := endedInTime(c.a, deadline, c.readAt); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }

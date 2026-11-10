@@ -58,7 +58,10 @@ func (s Store) Answer(ctx context.Context, actor audit.Actor, principal, ref str
 		out, err = s.answer(ctx, tx, actor, principal, ref, in)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return Ask{}, err
+	}
+	return s.stampEnd(ctx, out), nil
 }
 
 func (s Store) answer(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref string, in Reply) (Ask, error) {
@@ -112,7 +115,29 @@ func (s Store) Withdraw(ctx context.Context, actor audit.Actor, principal, ref, 
 		out, err = s.withdraw(ctx, tx, actor, principal, ref, reason)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return Ask{}, err
+	}
+	return s.stampEnd(ctx, out), nil
+}
+
+// stampEnd records the ended_at of k, which the transaction that answered or
+// withdrew it has just committed, and returns k with it. The clock is read only
+// now, after the commit, and rounded up to the stored whole millisecond, so
+// ended_at is never before the end took effect, which answered_at and
+// withdrawn_at, read inside the transaction, can be by however long the commit
+// took (`board ask --poll` relies on this, SPEC §8.3). The write runs even when
+// the caller has gone and changes nothing once a stamp is set; if it fails, the
+// end stands without one.
+func (s Store) stampEnd(ctx context.Context, k Ask) Ask {
+	ms := store.EncodeBound(s.now())
+	q := s.Store.Dialect().Rebind(`UPDATE asks SET ended_at = ? WHERE id = ? AND ended_at IS NULL`)
+	if _, err := s.Store.Writer().ExecContext(context.WithoutCancel(ctx), q, ms, k.ID); err != nil {
+		return k
+	}
+	at := store.DecodeTime(ms)
+	k.EndedAt = &at
+	return k
 }
 
 func (s Store) withdraw(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref, reason string) (Ask, error) {

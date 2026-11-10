@@ -106,4 +106,10 @@ func TestAnAskDocumentOmitsWhatIsUnsetAndListsNoOptionsAsEmpty(t *testing.T) {
 	if done.Channel == nil || *done.Channel != AskChannel("relay") || done.AskerWaiting || *done.OnBehalfOf != "nik@phone" {
 		t.Errorf("answered ask = %+v", done)
 	}
+	if open.EndedAt != nil {
+		t.Errorf("an open ask has ended_at %v", open.EndedAt)
+	}
+	if ended := o.apiAsk(asks.Ask{State: "withdrawn", Mode: "stop", EndedAt: &at}); ended.EndedAt == nil || !ended.EndedAt.Equal(at) {
+		t.Errorf("ended_at = %v, want %s", ended.EndedAt, at)
+	}
 }

@@ -42,6 +42,7 @@ type askView struct {
 	AnsweredAt     string   `json:"answered_at"`
 	WithdrawnAt    string   `json:"withdrawn_at"`
 	WithdrawReason string   `json:"withdraw_reason"`
+	EndedAt        string   `json:"ended_at"`
 }
 
 // askSubcommands are the words after `board ask` and what runs each; any

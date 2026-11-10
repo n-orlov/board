@@ -1511,6 +1511,11 @@ export interface components {
             /** Format: date-time */
             withdrawn_at?: string;
             withdraw_reason?: string;
+            /**
+             * Format: date-time
+             * @description The server's clock read just after the answer or withdrawal committed, rounded up to the millisecond, so never before the end took effect (`answered_at` and `withdrawn_at` are read before the commit). Absent while the ask is open, and for an end recorded without one.
+             */
+            ended_at?: string;
             /** @description It is open, its mode is `poll` and a long poll on it was seen within the last 60 seconds. */
             asker_waiting: boolean;
         };
