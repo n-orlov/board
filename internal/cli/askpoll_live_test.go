@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -77,7 +78,29 @@ func newLiveAskBoard(t *testing.T) *liveAskBoard {
 		server.WithAsks(b.reads), server.WithStream(f, time.Minute))
 	b.srv = httptest.NewServer(b.delayed(h))
 	t.Cleanup(b.srv.Close)
+	b.warmReaders()
 	return b
+}
+
+// warmReaders opens the server's whole read pool and keeps it idle, so
+// hogReaders takes the connections at the moment it is told to rather than
+// opening them one by one then: under -race on a many-core host that takes
+// longer than the window the readers are to be taken for.
+func (b *liveAskBoard) warmReaders() {
+	pool := b.st.Reader()
+	n := pool.Stats().MaxOpenConnections
+	pool.SetMaxIdleConns(n)
+	conns := make([]*sql.Conn, 0, n)
+	for range n {
+		c, err := pool.Conn(context.Background())
+		if err != nil {
+			b.t.Fatal(err)
+		}
+		conns = append(conns, c)
+	}
+	for _, c := range conns {
+		_ = c.Close()
+	}
 }
 
 // delayed serves h, holding every response to a GET back by b.delay once h is

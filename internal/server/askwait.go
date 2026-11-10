@@ -187,6 +187,7 @@ type waiter struct {
 // is delivered as the read's error.
 func (w *waiter) readAt(at time.Time) <-chan snapshot {
 	out := make(chan snapshot, 1)
+	id := w.k.ID // read here: the wait rereads w.k while the goroutine runs
 	go func() {
 		t := time.NewTimer(time.Until(at))
 		defer t.Stop()
@@ -196,7 +197,7 @@ func (w *waiter) readAt(at time.Time) <-chan snapshot {
 			out <- snapshot{err: w.ctx.Err()}
 			return
 		}
-		k, err := w.store.Get(context.WithoutCancel(w.ctx), w.k.ID)
+		k, err := w.store.Get(context.WithoutCancel(w.ctx), id)
 		out <- snapshot{k: k, err: err}
 	}()
 	return out
