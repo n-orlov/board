@@ -371,6 +371,81 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    // R8, R9: whether an ask's asker is waiting reaches an open Attention view through the stream alone. Each held wait is a
+    // real `GET /asks/<ref>?wait=10`, started after the view showed "asker not waiting".
+    test('an ask shows its asker waiting while a wait is held and leaves its section once answered, without a reload', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `held-${vp.name}`);
+      const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Is the asker waiting?', initiative: slug, mode: 'poll', blocking: true }, 201);
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await expect(item).toContainText(ask.ref, FIVE_SECONDS);
+      await expect(item).toContainText('asker not waiting');
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      const held = api.get(`/api/v1/asks/${ask.ref}?wait=10`);
+      try {
+        await expect(item).toContainText('asker waiting', FIVE_SECONDS);
+        await expect(item).not.toContainText('asker not waiting');
+      } finally {
+        await post(api, `/api/v1/asks/${ask.ref}/answer`, { answer: 'Seen live' }, 200);
+        await held;
+      }
+      await expect(item).toHaveCount(0, FIVE_SECONDS);
+      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('0', FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+      await api.dispose();
+    });
+
+    test('only the ask whose wait is held shows its asker waiting, and a withdrawal while it is held removes it', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `two-${vp.name}`);
+      const first = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'First?', initiative: slug, mode: 'poll' }, 201)).ref;
+      const second = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Second?', initiative: slug, mode: 'poll' }, 201)).ref;
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const row = (ref: string) => section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: ref });
+      await expect(row(first)).toContainText('asker not waiting', FIVE_SECONDS);
+      await expect(row(second)).toContainText('asker not waiting');
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+
+      const held = api.get(`/api/v1/asks/${first}?wait=10`);
+      try {
+        await expect(row(first)).toContainText('asker waiting', FIVE_SECONDS);
+        await expect(row(first)).not.toContainText('asker not waiting');
+        await expect(row(second)).toContainText('asker not waiting');
+      } finally {
+        await post(api, `/api/v1/asks/${first}/withdraw`, { reason: 'No longer needed' }, 200);
+        await held;
+      }
+      await expect(row(first)).toHaveCount(0, FIVE_SECONDS);
+      await expect(row(second)).toContainText('asker not waiting');
+      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('1', FIVE_SECONDS);
+      await api.dispose();
+    });
+
+    test('an ask raised by a wait that is already held appears as asker waiting, and a second wait on another ask follows on its own', async ({ page, playwright, baseURL }) => {
+      const { slug, api } = await ground(playwright, baseURL, `late-${vp.name}`);
+      const first = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Early?', initiative: slug, mode: 'poll' }, 201)).ref;
+      await page.goto(`/#/attention?initiative=${slug}`);
+      const row = (ref: string) => section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: ref });
+      await expect(row(first)).toContainText('asker not waiting', FIVE_SECONDS);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+
+      const second = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Later?', initiative: slug, mode: 'poll' }, 201)).ref;
+      await expect(row(second)).toContainText('asker not waiting', FIVE_SECONDS);
+      const heldSecond = api.get(`/api/v1/asks/${second}?wait=10`);
+      try {
+        await expect(row(second)).toContainText('asker waiting', FIVE_SECONDS);
+        await expect(row(first)).toContainText('asker not waiting');
+      } finally {
+        await post(api, `/api/v1/asks/${second}/answer`, { answer: 'Done' }, 200);
+        await heldSecond;
+      }
+      await expect(row(second)).toHaveCount(0, FIVE_SECONDS);
+      await expect(row(first)).toContainText('asker not waiting');
+      await post(api, `/api/v1/asks/${first}/withdraw`, {}, 200);
+      await api.dispose();
+    });
+
     for (const entry of ['/', '/#/']) {
       test(`${entry} opens the Attention view`, async ({ page }) => {
         await page.goto(entry);
