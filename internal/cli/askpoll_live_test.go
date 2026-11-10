@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -572,6 +573,60 @@ func TestAskPollLiveCountsAnEndCommittedInTimeThoughEveryServerReadIsLate(t *tes
 			}
 			if code != e.code || out != e.out || took < 1200*time.Millisecond {
 				t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", e.withdraw, code, out, took, e.code, e.out)
+			}
+		}
+	}
+}
+
+// An end's commit mark is persisted after the end commits, and the write of it
+// may itself run past the deadline. An end committed in time is exit 0 or 6
+// however that write and the server's reads are delayed (readers all taken
+// across the deadline, or the first read reaching the server only after it),
+// and an end committed after the deadline is exit 3 under the same delays: the
+// mark's lateness never moves an end across the deadline in either direction.
+func TestAskPollLiveMarkWriteHeldPastTheDeadlineDecidesByWhenTheEndCommitted(t *testing.T) {
+	delays := []struct {
+		name    string
+		release time.Duration // when the held mark write is let go
+		late    func(b *liveAskBoard, start time.Time)
+	}{
+		{"readers taken across the deadline", 1500 * time.Millisecond, func(b *liveAskBoard, start time.Time) {
+			b.early = 200 * time.Millisecond
+			b.hogReaders(start, 800*time.Millisecond, 1250*time.Millisecond)
+		}},
+		{"first read after the deadline", 1900 * time.Millisecond, func(b *liveAskBoard, _ time.Time) {
+			b.early = 1600 * time.Millisecond
+		}},
+	}
+	for _, d := range delays {
+		for _, c := range []struct {
+			endAt  time.Duration
+			counts bool
+		}{{600 * time.Millisecond, true}, {1100 * time.Millisecond, false}} {
+			for _, e := range endCases {
+				t.Run(fmt.Sprintf("%s withdraw=%v end=%s", d.name, e.withdraw, c.endAt), func(t *testing.T) {
+					registerMarkHold(t)
+					b := newLiveAskBoard(t)
+					hold := b.holdMarkWrites()
+					start := time.Now()
+					d.late(b, start)
+					go func() {
+						time.Sleep(time.Until(start.Add(d.release)))
+						close(hold.release)
+					}()
+					done := b.endAt(start, c.endAt, e.withdraw)
+					code, out, took := b.runLivePoll()
+					if err := <-done; err != nil {
+						t.Fatal(err)
+					}
+					wantCode, wantOut := e.code, e.out
+					if !c.counts {
+						wantCode, wantOut = ExitTimeout, stillOpen
+					}
+					if code != wantCode || out != wantOut || took < 1200*time.Millisecond {
+						t.Errorf("got %d %q after %s, want %d %q", code, out, took, wantCode, wantOut)
+					}
+				})
 			}
 		}
 	}

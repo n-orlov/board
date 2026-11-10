@@ -1268,8 +1268,10 @@ waits for the database's writer), but whether that read comes late does not chan
 latency, nor every reader being busy across `until`, nor an answer or withdrawal already holding the writer before the
 request reached the server (committing only after `until`), nor the request itself reaching the handler only after
 `until` counts an end that committed after `until`; and an end held across `until` with its last statement run before it, its COMMIT returning only after,
-is never counted. A request handled after `until` that finds the ask ended by such an
-end answers at once with the still-open ask. An end that a
+is never counted. A request handled after `until` that finds the ask ended answers at once with the
+still-open ask unless the end's mark is at or before `until`; when the end has no mark yet (its write is still held up by the
+writer) the request first marks the poll, which queues behind that write, and reads the ask again, so an end whose mark was
+sampled in time but written late counts all the same, as in the next paragraph. An end that a
 read during the hold finds by `until` (it came back at or before `until`) ends the hold at once and counts, whatever its mark; one that such a read finds only after `until` (a wake or
 renewal read that came back late) is replaced by the read at `until`, which is not repeated, and the response is that ask
 as it stood at `until` (judged by (b) alone), however late it reaches the client.

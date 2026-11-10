@@ -136,7 +136,29 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 	if err != nil {
 		return askResult[GetAskResponseObject](err)
 	}
-	return o.read(ctx, k, time.Now(), req.Params.Wait, req.Params.Until), nil
+	readBack := time.Now()
+	if req.Params.Wait != nil {
+		k = o.lateMark(ctx, k, readBack, req.Params.Until)
+	}
+	return o.read(ctx, k, readBack, req.Params.Wait, req.Params.Until), nil
+}
+
+// lateMark is k, an ask a wait with until found already ended by a read that
+// came back after until, with the commit mark of its end taken in when that is
+// at or before until and was still being written when k was read. The write of
+// the poll queues behind any write in flight, as a wait's own end does, so a
+// mark that was sampled in time but persisted late is not lost, and the end is
+// counted; with no such mark k is unchanged and the end stays uncounted.
+func (o askOps) lateMark(ctx context.Context, k asks.Ask, readBack time.Time, until *time.Time) asks.Ask {
+	if until == nil || k.State == domain.AskOpen || k.EndCommitAt != nil || readProves(k.State, readBack, until) {
+		return k
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := o.asks.Touch(ctx, k.ID); err != nil {
+		return k
+	}
+	return adoptedMark(ctx, o.asks, k, *until)
 }
 
 // read answers with the ask k, whose read came back at readBack: at once, or

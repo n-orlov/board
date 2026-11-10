@@ -312,18 +312,24 @@ func (w *waiter) settle(ctx context.Context) (asks.Ask, error) {
 // A mark after until, or none, leaves the snapshot as it is, and the end stays
 // uncounted.
 func (w *waiter) adoptMark(ctx context.Context) {
-	if w.until == nil || w.k.EndCommitAt != nil || ctx.Err() != nil {
-		return
+	if w.until != nil {
+		w.k = adoptedMark(ctx, w.store, w.k, *w.until)
 	}
-	k, err := w.store.Get(ctx, w.k.ID)
-	if err != nil || k.State == domain.AskOpen || k.EndCommitAt == nil || k.EndCommitAt.After(*w.until) {
-		return
+}
+
+// adoptedMark is k with the commit mark of its end taken from a fresh read,
+// when k, an ask found ended, has none and the stored mark is at or before
+// until; otherwise k itself.
+func adoptedMark(ctx context.Context, store *asks.Store, k asks.Ask, until time.Time) asks.Ask {
+	if k.EndCommitAt != nil || ctx.Err() != nil {
+		return k
 	}
-	poll := w.k.PollSeenAt
-	w.k = k
-	if poll != nil {
-		w.k.PollSeenAt = poll
+	got, err := store.Get(ctx, k.ID)
+	if err != nil || got.State == domain.AskOpen || got.EndCommitAt == nil || got.EndCommitAt.After(until) {
+		return k
 	}
+	got.PollSeenAt = k.PollSeenAt
+	return got
 }
 
 func (w *waiter) finish(ctx context.Context) (asks.Ask, error) {

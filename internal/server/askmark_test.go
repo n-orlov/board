@@ -137,6 +137,7 @@ type markCase struct {
 	withdraw bool
 	endAt    time.Duration
 	counts   bool
+	readAt   time.Duration // when the wait's request reaches the server, from until; 0 is at the start
 }
 
 // An end whose COMMIT returned, and whose real-clock mark was sampled, at or
@@ -148,12 +149,30 @@ type markCase struct {
 func TestAWaitCountsAnEndWhoseTimelyMarkIsPersistedAfterUntil(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
 		for _, c := range []markCase{
-			{"answer, mark 400ms early", false, 600 * time.Millisecond, true},
-			{"withdrawal, mark 400ms early", true, 600 * time.Millisecond, true},
-			{"answer, mark 150ms early", false, 850 * time.Millisecond, true},
-			{"withdrawal, mark 150ms early", true, 850 * time.Millisecond, true},
-			{"answer committed 100ms late", false, 1100 * time.Millisecond, false},
-			{"withdrawal committed 100ms late", true, 1100 * time.Millisecond, false},
+			{"answer, mark 400ms early", false, 600 * time.Millisecond, true, 0},
+			{"withdrawal, mark 400ms early", true, 600 * time.Millisecond, true, 0},
+			{"answer, mark 150ms early", false, 850 * time.Millisecond, true, 0},
+			{"withdrawal, mark 150ms early", true, 850 * time.Millisecond, true, 0},
+			{"answer committed 100ms late", false, 1100 * time.Millisecond, false, 0},
+			{"withdrawal committed 100ms late", true, 1100 * time.Millisecond, false, 0},
+		} {
+			t.Run(c.name, func(t *testing.T) { testTimelyMarkPersistedLate(t, leg, dbs, c) })
+		}
+	})
+}
+
+// The same holds when the wait's request reaches the server only after until,
+// finds the end already committed and its mark still being written: that read
+// is no proof (it came back after until), so the wait takes the mark once the
+// write lands, and counts the end only if the mark is at or before until.
+func TestAWaitReachingTheServerAfterUntilCountsAnEndWhoseTimelyMarkIsPersistedLate(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
+		for _, c := range []markCase{
+			{"answer, mark 400ms early", false, 600 * time.Millisecond, true, 100 * time.Millisecond},
+			{"withdrawal, mark 400ms early", true, 600 * time.Millisecond, true, 100 * time.Millisecond},
+			{"answer, mark 150ms early", false, 850 * time.Millisecond, true, 100 * time.Millisecond},
+			{"withdrawal committed 100ms late", true, 1100 * time.Millisecond, false, 150 * time.Millisecond},
+			{"answer committed 100ms late", false, 1100 * time.Millisecond, false, 150 * time.Millisecond},
 		} {
 			t.Run(c.name, func(t *testing.T) { testTimelyMarkPersistedLate(t, leg, dbs, c) })
 		}
@@ -182,6 +201,9 @@ func testTimelyMarkPersistedLate(t *testing.T, leg string, dbs databases, c mark
 	}
 	got := make(chan result, 1)
 	go func() {
+		if c.readAt != 0 {
+			time.Sleep(time.Until(until.Add(c.readAt)))
+		}
 		status, doc := r.getUntil(ref, until)
 		got <- result{status, doc}
 	}()
