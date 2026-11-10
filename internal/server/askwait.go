@@ -285,9 +285,12 @@ func (w *waiter) end() (asks.Ask, error) {
 	return w.finish(context.WithoutCancel(w.ctx))
 }
 
-// settle ends a wait whose ask is the one read as until passed: it is not read
-// again, which would find the ask as it is later. The poll is marked when the
-// writer is free within 5 seconds; the ask is the answer either way.
+// settle ends a wait whose ask is the one read as until passed: the ask is not
+// read again for its state, which would find it as it is later. The poll is
+// marked when the writer is free within 5 seconds; the ask is the answer
+// either way. The write waits for the writer, so a commit mark whose write was
+// still in flight when until passed has landed by the time it returns, and the
+// mark is then taken in (adoptMark).
 func (w *waiter) settle(ctx context.Context) (asks.Ask, error) {
 	if w.err != nil {
 		return w.k, w.err
@@ -297,7 +300,30 @@ func (w *waiter) settle(ctx context.Context) (asks.Ask, error) {
 	if at, err := w.store.MarkPoll(ctx, w.k.ID); err == nil {
 		w.k.PollSeenAt = &at
 	}
+	w.adoptMark(ctx)
 	return w.k, nil
+}
+
+// adoptMark takes the commit mark of the ask's end from a read made after the
+// poll's write, when the snapshot taken as until passed had none, and the mark
+// is at or before until. The mark is a real-clock sample read after the end's
+// COMMIT returned, so being at or before until proves the end committed by
+// then however late it was written or read, and the end cannot change after.
+// A mark after until, or none, leaves the snapshot as it is, and the end stays
+// uncounted.
+func (w *waiter) adoptMark(ctx context.Context) {
+	if w.until == nil || w.k.EndCommitAt != nil || ctx.Err() != nil {
+		return
+	}
+	k, err := w.store.Get(ctx, w.k.ID)
+	if err != nil || k.State == domain.AskOpen || k.EndCommitAt == nil || k.EndCommitAt.After(*w.until) {
+		return
+	}
+	poll := w.k.PollSeenAt
+	w.k = k
+	if poll != nil {
+		w.k.PollSeenAt = poll
+	}
 }
 
 func (w *waiter) finish(ctx context.Context) (asks.Ask, error) {

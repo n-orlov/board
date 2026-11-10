@@ -45,6 +45,8 @@ type liveAskBoard struct {
 	frozen time.Time
 	// postDelay delays the end's first clock read after its commit this long
 	postDelay time.Duration
+	// onGet, when set, runs as every read of the ask reaches the server
+	onGet func(r *http.Request)
 }
 
 func newLiveAskBoard(t *testing.T) *liveAskBoard {
@@ -108,8 +110,11 @@ func (b *liveAskBoard) warmReaders() {
 func (b *liveAskBoard) delayed(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
-		d, early := b.delay, b.early
+		d, early, onGet := b.delay, b.early, b.onGet
 		b.mu.Unlock()
+		if r.Method == http.MethodGet && onGet != nil {
+			onGet(r)
+		}
 		if r.Method == http.MethodGet && early > 0 {
 			select {
 			case <-r.Context().Done():
