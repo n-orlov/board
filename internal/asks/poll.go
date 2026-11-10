@@ -37,26 +37,37 @@ func (s Store) Touch(ctx context.Context, id string) error {
 // ask_polling event of a change to waiting are one transaction on the writer.
 func (s Store) MarkPoll(ctx context.Context, id string) (time.Time, error) {
 	at := store.EncodeTime(s.now())
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		before, err := s.find(ctx, tx, id)
-		if errors.Is(err, ErrNotFound) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		q := s.Store.Dialect().Rebind(`UPDATE asks SET poll_seen_at = ? WHERE id = ?`)
-		if _, err := tx.ExecContext(ctx, q, at, before.ID); err != nil {
-			return fmt.Errorf("record the poll: %w", err)
-		}
-		if before.State != domain.AskOpen || before.Mode != domain.AskModePoll || s.Waiting(before) {
-			return nil
-		}
-		return s.appendPolling(ctx, tx, before)
-	})
+	err := s.inTx(ctx, func(tx *sql.Tx) error { return s.markPollTx(ctx, tx, id, at) })
 	if err != nil {
 		return time.Time{}, fmt.Errorf("record the poll: %w", err)
 	}
 	return store.DecodeTime(at), nil
+}
+
+// markPollTx stores the poll mark at on the ask with this ULID inside tx, and
+// appends the ask_polling event when that makes the asker waiting. An id that
+// names no ask is not an error.
+func (s Store) markPollTx(ctx context.Context, tx *sql.Tx, id string, at int64) error {
+	before, err := s.find(ctx, tx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	q := s.Store.Dialect().Rebind(`UPDATE asks SET poll_seen_at = ? WHERE id = ?`)
+	if _, err := tx.ExecContext(ctx, q, at, before.ID); err != nil {
+		return fmt.Errorf("record the poll: %w", err)
+	}
+	if !s.startsWaiting(before) {
+		return nil
+	}
+	return s.appendPolling(ctx, tx, before)
+}
+
+// startsWaiting reports whether a poll mark makes k's asker waiting: k is an
+// open poll ask whose asker is not yet counted as waiting.
+func (s Store) startsWaiting(k Ask) bool {
+	return k.State == domain.AskOpen && k.Mode == domain.AskModePoll && !s.Waiting(k)
 }
 
 // appendPolling appends the ask_polling event of k, made by its asker.
