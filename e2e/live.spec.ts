@@ -217,6 +217,66 @@ for (const vp of viewports) {
       expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
     });
 
+    // R8, R9: an ask's state, and whether its asker is waiting, reaches an open task page and initiative page through
+    // the stream alone. The held wait is a real `GET /asks/<ref>?wait=10`, started after the page showed "not waiting".
+    for (const view of ['task page', 'initiative page'] as const) {
+      test(`the ${view} shows an ask raised, its asker waiting while a wait is held, and the ask answered, without a reload`, async ({ page, playwright, baseURL }) => {
+        const api = await apiAs(playwright, baseURL);
+        const slug = `e2e-live-ask-${view === 'task page' ? 't' : 'i'}-${vp.name}`;
+        await post(api, '/api/v1/initiatives', { slug, title: `Live ask ${vp.name}` }, 201);
+        const { ref: task } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Asked live' }, 201);
+        await page.goto(view === 'task page' ? `/#/t/${task}` : `/#/i/${slug}`);
+        await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+        await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+        const { ref } = await post<{ ref: string }>(api, '/api/v1/asks', { task, question: `Raised live on the ${view}?`, mode: 'poll' }, 201);
+        const ask = page.locator(`[data-testid=ask][data-ref=${ref}]`);
+        await expect(ask).toBeVisible(FIVE_SECONDS);
+        await expect(ask.getByTestId('ask-line')).toHaveText('asker not waiting');
+
+        const held = api.get(`/api/v1/asks/${ref}?wait=10`);
+        try {
+          await expect(ask.getByTestId('ask-line')).toHaveText('asker waiting', FIVE_SECONDS);
+        } finally {
+          await post(api, `/api/v1/asks/${ref}/answer`, { answer: 'Seen live' }, 200);
+          await held;
+        }
+        if (view === 'task page') {
+          await expect(ask.getByTestId('ask-state')).toHaveText('Answered', FIVE_SECONDS);
+          await expect(ask.getByTestId('ask-answer')).toContainText('Seen live');
+          await expect(ask.getByTestId('ask-line')).toContainText('answered');
+        } else {
+          await expect(ask).toBeHidden(FIVE_SECONDS); // the initiative page lists open asks only
+        }
+        expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+      });
+    }
+
+    test('the task page shows an ask withdrawn through the API while its wait is held, and a second ask on its own line', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-ask-w-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live ask withdrawn ${vp.name}` }, 201);
+      const { ref: task } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Two asks' }, 201);
+      const first = (await post<{ ref: string }>(api, '/api/v1/asks', { task, question: 'First?', mode: 'poll' }, 201)).ref;
+      const second = (await post<{ ref: string }>(api, '/api/v1/asks', { task, question: 'Second?', mode: 'poll' }, 201)).ref;
+      await page.goto(`/#/t/${task}`);
+      const line = (ref: string) => page.locator(`[data-testid=ask][data-ref=${ref}]`).getByTestId('ask-line');
+      await expect(line(first)).toHaveText('asker not waiting', FIVE_SECONDS);
+      await expect(line(second)).toHaveText('asker not waiting');
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+
+      const held = api.get(`/api/v1/asks/${first}?wait=10`);
+      try {
+        await expect(line(first)).toHaveText('asker waiting', FIVE_SECONDS);
+        await expect(line(second)).toHaveText('asker not waiting');
+      } finally {
+        await post(api, `/api/v1/asks/${first}/withdraw`, { reason: 'No longer needed' }, 200);
+        await held;
+      }
+      await expect(line(first)).toHaveText('withdrawn: No longer needed', FIVE_SECONDS);
+      await expect(line(second)).toHaveText('asker not waiting');
+    });
+
     test('the Notes view shows a note posted through the API within 5 s, and one posted while offline once back online', async ({ page, context, playwright, baseURL }) => {
       const api = await apiAs(playwright, baseURL);
       const slug = `e2e-live-notes-${vp.name}`;
