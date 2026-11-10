@@ -62,7 +62,10 @@ func invalid(err error, next string) error {
 // withdrawn. PollSeenAt is when a long poll on the ask last held or returned.
 // EndedAt is the clock read just after the transaction that answered or
 // withdrew the ask committed (stampEnd): nil while it is open, and for an end
-// whose stamp was never written.
+// whose stamp was never written. EndCommitAt is the real clock read inside
+// that transaction as the last thing before its commit (endTx), to the
+// nanosecond: the end had not committed at any instant at or before it. It is
+// nil while the ask is open, and for an end recorded before it was kept.
 type Ask struct {
 	N              int64
 	ID             string
@@ -89,6 +92,7 @@ type Ask struct {
 	WithdrawReason string
 	PollSeenAt     *time.Time
 	EndedAt        *time.Time
+	EndCommitAt    *time.Time
 }
 
 // Store reads and writes the asks of one database.
@@ -107,7 +111,7 @@ func (s Store) now() time.Time {
 
 const selectAsk = `SELECT k.n, k.id, k.task_id, ti.slug, t.seq, k.initiative_id, i.slug, a.handle, k.actor_id,
 	k.question, k.details, k.options, k.mode, k.blocking, k.state, k.answer, ab.handle, ob.handle, k.channel,
-	k.created_at, k.answered_at, k.withdrawn_at, k.withdraw_reason, k.poll_seen_at, k.ended_at
+	k.created_at, k.answered_at, k.withdrawn_at, k.withdraw_reason, k.poll_seen_at, k.ended_at, k.end_commit_ns
 	FROM asks k JOIN actors a ON a.id = k.actor_id
 	LEFT JOIN tasks t ON t.id = k.task_id LEFT JOIN initiatives ti ON ti.id = t.initiative_id
 	LEFT JOIN initiatives i ON i.id = k.initiative_id
@@ -129,11 +133,11 @@ func scan(r rowScanner) (Ask, error) {
 		options                                    string
 		answer, answeredBy, onBehalf, channel, why sql.NullString
 		created                                    int64
-		answered, withdrawn, polled, ended         sql.NullInt64
+		answered, withdrawn, polled, ended, commit sql.NullInt64
 	)
 	err := r.Scan(&k.N, &k.ID, &taskID, &taskSlug, &seq, &iniID, &iniSlug, &k.Actor, &k.ActorID,
 		&k.Question, &k.Details, &options, &k.Mode, &k.Blocking, &k.State, &answer, &answeredBy, &onBehalf, &channel,
-		&created, &answered, &withdrawn, &why, &polled, &ended)
+		&created, &answered, &withdrawn, &why, &polled, &ended, &commit)
 	if err != nil {
 		return Ask{}, err
 	}
@@ -149,6 +153,10 @@ func scan(r rowScanner) (Ask, error) {
 	k.Answer, k.AnsweredBy, k.OnBehalfOf, k.Channel, k.WithdrawReason = answer.String, answeredBy.String, onBehalf.String, channel.String, why.String
 	k.CreatedAt = store.DecodeTime(created)
 	k.AnsweredAt, k.WithdrawnAt, k.PollSeenAt, k.EndedAt = timePtr(answered), timePtr(withdrawn), timePtr(polled), timePtr(ended)
+	if commit.Valid {
+		at := time.Unix(0, commit.Int64).UTC()
+		k.EndCommitAt = &at
+	}
 	return k, nil
 }
 

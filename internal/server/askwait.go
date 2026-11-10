@@ -50,7 +50,7 @@ type askWaitResponse struct {
 
 // VisitGetAskResponse holds the request until the ask is answered or withdrawn,
 // the wait runs out or the client leaves, then answers with the ask as it then
-// is. The write deadline is moved past the wait first, so a server write
+// is, or, with until, as it stood at until (atUntil). The write deadline is moved past the wait first, so a server write
 // timeout shorter than the wait does not cut it.
 func (r askWaitResponse) VisitGetAskResponse(w http.ResponseWriter) error {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(r.max + streamWriteWindow))
@@ -61,7 +61,17 @@ func (r askWaitResponse) VisitGetAskResponse(w http.ResponseWriter) error {
 	case r.ctx.Err() != nil:
 		return nil // the client left
 	}
-	return GetAsk200JSONResponse(r.ops.apiAsk(k)).VisitGetAskResponse(w)
+	return GetAsk200JSONResponse(r.ops.apiAsk(atUntil(k, r.until))).VisitGetAskResponse(w)
+}
+
+// atUntil is k as it stood at until, when there is one: an end whose commit
+// mark is at or after until had not committed by it, however early its stamps
+// and whenever the wait read it, so k is then still open (asks.Ask.AsOf).
+func atUntil(k asks.Ask, until *time.Time) asks.Ask {
+	if until == nil {
+		return k
+	}
+	return k.AsOf(*until)
 }
 
 func (r askWaitResponse) touchEvery() time.Duration {

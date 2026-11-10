@@ -1480,9 +1480,11 @@ paths:
         within the feed's tail interval. While a wait is held the ask's `poll_seen_at` is set to now at the start, at
         least every 30 seconds and at the end, which is what makes `asker_waiting` true for a `poll` ask. With
         `until` as well (allowed with `wait` only, else 400), the hold also ends at that instant, by the server's
-        clock, when it comes before the N seconds do: the server then reads the ask as the instant passes, on a read
-        no write can hold up, and answers with it, so the response is the ask as it stood at `until` however late it
-        reaches the client. An end that a read during the hold finds only after `until` is replaced by that read.
+        clock, when it comes before the N seconds do, and the response is the ask as it stood at `until`, however late
+        the server reads it and however late it reaches the client: an answer or withdrawal whose transaction reached its
+        commit only at or after `until` (by the commit mark it writes as its last act before committing) is left out,
+        the ask answered still open, and one that committed before `until` is in it. A request handled after `until`
+        that finds the ask ended that way answers at once with the still-open ask.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -1498,8 +1500,8 @@ paths:
           in: query
           required: false
           description: >-
-            The instant the hold ends at, if before `wait` runs out; the response is then the ask as read when it
-            passes. Only with `wait`.
+            The instant the hold ends at, if before `wait` runs out; the response is then the ask as it stood at
+            that instant. Only with `wait`.
           schema:
             type: string
             format: date-time

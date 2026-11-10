@@ -140,11 +140,13 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 }
 
 // read answers with the ask k: at once, or after a wait when one was asked for
-// and the ask is still open, ending at until if that comes first.
+// and the ask is still open, ending at until if that comes first. With until,
+// an ask found ended is answered as it stood at until (atUntil): open, without
+// a wait, when its end had not committed by then.
 func (o askOps) read(ctx context.Context, k asks.Ask, wait *int, until *time.Time) GetAskResponseObject {
 	switch {
 	case wait == nil || k.State != domain.AskOpen:
-		return GetAsk200JSONResponse(o.apiAsk(k))
+		return GetAsk200JSONResponse(o.apiAsk(atUntil(k, until)))
 	case o.waits == nil:
 		return failure(http.StatusServiceUnavailable, "waiting for an ask is not available")
 	}

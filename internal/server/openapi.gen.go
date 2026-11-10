@@ -1815,7 +1815,7 @@ type GetAskParams struct {
 	// Wait Seconds to hold the request while the ask is open, 1 to 300.
 	Wait *int `form:"wait,omitempty" json:"wait,omitempty"`
 
-	// Until The instant the hold ends at, if before `wait` runs out; the response is then the ask as read when it passes. Only with `wait`.
+	// Until The instant the hold ends at, if before `wait` runs out; the response is then the ask as it stood at that instant. Only with `wait`.
 	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
 }
 

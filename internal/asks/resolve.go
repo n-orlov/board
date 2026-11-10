@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
@@ -53,10 +54,8 @@ func (s Store) Answer(ctx context.Context, actor audit.Actor, principal, ref str
 	if err != nil {
 		return Ask{}, err
 	}
-	var out Ask
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		out, err = s.answer(ctx, tx, actor, principal, ref, in)
-		return err
+	out, err := s.endTx(ctx, func(tx *sql.Tx) (Ask, error) {
+		return s.answer(ctx, tx, actor, principal, ref, in)
 	})
 	if err != nil {
 		return Ask{}, err
@@ -109,16 +108,42 @@ func (s Store) Withdraw(ctx context.Context, actor audit.Actor, principal, ref, 
 		return Ask{}, InvalidError{Msg: fmt.Sprintf("reason must be at most %d characters, got %d", domain.MaxWithdrawNote, n),
 			Next: "Send a shorter reason, or leave it out."}
 	}
-	var out Ask
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		out, err = s.withdraw(ctx, tx, actor, principal, ref, reason)
-		return err
+	out, err := s.endTx(ctx, func(tx *sql.Tx) (Ask, error) {
+		return s.withdraw(ctx, tx, actor, principal, ref, reason)
 	})
 	if err != nil {
 		return Ask{}, err
 	}
 	return s.stampEnd(ctx, out), nil
+}
+
+// commitClock is the real clock an end's commit mark reads: the deadline a
+// long poll is judged by is a real instant too, whatever clock Now is.
+var commitClock = time.Now
+
+// endTx runs f, which answers or withdraws one ask, in a transaction on the
+// writer, and commits when f returns nil. As the last thing before the commit,
+// after every statement and clock read of f, it writes the ask's commit mark
+// (end_commit_ns): the real clock then, to the nanosecond. The end therefore
+// commits after its mark, and a read made at any instant at or before the mark
+// cannot have seen it (SPEC 4.5, 7.2).
+func (s Store) endTx(ctx context.Context, f func(*sql.Tx) (Ask, error)) (Ask, error) {
+	var out Ask
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		k, err := f(tx)
+		if err != nil {
+			return err
+		}
+		at := commitClock().UTC()
+		q := s.Store.Dialect().Rebind(`UPDATE asks SET end_commit_ns = ? WHERE id = ?`)
+		if _, err := tx.ExecContext(ctx, q, at.UnixNano(), k.ID); err != nil {
+			return fmt.Errorf("mark the end: %w", err)
+		}
+		k.EndCommitAt = &at
+		out = k
+		return nil
+	})
+	return out, err
 }
 
 // stampEnd records the ended_at of k, which the transaction that answered or

@@ -26,6 +26,7 @@ import (
 // at the start of a wait, or as the wait's until passes.
 type liveAskBoard struct {
 	t     *testing.T
+	path  string // the database file
 	st    *store.Store
 	reads *asks.Store // the server's
 	w     *asks.Store // the ends', with clock as its clock
@@ -46,7 +47,8 @@ type liveAskBoard struct {
 }
 
 func newLiveAskBoard(t *testing.T) *liveAskBoard {
-	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
+	path := filepath.Join(t.TempDir(), "b.db")
+	st, err := store.Open("sqlite://" + path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +70,7 @@ func newLiveAskBoard(t *testing.T) *liveAskBoard {
 		t.Fatal(err)
 	}
 	go f.Run(ctx)
-	b := &liveAskBoard{t: t, st: st, reads: &asks.Store{Store: st}}
+	b := &liveAskBoard{t: t, path: path, st: st, reads: &asks.Store{Store: st}}
 	b.w = &asks.Store{Store: st, Now: b.clock}
 	verify := func(context.Context, string) (string, error) { return "key:x", nil }
 	h := server.NewHandler(func(context.Context) error { return nil }, verify, nil, nil,
@@ -403,5 +405,146 @@ func TestAskPollLiveOpenAtTheDeadlineExitsThree(t *testing.T) {
 	code, out, took := b.runLivePoll()
 	if code != ExitTimeout || out != stillOpen || took < time.Second || took > 3*time.Second {
 		t.Errorf("got %d %q after %s, want exit 3 at the deadline", code, out, took)
+	}
+}
+
+// watcher is a second store on b's database, with its own connections, so the
+// test can read the committed state of the ask while the server's readers and
+// writer are all taken.
+func (b *liveAskBoard) watcher() *asks.Store {
+	st, err := store.Open("sqlite://" + b.path)
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	b.t.Cleanup(func() { _ = st.Close() })
+	return &asks.Store{Store: st}
+}
+
+// stateBy reports the committed state of the ask at after from start, read
+// through k.
+func stateBy(k *asks.Store, start time.Time, after time.Duration) <-chan string {
+	out := make(chan string, 1)
+	go func() {
+		time.Sleep(time.Until(start.Add(after)))
+		got, err := k.Get(context.Background(), "A1")
+		if err != nil {
+			out <- "unread: " + err.Error()
+			return
+		}
+		out <- got.State
+	}()
+	return out
+}
+
+// hogReaders takes every connection of the server's read pool from `from` to
+// `to` after start, so no read the server makes in between can run.
+func (b *liveAskBoard) hogReaders(start time.Time, from, to time.Duration) {
+	go func() {
+		time.Sleep(time.Until(start.Add(from)))
+		pool := b.st.Reader()
+		var held []interface{ Close() error }
+		for range pool.Stats().MaxOpenConnections {
+			c, err := pool.Conn(context.Background())
+			if err != nil {
+				b.t.Error(err)
+				break
+			}
+			held = append(held, c)
+		}
+		time.Sleep(time.Until(start.Add(to)))
+		for _, c := range held {
+			_ = c.Close()
+		}
+	}()
+}
+
+// livePollEnd runs one poll in which the end takes the writer at endAt (its
+// transaction then held open, its stamps frozen there) and commits once
+// released at release; prep sets up whatever else the case delays. It checks
+// the ask was still open at the deadline and committed by the end of the
+// poll, and returns the poll's exit code, output and duration.
+func livePollEnd(t *testing.T, withdraw bool, endAt, release time.Duration, prep func(b *liveAskBoard, start time.Time)) (int, string, time.Duration) {
+	b := newLiveAskBoard(t)
+	watch := b.watcher()
+	hold := make(chan struct{})
+	b.holdTx = hold
+	start := time.Now()
+	prep(b, start)
+	done := b.endAt(start, endAt, withdraw)
+	atDeadline := stateBy(watch, start, 1050*time.Millisecond)
+	go func() {
+		time.Sleep(time.Until(start.Add(release)))
+		close(hold)
+	}()
+	code, out, took := b.runLivePoll()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if s := <-atDeadline; s != "open" {
+		t.Fatalf("withdraw=%v: the ask was %q at the deadline, want still open", withdraw, s)
+	}
+	if k, err := watch.Get(context.Background(), "A1"); err != nil || k.State == "open" || k.EndCommitAt == nil {
+		t.Fatalf("withdraw=%v: the end did not commit with its mark (%+v, %v)", withdraw, k, err)
+	}
+	return code, out, took
+}
+
+// An end that holds the writer before the poll's first read reaches the
+// server, and commits after the deadline, is exit 3 with the still-open line
+// even when that first read reaches the server only well after the deadline,
+// by which time the end is committed: the server answers with the ask as it
+// stood at the deadline, not as its first read finds it.
+func TestAskPollLiveQueuedFirstReadDoesNotCountAnEndCommittedAfterTheDeadline(t *testing.T) {
+	for _, e := range endCases {
+		code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, _ time.Time) {
+			b.early = 1600 * time.Millisecond
+		})
+		if code != ExitTimeout || out != stillOpen || took < 1600*time.Millisecond {
+			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the queued read is answered", e.withdraw, code, out, took)
+		}
+	}
+}
+
+// The same end is exit 3 when the poll's first read reaches the server in
+// time but every reader of the server is taken from just before the deadline
+// to well after the end commits, so the server's read at the deadline runs
+// only then and finds the end: when it is read does not decide the answer.
+func TestAskPollLiveLateReadAtTheDeadlineDoesNotCountAnEndCommittedAfterIt(t *testing.T) {
+	for _, e := range endCases {
+		code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
+			b.early = 200 * time.Millisecond
+			b.hogReaders(start, 900*time.Millisecond, 1250*time.Millisecond)
+		})
+		if code != ExitTimeout || out != stillOpen || took < 1250*time.Millisecond {
+			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the readers are free", e.withdraw, code, out, took)
+		}
+	}
+}
+
+// Its counterpart: an end committed before the deadline is exit 0 or 6 when
+// the poll's first read reaches the server only after the deadline, or when
+// the server's readers are all taken across the deadline, so the server reads
+// it late either way.
+func TestAskPollLiveCountsAnEndCommittedInTimeThoughEveryServerReadIsLate(t *testing.T) {
+	for _, late := range []func(b *liveAskBoard, start time.Time){
+		func(b *liveAskBoard, _ time.Time) { b.early = 1600 * time.Millisecond },
+		func(b *liveAskBoard, start time.Time) {
+			b.early = 200 * time.Millisecond
+			b.hogReaders(start, 900*time.Millisecond, 1250*time.Millisecond)
+		},
+	} {
+		for _, e := range endCases {
+			b := newLiveAskBoard(t)
+			start := time.Now()
+			late(b, start)
+			done := b.endAt(start, 700*time.Millisecond, e.withdraw)
+			code, out, took := b.runLivePoll()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if code != e.code || out != e.out || took < 1200*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", e.withdraw, code, out, took, e.code, e.out)
+			}
+		}
 	}
 }
