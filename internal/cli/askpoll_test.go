@@ -184,36 +184,45 @@ func TestPollAskOnlyCountsAnEndEffectiveByTheDeadline(t *testing.T) {
 
 // A deadline with a sub-millisecond part shares its millisecond with stamps of
 // ends made both before and after it, since the server floors a stamp to the
-// millisecond: only a stamp whose whole millisecond is over by the deadline
-// counts, and a stamp carrying its own sub-millisecond part is taken as exact,
-// whenever the server's answer reaches the client.
-func TestPollAskCountsAMillisecondStampOnlyWhenItsMillisecondIsOverByTheDeadline(t *testing.T) {
+// millisecond. Only a stamp that places the end after the deadline drops it: a
+// millisecond stamp at or after the deadline, or an exact stamp after it. A
+// millisecond stamp in the deadline's own millisecond but before it leaves the
+// server's read as the deadline passed, which reported the end, to decide, so
+// the end counts, whenever the server's answer reaches the client.
+func TestPollAskDropsOnlyAnEndItsStampPlacesAfterTheDeadline(t *testing.T) {
 	start := time.Date(2026, 11, 9, 20, 30, 0, 0, time.UTC)
-	deadline := start.Add(time.Second + 500*time.Microsecond) // 20:30:01.0005
+	subMs := start.Add(time.Second + 500*time.Microsecond) // 20:30:01.0005
+	wholeMs := start.Add(time.Second)                      // 20:30:01.000
 	for _, c := range []struct {
-		state string
-		stamp string
-		code  int
+		deadline time.Time
+		state    string
+		stamp    string
+		code     int
 	}{
-		{"answered", "2026-11-09T20:30:00.999Z", ExitOK},
-		{"withdrawn", "2026-11-09T20:30:00.999Z", ExitConflict},
-		{"answered", "2026-11-09T20:30:01Z", ExitTimeout}, // made at .0006 or at .0004: not provably in time
-		{"withdrawn", "2026-11-09T20:30:01.000Z", ExitTimeout},
-		{"answered", "2026-11-09T20:30:01.002Z", ExitTimeout},
-		{"withdrawn", "2026-11-09T20:30:01.0004Z", ExitConflict},
-		{"answered", "2026-11-09T20:30:01.0005Z", ExitOK},
-		{"answered", "2026-11-09T20:30:01.0006Z", ExitTimeout},
+		{subMs, "answered", "2026-11-09T20:30:00.999Z", ExitOK},
+		{subMs, "withdrawn", "2026-11-09T20:30:00.999Z", ExitConflict},
+		{subMs, "answered", "2026-11-09T20:30:01Z", ExitOK}, // the server's read at .0005 found it
+		{subMs, "withdrawn", "2026-11-09T20:30:01.000Z", ExitConflict},
+		{subMs, "answered", "2026-11-09T20:30:01.001Z", ExitTimeout}, // made at .001 or later
+		{subMs, "withdrawn", "2026-11-09T20:30:01.001Z", ExitTimeout},
+		{subMs, "answered", "2026-11-09T20:30:01.002Z", ExitTimeout},
+		{subMs, "withdrawn", "2026-11-09T20:30:01.0004Z", ExitConflict},
+		{subMs, "answered", "2026-11-09T20:30:01.0005Z", ExitOK},
+		{subMs, "answered", "2026-11-09T20:30:01.0006Z", ExitTimeout},
+		{wholeMs, "answered", "2026-11-09T20:30:00.999Z", ExitOK},
+		{wholeMs, "withdrawn", "2026-11-09T20:30:01.000Z", ExitTimeout}, // made at the deadline or up to 1 ms after
+		{wholeMs, "answered", "2026-11-09T20:30:01Z", ExitTimeout},
 	} {
-		for _, readAt := range []time.Time{deadline, deadline.Add(time.Microsecond), deadline.Add(time.Minute)} {
+		for _, readAt := range []time.Time{c.deadline, c.deadline.Add(time.Microsecond), c.deadline.Add(time.Minute)} {
 			clock := &pollClock{t: start}
 			fetch := func(_ int, _ time.Time) read {
 				clock.t = readAt // the server's answer reaches the client then
 				return read{a: endedView(c.state, c.stamp)}
 			}
-			got := pollAsk(openRead(), deadline, clock.now, fetch)
+			got := pollAsk(openRead(), c.deadline, clock.now, fetch)
 			if got.err != nil || pollExit(got.a.State) != c.code {
-				t.Errorf("%s at %s back at %s: got %q exit %d (%v), want exit %d", c.state, c.stamp,
-					readAt.Format(time.RFC3339Nano), got.a.State, pollExit(got.a.State), got.err, c.code)
+				t.Errorf("%s at %s, deadline %s, back at %s: got %q exit %d (%v), want exit %d", c.state, c.stamp,
+					c.deadline.Format(time.RFC3339Nano), readAt.Format(time.RFC3339Nano), got.a.State, pollExit(got.a.State), got.err, c.code)
 			}
 		}
 	}
@@ -257,7 +266,9 @@ func TestPollAskCountsTheServersAnswerHoweverLateItArrives(t *testing.T) {
 	}
 }
 
-func TestPollDeadlineRoundsUpToAWholeMillisecond(t *testing.T) {
+// The deadline is exactly D after the raise, to the nanosecond: never rounded
+// to the server's millisecond or moved in any other way.
+func TestPollDeadlineIsExactlyTheRequestedDuration(t *testing.T) {
 	at := func(ns int) time.Time { return time.Date(2026, 3, 4, 12, 0, 0, ns, time.UTC) }
 	for _, c := range []struct {
 		now     time.Time
@@ -265,56 +276,75 @@ func TestPollDeadlineRoundsUpToAWholeMillisecond(t *testing.T) {
 		want    time.Time
 	}{
 		{at(0), 600, at(0).Add(600 * time.Second)},
-		{at(400_000), 600, at(1_000_000).Add(600 * time.Second)},
-		{at(1), 1, at(1_000_000).Add(time.Second)},
-		{at(999_999_999), 0, at(999_999_999).Truncate(time.Second).Add(time.Second)},
+		{at(400_000), 600, time.Date(2026, 3, 4, 12, 10, 0, 400_000, time.UTC)},
+		{at(1), 1, time.Date(2026, 3, 4, 12, 0, 1, 1, time.UTC)},
+		{at(123_000), 1, time.Date(2026, 3, 4, 12, 0, 1, 123_000, time.UTC)},
+		{at(999_999_999), 0, at(999_999_999)},
 		{at(7_000_000), 30, at(7_000_000).Add(30 * time.Second)},
 	} {
 		if got := pollDeadline(c.now, c.seconds); !got.Equal(c.want) {
 			t.Errorf("pollDeadline(%s, %d) = %s, want %s", c.now.Format(time.RFC3339Nano), c.seconds, got.Format(time.RFC3339Nano), c.want.Format(time.RFC3339Nano))
 		}
-		if got := pollDeadline(c.now, c.seconds); got.Before(c.now.Add(time.Duration(c.seconds) * time.Second)) {
-			t.Errorf("pollDeadline(%s, %d) = %s is before the requested deadline", c.now, c.seconds, got)
-		}
 	}
 }
 
-// Raised at 12:00:00.0004 with --poll 10m, the deadline is 12:10:00.001: an end
-// the server stamps 12:10:00.000 was made before it, even when after
-// 12:10:00.0004, and one stamped 12:10:00.001 was not.
-func TestAskPollRoundsTheDeadlineUpToTheServersMillisecond(t *testing.T) {
+// Raised at 12:00:00.000123 with --poll 1s, the deadline is 12:00:01.000123 and
+// every call sends exactly that as until. The fake server answers as the real
+// one does: with the ask as it read it at until, an end showing only when it
+// committed by then, stamped at its millisecond. An end 200 µs after the
+// deadline is exit 3, one 50 µs before it, in the same millisecond, is 0 or 6,
+// and so is one well before it.
+func TestAskPollKeepsTheRequestedDeadlineToTheMicrosecond(t *testing.T) {
+	raisedAt := time.Date(2026, 11, 10, 12, 0, 0, 123_000, time.UTC)
+	deadline := raisedAt.Add(time.Second)
 	for _, c := range []struct {
-		state, field, stamp, out string
-		code                     int
+		state, field, out string
+		endAt             time.Time
+		code              int
 	}{
-		{"answered", "answered_at", "2026-03-04T12:10:00.000Z", "ok A1 answered by nik: x\n", ExitOK},
-		{"withdrawn", "withdrawn_at", "2026-03-04T12:10:00.000Z", "A1 withdrawn\n", ExitConflict},
-		{"answered", "answered_at", "2026-03-04T12:10:00.001Z", "A1 still open → board ask show A1\n", ExitTimeout},
-		{"withdrawn", "withdrawn_at", "2026-03-04T12:10:00.001Z", "A1 still open → board ask show A1\n", ExitTimeout},
+		{"answered", "answered_at", "A1 still open → board ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
+		{"withdrawn", "withdrawn_at", "A1 still open → board ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
+		{"answered", "answered_at", "A1 still open → board ask show A1\n", deadline.Add(time.Nanosecond), ExitTimeout},
+		{"answered", "answered_at", "ok A1 answered by nik: x\n", deadline.Add(-50 * time.Microsecond), ExitOK},
+		{"withdrawn", "withdrawn_at", "A1 withdrawn\n", deadline.Add(-50 * time.Microsecond), ExitConflict},
+		{"answered", "answered_at", "ok A1 answered by nik: x\n", deadline.Add(-300 * time.Millisecond), ExitOK},
+		{"withdrawn", "withdrawn_at", "A1 withdrawn\n", deadline.Add(-300 * time.Millisecond), ExitConflict},
 	} {
+		var untils []string
 		f := &fakeBoard{handler: func(w http.ResponseWriter, r *http.Request) {
 			body := strings.Replace(askAnswer, `"mode":"stop"`, `"mode":"poll"`, 1)
 			if r.Method == http.MethodGet {
-				body = strings.Replace(body, `"state":"open"`, `"state":"`+c.state+`","`+c.field+`":"`+c.stamp+`","answer":"x","answered_by":"nik"`, 1)
+				q := r.URL.Query().Get("until")
+				untils = append(untils, q)
+				until, err := time.Parse(time.RFC3339Nano, q)
+				if err == nil && !c.endAt.After(until) {
+					stamp := c.endAt.Truncate(time.Millisecond).Format(time.RFC3339Nano)
+					body = strings.Replace(body, `"state":"open"`, `"state":"`+c.state+`","`+c.field+`":"`+stamp+`","answer":"x","answered_by":"nik"`, 1)
+				}
 			}
 			_, _ = w.Write([]byte(body))
 		}}
 		srv := httptest.NewServer(f)
 		old := nowFn
-		clock := time.Date(2026, 3, 4, 12, 0, 0, 400_000, time.UTC)
 		calls := 0
-		nowFn = func() time.Time {
+		nowFn = func() time.Time { // the raise, then 400 ms before the deadline until a call comes back after it
 			calls++
-			if calls == 1 {
-				return clock
+			switch {
+			case calls == 1:
+				return raisedAt
+			case len(untils) == 0:
+				return deadline.Add(-400 * time.Millisecond)
 			}
-			return clock.Add(10*time.Minute - time.Second) // one second before the requested deadline
+			return deadline.Add(75 * time.Millisecond)
 		}
-		code, out, _ := runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "10m")
+		code, out, _ := runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "1s")
 		nowFn = old
 		srv.Close()
 		if code != c.code || out != c.out {
-			t.Errorf("%s stamped %s: got %d %q, want %d %q", c.state, c.stamp, code, out, c.code, c.out)
+			t.Errorf("%s at %s: got %d %q, want %d %q", c.state, c.endAt.Format(time.RFC3339Nano), code, out, c.code, c.out)
+		}
+		if len(untils) != 1 || untils[0] != "2026-11-10T12:00:01.000123Z" {
+			t.Errorf("%s at %s: until sent %q, want exactly the requested deadline 2026-11-10T12:00:01.000123Z", c.state, c.endAt.Format(time.RFC3339Nano), untils)
 		}
 	}
 }

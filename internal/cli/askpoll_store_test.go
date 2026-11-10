@@ -28,31 +28,43 @@ func storedAskView(k asks.Ask) askView {
 }
 
 // An end persisted by the real store, whose stamps are floored to the
-// millisecond, counts only when its stamp proves it was made by the deadline:
-// an answer or withdrawal made after a deadline that falls inside a millisecond
-// is exit 3, even when the stored stamp is that same millisecond and so not
-// after the deadline. (Which end the server reports for the deadline at all is
-// the server's read as the deadline passes: askpoll_live_test.go.)
-func TestPollAskAgainstTheStoreCountsOnlyAnEndStampedByTheDeadline(t *testing.T) {
+// millisecond, counts only when it was committed by the deadline: the fetch
+// plays the server, reading the ask at readAt (the deadline itself, or a
+// moment later when its timer is late), and the end commits at its own
+// instant, before or after that read. An end committed after the deadline is
+// exit 3, by the server's read when that read is on time, and by its stamp,
+// which then is at or after the deadline, when that read is late. One
+// committed before the deadline is exit 0 or 6 however late it is read and
+// however late the answer arrives, even inside the deadline's own millisecond,
+// where its stamp cannot say on which side of the deadline it lies.
+func TestPollAskAgainstTheStoreCountsOnlyAnEndCommittedByTheDeadline(t *testing.T) {
 	ctx := context.Background()
 	asker := audit.Actor{Handle: "claude@host"}
 	op := audit.Actor{Handle: "nik@host", Operator: true}
+	const late = 5 * time.Millisecond // a server read made this long after the deadline
 	for _, c := range []struct {
 		name     string
 		deadline time.Time
-		endAt    time.Time // the stamp the store's clock gives the end
+		endAt    time.Time     // the stamp the store's clock gives the end, and its commit
+		readLate time.Duration // how long after the deadline the server reads the ask
 		withdraw bool
 		code     int
 	}{
-		{"answered 100µs after a sub-ms deadline", at(1_000_500), at(1_000_600), false, ExitTimeout},
-		{"withdrawn 100µs after a sub-ms deadline", at(1_000_500), at(1_000_600), true, ExitTimeout},
-		{"answered 1ns after a whole-ms deadline", at(1_000_000), at(1_000_000).Add(time.Nanosecond), false, ExitTimeout},
-		{"withdrawn 900µs after a whole-ms deadline", at(1_000_000), at(1_000_900), true, ExitTimeout},
-		{"answered 2ms after the deadline", at(1_000_500), at(1_002_500), false, ExitTimeout},
-		{"answered 1ms before a sub-ms deadline", at(1_000_500), at(999_500), false, ExitOK},
-		{"withdrawn 2ms before a sub-ms deadline", at(1_000_500), at(998_500), true, ExitConflict},
-		{"answered 1ns before a whole-ms deadline", at(1_000_000), at(1_000_000).Add(-time.Nanosecond), false, ExitOK},
-		{"withdrawn 300µs before a whole-ms deadline", at(1_000_000), at(999_700), true, ExitConflict},
+		{"answered 100µs after a sub-ms deadline", at(1_000_500), at(1_000_600), 0, false, ExitTimeout},
+		{"withdrawn 100µs after a sub-ms deadline", at(1_000_500), at(1_000_600), 0, true, ExitTimeout},
+		{"answered 200µs after a sub-ms deadline", at(1_000_123), at(1_000_323), 0, false, ExitTimeout},
+		{"answered 1ns after a whole-ms deadline", at(1_000_000), at(1_000_000).Add(time.Nanosecond), late, false, ExitTimeout},
+		{"withdrawn 900µs after a whole-ms deadline", at(1_000_000), at(1_000_900), late, true, ExitTimeout},
+		{"answered 2ms after the deadline", at(1_000_500), at(1_002_500), late, false, ExitTimeout},
+		{"withdrawn 1ms after a sub-ms deadline", at(1_000_500), at(1_001_500), late, true, ExitTimeout},
+		{"answered 100µs before a sub-ms deadline, same millisecond", at(1_000_500), at(1_000_400), 0, false, ExitOK},
+		{"withdrawn 100µs before a sub-ms deadline, same millisecond", at(1_000_500), at(1_000_400), 0, true, ExitConflict},
+		{"answered 50µs before a sub-ms deadline, read late", at(1_000_123), at(1_000_073), late, false, ExitOK},
+		{"withdrawn 50µs before a sub-ms deadline, read late", at(1_000_123), at(1_000_073), late, true, ExitConflict},
+		{"answered 1ms before a sub-ms deadline", at(1_000_500), at(999_500), late, false, ExitOK},
+		{"withdrawn 2ms before a sub-ms deadline", at(1_000_500), at(998_500), late, true, ExitConflict},
+		{"answered 1ns before a whole-ms deadline", at(1_000_000), at(1_000_000).Add(-time.Nanosecond), late, false, ExitOK},
+		{"withdrawn 300µs before a whole-ms deadline", at(1_000_000), at(999_700), late, true, ExitConflict},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
@@ -69,9 +81,9 @@ func TestPollAskAgainstTheStoreCountsOnlyAnEndStampedByTheDeadline(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			clock := &pollClock{t: at(0)}
-			fetch := func(_ int, _ time.Time) read {
+			end := func() {
 				now = c.endAt
+				var err error
 				if c.withdraw {
 					_, err = s.Withdraw(ctx, asker, "key:x", k.Ref, "")
 				} else {
@@ -80,8 +92,22 @@ func TestPollAskAgainstTheStoreCountsOnlyAnEndStampedByTheDeadline(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
-				clock.t = c.deadline.Add(75 * time.Millisecond) // the answer arrives after the deadline
+			}
+			clock := &pollClock{t: at(0)}
+			fetch := func(_ int, until time.Time) read {
+				if !until.Equal(c.deadline) {
+					t.Errorf("until = %s, want the deadline %s", until.Format(time.RFC3339Nano), c.deadline.Format(time.RFC3339Nano))
+				}
+				readAt := until.Add(c.readLate)
+				committedFirst := !c.endAt.After(readAt)
+				if committedFirst {
+					end()
+				}
 				got, err := s.Get(ctx, k.Ref)
+				if !committedFirst {
+					end() // commits after the server's read
+				}
+				clock.t = c.deadline.Add(75 * time.Millisecond) // the answer arrives after the deadline
 				return read{a: storedAskView(got), err: err}
 			}
 			r := pollAsk(read{a: storedAskView(k)}, c.deadline, clock.now, fetch)

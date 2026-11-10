@@ -64,8 +64,9 @@ type askFetch func(wait int, until time.Time) read
 // pollAsk waits for the ask to leave `open` by repeating fetch until the
 // deadline. now is the clock. It returns the last read: still open when the
 // deadline came first, as the server read the ask when it passed, whatever a
-// later read would find. An answer or withdrawal stamped after the deadline
-// (endedAfter) did not take effect by it, so the ask is then still open too.
+// later read would find. An answer or withdrawal whose stamp places it after
+// the deadline (endedAfter) did not take effect by it, so the ask is then
+// still open too.
 func pollAsk(first read, deadline time.Time, now func() time.Time, fetch askFetch) read {
 	r := first
 	for r.err == nil && !r.ended() {
@@ -86,12 +87,14 @@ func pollAsk(first read, deadline time.Time, now func() time.Time, fetch askFetc
 // says only that the end happened somewhere in [s, s+1ms).
 const stampPrecision = time.Millisecond
 
-// endedAfter says a was answered or withdrawn after deadline, or may have
-// been: a whole-millisecond stamp counts as effective by the deadline only when
-// its whole millisecond is over by then, since an end later in that millisecond
-// is stored with the same stamp. A stamp carrying a sub-millisecond part is
-// taken as exact. An ask that is open, or whose stamp is missing or unreadable,
-// did not end after it.
+// endedAfter says a's stamp places its answer or withdrawal after deadline. A
+// whole-millisecond stamp s does so when s is at or after the deadline: the end
+// then happened at s or up to a millisecond later. A stamp carrying a
+// sub-millisecond part is taken as exact. A stamp in the millisecond the
+// deadline falls in, but before it, is no proof either way (the end happened
+// before or after the deadline), so the server's read as the deadline passed,
+// which is what reported the end, decides: it counts. An ask that is open, or
+// whose stamp is missing or unreadable, did not end after it.
 func endedAfter(a askView, deadline time.Time) bool {
 	stamp := ""
 	switch a.State {
@@ -105,21 +108,15 @@ func endedAfter(a askView, deadline time.Time) bool {
 		return false
 	}
 	if at.Truncate(stampPrecision).Equal(at) {
-		return at.Add(stampPrecision).After(deadline)
+		return !at.Before(deadline)
 	}
 	return at.After(deadline)
 }
 
-// pollDeadline is the deadline of a --poll of seconds raised at now: now plus
-// seconds, rounded up to a whole millisecond, the server's stamp precision. An
-// end the server stamps before it is then told apart exactly from one at or
-// after it, and every end up to now plus seconds is before it.
+// pollDeadline is the deadline of a --poll of seconds raised at now: exactly
+// now plus seconds, to the nanosecond, never rounded or otherwise moved.
 func pollDeadline(now time.Time, seconds int64) time.Time {
-	d := now.Add(time.Duration(seconds) * time.Second).Round(0)
-	if t := d.Truncate(stampPrecision); t.Before(d) {
-		return t.Add(stampPrecision)
-	}
-	return d
+	return now.Add(time.Duration(seconds) * time.Second).Round(0)
 }
 
 // askPoll raises the ask as a poll ask, then waits for its end up to seconds.

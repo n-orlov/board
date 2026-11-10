@@ -1239,7 +1239,7 @@ the ask at once if it is not `open`, otherwise holds the request until it is ans
 state) or N seconds pass (200 with the still-open ask). A `wait` outside the range is refused before the ask is looked up; a valid one on an ask that does not exist is 404.
 
 `&until=<instant>` (RFC 3339, allowed with `wait` only: `until` alone is 400 with a `next`) is a deadline for the hold, by
-the server's clock: when it comes before the N seconds run out (it may also be already past, or a fraction of a second
+the server's clock, taken at its full precision (fractional seconds to the nanosecond, never rounded to the millisecond): when it comes before the N seconds run out (it may also be already past, or a fraction of a second
 away), the hold ends at `until` instead, and the response is the ask as the server reads it as `until` passes. That read
 runs on the readers, by its own timer, which is armed as the request is handled, before the wait makes any write: marking the
 poll at the start waits for the database's writer, and an answer or withdrawal already holding it (committing only after `until`)
@@ -1564,9 +1564,9 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `show`, `ls` or `withdraw` is the subcommand and any other starts a new ask; flags may precede the task.
 - `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
   bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
-  `GET /api/v1/asks/<ref>?wait=N&until=<deadline>` calls (§7.2) until the deadline: `D` after the raise, rounded up to a whole
-  millisecond (the precision of the server's stamps, §2), so it is never earlier than `D` after the raise. Every call carries the
-  deadline as `until` and asks for at most 300 s (the server's cap). Once the deadline is at most 300 s away, the call asks for the
+  `GET /api/v1/asks/<ref>?wait=N&until=<deadline>` calls (§7.2) until the deadline: exactly `D` after the raise, to the
+  nanosecond, never rounded to the server's millisecond or moved in any other way. Every call carries the deadline as `until`
+  at its full precision (RFC 3339 with its fractional seconds) and asks for at most 300 s (the server's cap). Once the deadline is at most 300 s away, the call asks for the
   time left rounded up to a whole second (the server takes no shorter wait) and the server ends it at the deadline itself, so the
   poll stays active to the actual deadline, sub-second remainder included. Further away, a call asks for what lies beyond one capped
   call (at most 300 s, at least 1 s), so it ends a whole 300 s before the deadline and the last call is always one the server ends at
@@ -1582,9 +1582,12 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   database's writer, so that the server's first write for the poll waited for it, before the poll's first call reached the server; `board ask show` then shows the later end. The only read time that
   matters is the server's read as the deadline passes; it comes as the server's timer fires, which is an instant (the timer's
   latency, normally well under a millisecond) after the deadline, and an end that commits inside that instant is counted as
-  committed by the deadline. The end's stamp is used only against the deadline: the server floors it to the millisecond, so a stamp
-  `s` counts as in time only when `s + 1 ms ≤ deadline` (one with its own sub-millisecond part is taken as exact), and an end stamped
-  later gives exit 3 too. The deadline is compared on the server's clock (`until`), as the stamps are. With `--json` the last ask
+  committed by the deadline. The end's stamp is used only to drop an end it places after the deadline: the server floors it to the
+  millisecond, so a stamp `s` at or after the deadline (the end happened at `s` or up to 1 ms later) gives exit 3, and so does a
+  stamp with its own sub-millisecond part after the deadline (taken as exact). A stamp in the deadline's own millisecond but
+  before the deadline cannot say on which side of the deadline the end lies, so the server's read as the deadline passed, which
+  reported it, decides: an end committed before the deadline in that millisecond gives exit 0 or 6, and one committed after it
+  is not in that read and gives exit 3. The deadline is compared on the server's clock (`until`), as the stamps are. With `--json` the last ask
   read is printed with the same exit code. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is

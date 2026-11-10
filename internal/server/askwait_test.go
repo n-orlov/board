@@ -15,6 +15,7 @@ import (
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/feed"
 	"github.com/n-orlov/board/internal/store"
+	"github.com/oapi-codegen/runtime"
 )
 
 // testClock is a clock the test moves.
@@ -484,5 +485,23 @@ func TestAWaitOnAnOpenAskWithoutAFeedAnswers503AndOnAnAnsweredOneAnswersAtOnce(t
 	got = o.read(context.Background(), asks.Ask{State: "open"}, nil, nil)
 	if _, ok := got.(GetAsk200JSONResponse); !ok {
 		t.Errorf("an open ask without wait = %#v, want the ask at once", got)
+	}
+}
+
+// until is bound to the instant it names to the nanosecond, sub-millisecond
+// part included, the way the generated handler binds it: the read at until is
+// timed at the client's deadline itself, never at a rounded one.
+func TestUntilKeepsItsSubMillisecondPart(t *testing.T) {
+	for in, want := range map[string]time.Time{
+		"2026-11-10T12:00:01.000123Z":       time.Date(2026, 11, 10, 12, 0, 1, 123_000, time.UTC),
+		"2026-11-10T12:00:01.000000001Z":    time.Date(2026, 11, 10, 12, 0, 1, 1, time.UTC),
+		"2026-11-10T14:00:01.9999999+02:00": time.Date(2026, 11, 10, 12, 0, 1, 999_999_900, time.UTC),
+	} {
+		var until *time.Time
+		err := runtime.BindQueryParameterWithOptions("form", true, false, "until", url.Values{"until": {in}}, &until,
+			runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+		if err != nil || until == nil || !until.Equal(want) {
+			t.Errorf("until=%s bound to %v (%v), want %s", in, until, err, want.Format(time.RFC3339Nano))
+		}
 	}
 }
