@@ -146,7 +146,11 @@ func WithNotes(st *notes.Store) Option {
 
 // WithAttention serves GET /api/v1/attention from st; without it the operation answers 503.
 func WithAttention(st *attention.Store) Option {
-	return func(o *operations) { o.attentionOps = attentionOps{attention: st}; o.reasons = st }
+	return func(o *operations) {
+		o.attentionOps = attentionOps{attention: st}
+		o.reasons = st
+		o.needs = st
+	}
 }
 
 // WithCursors serves PUT /api/v1/cursors/{stream} from st and lets `since=cursor`

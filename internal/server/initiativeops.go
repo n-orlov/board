@@ -7,6 +7,7 @@ import (
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
@@ -36,6 +37,8 @@ type initiativeOps struct {
 	tasks *tasks.Store
 	// leases counts the live leases of an initiative's tasks.
 	leases *leases.Store
+	// needs derives the tasks that need a person; nil means none do.
+	needs *attention.Store
 }
 
 // ready answers 503 when the operations have no store behind them.
@@ -142,13 +145,13 @@ func listFailure(err error) (ListInitiativesResponseObject, error) {
 }
 
 // listItem is the list entry of i with the counts of its tasks and its live leases.
-func listItem(i initiatives.Initiative, c tasks.Counts, live int) InitiativeListItem {
+func listItem(i initiatives.Initiative, c tasks.Counts, live, attn int) InitiativeListItem {
 	a := apiInitiative(i)
 	return InitiativeListItem{
 		Id: a.Id, Ref: a.Ref, Slug: a.Slug, Title: a.Title, Description: a.Description,
 		Status: InitiativeListItemStatus(a.Status), Tags: a.Tags, TargetStart: a.TargetStart, TargetEnd: a.TargetEnd,
 		CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt, ClosedAt: a.ClosedAt, ClosedBy: a.ClosedBy,
-		Counts: TaskCounts{Open: c.Open, Done: c.Done, Closed: c.Closed}, LiveLeases: live,
+		Counts: TaskCounts{Open: c.Open, Done: c.Done, Closed: c.Closed}, LiveLeases: live, AttentionCount: attn,
 	}
 }
 
@@ -166,9 +169,13 @@ func (o initiativeOps) listItems(ctx context.Context, page initiatives.Page) ([]
 	if err != nil {
 		return nil, err
 	}
+	attn, err := o.attentionCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]InitiativeListItem, len(page.Items))
 	for i, it := range page.Items {
-		items[i] = listItem(it, counts[it.ID], live[it.ID])
+		items[i] = listItem(it, counts[it.ID], live[it.ID], attn[it.Slug])
 	}
 	return items, nil
 }
@@ -254,7 +261,11 @@ func (o initiativeOps) GetInitiative(ctx context.Context, req GetInitiativeReque
 	case err != nil:
 		return nil, err
 	}
-	return GetInitiative200JSONResponse(apiInitiative(got)), nil
+	n, err := o.attentionCount(ctx, got.Slug)
+	if err != nil {
+		return nil, err
+	}
+	return GetInitiative200JSONResponse(detail(apiInitiative(got), n)), nil
 }
 
 func initiativeField[T any](m Maybe[T]) initiatives.Field[T] {
@@ -363,4 +374,14 @@ func (o initiativeOps) ReopenInitiative(ctx context.Context, req ReopenInitiativ
 		return closeFailure(req.Slug, err)
 	}
 	return ReopenInitiative200JSONResponse(apiInitiative(got)), nil
+}
+
+// detail is a with the number of its tasks that need attention.
+func detail(a Initiative, attn int) InitiativeDetail {
+	return InitiativeDetail{
+		Id: a.Id, Ref: a.Ref, Slug: a.Slug, Title: a.Title, Description: a.Description,
+		Status: InitiativeDetailStatus(a.Status), Tags: a.Tags, TargetStart: a.TargetStart, TargetEnd: a.TargetEnd,
+		CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt, ClosedAt: a.ClosedAt, ClosedBy: a.ClosedBy,
+		AttentionCount: attn,
+	}
 }

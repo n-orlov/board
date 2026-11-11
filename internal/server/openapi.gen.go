@@ -175,6 +175,24 @@ func (e InitiativeStatus) Valid() bool {
 	}
 }
 
+// Defines values for InitiativeDetailStatus.
+const (
+	InitiativeDetailStatusClosed InitiativeDetailStatus = "closed"
+	InitiativeDetailStatusOpen   InitiativeDetailStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the InitiativeDetailStatus enum.
+func (e InitiativeDetailStatus) Valid() bool {
+	switch e {
+	case InitiativeDetailStatusClosed:
+		return true
+	case InitiativeDetailStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InitiativeListItemStatus.
 const (
 	InitiativeListItemStatusClosed InitiativeListItemStatus = "closed"
@@ -1000,6 +1018,9 @@ type Initiative struct {
 // InitiativeStatus defines model for Initiative.Status.
 type InitiativeStatus string
 
+// InitiativeAttentionCount How many of the initiative's tasks have a non-empty `attention` list (stranded, asking or done and not closed). A task counts once however many reasons it has.
+type InitiativeAttentionCount = int
+
 // InitiativeClose defines model for InitiativeClose.
 type InitiativeClose struct {
 	// Force Close the tasks that are not closed as `dropped` and then the initiative. Without it, an initiative with such a task is not closed.
@@ -1029,6 +1050,50 @@ type InitiativeCreate struct {
 	Title string `json:"title"`
 }
 
+// InitiativeDetail An initiative with the number of its tasks that need attention.
+type InitiativeDetail struct {
+	// AttentionCount How many of the initiative's tasks have a non-empty `attention` list (stranded, asking or done and not closed). A task counts once however many reasons it has.
+	AttentionCount InitiativeAttentionCount `json:"attention_count"`
+
+	// ClosedAt When it was closed. Absent while it is open.
+	ClosedAt *time.Time `json:"closed_at,omitempty"`
+
+	// ClosedBy The handle of the actor that closed it. Absent while it is open.
+	ClosedBy  *string   `json:"closed_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy The handle of the actor that created it.
+	CreatedBy string `json:"created_by"`
+
+	// Description Markdown. Empty when none was given.
+	Description string `json:"description"`
+
+	// Id The initiative's ULID.
+	Id string `json:"id"`
+
+	// Ref The short ref, which is the slug.
+	Ref string `json:"ref"`
+
+	// Slug The unique slug, 2 to 40 characters of `a-z`, `0-9` and `-`.
+	//
+	// Examples: phone-onboard
+	Slug   string                 `json:"slug"`
+	Status InitiativeDetailStatus `json:"status"`
+
+	// Tags The tags, sorted.
+	Tags []string `json:"tags"`
+
+	// TargetEnd The planned end. Absent when none was given.
+	TargetEnd *openapi_types.Date `json:"target_end,omitempty"`
+
+	// TargetStart The planned start. Absent when none was given.
+	TargetStart *openapi_types.Date `json:"target_start,omitempty"`
+	Title       string              `json:"title"`
+}
+
+// InitiativeDetailStatus defines model for InitiativeDetail.Status.
+type InitiativeDetailStatus string
+
 // InitiativeList A page of initiatives.
 type InitiativeList struct {
 	// Items The initiatives of the page, ordered by id.
@@ -1040,6 +1105,9 @@ type InitiativeList struct {
 
 // InitiativeListItem An initiative of a list, with the counts of its tasks and its live leases.
 type InitiativeListItem struct {
+	// AttentionCount How many of the initiative's tasks have a non-empty `attention` list (stranded, asking or done and not closed). A task counts once however many reasons it has.
+	AttentionCount InitiativeAttentionCount `json:"attention_count"`
+
 	// ClosedAt When it was closed. Absent while it is open.
 	ClosedAt *time.Time `json:"closed_at,omitempty"`
 
@@ -5165,7 +5233,7 @@ type GetInitiativeResponseObject interface {
 	VisitGetInitiativeResponse(w http.ResponseWriter) error
 }
 
-type GetInitiative200JSONResponse Initiative
+type GetInitiative200JSONResponse InitiativeDetail
 
 func (response GetInitiative200JSONResponse) VisitGetInitiativeResponse(w http.ResponseWriter) error {
 

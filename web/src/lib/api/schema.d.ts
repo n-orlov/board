@@ -177,7 +177,7 @@ export interface paths {
         };
         /**
          * List the initiatives
-         * @description A page of initiatives ordered by id (creation order). `tag` may repeat and keeps the initiatives that carry every tag given. `limit` is 1 to 1000, default 100. `after` is the id or slug of the last initiative of the previous page; the response's `next_after` is the value to send, and is absent on the last page. `status` is `open` (the default), `closed` or `all`. `closed_within` keeps the initiatives closed in the last 7d, 30d, 90d or an integer of days, and needs `status` `closed` or `all` (with `all` the open initiatives stay); with `open` it is 400. Each item carries the `counts` of its tasks by status and its `live_leases`. Before it reads, the list expires the leases whose `expires_at` has passed.
+         * @description A page of initiatives ordered by id (creation order). `tag` may repeat and keeps the initiatives that carry every tag given. `limit` is 1 to 1000, default 100. `after` is the id or slug of the last initiative of the previous page; the response's `next_after` is the value to send, and is absent on the last page. `status` is `open` (the default), `closed` or `all`. `closed_within` keeps the initiatives closed in the last 7d, 30d, 90d or an integer of days, and needs `status` `closed` or `all` (with `all` the open initiatives stay); with `open` it is 400. Each item carries the `counts` of its tasks by status, its `live_leases` and its `attention_count`. Before it reads, the list expires the leases whose `expires_at` has passed.
          */
         get: operations["listInitiatives"];
         put?: never;
@@ -201,7 +201,7 @@ export interface paths {
         };
         /**
          * Read an initiative
-         * @description The initiative whose slug (its ref) or ULID is given.
+         * @description The initiative whose slug (its ref) or ULID is given, with its `attention_count`: how many of its tasks have a non-empty `attention` list (see `GET /api/v1/tasks`).
          */
         get: operations["getInitiative"];
         put?: never;
@@ -997,8 +997,15 @@ export interface components {
             /** @description The handle of the actor that closed it. Absent while it is open. */
             closed_by?: string;
         };
+        /** @description How many of the initiative's tasks have a non-empty `attention` list (stranded, asking or done and not closed). A task counts once however many reasons it has. */
+        InitiativeAttentionCount: number;
+        /** @description An initiative with the number of its tasks that need attention. */
+        InitiativeDetail: components["schemas"]["Initiative"] & {
+            attention_count: components["schemas"]["InitiativeAttentionCount"];
+        };
         /** @description An initiative of a list, with the counts of its tasks and its live leases. */
         InitiativeListItem: components["schemas"]["Initiative"] & {
+            attention_count: components["schemas"]["InitiativeAttentionCount"];
             counts: components["schemas"]["TaskCounts"];
             /** @description How many live leases sit on the initiative's tasks. */
             live_leases: number;
@@ -2153,7 +2160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Initiative"];
+                    "application/json": components["schemas"]["InitiativeDetail"];
                 };
             };
             400: components["responses"]["BadRequest"];

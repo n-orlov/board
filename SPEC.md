@@ -919,7 +919,13 @@ unknown task is **404**.
   `live_leases` 0. It answers **503** without the tasks and leases stores, which it counts with.
 - Each item of the list is an initiative (below) plus `counts` `{open, done, closed}`, how many tasks the initiative
   holds in each status (all zero for none), and `live_leases`, how many live leases sit on those tasks (a lease past its
-  `expires_at` is not live). The single-initiative reads and writes do not carry them.
+  `expires_at` is not live), and `attention_count`, how many of its tasks have a non-empty
+  `attention` list (§6.4), a task counting once however many reasons it has and a closed task never (0 for none).
+  `GET /api/v1/initiatives/{slug}` carries `attention_count` too, with the same value as the list item for that
+  initiative; it does not carry `counts` or `live_leases`, and the other single-initiative reads and writes carry
+  none of the three. The count is derived at the instant of the request by the same derivation as the tasks'
+  `attention` lists (`internal/attention`), so the list and the initiative agree with `GET /api/v1/tasks`; without
+  the attention store it is 0.
 - An initiative is `{id, ref, slug, title, description, status, tags, target_start?, target_end?,
   created_by, created_at, closed_at?, closed_by?}`: `ref` is the slug, `tags` are sorted, `created_by`
   is the creating actor's handle, absent fields are omitted.

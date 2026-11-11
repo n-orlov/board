@@ -96,6 +96,7 @@
                 "auth.go",
                 "cursorops.go",
                 "eventops.go",
+                "initiativeops.go",
                 "metaops.go",
                 "noteops.go",
                 "nowops.go",
@@ -138,6 +139,7 @@
                     "attentionops.go",
                     "cursorops.go",
                     "eventops.go",
+                    "initiativeops.go",
                     "metaops.go",
                     "noteops.go",
                     "nowops.go"
