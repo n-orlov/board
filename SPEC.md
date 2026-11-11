@@ -722,7 +722,7 @@ expired (§5.1):
   leases by expiry, overdue watches by `next_check_at` (the one most recently due first), conflicts
   by their newest lease; ties go to the later row (conflicts: the resource name).
 - A lease is listed as expired when it is `expired`, has no `acked_at`, its task is not closed and no lease of any state
-  and holder started on its task after it (by `started_at`, ties to the later lease number). The last outcome of a done task is that of its last
+  and holder started on its task after it (by `started_at`, ties to the larger lease `id`). The last outcome of a done task is that of its last
   ended lease (nothing when none ended). An overdue watch is a `watch` task that is not closed and
   whose `next_check_at` is past; its last check is its latest `check_recorded` event.
 - A conflict is a resource that two or more live leases hold (§5.2, so two leases of one actor on
