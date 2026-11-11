@@ -42,6 +42,7 @@ type initiative struct {
 	CreatedAt   string   `json:"created_at"`
 	ClosedAt    string   `json:"closed_at"`
 	ClosedBy    string   `json:"closed_by"`
+	Attention   int      `json:"attention_count"`
 }
 
 type initiativePage struct {
@@ -203,11 +204,14 @@ func printInitiativeLines(stdout, stderr io.Writer, items []json.RawMessage, mor
 	return ExitOK
 }
 
-// initiativeLine is the one-line form: slug, status, title and the tags if any.
+// initiativeLine is the one-line form: slug, status, title, the tags if any and ` !N` when N tasks need attention.
 func initiativeLine(in initiative) string {
 	line := in.Slug + "  " + in.Status + "  " + in.Title
 	if len(in.Tags) > 0 {
 		line += "  [" + strings.Join(in.Tags, ",") + "]"
+	}
+	if in.Attention > 0 {
+		line += " !" + strconv.Itoa(in.Attention)
 	}
 	return line
 }

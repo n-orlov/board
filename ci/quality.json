@@ -114,6 +114,7 @@
                 "attention.go",
                 "cli.go",
                 "initedit.go",
+                "initiatives.go",
                 "leases.go",
                 "notes.go",
                 "now.go",
@@ -167,6 +168,7 @@
                     "args.go",
                     "cli.go",
                     "initedit.go",
+                    "initiatives.go",
                     "tree.go"
                 ],
                 "views": [

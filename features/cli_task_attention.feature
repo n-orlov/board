@@ -95,3 +95,16 @@ Feature: Attention first in board task ls and board task show
     When I run the client 'board task show aa-5 --json' as actor "claude@laptop"
     Then stdout JSON path "stranded_lease.ref" is "L1"
     And stdout JSON path "attention.0.reason" is "stranded"
+
+  Scenario: init ls marks an initiative with its attention count and leaves a quiet one unmarked
+    When I run the client 'board init add bb "Quiet one" --tag calm' as actor "claude@laptop"
+    And I run the client 'board init ls' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is:
+      """
+      aa  open  First one !6
+      bb  open  Quiet one  [calm]
+      """
+    When I run the client 'board init ls --json' as actor "claude@laptop"
+    Then stdout JSON path "0.attention_count" is "6"
+    And stdout JSON path "1.attention_count" is "0"

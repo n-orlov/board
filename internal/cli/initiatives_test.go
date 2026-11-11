@@ -353,3 +353,20 @@ func TestPrintJSONReportsAnUnencodableValue(t *testing.T) {
 		t.Fatalf("got %d %q %q", code, out.String(), errb.String())
 	}
 }
+
+func TestInitiativeLineAppendsTheAttentionCountOnlyWhenNotZero(t *testing.T) {
+	cases := []struct {
+		in   initiative
+		want string
+	}{
+		{initiative{Slug: "aa", Status: "open", Title: "T"}, "aa  open  T"},
+		{initiative{Slug: "aa", Status: "open", Title: "T", Attention: 1}, "aa  open  T !1"},
+		{initiative{Slug: "aa", Status: "open", Title: "T", Tags: []string{"x", "y"}, Attention: 12}, "aa  open  T  [x,y] !12"},
+		{initiative{Slug: "aa", Status: "open", Title: "T", Tags: []string{"x"}}, "aa  open  T  [x]"},
+	}
+	for _, c := range cases {
+		if got := initiativeLine(c.in); got != c.want {
+			t.Errorf("initiativeLine(%+v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

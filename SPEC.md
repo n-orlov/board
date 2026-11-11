@@ -1527,7 +1527,9 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   created` (`--json`: the created object instead). A taken slug, a bad slug and a bad tag each exit 1 with the server's
   message and, for a taken slug, `→ board init show <slug>`.
 - `board init ls [--tag t]... [--limit N|--all] [--json]` prints one line per initiative in creation order,
-  `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A tag
+  `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A line
+  ends with ` !<count>` when the initiative's `attention_count` (§6.3, the number of its tasks that need attention)
+  is not zero and carries nothing for a zero count; `board init show` prints the same line. A tag
   given more than once keeps the initiatives that carry every tag. It shows 20 by default, `--limit N` (N ≥ 1)
   changes the cap and `--all` removes it (both together are a usage error); when more exist the last line is
   `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array. `--status
