@@ -62,18 +62,8 @@ func doneLeases(outcome string, force bool) leaseRule {
 		if err != nil {
 			return err
 		}
-		var others []leases.Lease
-		for _, l := range live {
-			if l.ActorID != c.actorID {
-				others = append(others, l)
-			}
-		}
-		if len(others) > 0 && !force {
-			held := make([]LeaseHeld, len(others))
-			for i, l := range others {
-				held[i] = LeaseHeld{Ref: l.Ref, Holder: l.Actor, Intent: l.Intent}
-			}
-			return LeaseHeldError{Ref: c.task.Ref, Holders: held}
+		if others := heldByOthers(live, c.actorID); len(others) > 0 && !force {
+			return LeaseHeldError{Ref: c.task.Ref, Holders: others}
 		}
 		for _, l := range live {
 			o := outcome
@@ -86,6 +76,17 @@ func doneLeases(outcome string, force bool) leaseRule {
 		}
 		return nil
 	}
+}
+
+// heldByOthers lists the leases of live that an actor other than actorID holds.
+func heldByOthers(live []leases.Lease, actorID string) []LeaseHeld {
+	var held []LeaseHeld
+	for _, l := range live {
+		if l.ActorID != actorID {
+			held = append(held, LeaseHeld{Ref: l.Ref, Holder: l.Actor, Intent: l.Intent})
+		}
+	}
+	return held
 }
 
 // closeLeases ends every live lease on the task being closed.

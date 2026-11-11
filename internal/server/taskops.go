@@ -49,12 +49,12 @@ const nextTaskBody = "Send a JSON body; POST /api/v1/tasks needs an initiative a
 // taskFailure is the problem a failed task operation is answered with, or false
 // when the failure is the server's. missing is the 404 detail for ErrNotFound.
 func taskFailure(err error, missing string) (problemResponse, bool) {
+	if p, ok := taskConflict(err); ok {
+		return p, true
+	}
 	var bad tasks.InvalidError
 	var noDep tasks.NoDepError
-	var held tasks.LeaseHeldError
 	switch {
-	case errors.As(err, &held):
-		return failure(http.StatusConflict, held.Error()).withNext(held.Next()), true
 	case errors.As(err, &noDep):
 		return failure(http.StatusNotFound, noDep.Error()).
 			withNext("Read the task with GET /api/v1/tasks/" + noDep.Ref + " and look at its deps for the tasks it is blocked by."), true
@@ -66,6 +66,17 @@ func taskFailure(err error, missing string) (problemResponse, bool) {
 	case errors.Is(err, tasks.ErrNotFound):
 		return failure(http.StatusNotFound, missing+afterColon(err)).
 			withNext("Read a task with GET /api/v1/tasks/<ref>, using a ref like <initiative>-<number> or a ULID."), true
+	}
+	return problemResponse{}, false
+}
+
+// taskConflict is the 409 problem a refused transition is answered with, or
+// false when err is not one of the task store's refusals.
+func taskConflict(err error) (problemResponse, bool) {
+	var held tasks.LeaseHeldError
+	switch {
+	case errors.As(err, &held):
+		return failure(http.StatusConflict, held.Error()).withNext(held.Next()), true
 	case errors.Is(err, tasks.ErrInitiativeClosed):
 		return failure(http.StatusConflict, "the initiative "+afterColon(err)+" is closed").
 			withNext("Use a task of an open initiative."), true

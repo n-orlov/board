@@ -126,16 +126,7 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 	}
 	now := s.now()
 	d := s.Store.Dialect()
-	actorID, err := audit.UpsertActor(ctx, tx, d, actor, now)
-	if err != nil {
-		return Task{}, err
-	}
-	if tr.leases != nil {
-		if err := tr.leases(ctx, s, tx, leaseCall{task: cur, actor: actor, actorID: actorID, principal: principal, now: now}); err != nil {
-			return Task{}, err
-		}
-	}
-	onBehalf, err := behalfOf(ctx, tx, d, actor, now, tr)
+	actorID, onBehalf, err := s.settle(ctx, tx, cur, actor, principal, now, tr)
 	if err != nil {
 		return Task{}, err
 	}
@@ -148,6 +139,29 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 		return Task{}, err
 	}
 	return s.find(ctx, tx, cur.ID)
+}
+
+// settle upserts the actor of a permitted transition, settles the task's live
+// leases and returns the actor's row id and the actor the event is on behalf of.
+func (s Store) settle(ctx context.Context, tx *sql.Tx, cur Task, actor audit.Actor, principal string, now time.Time, tr transition) (string, string, error) {
+	d := s.Store.Dialect()
+	actorID, err := audit.UpsertActor(ctx, tx, d, actor, now)
+	if err != nil {
+		return "", "", err
+	}
+	if err := tr.settleLeases(ctx, s, tx, leaseCall{task: cur, actor: actor, actorID: actorID, principal: principal, now: now}); err != nil {
+		return "", "", err
+	}
+	onBehalf, err := behalfOf(ctx, tx, d, actor, now, tr)
+	return actorID, onBehalf, err
+}
+
+// settleLeases applies the transition's lease rule, if it has one.
+func (tr transition) settleLeases(ctx context.Context, s Store, tx *sql.Tx, c leaseCall) error {
+	if tr.leases == nil {
+		return nil
+	}
+	return tr.leases(ctx, s, tx, c)
 }
 
 // behalfOf is the actor row the transition's event is made on behalf of, or "".

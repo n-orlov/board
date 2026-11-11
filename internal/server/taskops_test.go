@@ -428,6 +428,9 @@ func TestDoneTaskEndsLeasesAsTheBodyAsksAndRefusesAnotherActorsLease(t *testing.
 	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":"`+strings.Repeat("x", 201)+`"}`, "claude@host"); rec.Code != http.StatusBadRequest {
 		t.Errorf("a 201-character outcome = %d %s", rec.Code, rec.Body)
 	}
+	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":`, "claude@host"); rec.Code != http.StatusBadRequest {
+		t.Errorf("a malformed done body = %d %s", rec.Code, rec.Body)
+	}
 	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", ``, "claude@host"); rec.Code != http.StatusConflict {
 		t.Errorf("done on a done task = %d %s", rec.Code, rec.Body)
 	}
