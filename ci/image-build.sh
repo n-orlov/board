@@ -27,6 +27,11 @@ cd "$repo_root"
 buildx_image='docker/buildx-bin:0.27.0@sha256:d989e4378c270b8ae1b05ee52c99b9be6a75f1aa06fd5564beac05cddbedb86b'
 buildkit_image='moby/buildkit:v0.26.0@sha256:93da6a53287490dd3b35952f73a109654ed9f260f2e6434db925125fa3ac6b2a'
 
+# The image reports these (SPEC 13): BOARD_IMAGE_VERSION is the tag or the short sha
+# (the Jenkinsfile sets it), BOARD_IMAGE_REVISION the full commit.
+version=${BOARD_IMAGE_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo devel)}
+revision=${BOARD_IMAGE_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}
+
 tar_path=${1:-ci-results/board-image.tar}
 oci_path="$(dirname "$tar_path")/board-image-oci.tar"
 tag=board:ci
@@ -55,10 +60,12 @@ rm -f "$tar_path" "$oci_path"
 # Both platforms in one build: the OCI layout holds an image index with both.
 docker buildx build --builder "$builder" -f Dockerfile \
 	--platform linux/amd64,linux/arm64 --provenance=false --sbom=false \
+	--build-arg "VERSION=$version" --build-arg "REVISION=$revision" \
 	--output "type=oci,dest=$oci_path" .
 # The amd64 image again, from the builder's cache: loaded and saved.
 docker buildx build --builder "$builder" -f Dockerfile \
 	--platform linux/amd64 --provenance=false --sbom=false \
+	--build-arg "VERSION=$version" --build-arg "REVISION=$revision" \
 	--tag "$tag" --load .
 docker save -o "$tar_path" "$tag"
 

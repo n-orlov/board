@@ -1242,7 +1242,10 @@ type Meta struct {
 	// Protocol The agent protocol version the server binary embeds (`board help agent`).
 	Protocol int `json:"protocol"`
 
-	// Version The version the server binary was built as.
+	// Revision The commit the server binary was built from, as the image build stamped it (the VERSION and REVISION build args); absent when the build recorded none.
+	Revision *string `json:"revision,omitempty"`
+
+	// Version The version the server binary was built as (`board version`'s first field).
 	Version string `json:"version"`
 }
 

@@ -72,3 +72,93 @@ func TestCurrentOfTestBinaryIsOneLine(t *testing.T) {
 		t.Fatalf("Current() = %q, want a single token", got)
 	}
 }
+
+// withLinkerValues sets the linker-stamped variables for one test.
+func withLinkerValues(t *testing.T, v, r string) {
+	t.Helper()
+	origV, origR := version, revision
+	version, revision = v, r
+	t.Cleanup(func() { version, revision = origV, origR })
+}
+
+func withBuildInfo(t *testing.T, bi *debug.BuildInfo, ok bool) {
+	t.Helper()
+	orig := readBuildInfo
+	readBuildInfo = func() (*debug.BuildInfo, bool) { return bi, ok }
+	t.Cleanup(func() { readBuildInfo = orig })
+}
+
+func TestLinkerValuesWinOverBuildInfo(t *testing.T) {
+	withLinkerValues(t, "v2.0.0", "feedface00112233445566778899aabbccddeeff")
+	withBuildInfo(t, info("v9.8.7",
+		debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef0123456789abcdef01234567"},
+		debug.BuildSetting{Key: "vcs.modified", Value: "true"}), true)
+	if got := Current(); got != "v2.0.0" {
+		t.Fatalf("Current() = %q, want the linker version v2.0.0", got)
+	}
+	if got := Revision(); got != "feedface00112233445566778899aabbccddeeff" {
+		t.Fatalf("Revision() = %q, want the linker revision", got)
+	}
+}
+
+func TestEachLinkerValueIsIndependent(t *testing.T) {
+	bi := info("(devel)", debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef0123456789abcdef01234567"})
+	withBuildInfo(t, bi, true)
+
+	withLinkerValues(t, "v2.0.0", "")
+	if Current() != "v2.0.0" || Revision() != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("version only: Current=%q Revision=%q", Current(), Revision())
+	}
+	withLinkerValues(t, "", "cafe")
+	if Current() != "devel+0123456789ab" || Revision() != "cafe" {
+		t.Fatalf("revision only: Current=%q Revision=%q", Current(), Revision())
+	}
+}
+
+func TestBuildWithNeitherArgsNorVCSInfoReportsDevel(t *testing.T) {
+	withLinkerValues(t, "", "")
+	withBuildInfo(t, nil, false)
+	if got := Current(); got != "devel" {
+		t.Fatalf("Current() = %q, want devel", got)
+	}
+	if got := Revision(); got != "" {
+		t.Fatalf("Revision() = %q, want empty", got)
+	}
+	withBuildInfo(t, info(""), true)
+	if got, rev := Current(), Revision(); got != "devel" || rev != "" {
+		t.Fatalf("empty build info: Current=%q Revision=%q", got, rev)
+	}
+	withBuildInfo(t, nil, true)
+	if got := Revision(); got != "" {
+		t.Fatalf("nil build info: Revision() = %q, want empty", got)
+	}
+}
+
+func TestRevisionFallsBackToVCSRevision(t *testing.T) {
+	withLinkerValues(t, "", "")
+	withBuildInfo(t, info("(devel)", debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef"}), true)
+	if got := Revision(); got != "0123456789abcdef" {
+		t.Fatalf("Revision() = %q, want the vcs.revision setting", got)
+	}
+}
+
+func TestLineAppendsTheRevisionOnlyWhenTheVersionDoesNotCarryIt(t *testing.T) {
+	withBuildInfo(t, info("(devel)"), true)
+	withLinkerValues(t, "v2.0.0", "feedface00112233")
+	if got := Line(); got != "v2.0.0 feedface00112233" {
+		t.Fatalf("stamped build: Line() = %q", got)
+	}
+	withLinkerValues(t, "v2.0.0", "")
+	if got := Line(); got != "v2.0.0" {
+		t.Fatalf("no revision: Line() = %q", got)
+	}
+	withLinkerValues(t, "", "")
+	withBuildInfo(t, info("(devel)", debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef0123456789abcdef01234567"}), true)
+	if got := Line(); got != "devel+0123456789ab" {
+		t.Fatalf("checkout build already names its commit: Line() = %q", got)
+	}
+	withLinkerValues(t, "abcdef0", "abcdef0123456789")
+	if got := Line(); got != "abcdef0 abcdef0123456789" {
+		t.Fatalf("short-sha version: Line() = %q", got)
+	}
+}

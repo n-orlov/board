@@ -1670,8 +1670,10 @@ export interface components {
         };
         /** @description The server and the caller. */
         Meta: {
-            /** @description The version the server binary was built as. */
+            /** @description The version the server binary was built as (`board version`'s first field). */
             version: string;
+            /** @description The commit the server binary was built from, as the image build stamped it (the VERSION and REVISION build args); absent when the build recorded none. */
+            revision?: string;
             /** @description The agent protocol version the server binary embeds (`board help agent`). */
             protocol: number;
             /** @description Who authenticated, such as `key:workstation` or `oidc:<email>`. */

@@ -15,7 +15,7 @@ func TestMetaReportsTheServerAndTheCaller(t *testing.T) {
 		t.Fatalf("meta = %d %s", rec.Code, rec.Body)
 	}
 	got := decode(t, rec)
-	want := map[string]any{"version": "v9.9.9", "protocol": float64(7), "principal": "key:caller", "actor": "claude@host"}
+	want := map[string]any{"version": "v9.9.9", "revision": "abc123def456", "protocol": float64(7), "principal": "key:caller", "actor": "claude@host"}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("meta %s = %v, want %v (all: %v)", k, got[k], v, got)
@@ -87,5 +87,20 @@ func TestProtocolSeenAnswers503WithoutAnActorsStore(t *testing.T) {
 	h.ServeHTTP(rec, r)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("got %d %s, want 503", rec.Code, rec.Body)
+	}
+}
+
+func TestMetaOmitsTheRevisionOfABuildThatRecordedNone(t *testing.T) {
+	orig := keyServerBuild
+	keyServerBuild = Build{Version: "devel", Protocol: 7}
+	t.Cleanup(func() { keyServerBuild = orig })
+	s := newKeyServer(t)
+	rec := s.send(http.MethodGet, "/api/v1/meta", "", "claude@host")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("meta = %d %s", rec.Code, rec.Body)
+	}
+	got := decode(t, rec)
+	if _, present := got["revision"]; present || got["version"] != "devel" {
+		t.Errorf("meta of a build with no revision: %v, want version devel and no revision", got)
 	}
 }

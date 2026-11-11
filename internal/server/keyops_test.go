@@ -33,6 +33,9 @@ type keyServer struct {
 	st    *store.Store
 }
 
+// keyServerBuild is the build the key server reports; a test may replace it.
+var keyServerBuild = Build{Version: "v9.9.9", Revision: "abc123def456", Protocol: 7}
+
 func newKeyServer(t *testing.T) *keyServer {
 	t.Helper()
 	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
@@ -51,7 +54,7 @@ func newKeyServer(t *testing.T) *keyServer {
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
 		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
 		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithCursors(&cursors.Store{Store: st}),
-		WithMeta(Build{Version: "v9.9.9", Protocol: 7}, &actors.Store{Store: st}))
+		WithMeta(keyServerBuild, &actors.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }
 

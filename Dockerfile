@@ -21,6 +21,10 @@ RUN mkdir -p ../internal/webui/dist && npm run build
 FROM --platform=$BUILDPLATFORM golang:1.26.11-trixie@sha256:fa340cb59ebeb1d53ac1cccfc334201d938fe5f3458003cccb767096d8e032b8 AS build
 ARG TARGETOS
 ARG TARGETARCH
+# VERSION and REVISION are stamped into the binary (internal/version), so `board version`
+# and GET /api/v1/meta report what the image was built as; the build context has no .git.
+ARG VERSION=devel
+ARG REVISION=
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -29,7 +33,7 @@ COPY --from=web /src/internal/webui/dist/ internal/webui/dist/
 # timetzdata embeds the time zone database, so the scratch image needs no
 # /usr/share/zoneinfo; there is no .git in the build context, hence -buildvcs=false.
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -buildvcs=false -tags timetzdata -ldflags='-s -w' -o /out/board ./cmd/board \
+    go build -trimpath -buildvcs=false -tags timetzdata -ldflags="-s -w -X github.com/n-orlov/board/internal/version.version=$VERSION -X github.com/n-orlov/board/internal/version.revision=$REVISION" -o /out/board ./cmd/board \
  && mkdir -p /out/data
 
 FROM scratch

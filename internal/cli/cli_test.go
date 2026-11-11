@@ -26,7 +26,7 @@ func run(args ...string) (int, string, string) {
 
 func TestVersionPrintsCurrentVersion(t *testing.T) {
 	code, out, errs := run("version")
-	if code != ExitOK || errs != "" || out != version.Current()+"\n" {
+	if code != ExitOK || errs != "" || out != version.Line()+"\n" {
 		t.Fatalf("got code=%d out=%q err=%q", code, out, errs)
 	}
 }

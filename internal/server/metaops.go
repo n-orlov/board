@@ -13,10 +13,11 @@ func (p problemResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) err
 	return p.write(w)
 }
 
-// Build is what the server reports about itself: the version it was built as
+// Build is what the server reports about itself: the version and commit it was built as
 // and the agent protocol version its binary embeds (SPEC 8.6).
 type Build struct {
 	Version  string
+	Revision string
 	Protocol int
 }
 
@@ -34,7 +35,11 @@ func (o metaOps) GetMeta(ctx context.Context, _ GetMetaRequestObject) (GetMetaRe
 	if !ok {
 		return r, nil
 	}
-	return GetMeta200JSONResponse(Meta{Version: o.build.Version, Protocol: o.build.Protocol, Principal: who.Principal, Actor: who.Actor}), nil
+	meta := Meta{Version: o.build.Version, Protocol: o.build.Protocol, Principal: who.Principal, Actor: who.Actor}
+	if o.build.Revision != "" {
+		meta.Revision = &o.build.Revision
+	}
+	return GetMeta200JSONResponse(meta), nil
 }
 
 // PutProtocolSeen records that the calling actor has read a protocol version.

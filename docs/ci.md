@@ -441,7 +441,10 @@ Scripts, each run through `ci/run.sh` unless noted:
 - `ci/image-build.sh [tar]`: builds the root `Dockerfile` for linux/amd64 and
   linux/arm64 (cross-compiled, no emulation, nothing pushed), loads amd64 as
   `board:ci` and writes `ci-results/board-image.tar` and
-  `ci-results/board-image-oci.tar` (the Jenkins Quality stage; on the agent).
+  `ci-results/board-image-oci.tar` (the Jenkins Quality stage; on the agent). It passes the
+  image's `VERSION` and `REVISION` build args (`BOARD_IMAGE_VERSION`, `BOARD_IMAGE_REVISION`, set by
+  the Jenkinsfile to the commit's tag or short sha and the full commit), which the binary reports in
+  `board version` and `GET /api/v1/meta`.
 - `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `board version`
   and a `/healthz` probe against `board:ci`.
 - `ci/imagecheck`: the Go tool that reads the OCI layout (both manifests, user,

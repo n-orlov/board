@@ -48,6 +48,7 @@
             "internal/notes",
             "internal/audit",
             "internal/tasks",
+            "internal/version",
             "internal/server",
             "internal/cli"
         ],
@@ -65,7 +66,8 @@
                 "internal/feed",
                 "internal/notes",
                 "internal/audit",
-                "internal/tasks"
+                "internal/tasks",
+                "internal/version"
             ],
             "server-ops": [
                 "internal/server#ops"
@@ -91,6 +93,7 @@
                 "attentionops.go",
                 "cursorops.go",
                 "eventops.go",
+                "metaops.go",
                 "noteops.go",
                 "nowops.go",
                 "server.go",
@@ -122,6 +125,7 @@
                     "attentionops.go",
                     "cursorops.go",
                     "eventops.go",
+                    "metaops.go",
                     "noteops.go",
                     "nowops.go"
                 ],

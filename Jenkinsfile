@@ -60,6 +60,10 @@ pipeline {
           env.CI_NIGHTLY = nightly ? 'true' : 'false'
           env.BOARD_CI_GO_EXTRA_FLAGS = nightly ? '-race' : ''
           env.BOARD_CI_SHA = env.GIT_COMMIT ?: ''
+          // The image's VERSION and REVISION build args (ci/image-build.sh): the tag the
+          // commit carries, otherwise its short sha, and the full commit.
+          env.BOARD_IMAGE_REVISION = env.GIT_COMMIT ?: ''
+          env.BOARD_IMAGE_VERSION = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short=7 HEAD').trim()
           if (nightly) {
             currentBuild.description = 'extended (-race, stability, mutation)'
           }

@@ -1348,9 +1348,13 @@ never accepted as a flag, so it does not land in shell history or process lists)
 `board admin …` subcommands talk to the database directly (`BOARD_DB_URL`) and need no key.
 
 `board serve` starts the HTTP server on `BOARD_LISTEN` (default `:8080`) and shuts down gracefully on
-SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version read from the Go build info
-embedded in the binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with
-`-dirty` appended when the build came from a modified tree. A subcommand the binary does not know, a missing
+SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version, then a space and the commit the binary was built from
+when the version does not already name it. A binary built by the container image build carries the
+image's `VERSION` and `REVISION` build args (§13), stamped with the linker, and prints `<VERSION> <REVISION>`
+and `GET /meta` reports both (§8.6). Without them the version is read from the Go build info embedded in the
+binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout build), with `-dirty` appended
+when the build came from a modified tree, and `devel` when there is neither. The first field is always the
+version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
 `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
@@ -1919,8 +1923,9 @@ and names no command or flag the build lacks (the `help_agent.feature` scenario 
 The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) arrive with their
 commands, each bumping the version.
 
-**Server side.** `GET /meta` answers `{version, protocol, principal, actor}`: the server binary's
-version (as `board version` prints it), the protocol version its binary embeds, the principal
+**Server side.** `GET /meta` answers `{version, revision, protocol, principal, actor}`: the server binary's
+version (as `board version` prints it first), the commit it was built from (`revision`, omitted when the
+build recorded none), the protocol version its binary embeds, the principal
 that authenticated (`key:<name>` or `oidc:<email>`) and the actor the request acts as. It reads
 nothing from the database. `PUT /actors/me/protocol-seen` takes `{"version": N}` (an integer of
 0 or more; anything else is 400 with a `next`), upserts the calling actor and sets its
@@ -2716,6 +2721,15 @@ and tests use a mock provider (§3.2, §15). The board does no TLS itself: it mu
 proxy, since the session cookie is `Secure`. Register the redirect URI
 `<BOARD_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
 `board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
+
+**Image version.** The root `Dockerfile` takes two build args, `VERSION` (default `devel`) and `REVISION`
+(default empty), and passes them to `go build` as the linker flags
+`-X github.com/n-orlov/board/internal/version.version=$VERSION` and
+`-X github.com/n-orlov/board/internal/version.revision=$REVISION`: the image has no `.git`, so build info
+cannot name its commit. `board version` and `GET /meta` (§8.3, §8.6) report them, and a linker value wins over
+build info. CI (`ci/image-build.sh`) passes the tag the commit carries or else its short sha as `VERSION`
+and the full commit as `REVISION`; `ci/repocheck` fails a `Dockerfile` that stops declaring either arg or stops
+passing them as those two flags.
 
 The operator's own deployment (host, network, image registry, backup schedule) is described
 outside this repository.

@@ -1,8 +1,10 @@
-// Package version reports the version the binary was built as, read from the
-// Go build info the toolchain embeds. There is no hand-maintained version
-// constant and no linker flag: a tagged module build reports its tag, a
-// checkout build reports devel plus the short commit, and a build from a
-// modified tree appends -dirty.
+// Package version reports the version and the revision the binary was built as.
+// There is no hand-maintained version constant. The container image build
+// stamps both with the linker (-X github.com/n-orlov/board/internal/version.version
+// and .revision, from the Dockerfile's VERSION and REVISION build args); a build
+// without them reads the Go build info the toolchain embeds: a tagged module build
+// reports its tag, a checkout build reports devel plus the short commit, and a
+// build from a modified tree appends -dirty. A build with neither reports devel.
 package version
 
 import (
@@ -17,11 +19,22 @@ const DirtySuffix = "-dirty"
 // reports before the commit and the dirty marker.
 const develVersion = "devel"
 
+// version and revision are set by the linker (-ldflags "-X ...version=v1.2.3
+// -X ...revision=<commit>"); empty means the build did not stamp them.
+var (
+	version  string
+	revision string
+)
+
 // readBuildInfo is the build-info source. Tests replace it.
 var readBuildInfo = debug.ReadBuildInfo
 
-// Current returns the version of the running binary, read from build info.
+// Current returns the version of the running binary: the linker-stamped
+// version when there is one, otherwise the version derived from build info.
 func Current() string {
+	if version != "" {
+		return version
+	}
 	info, ok := readBuildInfo()
 	if !ok {
 		return develVersion
@@ -71,4 +84,29 @@ func develBase(rev string) string {
 		return develVersion
 	}
 	return develVersion + "+" + rev[:min(len(rev), 12)]
+}
+
+// Revision returns the commit the running binary was built from: the
+// linker-stamped revision when there is one, otherwise the vcs.revision build
+// setting, otherwise "" (a build that recorded neither).
+func Revision() string {
+	if revision != "" {
+		return revision
+	}
+	info, ok := readBuildInfo()
+	if !ok || info == nil {
+		return ""
+	}
+	return setting(info, "vcs.revision")
+}
+
+// Line is what `board version` prints: the version, then a space and the
+// revision when there is one the version does not already carry (a checkout
+// build's devel+<short commit> names its commit itself).
+func Line() string {
+	v, rev := Current(), Revision()
+	if rev == "" || strings.Contains(v, rev[:min(len(rev), 12)]) {
+		return v
+	}
+	return v + " " + rev
 }
