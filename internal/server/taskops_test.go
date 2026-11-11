@@ -422,7 +422,7 @@ func TestDoneTaskEndsLeasesAsTheBodyAsksAndRefusesAnotherActorsLease(t *testing.
 		t.Errorf("forced lease = %v", l)
 	}
 	own := decode(t, s.send(http.MethodGet, "/api/v1/leases/L1", "", "claude@host"))
-	if own["state"] != "ended" || own["outcome"] != "shipped" {
+	if own["state"] != "ended" || own["ended_by"] != "claude@host" || own["outcome"] != "ended: task marked done by claude@host" {
 		t.Errorf("own lease = %v", own)
 	}
 	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":"`+strings.Repeat("x", 201)+`"}`, "claude@host"); rec.Code != http.StatusBadRequest {
