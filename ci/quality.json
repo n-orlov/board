@@ -91,6 +91,7 @@
                 "askops.go",
                 "askwait.go",
                 "attentionops.go",
+                "auth.go",
                 "cursorops.go",
                 "eventops.go",
                 "metaops.go",
@@ -136,6 +137,7 @@
                 ],
                 "core": [
                     "api.go",
+                    "auth.go",
                     "server.go",
                     "taskops.go"
                 ]

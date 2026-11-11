@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"net/http"
 	"strings"
 	"time"
@@ -56,6 +57,8 @@ type operations struct {
 	// writeTimeout is the http.Server write timeout; 0 means none.
 	writeTimeout time.Duration
 	ready        Readiness
+	// ui is the app the server serves at /; nil means the embedded build.
+	ui fs.FS
 }
 
 var _ StrictServerInterface = operations{}

@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#f6f7f9" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <!-- use-credentials: browsers fetch a manifest without cookies unless told otherwise, and every route but /healthz needs the session. -->
-    <link rel="manifest" href="./manifest.json" crossorigin="use-credentials" />
+    <!-- No crossorigin attribute: the manifest and the icons are public (served without a session), so the plain same-origin fetch works. -->
+    <link rel="manifest" href="./manifest.json" />
     <script>
       // Runs before the app bundle so the first paint already has the effective theme. The rule is
       // web/src/lib/theme.ts's (setting from localStorage, unknown = System, System = prefers-color-scheme).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"time"
@@ -64,7 +65,11 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	ops.nowOps = newNowOps(ops)
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
-	mux.Handle("GET /", http.FileServerFS(webui.Files()))
+	ui := ops.ui
+	if ui == nil {
+		ui = webui.Files()
+	}
+	mux.Handle("GET /", http.FileServerFS(ui))
 	var h http.Handler = mux
 	if ops.hub != nil {
 		h = wakeFeedAfterWrites(h, ops.hub.feed)
@@ -88,6 +93,11 @@ func wakeFeedAfterWrites(next http.Handler, f *feed.Feed) http.Handler {
 
 // Option adds an optional part to the handler NewHandler returns.
 type Option func(*operations)
+
+// WithUI serves the app from ui instead of the embedded build.
+func WithUI(ui fs.FS) Option {
+	return func(o *operations) { o.ui = ui }
+}
 
 // WithInitiatives serves /api/v1/initiatives from st.
 func WithInitiatives(st *initiatives.Store) Option {

@@ -1,7 +1,8 @@
 import { expect, test as base } from '@playwright/test';
 
 // Signs in through the mock provider (no API key rides along), then reads what the page links:
-// the manifest, the favicon and the apple-touch-icon, and fetches them with the session cookie.
+// the manifest, the favicon and the apple-touch-icon. A second test fetches the six public assets
+// in a fresh browser context that has no cookie and no key.
 const test = base;
 
 test('the page links a same-origin manifest and five icons that are served', async ({ page }) => {
@@ -17,7 +18,7 @@ test('the page links a same-origin manifest and five icons that are served', asy
 
   const manifestURL = await href('link[rel="manifest"]');
   expect(manifestURL.origin).toBe(origin);
-  expect(await page.locator('link[rel="manifest"]').getAttribute('crossorigin')).toBe('use-credentials');
+  expect(await page.locator('link[rel="manifest"]').getAttribute('crossorigin')).toBeNull();
   const manifestResponse = await page.request.get(manifestURL.href);
   expect(manifestResponse.status()).toBe(200);
   expect(manifestResponse.headers()['content-type']).toContain('json');
@@ -56,4 +57,28 @@ test('the page links a same-origin manifest and five icons that are served', asy
 
   // No service worker: the app is installable, not offline-capable.
   expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length)).toBe(0);
+});
+
+test('the manifest and its icons load in a fresh browser context with no cookie', async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL });
+  try {
+    expect(await context.cookies()).toEqual([]);
+    const assets: [string, RegExp][] = [
+      ['manifest.json', /json/],
+      ['icon-192.png', /^image\/png/],
+      ['icon-512.png', /^image\/png/],
+      ['icon.svg', /^image\/svg\+xml/],
+      ['apple-touch-icon.png', /^image\/png/],
+      ['favicon.svg', /^image\/svg\+xml/],
+    ];
+    for (const [name, type] of assets) {
+      const response = await context.request.get(`/${name}`);
+      expect(response.status(), name).toBe(200);
+      expect(response.headers()['content-type'], name).toMatch(type);
+    }
+    // The exemption is for those six files only.
+    expect((await context.request.get('/api/v1/tasks')).status()).toBe(401);
+  } finally {
+    await context.close();
+  }
 });

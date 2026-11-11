@@ -91,15 +91,36 @@ func bearerKey(r *http.Request) (string, bool) {
 	return strings.TrimSpace(key), true
 }
 
-// authenticated wraps next so that every request other than GET /healthz is
-// authenticated: by a Bearer key that verify accepts plus a Board-Actor header,
-// or, when login is on, by a live session cookie. A request with no credential
+// publicAssets are the files the browser fetches without the session cookie: the
+// PWA manifest (a manifest link fetches without credentials unless told
+// otherwise) and the icons it and the page name. They carry no data.
+var publicAssets = map[string]bool{
+	"/manifest.json":        true,
+	"/icon-192.png":         true,
+	"/icon-512.png":         true,
+	"/icon.svg":             true,
+	"/apple-touch-icon.png": true,
+	"/favicon.svg":          true,
+}
+
+// isPublic reports whether r needs no credential: GET /healthz, or a GET or
+// HEAD of one of publicAssets.
+func isPublic(r *http.Request) bool {
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		return true
+	}
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && publicAssets[r.URL.Path]
+}
+
+// authenticated wraps next so that every request other than GET /healthz and
+// the publicAssets is authenticated: by a Bearer key that verify accepts plus a
+// Board-Actor header, or, when login is on, by a live session cookie. A request with no credential
 // is refused before verify, and so before the store, is called: with 401, or,
 // when login is on and the request is a browser navigation, by a redirect to
 // /auth/login (which, like the callback, then answers the navigation).
 func authenticated(next http.Handler, verify KeyVerifier, login *Login) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		if isPublic(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

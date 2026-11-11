@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/n-orlov/board/internal/auth"
 )
@@ -165,5 +166,67 @@ func TestAKeyIsMarkedUsedOnlyByARequestThatSucceeds(t *testing.T) {
 	}
 	if rec := s.send(http.MethodGet, "/api/v1/leases", "", "a@b"); rec.Code != http.StatusOK || !s.lastUsed() {
 		t.Fatalf("a successful read = %d, used %v; want 200, used", rec.Code, s.lastUsed())
+	}
+}
+
+// publicUI is a stand-in for the embedded build: the six public assets plus the page.
+func publicUI() fstest.MapFS {
+	files := fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}
+	for _, name := range []string{"manifest.json", "icon-192.png", "icon-512.png", "icon.svg", "apple-touch-icon.png", "favicon.svg"} {
+		files[name] = &fstest.MapFile{Data: []byte("x")}
+	}
+	return files
+}
+
+func TestThePWAManifestAndIconsNeedNoSessionOrKey(t *testing.T) {
+	login := &Login{}
+	want := map[string]string{
+		"/manifest.json":        "application/json",
+		"/icon-192.png":         "image/png",
+		"/icon-512.png":         "image/png",
+		"/icon.svg":             "image/svg+xml",
+		"/apple-touch-icon.png": "image/png",
+		"/favicon.svg":          "image/svg+xml",
+	}
+	for _, withLogin := range []*Login{nil, login} {
+		c := &countingVerifier{}
+		h := NewHandler(ok, c.verify, withLogin, nil, WithUI(publicUI()))
+		for path, contentType := range want {
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+				if rec.Code != http.StatusOK {
+					t.Errorf("%s %s with no credential = %d, want 200", method, path, rec.Code)
+				}
+				if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, contentType) {
+					t.Errorf("%s %s Content-Type = %q, want %q", method, path, got, contentType)
+				}
+			}
+		}
+		if c.calls != 0 {
+			t.Errorf("the public assets consulted the store %d times", c.calls)
+		}
+	}
+}
+
+func TestOnlyTheSixAssetsArePublicAndOnlyForReads(t *testing.T) {
+	h := NewHandler(ok, (&countingVerifier{}).verify, nil, nil, WithUI(publicUI()))
+	refused := []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/tasks"},
+		{http.MethodGet, "/"},
+		{http.MethodGet, "/index.html"},
+		{http.MethodGet, "/manifest.json/"},
+		{http.MethodGet, "/assets/manifest.json"},
+		{http.MethodGet, "/icon-192.png.map"},
+		{http.MethodPost, "/manifest.json"},
+		{http.MethodPut, "/icon.svg"},
+		{http.MethodDelete, "/favicon.svg"},
+	}
+	for _, c := range refused {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s with no credential = %d, want 401", c.method, c.path, rec.Code)
+		}
 	}
 }

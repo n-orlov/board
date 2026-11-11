@@ -95,7 +95,7 @@ These names are fixed. Code, API, UI and skill text use exactly these words.
 
 ## 3. Authentication and rules of use
 
-**B10.** Every request except `GET /healthz` is authenticated, by a browser session (humans)
+**B10.** Every request except `GET /healthz` and the six public PWA files (§12.3) is authenticated, by a browser session (humans)
 or an API key (agents). v1 has **no roles or ACL**: any authenticated principal can do
 everything the API offers, including closing tasks and answering asks. Access control is a
 later addition (§17).
@@ -734,7 +734,7 @@ expired (§5.1):
   minted by `board admin keys create` and asserts the rendered operations are those of
   `api/openapi.yaml`.
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
-  The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` is
+  The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` and the six public PWA files (§12.3) are
   unauthenticated (`/readyz`, the spec documents, `/api/docs` and `/metrics` all require a key or
   session; `features/unauthenticated.feature` reads the operation list from `api/openapi.yaml` and
   expects 401 from each operation but `GET /healthz`). Every other route,
@@ -2542,12 +2542,17 @@ and served by the existing static lookup, no Go change): `manifest.json` (`name`
 `board`, `start_url` and `scope` `./`, `display: standalone`, `theme_color` and `background_color`
 `#f6f7f9`, and three icons: `icon.svg`, `icon-192.png`, `icon-512.png`), `favicon.svg` and
 `apple-touch-icon.png` (180 px). `web/index.html` links the manifest, the SVG favicon and the
-apple-touch-icon by relative URLs; the manifest link carries `crossorigin="use-credentials"`,
-because every route except `/healthz` needs the session and browsers fetch a manifest without
-cookies otherwise. No service worker is registered: the app is installable, not offline-capable.
+apple-touch-icon by relative URLs; the manifest link carries no `crossorigin` attribute. Those six
+files (`/manifest.json`, `/icon.svg`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`,
+`/favicon.svg`) are public: a `GET` or `HEAD` of exactly those paths is answered with no session
+and no key (`internal/server/auth.go`), because a browser fetches a manifest without cookies
+unless told otherwise and the files carry no data. Every other route but `/healthz` still
+needs the session or a key. No service worker is registered: the app is installable, not offline-capable.
 The PNGs are rendered from `icon.svg`. `e2e/manifest.spec.ts` signs in, reads the three links from
 the page, and checks the manifest is same-origin JSON with those fields and that the five icon
-URLs answer 200 with an `image/*` content type.
+URLs answer 200 with an `image/*` content type. It also fetches the six
+files in a fresh browser context with no cookie (200, the right content type) and requires an
+anonymous `GET /api/v1/tasks` to answer 401.
 
 **Same origin.** The UI requests nothing from another origin: no web font, CDN, remote icon or
 script. `e2e/sameorigin.spec.ts` signs in through the mock provider, then records every request the
