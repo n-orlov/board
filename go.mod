@@ -2,7 +2,7 @@ module github.com/n-orlov/board
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/cucumber/godog v0.16.0

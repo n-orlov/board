@@ -13,8 +13,8 @@ RUN GOBIN=/out go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 # node:24-trixie-slim (Node 24.22.2)
 FROM node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS node
 
-# golang:1.26.10-trixie
-FROM golang:1.26.10-trixie@sha256:9ba7dc6d09ebf6e9317263973174bbf44e15bdf58cb0103747d7376f7cfa2d2f
+# golang:1.26.11-trixie
+FROM golang:1.26.11-trixie@sha256:fa340cb59ebeb1d53ac1cccfc334201d938fe5f3458003cccb767096d8e032b8
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

@@ -18,7 +18,7 @@ COPY web/ ./
 # npm run build writes ../internal/webui/dist.
 RUN mkdir -p ../internal/webui/dist && npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.10-trixie@sha256:9ba7dc6d09ebf6e9317263973174bbf44e15bdf58cb0103747d7376f7cfa2d2f AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.11-trixie@sha256:fa340cb59ebeb1d53ac1cccfc334201d938fe5f3458003cccb767096d8e032b8 AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
