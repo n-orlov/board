@@ -238,6 +238,31 @@ Feature: Leases from the command line
     And stdout JSON path "lease.ref" is "L2"
     And stdout JSON path "conflicts" has 1 items
 
+  Scenario: lease ack acknowledges an expired lease and prints one ok line
+    Given I run the client 'board lease start aa-1 "one"' as actor "claude@laptop"
+    And the lease "L1" ran out 120 seconds ago
+    When I run the client 'board lease ack L1' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok lease L1 acknowledged"
+    And stderr is empty
+    When I run the client 'board lease ack l1 --json' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout JSON path "ref" is "L1"
+
+  Scenario: lease ack of a lease that has not expired exits 6 and an unknown lease exits 4
+    Given I run the client 'board lease start aa-1 "one"' as actor "claude@laptop"
+    When I run the client 'board lease ack L1' as actor "claude@laptop"
+    Then the exit code is 6
+    And stdout is empty
+    And stderr is one line ending with "→ board lease ls --mine --state all"
+    When I run the client 'board lease end L1' as actor "claude@laptop"
+    And I run the client 'board lease ack L1' as actor "claude@laptop"
+    Then the exit code is 6
+    When I run the client 'board lease ack L9' as actor "claude@laptop"
+    Then the exit code is 4
+    And stdout is empty
+    And stderr is one line ending with "→ board lease ls"
+
   Scenario: wrong arguments exit 2 with the usage line
     When I run the client 'board lease' as actor "claude@laptop"
     Then the exit code is 2
@@ -248,4 +273,10 @@ Feature: Leases from the command line
     When I run the client 'board lease ls extra' as actor "claude@laptop"
     Then the exit code is 2
     When I run the client 'board lease nothing' as actor "claude@laptop"
+    Then the exit code is 2
+    When I run the client 'board lease ack' as actor "claude@laptop"
+    Then the exit code is 2
+    When I run the client 'board lease ack L1 L2' as actor "claude@laptop"
+    Then the exit code is 2
+    When I run the client 'board lease ack aa-1' as actor "claude@laptop"
     Then the exit code is 2

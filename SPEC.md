@@ -1475,7 +1475,7 @@ Exit codes:
 | 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board note show` of an unknown `N<n>`, `board ask`, `board note` and `board notes` on an unknown task or initiative |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board lease ack` of a lease that has not expired (live or ended); `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | `board lease start` and `board lease renew` when a live lease of another holds a resource of the lease; `board now --resources` and `board now` when a conflict touches one of my live leases or a resource given; `board start` arrives later |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
@@ -1507,7 +1507,7 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 
 ### 8.3 Commands
 
-Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `lease start|renew|end|ls`, `now`, `milestone`, `check`, `events`, `ask`, `ask show|ls|withdraw`, `answer`, `note`, `note show` and `notes`; the other lines
+Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `lease start|renew|end|ack|ls`, `now`, `milestone`, `check`, `events`, `ask`, `ask show|ls|withdraw`, `answer`, `note`, `note show` and `notes`; the other lines
 below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `lease …`, `now`, `milestone`, `check`, `events`, `ask …`, `answer`, `note …`, `notes`) call the server at `BOARD_URL` with
 `Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
 $BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
@@ -1520,7 +1520,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `lease ack` (a lease that has not expired) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1628,6 +1628,11 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   ref (`L7`) or a task ref (`aa-1`) and the outcome otherwise, so `board lease end "shipped it"` ends my only lease with that
   outcome; two words are the target and the outcome. A lease that is not live exits 6 with `→ board lease ls --mine --state
   all`, an unknown lease exits 4 with `→ board lease ls`.
+- `board lease ack <L…> [--json]` calls `POST /api/v1/leases/<ref>/ack` (§6.5) and prints `ok lease L<n> acknowledged` (`--json`:
+  the lease). The argument is a lease ref (`L7`, either letter case); anything else is exit 2 with the usage line. Acknowledging
+  an expired lease records it (§4.4) and clears the `stranded` reason of its task; acknowledging it again prints the same line
+  and changes nothing. A lease that has not expired (live or ended) exits 6 with `→ board lease ls --mine --state all`, an
+  unknown lease exits 4 with `→ board lease ls`.
 - `board lease ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]` calls `GET
   /api/v1/leases` and prints one line per lease, oldest first, `L<n>  <state>  <task>  <holder>  "<intent>"  res a,b  exp
   41m` (the `res` part only when it holds resources; `expired 14m ago` or `ended 3m ago` in place of `exp` for the other

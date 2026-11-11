@@ -225,6 +225,9 @@ func TestLeaseRenewAndEndRefusals(t *testing.T) {
 		{[]string{"end", "L1"}, http.StatusNotFound, ExitNotFound, "gone → board lease ls\n"},
 		{[]string{"end", "L1"}, http.StatusConflict, ExitConflict, "gone → board lease ls --mine --state all\n"},
 		{[]string{"end", "L1"}, http.StatusBadRequest, ExitError, "gone\n"},
+		{[]string{"ack", "L1"}, http.StatusNotFound, ExitNotFound, "gone → board lease ls\n"},
+		{[]string{"ack", "L1"}, http.StatusConflict, ExitConflict, "gone → board lease ls --mine --state all\n"},
+		{[]string{"ack", "L1"}, http.StatusBadRequest, ExitError, "gone\n"},
 	} {
 		f := answering(c.status, `{"detail":"gone"}`)
 		srv := httptest.NewServer(f)
@@ -326,6 +329,7 @@ func TestLeaseUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"lease"}, {"lease", "frob"}, {"lease", "start"}, {"lease", "start", "a"}, {"lease", "start", "a", "b", "c"},
 		{"lease", "renew", "a", "b"}, {"lease", "renew", "--bogus"}, {"lease", "end", "a", "b", "c"},
+		{"lease", "ack"}, {"lease", "ack", "aa-1"}, {"lease", "ack", "L1", "L2"}, {"lease", "ack", "L1", "--bogus"},
 		{"lease", "ls", "x"}, {"lease", "ls", "--state", "weird"}, {"lease", "ls", "--all", "--limit", "3"},
 	} {
 		code, out, errs := runEnv(envWith(map[string]string{}), args...)
@@ -338,5 +342,31 @@ func TestLeaseUsageErrors(t *testing.T) {
 		if code != ExitUsage || out != "" || !strings.HasPrefix(errs, "board: --ttl: invalid duration") {
 			t.Errorf("%v: got %d %q %q", args, code, out, errs)
 		}
+	}
+}
+
+func TestLeaseAckPostsToTheLeaseAndPrintsOneLine(t *testing.T) {
+	f := &fakeBoard{handler: func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ref":"L3","state":"expired"}`))
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	code, out, errs := runEnv(f.env(srv), "lease", "ack", "l3")
+	if code != ExitOK || out != "ok lease L3 acknowledged\n" || errs != "" || len(f.requests) != 1 || f.requests[0].Method != "POST" || f.requests[0].URL.Path != "/api/v1/leases/L3/ack" {
+		t.Errorf("got %d %q %q %v", code, out, errs, f.requests)
+	}
+	code, out, _ = runEnv(f.env(srv), "lease", "ack", "L3", "--json")
+	if code != ExitOK || out != `{"ref":"L3","state":"expired"}`+"\n" {
+		t.Errorf("--json: got %d %q", code, out)
+	}
+}
+
+func TestLeaseAckReportsAnUnreadableAnswer(t *testing.T) {
+	f := answering(http.StatusOK, `"not a lease"`)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	code, out, errs := runEnv(f.env(srv), "lease", "ack", "L3")
+	if code != ExitError || out != "" || errs == "" {
+		t.Errorf("got %d %q %q", code, out, errs)
 	}
 }

@@ -19,13 +19,14 @@ import (
 const ExitWarning = 7
 
 // LeaseUsage is the single stderr line for a malformed `board lease` command line.
-const LeaseUsage = "usage: board lease start <task> \"<intent>\" [--ttl D] [--res r]... [--json] | renew [<L…>|<task>] [--ttl D] [--intent text] [--json] | end [<L…>|<task>] [\"<outcome>\"] [--json] | ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]"
+const LeaseUsage = "usage: board lease start <task> \"<intent>\" [--ttl D] [--res r]... [--json] | renew [<L…>|<task>] [--ttl D] [--intent text] [--json] | end [<L…>|<task>] [\"<outcome>\"] [--json] | ack <L…> [--json] | ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]"
 
 // leaseSubcommands are the words after `board lease` and what runs each.
 var leaseSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"start": leaseStart,
 	"renew": leaseRenew,
 	"end":   leaseEnd,
+	"ack":   leaseAck,
 	"ls":    leaseLs,
 }
 
@@ -371,6 +372,39 @@ func endFailure(err error) error {
 		return conflictError(ae, "board lease ls --mine --state all")
 	}
 	return err
+}
+
+// leaseAck runs `board lease ack <L…>`.
+func leaseAck(args []string, stdout, stderr io.Writer, env Env) int {
+	p, ok := parseArgs(args, leaseEndFlags)
+	if !ok || len(p.pos) != 1 || !leaseRefPattern.MatchString(p.pos[0]) {
+		return usageLine(stderr, LeaseUsage)
+	}
+	c, err := newClient(env)
+	if err != nil {
+		return report(stderr, err)
+	}
+	ctx, stop := clientContext()
+	defer stop()
+	var raw json.RawMessage
+	if err := c.do(ctx, "POST", "/api/v1/leases/"+url.PathEscape(strings.ToUpper(p.pos[0]))+"/ack", nil, nil, &raw); err != nil {
+		return report(stderr, endFailure(err))
+	}
+	return printAcked(p, raw, stdout, stderr)
+}
+
+// printAcked prints `ok lease L7 acknowledged`, or the lease with --json.
+func printAcked(p parsedArgs, raw json.RawMessage, stdout, stderr io.Writer) int {
+	if p.has("--json") {
+		_, _ = fmt.Fprintln(stdout, string(raw))
+		return ExitOK
+	}
+	var l leaseView
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return report(stderr, err)
+	}
+	_, _ = fmt.Fprintf(stdout, "ok lease %s acknowledged\n", l.Ref)
+	return ExitOK
 }
 
 // printLeaseResults prints, for each start or renewal answer, the `ok` line
