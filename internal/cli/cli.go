@@ -158,6 +158,9 @@ func serve(stderr io.Writer, env Env) int {
 	if _, _, err := streamSettings(env); err != nil {
 		return fail(stderr, err)
 	}
+	if _, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT")); err != nil {
+		return fail(stderr, err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serveUntil(ctx, stderr, env, dbURL(env), addr, migrate != "off")
@@ -178,6 +181,10 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// Registered before the sweeper and the feed so that, deferred last-in
+	// first-out, its final checkpoint runs after both stopped and before the
+	// store closes.
+	defer startCheckpointer(ctx, stderr, env, st)()
 	stopSweeper := startSweeper(ctx, stderr, env, st)
 	defer stopSweeper()
 	stream, stopFeed, err := startFeed(ctx, stderr, env, st)
@@ -228,6 +235,32 @@ func prepareSchema(ctx context.Context, st *store.Store, migrate bool) error {
 		return st.Migrate(ctx)
 	}
 	return nil
+}
+
+// startCheckpointer checkpoints a SQLite write-ahead log every
+// BOARD_SQLITE_CHECKPOINT until ctx ends (`0` runs no timer), and returns the
+// function that stops the timer, waits for it and checkpoints once more. The
+// caller runs it on clean shutdown, after every other writer stopped. serve has
+// already checked the setting parses; Postgres is unaffected.
+func startCheckpointer(ctx context.Context, stderr io.Writer, env Env, st *store.Store) func() {
+	interval, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT"))
+	if err != nil {
+		return func() {}
+	}
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: checkpoint: %v\n", err) }
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sweep.Run(ctx, interval, report, st.Checkpoint)
+	}()
+	return func() {
+		cancel()
+		<-done
+		if err := st.Checkpoint(context.Background()); err != nil {
+			report(err)
+		}
+	}
 }
 
 // startSweeper runs runSweeper in the background and returns the function that

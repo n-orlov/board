@@ -2706,6 +2706,7 @@ All configuration is by environment variable:
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
+| `BOARD_SQLITE_CHECKPOINT` | `10m` | how often `board serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
 | `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
