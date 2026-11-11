@@ -47,6 +47,16 @@ func (h *harness) stdoutHasTheLine(want string) error {
 	return fmt.Errorf("stdout has no line %q: %q", want, h.stdout)
 }
 
+// stdoutHasNoLineStartingWith checks no line of stdout starts with the prefix.
+func (h *harness) stdoutHasNoLineStartingWith(prefix string) error {
+	for _, line := range strings.Split(h.stdout, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return fmt.Errorf("stdout has the line %q, which starts with %q", line, prefix)
+		}
+	}
+	return nil
+}
+
 // eventRefPattern is the ref an event line starts with.
 var eventRefPattern = regexp.MustCompile(`^(E[0-9]+)  `)
 
@@ -90,4 +100,6 @@ func registerCLITaskSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the event ref on line (\d+) of stdout is remembered$`, h.rememberEventRef)
 	sc.Step(`^stdout is a JSON array whose refs are "([^"]*)"$`, h.stdoutJSONArrayRefs)
 	sc.Step(`^stdout has the line "([^"]*)"$`, h.stdoutHasTheLine)
+	sc.Step(`^stdout has the line '([^']*)'$`, h.stdoutHasTheLine)
+	sc.Step(`^stdout has no line starting with "([^"]*)"$`, h.stdoutHasNoLineStartingWith)
 }

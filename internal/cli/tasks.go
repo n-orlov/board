@@ -14,7 +14,7 @@ import (
 )
 
 // TaskUsage is the single stderr line for a malformed `board task` command line.
-const TaskUsage = "usage: board task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
+const TaskUsage = "usage: board task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
 
 // taskSubcommands are the words after `board task` and what runs each.
 var taskSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
@@ -224,6 +224,8 @@ type taskQuery struct {
 	kind       string
 	flags      []string // active, blocked, overdue
 	q          string
+	only       bool   // --attention: keep only the tasks that need attention
+	attention  string // the attention filter sent to the server: "", "true" or "false"
 }
 
 // taskFilter reads the filter flags and the optional initiative. A status or
@@ -237,6 +239,7 @@ func taskFilter(p parsedArgs) (taskQuery, bool) {
 		q.initiative = p.pos[0]
 	}
 	q.flags = derivedFlags(p)
+	q.only = p.has("--attention")
 	return q, q.valid()
 }
 
@@ -269,6 +272,9 @@ func (q taskQuery) values() url.Values {
 	for _, f := range q.flags {
 		v.Set(f, "true")
 	}
+	if q.attention != "" {
+		v.Set("attention", q.attention)
+	}
 	return v
 }
 
@@ -286,6 +292,9 @@ func (q taskQuery) command() string {
 	}
 	for _, f := range q.flags {
 		cmd += " --" + f
+	}
+	if q.only {
+		cmd += " --attention"
 	}
 	if q.q != "" {
 		cmd += " --q " + quoteArg(q.q)
@@ -314,7 +323,7 @@ func taskLs(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	ctx, stop := clientContext()
 	defer stop()
-	items, err := c.allTasks(ctx, filter)
+	items, err := c.orderedTasks(ctx, filter)
 	if err != nil {
 		return report(stderr, withNext(err, http.StatusNotFound, "board init ls"))
 	}
@@ -323,6 +332,22 @@ func taskLs(args []string, stdout, stderr io.Writer, env Env) int {
 		return printJSON(stdout, stderr, items)
 	}
 	return printTaskLines(stdout, stderr, items, more, filter.command())
+}
+
+// orderedTasks is the tasks that need attention in the order of SPEC 8.3, then, unless
+// --attention was given, the rest in id order.
+func (c *client) orderedTasks(ctx context.Context, f taskQuery) ([]json.RawMessage, error) {
+	f.attention = "true"
+	items, err := c.allTasks(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	if items, err = orderAttention(items); err != nil || f.only {
+		return items, err
+	}
+	f.attention = "false"
+	rest, err := c.allTasks(ctx, f)
+	return append(items, rest...), err
 }
 
 // allTasks follows next_after until the last page.

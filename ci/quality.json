@@ -116,6 +116,9 @@
                 "initedit.go",
                 "notes.go",
                 "now.go",
+                "taskattention.go",
+                "tasks.go",
+                "taskview.go",
                 "tree.go"
             ],
             "internal/tasks": [
@@ -170,7 +173,10 @@
                     "asks.go",
                     "attention.go",
                     "notes.go",
-                    "now.go"
+                    "now.go",
+                    "taskattention.go",
+                    "tasks.go",
+                    "taskview.go"
                 ]
             }
         },

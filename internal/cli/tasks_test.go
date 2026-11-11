@@ -139,8 +139,13 @@ func TestTaskWriteFailuresNameTheNextAction(t *testing.T) {
 }
 
 // taskPages serves GET /api/v1/tasks in pages of 7 out of total tasks aa-1...
+// None of them needs attention, so attention=true answers an empty page.
 func taskPages(total int) *fakeBoard {
 	return &fakeBoard{handler: func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("attention") == "true" {
+			_, _ = w.Write([]byte(`{"items":[]}`))
+			return
+		}
 		after := 0
 		if a := r.URL.Query().Get("after"); a != "" {
 			_, _ = fmt.Sscanf(a, "aa-%d", &after)

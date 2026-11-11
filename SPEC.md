@@ -1560,19 +1560,29 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `<detail> → board init ls`, an unknown `--after` task exits 4 with `→ board task ls <initiative>`, a closed initiative
   exits 6 with `→ board init show <initiative>`.
 - `board task ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked]
-  [--overdue] [--q text] [--limit N|--all] [--json]` prints one line per task in creation order, `<ref>  <status>  <title>`
-  followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. The status is
+  [--overdue] [--attention] [--q text] [--limit N|--all] [--json]` prints one line per task, `<ref>  <status>  <title>`
+  followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. The tasks that
+  need attention (§5.3, `attention` on the task, §6.4) come first: stranded, then asking with the blocking ones first,
+  then done, each group by most recent change (`updated_at`) first, a task with several reasons in the group of its
+  first one; the rest follow in creation order (id order). A task's line ends with one marker per reason, in the order
+  of the `attention` list, separated by a space and set off by two spaces: `!stranded`, `!asking` (`!asking(blocking)`
+  when an open ask on it is blocking) and `!done`, so `aa-3  done  Wire it  !stranded !done`. `--attention` keeps only
+  the tasks that need attention (the `attention=true` filter). `--json` prints each task as the API gives it, with
+  `attention` and, for a stranded task, `stranded_lease`. The status is
   `not_closed` by default; `--active`, `--blocked` and `--overdue` keep the tasks that have a live lease, an open
   dependency or a missed check; `--q` keeps the tasks whose title or description contains the text, in either case.
-  It shows 20 by default; the last line is `+K more → board task ls … --all` repeating the initiative and every filter.
+  It shows 20 by default, counted over the ordered list; the last line is `+K more → board task ls … --all` repeating the
+  initiative and every filter, `--attention` included.
   `--json` prints the shown tasks as one JSON array. An unknown initiative exits 4 with `→ board init ls`; a status or
   kind the server does not know, a `--limit` below 1 and `--all` with `--limit` exit 2.
 - `board task show <ref> [--json]` prints the one-line form, then `initiative:`, `planned: <start> → <end>` when it has
   either, `cadence: <D>, next check <relative time>` for a watch task, a `link: <label> <url>` line per link,
   `created by`, `done by` and `closed (<resolution>) by` lines, `blocked by <ref> (<status>) <title>` per open or
   closed dependency, `blocking <ref> (<status>) <title>` per task it blocks, `lease L<n> by <handle>: <intent> (expires in
-  …)` per live lease, the description, then `events:` and its last 10 events as `  E<n>  <relative time>  <handle>
-  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → board task ls`.
+  …)` per live lease, an `attention: <markers>` line (the markers of `task ls`) after `initiative:` when the task
+  needs attention, and for a stranded task a line `stranded: L<n> by <holder>: "<intent>" expired <age> ago → board
+  lease ack L<n>` after it (`<holder>` is the handle; `<age>` is `2m`, `3h` or `4d`), the description, then `events:`
+  and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → board task ls`.
 - `board task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
   [--no-links] [--json]` sends only the fields given (`PATCH /api/v1/tasks/<ref>`) and prints `ok task <ref> updated`
   (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
@@ -1770,7 +1780,7 @@ board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|cl
                 | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
                 | close <slug> [--force] | reopen <slug>
 board task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
-board task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--q text] [--limit N|--all] | show <ref>
+board task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] | show <ref>
                 | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links]
 board task done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
 board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]

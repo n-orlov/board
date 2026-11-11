@@ -17,30 +17,33 @@ const showEvents = 10
 
 // task is the part of a task the text output shows.
 type task struct {
-	Ref            string      `json:"ref"`
-	Initiative     string      `json:"initiative"`
-	Title          string      `json:"title"`
-	Description    string      `json:"description"`
-	Kind           string      `json:"kind"`
-	Status         string      `json:"status"`
-	Resolution     string      `json:"resolution"`
-	PlannedStart   string      `json:"planned_start"`
-	PlannedEnd     string      `json:"planned_end"`
-	CadenceSeconds int64       `json:"cadence_seconds"`
-	NextCheckAt    string      `json:"next_check_at"`
-	ExternalRefs   []extRef    `json:"external_refs"`
-	CreatedBy      string      `json:"created_by"`
-	CreatedAt      string      `json:"created_at"`
-	DoneAt         string      `json:"done_at"`
-	DoneBy         string      `json:"done_by"`
-	ClosedAt       string      `json:"closed_at"`
-	ClosedBy       string      `json:"closed_by"`
-	Active         bool        `json:"active"`
-	Blocked        bool        `json:"blocked"`
-	Overdue        bool        `json:"overdue"`
-	Deps           []taskLink  `json:"deps"`
-	Blocking       []taskLink  `json:"blocking"`
-	LiveLeases     []leaseView `json:"live_leases"`
+	Ref            string         `json:"ref"`
+	Initiative     string         `json:"initiative"`
+	Title          string         `json:"title"`
+	Description    string         `json:"description"`
+	Kind           string         `json:"kind"`
+	Status         string         `json:"status"`
+	Resolution     string         `json:"resolution"`
+	PlannedStart   string         `json:"planned_start"`
+	PlannedEnd     string         `json:"planned_end"`
+	CadenceSeconds int64          `json:"cadence_seconds"`
+	NextCheckAt    string         `json:"next_check_at"`
+	ExternalRefs   []extRef       `json:"external_refs"`
+	CreatedBy      string         `json:"created_by"`
+	CreatedAt      string         `json:"created_at"`
+	DoneAt         string         `json:"done_at"`
+	DoneBy         string         `json:"done_by"`
+	ClosedAt       string         `json:"closed_at"`
+	ClosedBy       string         `json:"closed_by"`
+	Active         bool           `json:"active"`
+	Blocked        bool           `json:"blocked"`
+	Overdue        bool           `json:"overdue"`
+	Deps           []taskLink     `json:"deps"`
+	Blocking       []taskLink     `json:"blocking"`
+	LiveLeases     []leaseView    `json:"live_leases"`
+	UpdatedAt      string         `json:"updated_at"`
+	Attention      []taskReason   `json:"attention"`
+	StrandedLease  *strandedLease `json:"stranded_lease"`
 }
 
 type taskLink struct {
@@ -82,6 +85,9 @@ func taskLine(t task) string {
 	}
 	if len(marks) > 0 {
 		line += "  (" + strings.Join(marks, ", ") + ")"
+	}
+	if m := t.markers(); len(m) > 0 {
+		line += "  " + strings.Join(m, " ")
 	}
 	return line
 }
@@ -160,6 +166,7 @@ func taskDetail(t task, events []eventView, now time.Time) string {
 	var b strings.Builder
 	b.WriteString(taskLine(t) + "\n")
 	b.WriteString("initiative: " + t.Initiative + "\n")
+	b.WriteString(taskAttentionLine(t) + strandedText(t, now))
 	b.WriteString(taskFacts(t, now))
 	for _, d := range t.Deps {
 		b.WriteString("blocked by " + linkLine(d) + "\n")

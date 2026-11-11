@@ -26,7 +26,7 @@ var (
 	}
 	taskLsFlags = []flagSpec{
 		{"--status", true}, {"--kind", true}, {"--active", false}, {"--blocked", false}, {"--overdue", false},
-		{"--q", true}, {"--limit", true}, {"--all", false}, {"--json", false},
+		{"--q", true}, {"--limit", true}, {"--all", false}, {"--json", false}, {"--attention", false},
 	}
 	taskShowFlags = []flagSpec{{"--json", false}}
 	taskEditFlags = []flagSpec{

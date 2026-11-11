@@ -72,9 +72,9 @@ Feature: Adding, listing, showing and editing tasks from the command line
       """
     When I mark the task "bb-1" done as actor "claude@laptop"
     And I run the client 'board task ls bb' as actor "claude@laptop"
-    Then stdout is exactly "bb-1  done  Other initiative"
+    Then stdout is exactly "bb-1  done  Other initiative  !done"
     When I run the client 'board task ls --status all bb' as actor "claude@laptop"
-    Then stdout is exactly "bb-1  done  Other initiative"
+    Then stdout is exactly "bb-1  done  Other initiative  !done"
     When I run the client 'board task ls --status open bb' as actor "claude@laptop"
     Then stdout is empty
     When I run the client 'board task ls --json aa' as actor "claude@laptop"
