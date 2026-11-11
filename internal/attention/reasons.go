@@ -13,7 +13,7 @@ type Reason string
 
 // The reasons a task can carry, in the order TaskReasons lists them.
 const (
-	// ReasonStranded: the task's newest lease (by started_at, then lease number)
+	// ReasonStranded: the task's newest lease (by started_at, then lease id)
 	// ran out and nobody acknowledged it.
 	ReasonStranded Reason = "stranded"
 	// ReasonAsking: the task has an open ask.

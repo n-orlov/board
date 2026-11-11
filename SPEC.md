@@ -712,7 +712,7 @@ expired (§5.1):
 
 - **Per-task reasons.** `attention.Store.Reasons` is the one derivation of why a task needs a person, and the
   `open_asks`, `done_not_closed` and `expired_leases` sections are the rows it returns, so a task is in a section exactly when it
-  carries the matching reason. A task has, in this order, `stranded` (its newest lease, by `started_at` then lease number, is
+  carries the matching reason. A task has, in this order, `stranded` (its newest lease, by `started_at` then lease `id`, is
   `expired` with no `acked_at`), `asking` (it has an open ask; `blocking` is true when any such ask is blocking and
   `asker_waiting` when any has its asker waiting) and `done` (it is done and not closed). A closed task has no reason, so its
   leftover asks and unacknowledged leases drop out of the view. Asks on no task stay in `open_asks` and carry no task reason.

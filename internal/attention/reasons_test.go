@@ -218,3 +218,45 @@ func TestReasonsHonoursTheQueryAndRefusesABadOne(t *testing.T) {
 		t.Error("an unknown initiative was accepted")
 	}
 }
+
+// A lease number and a lease id can disagree on which of two leases started at
+// the same instant is newer: the newest lease is the one with the larger id.
+func TestTheNewestLeaseOnAStartedAtTieIsTheOneWithTheLargerID(t *testing.T) {
+	e := newEnv(t)
+	stale := e.lease(t, me, "aa-1")
+	e.tick(2 * time.Minute)
+	e.reasons(t, Query{}) // expires stale
+	ended := e.lease(t, bob, "aa-1")
+	must(e.Leases.End(ctx, bob, "key:x", ended.Ref, "finished"))
+	db := e.A.Store.Writer()
+	if _, err := db.ExecContext(ctx, `UPDATE leases SET started_at = (SELECT started_at FROM leases WHERE id = ?) WHERE id = ?`, stale.ID, ended.ID); err != nil {
+		t.Fatal(err)
+	}
+	setID := func(from, to string) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, `UPDATE leases SET id = ? WHERE id = ?`, to, from); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stale.N >= ended.N || stale.ID >= ended.ID {
+		t.Fatalf("setup: stale %d/%s should precede ended %d/%s in both number and id", stale.N, stale.ID, ended.N, ended.ID)
+	}
+	if got := e.reasons(t, Query{}).Of("aa-1"); got.Reasons != nil {
+		t.Fatalf("with the ended lease's id larger, reasons = %v, want none", got.Reasons)
+	}
+
+	high := "ZZZZZZZZZZZZZZZZZZZZZZZZZZ" // the stale lease's id now sorts after the ended one's, its number still before
+	setID(stale.ID, high)
+	got := e.reasons(t, Query{}).Of("aa-1")
+	if !reflect.DeepEqual(got.Reasons, []Reason{ReasonStranded}) || got.Stranded == nil || got.Stranded.Lease != stale.Ref {
+		t.Fatalf("with the stale lease's id larger, reasons = %v on %+v, want stranded on %s", got.Reasons, got.Stranded, stale.Ref)
+	}
+	if r := e.get(t, Query{}); len(r.ExpiredLeases) != 1 || r.ExpiredLeases[0].Lease != stale.Ref {
+		t.Errorf("expired_leases = %+v, want %s alone", r.ExpiredLeases, stale.Ref)
+	}
+
+	setID(high, "00000000000000000000000000") // and back before the ended one's
+	if got := e.reasons(t, Query{}).Of("aa-1"); got.Reasons != nil {
+		t.Errorf("with the stale lease's id smaller again, reasons = %v, want none", got.Reasons)
+	}
+}

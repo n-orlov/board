@@ -121,7 +121,7 @@ func expiredSection(sc scope) section {
 		 JOIN actors a ON a.id = l.actor_id
 		 WHERE l.state = 'expired' AND l.acked_at IS NULL AND t.status <> 'closed'
 		 AND NOT EXISTS (SELECT 1 FROM leases later WHERE later.task_id = l.task_id
-		     AND (later.started_at > l.started_at OR (later.started_at = l.started_at AND later.n > l.n)))`,
+		     AND (later.started_at > l.started_at OR (later.started_at = l.started_at AND later.id > l.id)))`,
 		`l.expires_at DESC, l.n DESC`)
 }
 
