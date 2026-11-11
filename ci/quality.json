@@ -120,7 +120,8 @@
                 "list.go",
                 "task.go",
                 "tasks.go",
-                "transitions.go"
+                "transitions.go",
+                "upgrade.go"
             ],
             "internal/leases": [
                 "end.go",

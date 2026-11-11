@@ -177,6 +177,9 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err := prepareSchema(ctx, st, migrate); err != nil {
 		return fail(stderr, err)
 	}
+	if _, err := (&tasks.Store{Store: st}).ReopenLeased(ctx); err != nil {
+		return fail(stderr, err)
+	}
 	login, err := loginFromEnv(env, st)
 	if err != nil {
 		return fail(stderr, err)

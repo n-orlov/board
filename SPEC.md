@@ -359,6 +359,15 @@ transaction (a lease past its `expires_at` is expired first, with its `lease_exp
 - Starting a lease on a `done` or a `closed` task is refused (§4.4), so no transition leaves a done or closed task with a live lease.
 Every other transition ends nothing.
 
+**Upgrade step on start (R14).** A database written by a Phase 2 release can hold a `done` task that has a live lease. `board serve`
+settles each one when it starts, after the schema is migrated and before it listens (`internal/tasks` `ReopenLeased`), in one
+transaction: every `done` task that holds a live lease (state `live`, `expires_at` not before now) goes back to `open` with `resolution`,
+`done_at`, `done_by`, `closed_at` and `closed_by` cleared, and `task_reopened` is appended for it with the actor the holder of the task's
+oldest live lease, principal `system:upgrade`, `data.reason` `live lease at upgrade` and `data.lease` that lease's ref (the usual `data.ref`
+and `data.from` `done` too). The leases are left as they are. The update is conditional on the task still being `done`, so a second start,
+or a second server starting at the same moment on the same database, finds nothing to reopen and writes no event. A done task whose
+leases are ended or expired, and every open or closed task, is untouched.
+
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
 open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is
 computed in the same query that reads the task, and the list filter `blocked` uses the same condition. The rule: a task is
