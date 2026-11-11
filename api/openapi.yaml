@@ -531,6 +531,8 @@ paths:
         initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`,
         `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has
         an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`.
+        `attention` is `true` (keeps the tasks that need a person: a non-empty `attention` list) or `false` (those that
+        do not); any other value is 400.
         `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the
         tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose
         title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is
@@ -591,6 +593,12 @@ paths:
           in: query
           required: false
           description: "`true` keeps overdue watch tasks, `false` the tasks that are not overdue."
+          schema:
+            type: boolean
+        - name: attention
+          in: query
+          required: false
+          description: "`true` keeps tasks whose `attention` list is not empty, `false` those whose list is empty."
           schema:
             type: boolean
         - name: closed_within
@@ -2592,8 +2600,17 @@ components:
       allOf:
         - $ref: "#/components/schemas/Task"
         - type: object
-          required: [deps, blocking, live_leases, open_asks]
+          required: [deps, blocking, live_leases, open_asks, attention]
           properties:
+            attention:
+              type: array
+              description: >-
+                Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always
+                empty for a closed task.
+              items:
+                $ref: "#/components/schemas/TaskAttention"
+            stranded_lease:
+              $ref: "#/components/schemas/TaskStrandedLease"
             deps:
               type: array
               description: The tasks it is blocked by, in creation order.
@@ -2620,13 +2637,57 @@ components:
       allOf:
         - $ref: "#/components/schemas/Task"
         - type: object
-          required: [live_leases]
+          required: [live_leases, attention]
           properties:
+            attention:
+              type: array
+              description: >-
+                Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always
+                empty for a closed task.
+              items:
+                $ref: "#/components/schemas/TaskAttention"
+            stranded_lease:
+              $ref: "#/components/schemas/TaskStrandedLease"
             live_leases:
               type: array
               description: Its live leases, oldest first.
               items:
                 $ref: "#/components/schemas/Lease"
+    TaskAttention:
+      type: object
+      description: One reason a task needs a person.
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [stranded, asking, done]
+          description: >-
+            `stranded`: its newest lease ran out and nobody acknowledged it. `asking`: it has an open ask. `done`: it is
+            done and not closed.
+        blocking:
+          type: boolean
+          description: Present, and true, on `asking` when an open ask is blocking.
+        asker_waiting:
+          type: boolean
+          description: Present, and true, on `asking` when an open ask has its asker waiting.
+    TaskStrandedLease:
+      type: object
+      description: The lease behind the `stranded` reason. Present only on a stranded task.
+      required: [ref, holder, intent, renewed_at, expired_at]
+      properties:
+        ref:
+          type: string
+          description: The lease's ref, `L<n>`.
+        holder:
+          $ref: "#/components/schemas/AttentionActor"
+        intent:
+          type: string
+        renewed_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
     TaskList:
       type: object
       description: A page of tasks.

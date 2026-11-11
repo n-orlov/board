@@ -30,22 +30,25 @@ var ErrBadCursor = errors.New("unknown cursor")
 // Tags are initiative tags: the task's initiative must carry every one. Status
 // is open, done, closed, not_closed (the default when empty) or all, and Kind
 // work or watch, empty for either. Active, Blocked and Overdue keep the tasks
-// whose derived state equals the value, nil for either. ClosedWithin is 7d, 30d,
+// whose derived state equals the value, nil for either. Attention keeps the tasks whose ref is in AttentionRefs (true) or
+// is not (false), nil for either; the caller derives AttentionRefs, the tasks that need a person. ClosedWithin is 7d, 30d,
 // 90d or an integer of days and needs a status of closed or all. Q is a text the
 // title or the description contains, in either letter case. After is the ULID or
 // ref of the last task of the previous page. Limit 0 is the default page size.
 type Query struct {
-	Initiatives  []string
-	Tags         []string
-	Status       string
-	Kind         string
-	Active       *bool
-	Blocked      *bool
-	Overdue      *bool
-	ClosedWithin string
-	Q            string
-	After        string
-	Limit        int
+	Initiatives   []string
+	Tags          []string
+	Status        string
+	Kind          string
+	Active        *bool
+	Blocked       *bool
+	Overdue       *bool
+	Attention     *bool
+	AttentionRefs []string
+	ClosedWithin  string
+	Q             string
+	After         string
+	Limit         int
 }
 
 // Page is one page of tasks. NextAfter is the ULID to send as After for the
@@ -162,6 +165,7 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 	f.flag(q.Active, `EXISTS (SELECT 1 FROM leases l WHERE l.task_id = t.id AND l.state = 'live' AND l.expires_at >= ?)`, store.EncodeBound(f.now))
 	f.flag(q.Blocked, `(`+blockedSQL+`)`)
 	f.flag(q.Overdue, `(t.kind = 'watch' AND t.status <> 'closed' AND t.next_check_at IS NOT NULL AND t.next_check_at < ?)`, store.EncodeBound(f.now))
+	f.refs(q.Attention, q.AttentionRefs)
 	return s.afterFilter(ctx, f, q.After)
 }
 
@@ -279,4 +283,23 @@ func (s Store) afterFilter(ctx context.Context, f *filter, ref string) error {
 		return nil
 	}
 	return fmt.Errorf("%w: there is no task %s", ErrBadCursor, ref)
+}
+
+// refs keeps the tasks whose ref is in refs when want is true and those whose
+// ref is not when it is false; nil want keeps every task.
+func (f *filter) refs(want *bool, refs []string) {
+	if want == nil {
+		return
+	}
+	if len(refs) == 0 {
+		if *want {
+			f.add(`1 = 0`)
+		}
+		return
+	}
+	cond := `(i.slug || '-' || CAST(t.seq AS TEXT)) IN (` + marks(len(refs)) + `)`
+	if !*want {
+		cond = `NOT ` + cond
+	}
+	f.add(cond, anys(refs)...)
 }

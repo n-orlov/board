@@ -164,3 +164,32 @@ func TestListTextFoldsNonASCIICaseAndKeepsPatternCharactersLiteral(t *testing.T)
 		t.Fatalf("next page %q, %q, %v", refs(next), next.NextAfter, err)
 	}
 }
+
+func TestListKeepsTheTasksWhoseRefIsInTheAttentionRefs(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	initiative(t, s, "bb")
+	mk(t, s, "aa", "one")
+	mk(t, s, "bb", "two")
+	mk(t, s, "aa", "three")
+	needs := []string{"aa-1", "bb-1"}
+	cases := []struct {
+		name string
+		q    Query
+		want string
+	}{
+		{"no filter keeps every task", Query{AttentionRefs: needs}, "aa-1,bb-1,aa-2"},
+		{"true keeps the listed refs", Query{Attention: yes(), AttentionRefs: needs}, "aa-1,bb-1"},
+		{"false keeps the others", Query{Attention: no(), AttentionRefs: needs}, "aa-2"},
+		{"true with no refs keeps nothing", Query{Attention: yes()}, ""},
+		{"false with no refs keeps every task", Query{Attention: no()}, "aa-1,bb-1,aa-2"},
+		{"true with another filter", Query{Attention: yes(), AttentionRefs: needs, Initiatives: []string{"bb"}}, "bb-1"},
+		{"a ref is matched whole", Query{Attention: yes(), AttentionRefs: []string{"aa-10", "a-1"}}, ""},
+	}
+	for _, c := range cases {
+		got, err := s.List(ctx, c.q)
+		if err != nil || refs(got) != c.want {
+			t.Errorf("%s: %q, %v, want %q", c.name, refs(got), err, c.want)
+		}
+	}
+}

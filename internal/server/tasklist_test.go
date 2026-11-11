@@ -22,13 +22,16 @@ func TestTaskQueryCarriesEveryParameter(t *testing.T) {
 	ini, tag, win, q, after := []string{"aa", "bb"}, []string{"x"}, "30d", "text", "aa-1"
 	yes, limit := true, 5
 	got := taskQuery(ListTasksParams{Initiative: &ini, Tag: &tag, Status: &status, Kind: &kind, Active: &yes, Blocked: &yes,
-		Overdue: &yes, ClosedWithin: &win, Q: &q, Limit: &limit, After: &after})
+		Overdue: &yes, Attention: &yes, ClosedWithin: &win, Q: &q, Limit: &limit, After: &after}, []string{"aa-2"})
 	if fmt.Sprintf("%v %v %s %s %v %v %v %s %s %d %s", got.Initiatives, got.Tags, got.Status, got.Kind, *got.Active, *got.Blocked, *got.Overdue, got.ClosedWithin, got.Q, got.Limit, got.After) !=
 		"[aa bb] [x] closed watch true true true 30d text 5 aa-1" {
 		t.Errorf("query = %+v", got)
 	}
+	if !*got.Attention || fmt.Sprint(got.AttentionRefs) != "[aa-2]" {
+		t.Errorf("attention filter = %v %v", got.Attention, got.AttentionRefs)
+	}
 	zero := 0
-	if got := taskQuery(ListTasksParams{Limit: &zero}); got.Limit != -1 || got.Status != "" || got.Active != nil {
+	if got := taskQuery(ListTasksParams{Limit: &zero}, nil); got.Limit != -1 || got.Status != "" || got.Active != nil {
 		t.Errorf("an explicit limit of 0 and nothing else = %+v", got)
 	}
 }

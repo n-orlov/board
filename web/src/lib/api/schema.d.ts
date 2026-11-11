@@ -265,7 +265,7 @@ export interface paths {
         };
         /**
          * List the tasks
-         * @description A page of tasks ordered by id (creation order), each with its live leases. Filters combine. `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`. `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is not active. An initiative that names nothing is 404.
+         * @description A page of tasks ordered by id (creation order), each with its live leases. Filters combine. `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`. `attention` is `true` (keeps the tasks that need a person: a non-empty `attention` list) or `false` (those that do not); any other value is 400. `closed_within` (`7d`, `30d`, `90d` or an integer of days) is for `status` `closed` or `all`: it keeps the tasks closed within that many days and, with `all`, the tasks that are not closed. `q` keeps the tasks whose title or description contains the text, ignoring letter case. `limit` is 1 to 1000, default 100. `after` is the id or ref of the last task of the previous page; the response's `next_after` is the value to send, and is absent on the last page. Overdue leases are expired before the list is read, so a task whose lease ran out is not active. An initiative that names nothing is 404.
          */
         get: operations["listTasks"];
         put?: never;
@@ -1162,6 +1162,9 @@ export interface components {
         };
         /** @description A task with its dependencies and live leases. */
         TaskDetail: components["schemas"]["Task"] & {
+            /** @description Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always empty for a closed task. */
+            attention: components["schemas"]["TaskAttention"][];
+            stranded_lease?: components["schemas"]["TaskStrandedLease"];
             /** @description The tasks it is blocked by, in creation order. */
             deps: components["schemas"]["TaskLink"][];
             /** @description The tasks that are blocked by it, in creation order. */
@@ -1173,8 +1176,34 @@ export interface components {
         };
         /** @description A task of a list, with its live leases. */
         TaskListItem: components["schemas"]["Task"] & {
+            /** @description Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always empty for a closed task. */
+            attention: components["schemas"]["TaskAttention"][];
+            stranded_lease?: components["schemas"]["TaskStrandedLease"];
             /** @description Its live leases, oldest first. */
             live_leases: components["schemas"]["Lease"][];
+        };
+        /** @description One reason a task needs a person. */
+        TaskAttention: {
+            /**
+             * @description `stranded`: its newest lease ran out and nobody acknowledged it. `asking`: it has an open ask. `done`: it is done and not closed.
+             * @enum {string}
+             */
+            reason: "stranded" | "asking" | "done";
+            /** @description Present, and true, on `asking` when an open ask is blocking. */
+            blocking?: boolean;
+            /** @description Present, and true, on `asking` when an open ask has its asker waiting. */
+            asker_waiting?: boolean;
+        };
+        /** @description The lease behind the `stranded` reason. Present only on a stranded task. */
+        TaskStrandedLease: {
+            /** @description The lease's ref, `L<n>`. */
+            ref: string;
+            holder: components["schemas"]["AttentionActor"];
+            intent: string;
+            /** Format: date-time */
+            renewed_at: string;
+            /** Format: date-time */
+            expired_at: string;
         };
         /** @description A page of tasks. */
         TaskList: {
@@ -2240,6 +2269,8 @@ export interface operations {
                 blocked?: boolean;
                 /** @description `true` keeps overdue watch tasks, `false` the tasks that are not overdue. */
                 overdue?: boolean;
+                /** @description `true` keeps tasks whose `attention` list is not empty, `false` those whose list is empty. */
+                attention?: boolean;
                 /** @description `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`. */
                 closed_within?: string;
                 /** @description A text that the title or the description contains, in either letter case. */

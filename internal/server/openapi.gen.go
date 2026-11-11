@@ -319,6 +319,27 @@ func (e TaskStatus) Valid() bool {
 	}
 }
 
+// Defines values for TaskAttentionReason.
+const (
+	TaskAttentionReasonAsking   TaskAttentionReason = "asking"
+	TaskAttentionReasonDone     TaskAttentionReason = "done"
+	TaskAttentionReasonStranded TaskAttentionReason = "stranded"
+)
+
+// Valid indicates whether the value is a known member of the TaskAttentionReason enum.
+func (e TaskAttentionReason) Valid() bool {
+	switch e {
+	case TaskAttentionReasonAsking:
+		return true
+	case TaskAttentionReasonDone:
+		return true
+	case TaskAttentionReasonStranded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskCreateKind.
 const (
 	TaskCreateKindWatch TaskCreateKind = "watch"
@@ -1496,6 +1517,21 @@ type TaskResolution string
 // TaskStatus defines model for Task.Status.
 type TaskStatus string
 
+// TaskAttention One reason a task needs a person.
+type TaskAttention struct {
+	// AskerWaiting Present, and true, on `asking` when an open ask has its asker waiting.
+	AskerWaiting *bool `json:"asker_waiting,omitempty"`
+
+	// Blocking Present, and true, on `asking` when an open ask is blocking.
+	Blocking *bool `json:"blocking,omitempty"`
+
+	// Reason `stranded`: its newest lease ran out and nobody acknowledged it. `asking`: it has an open ask. `done`: it is done and not closed.
+	Reason TaskAttentionReason `json:"reason"`
+}
+
+// TaskAttentionReason `stranded`: its newest lease ran out and nobody acknowledged it. `asking`: it has an open ask. `done`: it is done and not closed.
+type TaskAttentionReason string
+
 // TaskCheck defines model for TaskCheck.
 type TaskCheck struct {
 	// NextCheckAt When the next check is due. Default is now plus the task's cadence.
@@ -1559,6 +1595,9 @@ type TaskDetail struct {
 	// Active It has a live lease.
 	Active bool `json:"active"`
 
+	// Attention Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always empty for a closed task.
+	Attention []TaskAttention `json:"attention"`
+
 	// Blocked It has an open dependency, one whose blocking task is not closed.
 	Blocked bool `json:"blocked"`
 
@@ -1613,10 +1652,13 @@ type TaskDetail struct {
 	Resolution *TaskDetailResolution `json:"resolution,omitempty"`
 
 	// Seq The number within the initiative, from 1.
-	Seq       int              `json:"seq"`
-	Status    TaskDetailStatus `json:"status"`
-	Title     string           `json:"title"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	Seq    int              `json:"seq"`
+	Status TaskDetailStatus `json:"status"`
+
+	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
+	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
+	Title         string             `json:"title"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 // TaskDetailKind defines model for TaskDetail.Kind.
@@ -1665,6 +1707,9 @@ type TaskListItem struct {
 	// Active It has a live lease.
 	Active bool `json:"active"`
 
+	// Attention Why the task needs a person, in the order stranded, asking, done. Empty when it needs nothing, and always empty for a closed task.
+	Attention []TaskAttention `json:"attention"`
+
 	// Blocked It has an open dependency, one whose blocking task is not closed.
 	Blocked bool `json:"blocked"`
 
@@ -1710,10 +1755,13 @@ type TaskListItem struct {
 	Resolution *TaskListItemResolution `json:"resolution,omitempty"`
 
 	// Seq The number within the initiative, from 1.
-	Seq       int                `json:"seq"`
-	Status    TaskListItemStatus `json:"status"`
-	Title     string             `json:"title"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	Seq    int                `json:"seq"`
+	Status TaskListItemStatus `json:"status"`
+
+	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
+	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
+	Title         string             `json:"title"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 // TaskListItemKind defines model for TaskListItem.Kind.
@@ -1758,6 +1806,19 @@ type TaskPatch struct {
 
 	// Title 1 to 200 characters.
 	Title Maybe[string] `json:"title,omitempty"`
+}
+
+// TaskStrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
+type TaskStrandedLease struct {
+	ExpiredAt time.Time `json:"expired_at"`
+
+	// Holder An actor involved in an item, with the way back the board has on record for it.
+	Holder AttentionActor `json:"holder"`
+	Intent string         `json:"intent"`
+
+	// Ref The lease's ref, `L<n>`.
+	Ref       string    `json:"ref"`
+	RenewedAt time.Time `json:"renewed_at"`
 }
 
 // AskRef defines model for AskRef.
@@ -1992,6 +2053,9 @@ type ListTasksParams struct {
 
 	// Overdue `true` keeps overdue watch tasks, `false` the tasks that are not overdue.
 	Overdue *bool `form:"overdue,omitempty" json:"overdue,omitempty"`
+
+	// Attention `true` keeps tasks whose `attention` list is not empty, `false` those whose list is empty.
+	Attention *bool `form:"attention,omitempty" json:"attention,omitempty"`
 
 	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Only with `status` `closed` or `all`.
 	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
@@ -3239,6 +3303,10 @@ func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Requ
 	// ------------- Optional query parameter "overdue" -------------
 
 	bind.check("overdue", runtime.BindQueryParameterWithOptions("form", true, false, "overdue", r.URL.Query(), &params.Overdue, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	// ------------- Optional query parameter "attention" -------------
+
+	bind.check("attention", runtime.BindQueryParameterWithOptions("form", true, false, "attention", r.URL.Query(), &params.Attention, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
 
 	// ------------- Optional query parameter "closed_within" -------------
 

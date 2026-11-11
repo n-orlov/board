@@ -108,7 +108,7 @@ func WithInitiatives(st *initiatives.Store) Option {
 // both the operations answer 503.
 func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 	return func(o *operations) {
-		o.taskOps = taskOps{tasks: st, leases: ls, asks: o.taskOps.asks}
+		o.taskOps = taskOps{tasks: st, leases: ls, asks: o.taskOps.asks, reasons: o.reasons}
 		o.initiativeOps.tasks = st
 		o.initiativeOps.leases = ls
 	}
@@ -146,7 +146,7 @@ func WithNotes(st *notes.Store) Option {
 
 // WithAttention serves GET /api/v1/attention from st; without it the operation answers 503.
 func WithAttention(st *attention.Store) Option {
-	return func(o *operations) { o.attentionOps = attentionOps{attention: st} }
+	return func(o *operations) { o.attentionOps = attentionOps{attention: st}; o.reasons = st }
 }
 
 // WithCursors serves PUT /api/v1/cursors/{stream} from st and lets `since=cursor`

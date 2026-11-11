@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/tasks"
 )
@@ -19,9 +20,10 @@ func orEmpty[T any](list *[]T) []T {
 }
 
 // taskQuery is the store's query for the parameters of GET /api/v1/tasks.
-func taskQuery(p ListTasksParams) tasks.Query {
+func taskQuery(p ListTasksParams, needing []string) tasks.Query {
 	q := tasks.Query{
 		Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag), Active: p.Active, Blocked: p.Blocked, Overdue: p.Overdue,
+		Attention: p.Attention, AttentionRefs: needing,
 		ClosedWithin: text(p.ClosedWithin), Q: text(p.Q), After: text(p.After), Limit: pageLimit(p.Limit),
 	}
 	if p.Status != nil {
@@ -64,14 +66,18 @@ func (o taskOps) ListTasks(ctx context.Context, req ListTasksRequestObject) (Lis
 	if _, err := o.leases.ExpireDue(ctx); err != nil {
 		return nil, err
 	}
-	page, err := o.tasks.List(ctx, taskQuery(req.Params))
+	reasons, err := o.derived(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := o.tasks.List(ctx, taskQuery(req.Params, needing(reasons)))
 	if errors.Is(err, tasks.ErrBadCursor) {
 		return failure(http.StatusBadRequest, err.Error()).withNext(nextTaskCursor), nil
 	}
 	if err != nil {
 		return taskResult[ListTasksResponseObject](err, "there is no task ")
 	}
-	out, err := o.listed(ctx, page)
+	out, err := o.listed(ctx, page, reasons)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +86,7 @@ func (o taskOps) ListTasks(ctx context.Context, req ListTasksRequestObject) (Lis
 
 // listed is the document for a page: each task with its live leases, read for
 // the whole page in one query.
-func (o taskOps) listed(ctx context.Context, page tasks.Page) (TaskList, error) {
+func (o taskOps) listed(ctx context.Context, page tasks.Page, reasons attention.Derivation) (TaskList, error) {
 	ids := make([]string, len(page.Items))
 	for i, t := range page.Items {
 		ids[i] = t.ID
@@ -92,6 +98,7 @@ func (o taskOps) listed(ctx context.Context, page tasks.Page) (TaskList, error) 
 	out := TaskList{Items: make([]TaskListItem, len(page.Items)), NextAfter: optionalText(page.NextAfter)}
 	for i, t := range page.Items {
 		out.Items[i] = apiTaskListItem(t, live[t.ID])
+		out.Items[i].Attention, out.Items[i].StrandedLease = apiTaskAttention(reasons.Of(t.Ref))
 	}
 	return out, nil
 }

@@ -806,7 +806,7 @@ expired (§5.1):
 | GET/POST | `/initiatives` | list (filters: tag, status, closed_within) / create |
 | GET/PATCH | `/initiatives/{slug}` | read / update (title, description, tags, targets) |
 | POST | `/initiatives/{slug}/close`, `/reopen` | |
-| GET/POST | `/tasks` | list (filters: initiative, tag, status, kind, active, blocked, overdue, closed_within, q) / create |
+| GET/POST | `/tasks` | list (filters: initiative, tag, status, kind, active, blocked, overdue, attention, closed_within, q) / create |
 | GET/PATCH | `/tasks/{ref}` | read (with deps, live leases, open asks) / update |
 | POST | `/tasks/{ref}/done`, `/reopen`, `/close` | done takes optional `outcome` and `force` (R14), close takes `resolution`; done and close end the task's live leases |
 | POST/DELETE | `/tasks/{ref}/deps/{blockedByRef}` | |
@@ -947,12 +947,12 @@ principal may use them. The server answers 503 problem documents when it runs wi
   initiative's counter, inserts the row and appends `task_created` (`data` is `{ref, initiative, title, kind}`) and then
   one `dep_added` per blocker (§4.3). A new task cannot close a dependency cycle.
 - **`GET /api/v1/tasks`** lists tasks in id order (creation order), a page at a time, each item the task document
-  without `deps` and `blocking` (`TaskListItem`: the fields below plus `live_leases`). Filters combine, and none is
+  without `deps` and `blocking` (`TaskListItem`: the fields below plus `live_leases`, `attention` and `stranded_lease`). Filters combine, and none is
   needed: `initiative` (slug or ULID, either letter case) and `tag` (an initiative tag) may repeat, a task being kept
   when it belongs to any initiative given and its initiative carries every tag given (`domain.NormalizeTags` rules);
   `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`; `kind` is `work` or `watch`; `active`
   (a live lease, as in the task document), `blocked` (an open dependency or an open blocking ask) and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
-  `true` or `false`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
+  `true` or `false`; `attention` is `true` (the tasks with a non-empty `attention` list, §5.3) or `false` (an empty list), derived once per request by `attention.Store.Reasons` at the same instant the documents are, so a task selected by `attention=true` carries a non-empty `attention`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
   `closed` or `all`, keeping the tasks closed in the last that many days (with `all` the tasks that are not closed stay);
   `q` keeps the tasks whose title or description contains the text ignoring letter case, for any Unicode letter and not only ASCII; the same tasks match on SQLite and on Postgres, because the match runs in the service and not in the database's own case folding. `%`, `_` and `\` match themselves.
   `limit` is 1 to 1000, default 100, and `after` is the ULID or ref of the last task of the previous page, in either
@@ -1029,13 +1029,14 @@ principal may use them. The server answers 503 problem documents when it runs wi
 - **The task document** (all of the above answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
   status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,
-  live_leases, open_asks}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
-  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`.
+  live_leases, open_asks, attention, stranded_lease?}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
+  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`, and a task that needs nothing has `attention` as `[]`.
   `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
   status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
   is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
   expires_at, state, resources}`, resources sorted); the read first expires the due leases (§5.1), so a lease past its expiry is not listed. The derived `active` is a non-empty
   `live_leases`, `open_asks` are the task's asks in state `open`, blocking or not, oldest first, each an `Ask` (§6.6); `blocked` is an open dependency or an open blocking ask (§4.3) and `overdue` is §4.6's rule at the time of the read.
+  `attention` (also on every `TaskListItem`) is why the task needs a person, derived by the §5.3 rules: `[{reason, blocking?, asker_waiting?}]` with `reason` one of `stranded` (its newest lease ran out and was not acknowledged), `asking` (an open ask) and `done` (done and not closed), always in that order, and `[]` for none and for every closed task. On `asking`, `blocking` is present and `true` when an open ask is blocking and `asker_waiting` present and `true` when an open ask has its asker waiting; neither is ever sent as `false`. A stranded task also carries `stranded_lease: {ref, holder: {handle, way_back?}, intent, renewed_at, expired_at}`, the lease of the §5.3 expired-lease row (`ref` is `L<n>`); every other task omits it. Acknowledging the lease, a later lease, answering or withdrawing the last open ask, closing, and reopening a done task each clear the matching reason on the next read.
 - A PATCH body is read with a three-state field (`internal/server` `Maybe`): left out, `null`, or a value. Fields the
   document does not name are ignored.
 

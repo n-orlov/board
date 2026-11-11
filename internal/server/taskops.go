@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/leases"
@@ -37,6 +38,8 @@ type taskOps struct {
 	leases *leases.Store
 	// asks lists the open asks a task document carries; nil lists none.
 	asks *asks.Store
+	// reasons derives why a task needs a person; nil means none does.
+	reasons *attention.Store
 }
 
 // ready answers 503 when the operations have no store behind them.
@@ -172,6 +175,10 @@ func (o taskOps) openAsks(ctx context.Context, t tasks.Task) ([]Ask, error) {
 
 // detail reads what the document of t carries beyond the row.
 func (o taskOps) detail(ctx context.Context, t tasks.Task) (TaskDetail, error) {
+	reasons, err := o.derived(ctx, t.Initiative)
+	if err != nil {
+		return TaskDetail{}, err
+	}
 	links, err := o.tasks.Links(ctx, t)
 	if err != nil {
 		return TaskDetail{}, err
@@ -184,7 +191,9 @@ func (o taskOps) detail(ctx context.Context, t tasks.Task) (TaskDetail, error) {
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	return apiTaskDetail(t, links, live, open), nil
+	doc := apiTaskDetail(t, links, live, open)
+	doc.Attention, doc.StrandedLease = apiTaskAttention(reasons.Of(t.Ref))
+	return doc, nil
 }
 
 // newTask is the store's request for a create body.
