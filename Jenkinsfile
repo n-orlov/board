@@ -4,11 +4,11 @@
 // also runs nightly (03:17) in the extended lane (-race, fresh vulnerability
 // databases, three clean-state stability runs), which the EXTENDED parameter
 // asks for on demand. Mutation (ci/mutation.sh, the Go and frontend mutation
-// gates) runs last, on every main build and in the extended lane; other
-// branches skip it. A fully green main build archives
-// ci-results/release-candidate.json, which Jenkinsfile.release (the
-// board/release job, a placeholder in this phase) validates against; this job
-// never releases. Reports are Jenkins HTML reports on the build page
+// gates) runs last, in the extended lane only (nightly or EXTENDED=true), like
+// Stability: a push build of main and a branch build skip it. A fully green
+// main build archives ci-results/release-candidate.json, which
+// Jenkinsfile.release (the board/release job, a placeholder in this phase)
+// validates against; this job never releases. Reports are Jenkins HTML reports on the build page
 // ("Allure", "CI summary"), built in post { always } so a red build still has
 // them.
 //
@@ -107,9 +107,9 @@ pipeline {
       }
     }
 
-    // The mutation gates (mutation-go, stryker) read the Mutation stage's
-    // reports, which are written after this stage and not at all on a branch
-    // build, so --mutation-deferred reports them as judged there: ci/mutation.sh
+    // The mutation gates (mutation-go, stryker) read the Mutation stages'
+    // reports, which are written after this stage and only in the extended
+    // lane, so --mutation-deferred reports them as judged there: ci/mutation.sh
     // reads the same thresholds from ci/quality.json and fails the build below
     // them. Every other gate runs here. The image the Trivy and SBOM image
     // gates scan is built on the agent (it needs the docker CLI) and never pushed.
@@ -163,14 +163,10 @@ pipeline {
     // streams and core, because one stage measured it in over 25 minutes),
     // internal/cli (narrowed the same way, in two parts, views and core), then
     // `Mutation`, which runs the base lane (internal/domain, internal/store)
-    // and Stryker over web/src/lib. Every main build and the extended lane.
+    // and Stryker over web/src/lib. The extended lane only (nightly or
+    // EXTENDED=true), like Stability: a push build of main skips all seven.
     stage('Mutation logic') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -180,12 +176,7 @@ pipeline {
     }
 
     stage('Mutation server ops') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -195,12 +186,7 @@ pipeline {
     }
 
     stage('Mutation server streams') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -210,12 +196,7 @@ pipeline {
     }
 
     stage('Mutation server core') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -225,12 +206,7 @@ pipeline {
     }
 
     stage('Mutation cli') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -240,12 +216,7 @@ pipeline {
     }
 
     stage('Mutation cli core') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -255,12 +226,7 @@ pipeline {
     }
 
     stage('Mutation') {
-      when {
-        anyOf {
-          branch 'main'
-          environment name: 'CI_NIGHTLY', value: 'true'
-        }
-      }
+      when { environment name: 'CI_NIGHTLY', value: 'true' }
       options { timeout(time: 30, unit: 'MINUTES') }
       steps {
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {

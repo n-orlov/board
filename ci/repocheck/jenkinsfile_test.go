@@ -411,9 +411,9 @@ func TestJenkinsfilesNotifyTelegram(t *testing.T) {
 
 // TestJenkinsfileMutationStageRunsTheMutationGate: the Jenkinsfile's
 // Mutation stage exists, comes last (after Quality and Stability, R13's
-// order), runs on every main build and in the extended lane, runs
-// `ci/run.sh ci/mutation.sh` as its command, and lets a red gate fail the
-// build.
+// order), runs in the extended lane only (guarded by CI_NIGHTLY like
+// Stability, never on a push build of main), runs `ci/run.sh ci/mutation.sh`
+// as its command, and lets a red gate fail the build.
 func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	stages := jenkinsStages(jf)
@@ -430,10 +430,8 @@ func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 	if !anyLineContains(lines, "sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json base'") {
 		t.Errorf("the Mutation stage does not run `ci/run.sh ci/mutation.sh` over the base lane:\n%s", body)
 	}
-	for _, want := range []string{"anyOf", "branch 'main'", "environment name: 'CI_NIGHTLY', value: 'true'"} {
-		if !anyLineContains(lines, want) {
-			t.Errorf("the Mutation stage's when {} lacks %q (every main build and the extended lane):\n%s", want, body)
-		}
+	for _, problem := range mutationGuardProblems(body) {
+		t.Errorf("the Mutation stage's when {}: %s (extended lane only):\n%s", problem, body)
 	}
 	if !anyLineContains(lines, "catchError(buildResult: 'FAILURE'") {
 		t.Errorf("a red mutation gate does not fail the build:\n%s", body)
@@ -446,7 +444,7 @@ func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 // TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout: ci/quality.json's
 // mutation_go.lanes partition the gremlins packages, and the Jenkinsfile runs
 // every lane as one stage (the base lane in `Mutation`, which also runs
-// Stryker), each on every main build and the extended lane, each failing the
+// Stryker), each in the extended lane only, each failing the
 // build when red, none with a timeout past the 30 minutes the single Mutation
 // stage always had. A lane without a stage would never be measured by CI.
 func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
@@ -475,10 +473,12 @@ func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
 			continue
 		}
 		lines := jenkinsfileLines(body)
+		for _, problem := range mutationGuardProblems(body) {
+			t.Errorf("stage %q: when {} %s:\n%s", name, problem, body)
+		}
 		for _, want := range []string{
 			"sh 'ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json " + lane + "'",
 			"options { timeout(time: 30, unit: 'MINUTES') }",
-			"branch 'main'", "environment name: 'CI_NIGHTLY', value: 'true'",
 			"catchError(buildResult: 'FAILURE'",
 		} {
 			if !anyLineContains(lines, want) {
@@ -497,6 +497,41 @@ func TestEveryMutationLaneIsItsOwnStageUnderTheSameTimeout(t *testing.T) {
 	}
 	if len(all.MutationGo.Lanes) != len(stageOf) {
 		t.Errorf("lanes %v, want exactly %d (one per Jenkins mutation stage)", all.MutationGo.Lanes, len(stageOf))
+	}
+}
+
+// mutationGuardProblems says what is wrong with a Mutation stage's `when`:
+// it must be exactly the CI_NIGHTLY guard Stability uses, so the stage runs in
+// the extended lane only, with no `branch 'main'` (or any other) alternative
+// that would run it on a push build.
+func mutationGuardProblems(stageBody string) []string {
+	var problems []string
+	lines := jenkinsfileLines(stageBody)
+	if !anyLineContains(lines, "environment name: 'CI_NIGHTLY', value: 'true'") {
+		problems = append(problems, "lacks the CI_NIGHTLY guard")
+	}
+	for _, banned := range []string{"branch 'main'", "anyOf", "branch "} {
+		if anyLineContains(lines, banned) {
+			problems = append(problems, "still carries "+banned+", so a push build would run it")
+		}
+	}
+	return problems
+}
+
+// TestMutationGuardProblemsRejectsAPushBuildStage: the guard check fails the
+// old shape (anyOf with branch 'main'), a missing guard, and passes the
+// CI_NIGHTLY-only guard.
+func TestMutationGuardProblemsRejectsAPushBuildStage(t *testing.T) {
+	old := "stage('Mutation') {\n when {\n anyOf {\n branch 'main'\n environment name: 'CI_NIGHTLY', value: 'true'\n }\n }\n steps { sh 'x' }\n}\n"
+	if got := mutationGuardProblems(old); len(got) == 0 {
+		t.Error("a Mutation stage that still runs on branch 'main' passes")
+	}
+	if got := mutationGuardProblems("stage('Mutation') {\n steps { sh 'x' }\n}\n"); len(got) == 0 {
+		t.Error("a Mutation stage without the CI_NIGHTLY guard passes")
+	}
+	ok := "stage('Mutation') {\n when { environment name: 'CI_NIGHTLY', value: 'true' }\n steps { sh 'x' }\n}\n"
+	if got := mutationGuardProblems(ok); len(got) != 0 {
+		t.Errorf("the CI_NIGHTLY-only guard is refused: %v", got)
 	}
 }
 

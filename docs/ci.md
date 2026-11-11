@@ -106,13 +106,13 @@ The clone is of the committed HEAD, so commit before running it.
 | Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |
 | Quality | `ci/image-build.sh`, `ci/image-check.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
 | Stability | `ci/stability.sh 3` on the agent | extended lane only |
-| Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | every `main` build and the extended lane |
+| Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | extended lane only (nightly or `EXTENDED=true`), like Stability |
 | Mutation server ops | the same command, lane `server-ops` (`internal/server#ops`) | same |
 | Mutation server streams | the same command, lane `server-streams` (`internal/server#streams`) | same |
 | Mutation server core | the same command, lane `server-core` (`internal/server#core`) | same |
 | Mutation cli | the same command, lane `cli` (`internal/cli#views`) | same |
 | Mutation cli core | the same command, lane `cli-core` (`internal/cli#core`) | same |
-| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; other branches skip all seven |
+| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; a push build of `main` and a branch build skip all seven |
 
 The extended lane is the nightly `main` build (03:17) or a build with the
 `EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
@@ -129,7 +129,8 @@ set, then `ci/allure-smoke.sh` runs the pinned Allure CLI over the results and
 fails unless the report carries the fixture's steps and its `@gh-61` link.
 
 **Quality and Mutation.** `ci/mutation.sh` writes the reports that `mutation-go`
-and `stryker` read, after Quality, and not at all on a branch build. So the Quality
+and `stryker` read, after Quality, in the extended lane only (a push build of `main` and a branch
+build skip the Mutation stages). So the Quality
 stage passes `--mutation-deferred` as `ci/quality.sh`'s third argument: those two
 rows print "deferred to the Mutation stage" instead of reading reports that
 cannot exist yet. The Mutation stage's `ci/mutation.sh` judges the same reports
@@ -234,7 +235,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 ./ci/...` runs them all:
 
 - `ci/mutation.sh` and `ci/mutationgate`: the Go mutation gate, the command of
-  the Jenkins Mutation stage (every `main` build and the extended lane). The
+  the Jenkins Mutation stages (the extended lane only: nightly or `EXTENDED=true`; a push build of `main` skips them). The
   script runs `gremlins unleash` over each package in `mutation_go.packages`
   (`internal/domain`, `internal/store`, and the application logic Phase 2
   introduced or changed: `internal/asks`, `internal/attention`,
