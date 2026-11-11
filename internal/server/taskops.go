@@ -51,7 +51,10 @@ const nextTaskBody = "Send a JSON body; POST /api/v1/tasks needs an initiative a
 func taskFailure(err error, missing string) (problemResponse, bool) {
 	var bad tasks.InvalidError
 	var noDep tasks.NoDepError
+	var held tasks.LeaseHeldError
 	switch {
+	case errors.As(err, &held):
+		return failure(http.StatusConflict, held.Error()).withNext(held.Next()), true
 	case errors.As(err, &noDep):
 		return failure(http.StatusNotFound, noDep.Error()).
 			withNext("Read the task with GET /api/v1/tasks/" + noDep.Ref + " and look at its deps for the tasks it is blocked by."), true
@@ -329,13 +332,18 @@ func transitioned[R any](ctx context.Context, o taskOps, got tasks.Task, err err
 	return ok(doc), nil
 }
 
-// DoneTask marks an open task done.
+// DoneTask marks an open task done, ending the leases on it as the request says.
 func (o taskOps) DoneTask(ctx context.Context, req DoneTaskRequestObject) (DoneTaskResponseObject, error) {
 	who, bad := o.writer(ctx)
 	if bad != nil {
 		return *bad, nil
 	}
-	got, err := o.tasks.Done(ctx, who.AuditActor(), who.Principal, req.Ref)
+	var opt tasks.DoneOptions
+	if req.Body != nil {
+		opt.Outcome = ptrOr(req.Body.Outcome, "")
+		opt.Force = ptrOr(req.Body.Force, false)
+	}
+	got, err := o.tasks.Done(ctx, who.AuditActor(), who.Principal, req.Ref, opt)
 	return transitioned(ctx, o, got, err, func(d TaskDetail) DoneTaskResponseObject { return DoneTask200JSONResponse(d) })
 }
 
@@ -418,3 +426,11 @@ func (o taskOps) RecordTaskMilestone(ctx context.Context, req RecordTaskMileston
 }
 
 const nextSummaryBody = "Send a JSON body such as {\"summary\": \"...\"}, with a summary of 1 to 200 characters."
+
+// ptrOr is the value p points to, or def for a field the request left out.
+func ptrOr[T any](p *T, def T) T {
+	if p == nil {
+		return def
+	}
+	return *p
+}

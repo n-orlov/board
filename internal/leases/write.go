@@ -84,7 +84,7 @@ const (
 // is renewed instead (same lease, event lease_renewed, Renewed true); otherwise
 // it is a new lease numbered L<n> and the event is lease_started. It returns
 // ErrInvalid for an intent or resource that is wrong (checked before anything is
-// read; a missing task is ErrInvalid too), ErrNotFound for an unknown task, and ErrConflict for a closed task, and writes nothing then.
+// read; a missing task is ErrInvalid too), ErrNotFound for an unknown task, and ErrConflict for a done or closed task, and writes nothing then.
 func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, in Start) (Result, error) {
 	if strings.TrimSpace(in.Task) == "" {
 		return Result{}, InvalidError{Msg: "a lease needs a task", Next: "Send the ref of the task the lease is on, such as aa-1."}
@@ -117,6 +117,10 @@ func (s Store) start(ctx context.Context, tx *sql.Tx, actor audit.Actor, princip
 	if task.Status == "closed" {
 		return Result{}, ConflictError{Msg: "cannot start a lease on task " + task.Ref + ": it is closed",
 			Next: "Reopen the task first, or start the lease on an open task."}
+	}
+	if task.Status == "done" {
+		return Result{}, ConflictError{Msg: "cannot start a lease on task " + task.Ref + ": it is done",
+			Next: "Run board task reopen " + task.Ref + " first, or start the lease on an open task."}
 	}
 	now := s.now()
 	actorID, err := audit.UpsertActor(ctx, tx, s.Store.Dialect(), actor, now)

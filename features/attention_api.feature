@@ -169,12 +169,12 @@ Feature: Attention over HTTP
 
   Scenario: the total is the sum of the five sections
     Given I raise an ask with body "{'task':'aa-1','question':'Which?'}" as actor "claude@laptop"
-    And I mark the task "aa-2" done as actor "codex@laptop"
     And I record a check on the task "aa-3" with body "{'summary':'late','next_check_at':'2020-01-01T00:00:00Z'}" as actor "codex@laptop"
     And I start a lease with body "{'task':'aa-1','intent':'one','resources':['db:x']}" as actor "claude@laptop"
     And I start a lease with body "{'task':'bb-1','intent':'two','resources':['db:x']}" as actor "codex@laptop"
     And I start a lease with body "{'task':'aa-2','intent':'old'}" as actor "gemini@laptop"
     And the lease "L3" ran out 30 seconds ago
+    And I mark the task "aa-2" done as actor "codex@laptop"
     When I request the attention with "" as actor "operator@laptop"
     Then the attention counts are "1,1,1,1,1,5"
 
@@ -204,12 +204,12 @@ Feature: Attention over HTTP
     Then the attention counts are "3,0,0,0,0,3"
 
   Scenario: the filters apply to done tasks, expired leases, overdue watches and conflicts
-    Given I mark the task "bb-1" done as actor "codex@laptop"
-    And I record a check on the task "aa-3" with body "{'summary':'late','next_check_at':'2020-01-01T00:00:00Z'}" as actor "codex@laptop"
+    Given I record a check on the task "aa-3" with body "{'summary':'late','next_check_at':'2020-01-01T00:00:00Z'}" as actor "codex@laptop"
     And I start a lease with body "{'task':'aa-1','intent':'one','resources':['db:x']}" as actor "claude@laptop"
     And I start a lease with body "{'task':'aa-2','intent':'two','resources':['db:x']}" as actor "codex@laptop"
     And I start a lease with body "{'task':'bb-1','intent':'old'}" as actor "gemini@laptop"
     And the lease "L3" ran out 30 seconds ago
+    And I mark the task "bb-1" done as actor "codex@laptop"
     When I request the attention with "" as actor "operator@laptop"
     Then the attention counts are "0,1,1,1,1,4"
     When I request the attention with "initiative=aa" as actor "operator@laptop"

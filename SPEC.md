@@ -335,16 +335,27 @@ Transitions (`internal/tasks`: `Done`, `Reopen`, `Close`), each in one transacti
 
 | from → to | event | row change |
 |---|---|---|
-| `open → done` | `task_done` | sets `done_at`, `done_by` |
+| `open → done` | `task_done` | sets `done_at`, `done_by`; ends the caller's live lease on the task, and refuses or (with force) ends other actors' (below) |
 | `done → open`, `closed → open` | `task_reopened` | clears `resolution`, `done_at`, `done_by`, `closed_at`, `closed_by` |
-| `open → closed`, `done → closed` | `task_closed`, `data.resolution` | sets `resolution`, `closed_at`, `closed_by` (a done task keeps `done_at`, `done_by`) |
+| `open → closed`, `done → closed` | `task_closed`, `data.resolution` | sets `resolution`, `closed_at`, `closed_by` (a done task keeps `done_at`, `done_by`); ends every live lease on the task |
 
 Every transition sets `updated_at` and writes `data.ref` and `data.from` (the status it left). The resolution is
 one of `completed`, `dropped`, `superseded`, `duplicate` (`domain.ValidateResolution`): a missing or unknown one is
 `ErrInvalid` and nothing is read or written. Every other transition (done on done, done on closed, reopen on open,
 close on closed) is `ErrConflict`, a `ConflictError` whose text names the task and its current status
 ("cannot close task aa-1: it is closed"), and writes no row, event or actor. Reopening a task of a closed
-initiative is `ErrInitiativeClosed` and writes nothing. A transition ends nothing else: live leases stay live.
+initiative is `ErrInitiativeClosed` and writes nothing. **Done and active are exclusive** (R14): a task is never `done`
+or `closed` while it holds a live lease, so the done and close transitions settle the task's live leases in their own
+transaction (a lease past its `expires_at` is expired first, with its `lease_expired`, and is not live):
+- `done` ends the caller's own live lease on the task (`lease_ended`, `outcome` the request's optional outcome of at most 200
+  characters, else `done`; `ended_by` stays null as the caller is the holder). A longer outcome is `ErrInvalid` and nothing is read.
+- `done` while another actor holds a live lease is `ErrConflict`, a `LeaseHeldError` naming each holder, lease and intent
+  (`cannot mark task aa-1 done: codex@host holds lease L2 (refactor the parser)`) whose next is `wait for L2 to end, or --force`,
+  and writes no row, event or actor. With `force` every live lease on the task ends in the same transaction: the caller's own
+  with the outcome above, each other actor's with `ended_by` the caller and the outcome `ended: task marked done by <handle>`.
+- `close` ends every live lease on the task, `ended_by` the caller when not the holder, outcome `ended: task closed by <handle>`.
+- Starting a lease on a `done` or a `closed` task is refused (§4.4), so no transition leaves a done or closed task with a live lease.
+Every other transition ends nothing.
 
 Derived, not stored: **active** (has a live lease), **blocked** (has an open dependency or an
 open blocking ask), **overdue** (watch with `next_check_at < now`). `Task.Blocked` (`internal/tasks`) is
@@ -396,7 +407,9 @@ Both tables exist (migration `00004_leases`, in both dialects) with `n` (the sho
 `domain.FormatLeaseRef`), the indexes `leases(state, expires_at)` and `lease_resources(resource)` (§4.10), and extra indexes
 on `leases(task_id)` and `leases(actor_id)`. The database holds the ttl within [60, 43200] and the state to the three values.
 
-An actor may hold several live leases (different tasks). Starting a lease on a task where the
+A lease is started only on an `open` task: a `done` or a `closed` task is `ErrConflict` (`cannot start a lease on task aa-1: it is
+done`, next `Run board task reopen aa-1 first, or start the lease on an open task.`) and nothing is written. A task never
+holds a live lease once it is done or closed: both transitions end the leases on it (§4.3). An actor may hold several live leases (different tasks). Starting a lease on a task where the
 same actor already has a live lease **renews** that lease instead (idempotent start).
 
 `internal/leases` (`Store`: `Start`, `Renew`, `End`, `Ack`, `ExpireDue`, `Get`) writes each change in one transaction with its
@@ -776,7 +789,7 @@ expired (§5.1):
 | POST | `/initiatives/{slug}/close`, `/reopen` | |
 | GET/POST | `/tasks` | list (filters: initiative, tag, status, kind, active, blocked, overdue, closed_within, q) / create |
 | GET/PATCH | `/tasks/{ref}` | read (with deps, live leases, open asks) / update |
-| POST | `/tasks/{ref}/done`, `/reopen`, `/close` | close takes `resolution` |
+| POST | `/tasks/{ref}/done`, `/reopen`, `/close` | done takes optional `outcome` and `force` (R14), close takes `resolution`; done and close end the task's live leases |
 | POST/DELETE | `/tasks/{ref}/deps/{blockedByRef}` | |
 | POST | `/tasks/{ref}/checks` | watch: record a check `{summary, next_check_at?}`; answers the task (§6.4) |
 | POST | `/tasks/{ref}/milestones` | `{summary, data?}`; answers the task (§6.4) |
@@ -949,7 +962,15 @@ principal may use them. The server answers 503 problem documents when it runs wi
   done keeps its `done_at` and `done_by`). Any other move is **409** and the problem's `detail` names the task and its
   current status (`cannot mark done task aa-1: it is closed`), which covers `done` on a done or closed task, `reopen`
   on an open task and `close` on a closed task; reopening a task of a closed initiative is **409** too. An unknown ref
-  is **404**. `/done` and `/reopen` take no body. `/close` takes `{resolution}`, one of `completed`, `dropped`,
+  is **404**. `/reopen` takes no body. `/done` takes an optional body `{outcome?, force?}`: `outcome` (at most 200 characters,
+  else **400**) is the outcome the caller's own live lease ends with, `done` when absent, and `force` (default false) ends
+  the live leases of other actors instead of refusing. **Done and active are exclusive** (R14, §4.3): `/done` and `/close`
+  end the task's live leases in the same transaction. `/done` ends the caller's own live lease (`lease_ended`, the outcome),
+  and a live lease of another actor makes it **409** whose `detail` names the holder, the lease and its intent (`cannot mark
+  task aa-1 done: codex@host holds lease L2 (refactor the parser)`) and whose `next` is `wait for L2 to end, or --force`; the
+  task and every lease stay as they were. With `force: true` every live lease ends, `ended_by` the caller and outcome
+  `ended: task marked done by <handle>`. `/close` ends every live lease on the task, outcome `ended: task closed by
+  <handle>`, `ended_by` the caller when not the holder. `/close` takes `{resolution}`, one of `completed`, `dropped`,
   `superseded` or `duplicate`; a missing body, a missing resolution or any other value (case counts) is **400** and
   the `next` lists the four. Each move runs in one transaction, upserts the acting actor and appends one event
   (`task_done`, `task_reopened`, `task_closed`) whose `data` is `{ref, from}` (the status it left), plus `resolution`
@@ -1011,8 +1032,8 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
 - **`POST /api/v1/leases`**, body `{task, intent, ttl_seconds?, resources?}`. `task` is a task ref or ULID, `intent`
   1 to 200 characters, `ttl_seconds` an integer clamped to [60, 43200] (7200 when absent), `resources` at most 20
   strings of 1 to 100 characters, repeats dropped, kept sorted. A missing body, a missing `task`, a bad intent or a
-  bad resource is **400**, an unknown task **404**, and a **closed** task **409** (`cannot start a lease on task aa-1: it is
-  closed`; a done task is allowed). When the caller already holds a live lease on the task, that lease is renewed
+  bad resource is **400**, an unknown task **404**, and a **done** or **closed** task **409** (`cannot start a lease on task aa-1: it is
+  done` or `… it is closed`; `next` says to run `board task reopen aa-1` first). When the caller already holds a live lease on the task, that lease is renewed
   instead: **200**, the same lease, `lease_renewed`, its intent replaced and its resources replaced only when
   `resources` was sent. Otherwise it is **201**, a new lease and `lease_started`. The answer is `{lease, conflicts}`
   (§5.2). A refusal changes nothing: no lease, event or actor. In one transaction the server upserts the actor
@@ -1043,7 +1064,8 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   state, resources, ended_at?, ended_by?, outcome?, acked_at?, acked_by?}`. `task` is the task's ref, `actor` the
   holder's handle, `state` `live`, `ended` or `expired`, and absent optional fields are omitted. The task document
   (§6.4) lists a task's live leases in `live_leases` and is `active` while it has one. Marking the task done or
-  closing it leaves its leases live: they end by `/end` or by running out.
+  closing it ends its live leases (§4.3, §6.4): a done or closed task never holds one, and a lease ends otherwise by
+  `/end` or by running out.
 
 - **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller. It answers exactly `{actor, my_leases,
   others_leases, conflicts, my_asks, notes, notes_more, attention}`, every list `[]` when empty. Like every lease read it
@@ -1539,7 +1561,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   exit 2 with `board: --resolution: invalid resolution …` or `board: --for: invalid actor …`, before any request is
   sent; `--resolution` and `--for` belong to `close` alone. A move the task's status does not allow (done on a done or
   closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → board
-  task show <ref>`; an unknown task exits 4 with `→ board task ls`. Live leases on the task stay live.
+  task show <ref>`; an unknown task exits 4 with `→ board task ls`. Done and close end the live leases on the task (§4.3, §6.4).
 - `board task dep add <ref> <blocked-by-ref> [--json]` and `board task dep rm <ref> <blocked-by-ref> [--json]` call
   `POST` and `DELETE /api/v1/tasks/<ref>/deps/<blocked-by-ref>` (the refs in either letter case, the two tasks possibly in
   different initiatives) and print `ok task <ref> blocked by <blocked-by-ref>` and `ok task <ref> no longer blocked by

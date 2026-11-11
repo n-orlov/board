@@ -409,7 +409,7 @@ func TestCountsForCountsTheTasksOfEachInitiativeByStatus(t *testing.T) {
 	three := mk(t, s, "aa", "three")
 	mk(t, s, "aa", "four")
 	mk(t, s, "bb", "other")
-	if _, err := s.Done(ctx, who, "key:caller", two.Ref); err != nil {
+	if _, err := s.Done(ctx, who, "key:caller", two.Ref, DoneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Close(ctx, who, "key:caller", three.Ref, "dropped"); err != nil {

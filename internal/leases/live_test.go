@@ -1,9 +1,11 @@
-package leases
+package leases_test
 
 import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/n-orlov/board/internal/leases"
 )
 
 func TestLiveOfListsOnlyTheLiveUnexpiredLeasesOfThatTaskOldestFirst(t *testing.T) {
@@ -43,7 +45,7 @@ func TestLiveOfListsOnlyTheLiveUnexpiredLeasesOfThatTaskOldestFirst(t *testing.T
 		t.Fatal(err)
 	}
 	// the aa-2 lease of the same age expired with it: one event each, however many reads.
-	if evs := e.events(t, EventExpired); len(evs) != 2 {
+	if evs := e.events(t, leases.EventExpired); len(evs) != 2 {
 		t.Errorf("%d lease_expired events after two reads, want 2", len(evs))
 	}
 }
@@ -62,7 +64,7 @@ func TestLiveOfIncludesALeaseAtItsExactExpiry(t *testing.T) {
 	}
 }
 
-func mustGet(t *testing.T, e env, ref string) Lease {
+func mustGet(t *testing.T, e env, ref string) leases.Lease {
 	t.Helper()
 	l, err := e.S.Get(ctx, ref)
 	if err != nil {

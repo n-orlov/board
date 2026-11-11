@@ -181,7 +181,7 @@ func TestOverdueIsAnOpenOrDoneWatchTaskWithNextCheckAtBeforeNow(t *testing.T) {
 			t.Errorf("%s: Overdue = %v (%v), want %v", tc.name, got.Overdue, err, tc.want)
 		}
 	}
-	if _, err := s.Done(ctx, who, "k", overdue.Ref); err != nil {
+	if _, err := s.Done(ctx, who, "k", overdue.Ref, DoneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.Get(ctx, overdue.Ref); !got.Overdue {

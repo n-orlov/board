@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/n-orlov/board/internal/audit"
@@ -24,17 +25,41 @@ type transition struct {
 	data map[string]any
 	// behalf is set when the event records the actor the request is made for.
 	behalf bool
+	// leases settles the task's live leases in the transition's transaction; nil
+	// leaves them as they are.
+	leases leaseRule
+}
+
+// DoneOptions is the optional part of a done request. Outcome is the outcome the
+// caller's own live lease on the task ends with ("" is "done"). Force ends the
+// live leases of other actors too, instead of refusing.
+type DoneOptions struct {
+	Outcome string
+	Force   bool
 }
 
 // Done marks the open task ref names as done, setting done_at and done_by, and
-// appends a task_done event, in one transaction. It returns ErrNotFound for an
-// unknown task and ErrConflict (naming the current status) for a task that is
-// not open, and writes no row or event then.
-func (s Store) Done(ctx context.Context, actor audit.Actor, principal, ref string) (Task, error) {
+// appends a task_done event, in one transaction. A live lease the caller holds
+// on the task ends in the same transaction (lease_ended, outcome opt.Outcome,
+// else "done"). A live lease of another actor refuses the request with
+// LeaseHeldError unless opt.Force is set, which ends every such lease with
+// ended_by the caller and the outcome "ended: task marked done by <handle>". It
+// returns ErrInvalid for an outcome longer than 200 characters (checked before
+// the task is read), ErrNotFound for an unknown task and ErrConflict (naming
+// the current status) for a task that is not open, and writes no row or event
+// then.
+func (s Store) Done(ctx context.Context, actor audit.Actor, principal, ref string, opt DoneOptions) (Task, error) {
+	outcome := strings.TrimSpace(opt.Outcome)
+	if outcome == "" {
+		outcome = "done"
+	} else if err := domain.ValidateSummary(outcome); err != nil {
+		return Task{}, InvalidError{Msg: err.Error(), Next: "Send an outcome of at most 200 characters, or leave it out."}
+	}
 	return s.transit(ctx, actor, principal, ref, transition{
 		action: "mark done", event: EventDone, allowed: []string{"open"},
-		set:  `status = 'done', done_at = ?, done_by = ?`,
-		args: func(actorID string, at int64) []any { return []any{at, actorID} },
+		set:    `status = 'done', done_at = ?, done_by = ?`,
+		args:   func(actorID string, at int64) []any { return []any{at, actorID} },
+		leases: doneLeases(outcome, opt.Force),
 	})
 }
 
@@ -57,7 +82,9 @@ func (s Store) Reopen(ctx context.Context, actor audit.Actor, principal, ref str
 // returns ErrInvalid for a missing or unknown resolution (checked before the
 // task is read), ErrNotFound for an unknown task and ErrConflict (naming the
 // current status) for a closed one, and writes no row or event then. A done
-// task keeps its done_at and done_by.
+// task keeps its done_at and done_by. Every live lease on the task ends with
+// it (lease_ended, ended_by the caller when not the holder, outcome "ended: task
+// closed by <handle>").
 func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, resolution string) (Task, error) {
 	if err := domain.ValidateResolution(resolution); err != nil {
 		return Task{}, InvalidError{Msg: err.Error(), Next: "Send resolution completed, dropped, superseded or duplicate."}
@@ -65,13 +92,14 @@ func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, res
 	return s.transit(ctx, actor, principal, ref, closeTransition(resolution))
 }
 
-// closeTransition is the close of a task with the resolution.
+// closeTransition is the close of a task with the resolution. Every live lease
+// on the task ends with it.
 func closeTransition(resolution string) transition {
 	return transition{
 		action: "close", event: EventClosed, allowed: []string{"open", "done"},
 		set:  `status = 'closed', resolution = ?, closed_at = ?, closed_by = ?`,
 		args: func(actorID string, at int64) []any { return []any{resolution, at, actorID} },
-		data: map[string]any{"resolution": resolution}, behalf: true,
+		data: map[string]any{"resolution": resolution}, behalf: true, leases: closeLeases,
 	}
 }
 
@@ -101,6 +129,11 @@ func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 	actorID, err := audit.UpsertActor(ctx, tx, d, actor, now)
 	if err != nil {
 		return Task{}, err
+	}
+	if tr.leases != nil {
+		if err := tr.leases(ctx, s, tx, leaseCall{task: cur, actor: actor, actorID: actorID, principal: principal, now: now}); err != nil {
+			return Task{}, err
+		}
 	}
 	onBehalf, err := behalfOf(ctx, tx, d, actor, now, tr)
 	if err != nil {

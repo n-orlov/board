@@ -48,6 +48,7 @@
             "internal/notes",
             "internal/audit",
             "internal/tasks",
+            "internal/leases",
             "internal/version",
             "internal/server",
             "internal/cli"
@@ -67,6 +68,7 @@
                 "internal/notes",
                 "internal/audit",
                 "internal/tasks",
+                "internal/leases",
                 "internal/version"
             ],
             "server-ops": [
@@ -114,9 +116,15 @@
                 "tree.go"
             ],
             "internal/tasks": [
+                "leaseend.go",
                 "list.go",
                 "task.go",
-                "tasks.go"
+                "tasks.go",
+                "transitions.go"
+            ],
+            "internal/leases": [
+                "ontask.go",
+                "write.go"
             ]
         },
         "parts": {

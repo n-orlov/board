@@ -1628,6 +1628,19 @@ type TaskDetailResolution string
 // TaskDetailStatus defines model for TaskDetail.Status.
 type TaskDetailStatus string
 
+// TaskDone defines model for TaskDone.
+type TaskDone struct {
+	// Force Optional, false when left out. Ends the live leases of other actors instead of refusing with 409. The operator's action: agents send it only when the operator says so.
+	//
+	// Examples: false
+	Force *bool `json:"force,omitempty"`
+
+	// Outcome Optional, at most 200 characters. The outcome the caller's own live lease on the task ends with; `done` when left out.
+	//
+	// Examples: shipped
+	Outcome *string `json:"outcome,omitempty"`
+}
+
 // TaskLink A task on the other end of a dependency.
 type TaskLink struct {
 	Ref    string         `json:"ref"`
@@ -2058,6 +2071,9 @@ type RecordTaskCheckJSONRequestBody = TaskCheck
 
 // CloseTaskJSONRequestBody defines body for CloseTask for application/json ContentType.
 type CloseTaskJSONRequestBody = TaskClose
+
+// DoneTaskJSONRequestBody defines body for DoneTask for application/json ContentType.
+type DoneTaskJSONRequestBody = TaskDone
 
 // RecordTaskMilestoneJSONRequestBody defines body for RecordTaskMilestone for application/json ContentType.
 type RecordTaskMilestoneJSONRequestBody = TaskMilestone
@@ -7475,7 +7491,8 @@ func (response AddTaskDep503ApplicationProblemPlusJSONResponse) VisitAddTaskDepR
 }
 
 type DoneTaskRequestObject struct {
-	Ref TaskRef `json:"ref"`
+	Ref  TaskRef `json:"ref"`
+	Body *DoneTaskJSONRequestBody
 }
 
 type DoneTaskResponseObject interface {
@@ -9678,6 +9695,16 @@ func (sh *strictHandler) DoneTask(w http.ResponseWriter, r *http.Request, ref Ta
 	var request DoneTaskRequestObject
 
 	request.Ref = ref
+
+	var body DoneTaskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DoneTask(ctx, request.(DoneTaskRequestObject))

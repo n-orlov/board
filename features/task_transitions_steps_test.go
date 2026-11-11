@@ -17,6 +17,10 @@ func (h *harness) markDone(ctx context.Context, ref, actor string) error {
 	return h.transition(ctx, ref, "done", "", actor)
 }
 
+func (h *harness) markDoneWithBody(ctx context.Context, ref, body, actor string) error {
+	return h.transition(ctx, ref, "done", body, actor)
+}
+
 func (h *harness) reopen(ctx context.Context, ref, actor string) error {
 	return h.transition(ctx, ref, "reopen", "", actor)
 }
@@ -68,6 +72,7 @@ func (h *harness) actorHasNoRow(ctx context.Context, handle string) error {
 
 func registerTaskTransitionSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I mark the task "([^"]*)" done as actor "([^"]*)"$`, h.markDone)
+	sc.Step(`^I mark the task "([^"]*)" done with body "([^"]*)" as actor "([^"]*)"$`, h.markDoneWithBody)
 	sc.Step(`^I reopen the task "([^"]*)" as actor "([^"]*)"$`, h.reopen)
 	sc.Step(`^I close the task "([^"]*)" with body "([^"]*)" as actor "([^"]*)"$`, h.closeWithBody)
 	sc.Step(`^I close the task "([^"]*)" without a body as actor "([^"]*)"$`, h.closeWithoutBody)

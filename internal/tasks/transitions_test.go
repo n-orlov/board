@@ -35,7 +35,7 @@ func TestDoneSetsDoneFieldsAndWritesOneTaskDoneEvent(t *testing.T) {
 	initiative(t, s, "aa")
 	tk := mk(t, s, "aa", "one")
 	other := audit2("codex@host")
-	got, err := s.Done(ctx, other, "key:done", tk.Ref)
+	got, err := s.Done(ctx, other, "key:done", tk.Ref, DoneOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestReopenFromDoneAndFromClosedClearsTheDoneAndClosedFields(t *testing.T) {
 		to   func(Task) error
 		from string
 	}{
-		{"done", func(tk Task) error { _, err := s.Done(ctx, who, "key:a", tk.Ref); return err }, "done"},
+		{"done", func(tk Task) error { _, err := s.Done(ctx, who, "key:a", tk.Ref, DoneOptions{}); return err }, "done"},
 		{"closed", func(tk Task) error { _, err := s.Close(ctx, who, "key:a", tk.Ref, "dropped"); return err }, "closed"},
 	} {
 		tk := mk(t, s, "aa", tc.name)
@@ -96,7 +96,7 @@ func TestCloseFromOpenAndFromDoneRecordsTheResolution(t *testing.T) {
 	initiative(t, s, "aa")
 	open := mk(t, s, "aa", "open")
 	done := mk(t, s, "aa", "done")
-	d := must(t)(s.Done(ctx, who, "key:a", done.Ref))
+	d := must(t)(s.Done(ctx, who, "key:a", done.Ref, DoneOptions{}))
 	got, err := s.Close(ctx, audit2("codex@host"), "key:c", open.Ref, "superseded")
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestRefusedTransitionsAreConflictsNamingTheStatusAndWriteNothing(t *testing
 	s := newStore(t)
 	initiative(t, s, "aa")
 	open := mk(t, s, "aa", "open")
-	done := must(t)(s.Done(ctx, who, "key:a", mk(t, s, "aa", "done").Ref))
+	done := must(t)(s.Done(ctx, who, "key:a", mk(t, s, "aa", "done").Ref, DoneOptions{}))
 	closed := mk(t, s, "aa", "closed")
 	closed = must(t)(s.Close(ctx, who, "key:a", closed.Ref, "dropped"))
 	newcomer := audit2("never-seen@host")
@@ -179,8 +179,8 @@ func TestRefusedTransitionsAreConflictsNamingTheStatusAndWriteNothing(t *testing
 		call func(ref string) (Task, error)
 		want string
 	}{
-		{"done on done", done, func(ref string) (Task, error) { return s.Done(ctx, newcomer, "key:n", ref) }, "done"},
-		{"done on closed", closed, func(ref string) (Task, error) { return s.Done(ctx, newcomer, "key:n", ref) }, "closed"},
+		{"done on done", done, func(ref string) (Task, error) { return s.Done(ctx, newcomer, "key:n", ref, DoneOptions{}) }, "done"},
+		{"done on closed", closed, func(ref string) (Task, error) { return s.Done(ctx, newcomer, "key:n", ref, DoneOptions{}) }, "closed"},
 		{"reopen on open", open, func(ref string) (Task, error) { return s.Reopen(ctx, newcomer, "key:n", ref) }, "open"},
 		{"close on closed", closed, func(ref string) (Task, error) { return s.Close(ctx, newcomer, "key:n", ref, "completed") }, "closed"},
 	} {
@@ -204,7 +204,7 @@ func TestTransitionsRefuseAnUnknownTask(t *testing.T) {
 	s := newStore(t)
 	initiative(t, s, "aa")
 	for name, f := range map[string]func() error{
-		"done":   func() error { _, err := s.Done(ctx, who, "k", "aa-9"); return err },
+		"done":   func() error { _, err := s.Done(ctx, who, "k", "aa-9", DoneOptions{}); return err },
 		"reopen": func() error { _, err := s.Reopen(ctx, who, "k", "aa"); return err },
 		"close":  func() error { _, err := s.Close(ctx, who, "k", "aa-9", "dropped"); return err },
 	} {
@@ -242,7 +242,7 @@ func TestTransitionsDoNotTouchTheEditableFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := must(t)(s.Done(ctx, who, "k", tk.Ref))
+	got := must(t)(s.Done(ctx, who, "k", tk.Ref, DoneOptions{}))
 	got = must(t)(s.Reopen(ctx, who, "k", got.Ref))
 	if got.Title != "keep" || got.Description != "d" || got.PlannedEnd == nil || !got.PlannedEnd.Equal(end) || got.Seq != tk.Seq {
 		t.Errorf("fields changed: %+v", got)
@@ -273,7 +273,7 @@ func TestOnlyCloseRecordsTheActorTheRequestIsMadeFor(t *testing.T) {
 	initiative(t, s, "aa")
 	a, b, c := mk(t, s, "aa", "a"), mk(t, s, "aa", "b"), mk(t, s, "aa", "c")
 	behalf := audit.Actor{Handle: "claude@host", OnBehalfOf: "operator"}
-	must(t)(s.Done(ctx, behalf, "key:a", a.Ref))
+	must(t)(s.Done(ctx, behalf, "key:a", a.Ref, DoneOptions{}))
 	must(t)(s.Close(ctx, behalf, "key:a", b.Ref, "dropped"))
 	must(t)(s.Close(ctx, who, "key:a", c.Ref, "dropped"))
 	must(t)(s.Reopen(ctx, behalf, "key:a", c.Ref))

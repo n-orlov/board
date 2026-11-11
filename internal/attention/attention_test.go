@@ -200,9 +200,9 @@ func TestADoneTaskIsListedWithItsLastEndedLeaseAndClearedByClosing(t *testing.T)
 	e.tick(time.Second)
 	must(e.Leases.End(ctx, me, "key:x", l.Ref, "shipped the thing"))
 	e.tick(time.Second)
-	must(e.Tasks.Done(ctx, me, "key:x", "aa-1"))
+	must(e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}))
 	e.tick(time.Second)
-	must(e.Tasks.Done(ctx, bob, "key:x", "aa-2"))
+	must(e.Tasks.Done(ctx, bob, "key:x", "aa-2", tasks.DoneOptions{}))
 
 	r := e.get(t, Query{})
 	if r.Counts.DoneNotClosed != 2 || r.Counts.Total != 2 {
@@ -347,10 +347,11 @@ func TestFiltersKeepTheItemsOfTheInitiativesAndTagsAndTheTotalFollows(t *testing
 	e.ask(t, me, asks.New{Task: "aa-1", Question: "in aa"})
 	e.ask(t, me, asks.New{Task: "bb-1", Question: "in bb"})
 	e.ask(t, me, asks.New{Question: "on no initiative"})
-	must(e.Tasks.Done(ctx, me, "key:x", "aa-2"))
-	must(e.Tasks.Done(ctx, me, "key:x", "bb-1"))
+	must(e.Tasks.Done(ctx, me, "key:x", "aa-2", tasks.DoneOptions{}))
+	must(e.Tasks.Done(ctx, me, "key:x", "bb-1", tasks.DoneOptions{}))
+	must(e.Tasks.Create(ctx, op, "key:x", tasks.New{Initiative: "bb", Title: "second task in bb"}))
 	e.lease(t, me, "aa-1", "repo:board")
-	e.lease(t, bob, "bb-1", "repo:board")
+	e.lease(t, bob, "bb-2", "repo:board")
 
 	if c := e.counts(t); c.OpenAsks != 3 || c.DoneNotClosed != 2 || c.Conflicts != 1 || c.Total != 6 {
 		t.Fatalf("unfiltered counts = %+v", c)

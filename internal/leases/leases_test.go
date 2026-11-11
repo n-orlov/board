@@ -1,4 +1,4 @@
-package leases
+package leases_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/tasks"
 )
@@ -31,7 +32,7 @@ func (c *clock) Now() time.Time      { return c.now }
 func (c *clock) add(d time.Duration) { c.now = c.now.Add(d) }
 
 type env struct {
-	S     Store
+	S     leases.Store
 	Tasks tasks.Store
 	Clock *clock
 }
@@ -52,7 +53,7 @@ func newEnv(t *testing.T) env {
 	if _, err := (initiatives.Store{Store: st, Now: c.Now}).Create(ctx, me, "key:x", initiatives.New{Slug: "aa", Title: "I"}); err != nil {
 		t.Fatal(err)
 	}
-	e := env{S: Store{Store: st, Now: c.Now}, Tasks: tasks.Store{Store: st, Now: c.Now}, Clock: c}
+	e := env{S: leases.Store{Store: st, Now: c.Now}, Tasks: tasks.Store{Store: st, Now: c.Now}, Clock: c}
 	for i := 0; i < 2; i++ {
 		c.add(time.Second)
 		if _, err := e.Tasks.Create(ctx, me, "key:x", tasks.New{Initiative: "aa", Title: "t"}); err != nil {
@@ -62,10 +63,10 @@ func newEnv(t *testing.T) env {
 	return e
 }
 
-func (e env) start(t *testing.T, a audit.Actor, task string, ttl *int64, res ...string) Result {
+func (e env) start(t *testing.T, a audit.Actor, task string, ttl *int64, res ...string) leases.Result {
 	t.Helper()
 	e.Clock.add(time.Second)
-	r, err := e.S.Start(ctx, a, "key:"+a.Handle, Start{Task: task, Intent: "work on " + task, TTL: ttl, Resources: res})
+	r, err := e.S.Start(ctx, a, "key:"+a.Handle, leases.Start{Task: task, Intent: "work on " + task, TTL: ttl, Resources: res})
 	if err != nil {
 		t.Fatalf("start %s: %v", task, err)
 	}
@@ -115,7 +116,7 @@ func TestStartWritesALiveLeaseNumberedLAndALeaseStartedEvent(t *testing.T) {
 	if !reflect.DeepEqual(l.Resources, []string{"host:y", "repo:x"}) || r.Renewed || len(r.Conflicts) != 0 {
 		t.Errorf("resources %v renewed %v conflicts %v", l.Resources, r.Renewed, r.Conflicts)
 	}
-	evs := e.events(t, EventStarted)
+	evs := e.events(t, leases.EventStarted)
 	if len(evs) != 1 || evs[0].TaskID != l.TaskID || evs[0].RefID != l.ID || evs[0].Principal != "key:claude@host" ||
 		evs[0].Data["ref"] != "L1" || evs[0].Data["task"] != "aa-1" || evs[0].Data["ttl_seconds"] != float64(7200) ||
 		!strings.HasPrefix(evs[0].Summary, "L1 started on aa-1") {
@@ -143,7 +144,7 @@ func TestStartBySameActorOnSameTaskRenewsThatLease(t *testing.T) {
 	e := newEnv(t)
 	first := e.start(t, me, "aa-1", secs(600), "r1")
 	e.Clock.add(5 * time.Minute)
-	r, err := e.S.Start(ctx, me, "key:c", Start{Task: "AA-1", Intent: "new intent", TTL: secs(1200)})
+	r, err := e.S.Start(ctx, me, "key:c", leases.Start{Task: "AA-1", Intent: "new intent", TTL: secs(1200)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,13 +158,13 @@ func TestStartBySameActorOnSameTaskRenewsThatLease(t *testing.T) {
 	if !reflect.DeepEqual(l.Resources, []string{"r1"}) {
 		t.Errorf("resources left out of a renewing start must be kept, got %v", l.Resources)
 	}
-	if n := len(e.events(t, EventStarted)); n != 1 {
+	if n := len(e.events(t, leases.EventStarted)); n != 1 {
 		t.Errorf("lease_started events = %d, want 1", n)
 	}
-	if ev := e.events(t, EventRenewed); len(ev) != 1 || ev[0].Data["ref"] != "L1" || ev[0].RefID != l.ID {
+	if ev := e.events(t, leases.EventRenewed); len(ev) != 1 || ev[0].Data["ref"] != "L1" || ev[0].RefID != l.ID {
 		t.Errorf("lease_renewed events = %+v", ev)
 	}
-	again, err := e.S.Start(ctx, me, "key:c", Start{Task: "aa-1", Intent: "x", Resources: []string{"r2"}})
+	again, err := e.S.Start(ctx, me, "key:c", leases.Start{Task: "aa-1", Intent: "x", Resources: []string{"r2"}})
 	if err != nil || !reflect.DeepEqual(again.Lease.Resources, []string{"r2"}) {
 		t.Errorf("a renewing start with resources replaces them: %+v, %v", again.Lease.Resources, err)
 	}
@@ -198,9 +199,9 @@ func TestStartOnAClosedTaskIsRefusedAndWritesNothing(t *testing.T) {
 	if _, err := e.Tasks.Close(ctx, me, "key:x", "aa-1", "dropped"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.S.Start(ctx, bob, "key:b", Start{Task: "aa-1", Intent: "x"})
-	var ce ConflictError
-	if !errors.Is(err, ErrConflict) || !errors.As(err, &ce) || !strings.Contains(err.Error(), "aa-1") {
+	_, err := e.S.Start(ctx, bob, "key:b", leases.Start{Task: "aa-1", Intent: "x"})
+	var ce leases.ConflictError
+	if !errors.Is(err, leases.ErrConflict) || !errors.As(err, &ce) || !strings.Contains(err.Error(), "aa-1") {
 		t.Fatalf("err = %v", err)
 	}
 	var n int
@@ -214,13 +215,13 @@ func TestStartOnAClosedTaskIsRefusedAndWritesNothing(t *testing.T) {
 
 func TestStartRefusesWhatIsInvalidOrUnknown(t *testing.T) {
 	e := newEnv(t)
-	for name, in := range map[string]Start{
+	for name, in := range map[string]leases.Start{
 		"empty intent":   {Task: "aa-1", Intent: " "},
 		"long intent":    {Task: "aa-1", Intent: strings.Repeat("x", 201)},
 		"empty resource": {Task: "aa-1", Intent: "x", Resources: []string{""}},
 		"long resource":  {Task: "aa-1", Intent: "x", Resources: []string{strings.Repeat("x", 101)}},
 	} {
-		if _, err := e.S.Start(ctx, me, "key:x", in); !errors.Is(err, ErrInvalid) {
+		if _, err := e.S.Start(ctx, me, "key:x", in); !errors.Is(err, leases.ErrInvalid) {
 			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
 		}
 	}
@@ -228,11 +229,11 @@ func TestStartRefusesWhatIsInvalidOrUnknown(t *testing.T) {
 	for i := range many {
 		many[i] = strings.Repeat("r", i+1)
 	}
-	if _, err := e.S.Start(ctx, me, "key:x", Start{Task: "aa-1", Intent: "x", Resources: many}); !errors.Is(err, ErrInvalid) {
+	if _, err := e.S.Start(ctx, me, "key:x", leases.Start{Task: "aa-1", Intent: "x", Resources: many}); !errors.Is(err, leases.ErrInvalid) {
 		t.Errorf("21 resources: %v", err)
 	}
 	for _, task := range []string{"aa-9", "nope", "zz-1"} {
-		if _, err := e.S.Start(ctx, me, "key:x", Start{Task: task, Intent: "x"}); !errors.Is(err, ErrNotFound) {
+		if _, err := e.S.Start(ctx, me, "key:x", leases.Start{Task: task, Intent: "x"}); !errors.Is(err, leases.ErrNotFound) {
 			t.Errorf("task %q: err = %v, want ErrNotFound", task, err)
 		}
 	}
@@ -269,7 +270,7 @@ func TestRenewPushesExpiresAtAndKeepsTheTTLUnlessGiven(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, me, "aa-1", secs(600), "r").Lease
 	e.Clock.add(5 * time.Minute)
-	r, err := e.S.Renew(ctx, me, "key:c", "l1", Renew{})
+	r, err := e.S.Renew(ctx, me, "key:c", "l1", leases.Renew{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +280,7 @@ func TestRenewPushesExpiresAtAndKeepsTheTTLUnlessGiven(t *testing.T) {
 	}
 	e.Clock.add(time.Minute)
 	intent, res := "other", []string{"a", "b", "a"}
-	r, err = e.S.Renew(ctx, me, "key:c", l.ID, Renew{TTL: secs(10), Intent: &intent, Resources: &res})
+	r, err = e.S.Renew(ctx, me, "key:c", l.ID, leases.Renew{TTL: secs(10), Intent: &intent, Resources: &res})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestRenewPushesExpiresAtAndKeepsTheTTLUnlessGiven(t *testing.T) {
 		!r.Lease.ExpiresAt.Equal(e.Clock.now.Add(time.Minute)) {
 		t.Errorf("renewed lease = %+v", r.Lease)
 	}
-	evs := e.events(t, EventRenewed)
+	evs := e.events(t, leases.EventRenewed)
 	if len(evs) != 2 || evs[1].Data["intent"] != "other" || evs[1].Data["ttl_seconds"] != float64(60) {
 		t.Errorf("events = %+v", evs)
 	}
@@ -298,20 +299,20 @@ func TestRenewReturnsConflictsAndRefusesInvalidInput(t *testing.T) {
 	e.start(t, bob, "aa-2", nil, "shared")
 	l := e.start(t, me, "aa-1", nil).Lease
 	res := []string{"shared"}
-	r, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{Resources: &res})
+	r, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{Resources: &res})
 	if err != nil || len(r.Conflicts) != 1 || r.Conflicts[0].Holder != "codex@host" {
 		t.Fatalf("renew conflicts = %+v, %v", r.Conflicts, err)
 	}
 	bad := ""
-	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{Intent: &bad}); !errors.Is(err, ErrInvalid) {
+	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{Intent: &bad}); !errors.Is(err, leases.ErrInvalid) {
 		t.Errorf("empty intent: %v", err)
 	}
 	empty := []string{""}
-	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{Resources: &empty}); !errors.Is(err, ErrInvalid) {
+	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{Resources: &empty}); !errors.Is(err, leases.ErrInvalid) {
 		t.Errorf("empty resource: %v", err)
 	}
 	for _, ref := range []string{"L99", "nope", ""} {
-		if _, err := e.S.Renew(ctx, me, "key:c", ref, Renew{}); !errors.Is(err, ErrNotFound) {
+		if _, err := e.S.Renew(ctx, me, "key:c", ref, leases.Renew{}); !errors.Is(err, leases.ErrNotFound) {
 			t.Errorf("ref %q: %v", ref, err)
 		}
 	}
@@ -322,19 +323,19 @@ func TestRenewOfAnExpiredLeaseIsGoneCarryingTheExpiryTime(t *testing.T) {
 	l := e.start(t, me, "aa-1", secs(60)).Lease
 	e.Clock.add(61 * time.Second)
 	for i := 0; i < 2; i++ { // a refused renewal never marks it, so both attempts see the same thing
-		_, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{})
-		var gone GoneError
-		if !errors.Is(err, ErrGone) || !errors.As(err, &gone) || !gone.ExpiredAt.Equal(l.ExpiresAt) || gone.Ref != "L1" {
+		_, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{})
+		var gone leases.GoneError
+		if !errors.Is(err, leases.ErrGone) || !errors.As(err, &gone) || !gone.ExpiredAt.Equal(l.ExpiresAt) || gone.Ref != "L1" {
 			t.Fatalf("attempt %d: err = %v", i, err)
 		}
 	}
 	if got, _ := e.S.Get(ctx, l.Ref); got.State != "live" || !got.ExpiresAt.Equal(l.ExpiresAt) {
 		t.Errorf("lease after a refused renewal = %+v", got)
 	}
-	if n := len(e.events(t, EventRenewed)) + len(e.events(t, EventExpired)); n != 0 {
+	if n := len(e.events(t, leases.EventRenewed)) + len(e.events(t, leases.EventExpired)); n != 0 {
 		t.Errorf("lease_renewed and lease_expired events = %d", n)
 	}
-	if got, _ := e.S.Current(ctx, l.Ref); got.State != "expired" || len(e.events(t, EventExpired)) != 1 {
+	if got, _ := e.S.Current(ctx, l.Ref); got.State != "expired" || len(e.events(t, leases.EventExpired)) != 1 {
 		t.Errorf("lease after a read = %+v", got)
 	}
 }
@@ -343,7 +344,7 @@ func TestRenewAtTheExpiryInstantIsStillLive(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, me, "aa-1", secs(60)).Lease
 	e.Clock.now = l.ExpiresAt
-	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{}); err != nil {
+	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{}); err != nil {
 		t.Fatalf("renew at expires_at: %v", err)
 	}
 }
@@ -354,8 +355,8 @@ func TestRenewOfAnEndedLeaseIsAConflict(t *testing.T) {
 	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{})
-	if !errors.Is(err, ErrConflict) || errors.Is(err, ErrGone) || !strings.Contains(err.Error(), "ended") {
+	_, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{})
+	if !errors.Is(err, leases.ErrConflict) || errors.Is(err, leases.ErrGone) || !strings.Contains(err.Error(), "ended") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -371,7 +372,7 @@ func TestEndByTheHolderSetsNoEndedBy(t *testing.T) {
 	if got.State != "ended" || got.EndedBy != "" || got.Outcome != "all done" || got.EndedAt == nil || !got.EndedAt.Equal(e.Clock.now) {
 		t.Errorf("ended lease = %+v", got)
 	}
-	evs := e.events(t, EventEnded)
+	evs := e.events(t, leases.EventEnded)
 	if len(evs) != 1 || evs[0].Data["outcome"] != "all done" || evs[0].Data["ref"] != "L1" || evs[0].Actor != "claude@host" {
 		t.Fatalf("events = %+v", evs)
 	}
@@ -390,7 +391,7 @@ func TestEndByAnotherActorSetsEndedBy(t *testing.T) {
 	if got.State != "ended" || got.EndedBy != "codex@host" || got.Actor != "claude@host" || got.Outcome != "" {
 		t.Errorf("ended lease = %+v", got)
 	}
-	evs := e.events(t, EventEnded)
+	evs := e.events(t, leases.EventEnded)
 	if len(evs) != 1 || evs[0].Data["ended_by"] != "codex@host" || evs[0].Actor != "codex@host" {
 		t.Errorf("events = %+v", evs)
 	}
@@ -405,21 +406,21 @@ func TestEndTwiceAndEndOfAnExpiredLeaseAreConflicts(t *testing.T) {
 	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "ended") {
+	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); !errors.Is(err, leases.ErrConflict) || !strings.Contains(err.Error(), "ended") {
 		t.Errorf("second end: %v", err)
 	}
 	short := e.start(t, me, "aa-2", secs(60)).Lease
 	e.Clock.add(2 * time.Minute)
-	if _, err := e.S.End(ctx, me, "key:c", short.Ref, ""); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "expired") {
+	if _, err := e.S.End(ctx, me, "key:c", short.Ref, ""); !errors.Is(err, leases.ErrConflict) || !strings.Contains(err.Error(), "expired") {
 		t.Errorf("end of expired: %v", err)
 	}
-	if n := len(e.events(t, EventEnded)); n != 1 {
+	if n := len(e.events(t, leases.EventEnded)); n != 1 {
 		t.Errorf("lease_ended events = %d", n)
 	}
-	if _, err := e.S.End(ctx, me, "key:c", "L77", ""); !errors.Is(err, ErrNotFound) {
+	if _, err := e.S.End(ctx, me, "key:c", "L77", ""); !errors.Is(err, leases.ErrNotFound) {
 		t.Errorf("unknown: %v", err)
 	}
-	if _, err := e.S.End(ctx, me, "key:c", "L1", strings.Repeat("x", 201)); !errors.Is(err, ErrInvalid) {
+	if _, err := e.S.End(ctx, me, "key:c", "L1", strings.Repeat("x", 201)); !errors.Is(err, leases.ErrInvalid) {
 		t.Errorf("long outcome: %v", err)
 	}
 }
@@ -436,13 +437,13 @@ func TestAckOfAnExpiredLeaseSetsAckedAtAndAckedBy(t *testing.T) {
 	if got.State != "expired" || got.AckedBy != "op@host" || got.AckedAt == nil || !got.AckedAt.Equal(e.Clock.now) {
 		t.Errorf("acked lease = %+v", got)
 	}
-	evs := e.events(t, EventAcked)
+	evs := e.events(t, leases.EventAcked)
 	if len(evs) != 1 || evs[0].Data["ref"] != "L1" || evs[0].RefID != l.ID {
 		t.Errorf("events = %+v", evs)
 	}
 	e.Clock.add(time.Minute)
 	again, err := e.S.Ack(ctx, bob, "key:b", l.Ref)
-	if err != nil || again.AckedBy != "op@host" || !again.AckedAt.Equal(got.AckedAt.UTC()) || len(e.events(t, EventAcked)) != 1 {
+	if err != nil || again.AckedBy != "op@host" || !again.AckedAt.Equal(got.AckedAt.UTC()) || len(e.events(t, leases.EventAcked)) != 1 {
 		t.Errorf("second ack = %+v, %v", again, err)
 	}
 }
@@ -450,23 +451,23 @@ func TestAckOfAnExpiredLeaseSetsAckedAtAndAckedBy(t *testing.T) {
 func TestAckOfALiveOrEndedLeaseIsAConflict(t *testing.T) {
 	e := newEnv(t)
 	live := e.start(t, me, "aa-1", nil).Lease
-	if _, err := e.S.Ack(ctx, me, "key:c", live.Ref); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "live") {
+	if _, err := e.S.Ack(ctx, me, "key:c", live.Ref); !errors.Is(err, leases.ErrConflict) || !strings.Contains(err.Error(), "live") {
 		t.Errorf("ack live: %v", err)
 	}
 	done := e.start(t, me, "aa-2", nil).Lease
 	if _, err := e.S.End(ctx, me, "key:c", done.Ref, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.S.Ack(ctx, me, "key:c", done.Ref); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "ended") {
+	if _, err := e.S.Ack(ctx, me, "key:c", done.Ref); !errors.Is(err, leases.ErrConflict) || !strings.Contains(err.Error(), "ended") {
 		t.Errorf("ack ended: %v", err)
 	}
 	if got, _ := e.S.Get(ctx, live.Ref); got.AckedAt != nil || got.AckedBy != "" {
 		t.Errorf("a refused ack wrote: %+v", got)
 	}
-	if _, err := e.S.Ack(ctx, me, "key:c", "L99"); !errors.Is(err, ErrNotFound) {
+	if _, err := e.S.Ack(ctx, me, "key:c", "L99"); !errors.Is(err, leases.ErrNotFound) {
 		t.Errorf("unknown: %v", err)
 	}
-	if n := len(e.events(t, EventAcked)); n != 0 {
+	if n := len(e.events(t, leases.EventAcked)); n != 0 {
 		t.Errorf("lease_acked events = %d", n)
 	}
 }
@@ -490,24 +491,109 @@ func TestExpireDueMarksLeasesPastExpiryOnceAndWritesOneEventEach(t *testing.T) {
 	if got.State != "expired" || other.State != "live" {
 		t.Errorf("states = %s, %s", got.State, other.State)
 	}
-	evs := e.events(t, EventExpired)
+	evs := e.events(t, leases.EventExpired)
 	if len(evs) != 1 || evs[0].RefID != a.ID || evs[0].Data["ref"] != "L1" || evs[0].Principal != "system:expiry" ||
 		evs[0].Data["expired_at"] != a.ExpiresAt.Format(time.RFC3339Nano) || evs[0].TaskID != a.TaskID {
 		t.Errorf("events = %+v", evs)
 	}
 }
 
-func TestClosingATaskLeavesItsLeasesLive(t *testing.T) {
+func TestClosingATaskEndsItsLiveLeasesAndTheyCanNoLongerBeRenewedOrEnded(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, me, "aa-1", nil).Lease
+	b := e.start(t, bob, "aa-1", nil).Lease
+	other := e.start(t, bob, "aa-2", nil).Lease
 	if _, err := e.Tasks.Close(ctx, me, "key:x", "aa-1", "dropped"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, Renew{}); err != nil {
+	got, _ := e.S.Get(ctx, l.Ref)
+	theirs, _ := e.S.Get(ctx, b.Ref)
+	if got.State != "ended" || got.Outcome != "ended: task closed by claude@host" || got.EndedBy != "" || got.EndedAt == nil {
+		t.Errorf("own lease = %+v", got)
+	}
+	if theirs.State != "ended" || theirs.Outcome != "ended: task closed by claude@host" || theirs.EndedBy != "claude@host" {
+		t.Errorf("other lease = %+v", theirs)
+	}
+	if left, _ := e.S.Get(ctx, other.Ref); left.State != "live" {
+		t.Errorf("a lease on another task = %+v, want live", left)
+	}
+	if _, err := e.S.Renew(ctx, me, "key:c", l.Ref, leases.Renew{}); !errors.Is(err, leases.ErrConflict) {
 		t.Errorf("renew on a closed task: %v", err)
 	}
-	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); err != nil {
+	if _, err := e.S.End(ctx, me, "key:c", l.Ref, ""); !errors.Is(err, leases.ErrConflict) {
 		t.Errorf("end on a closed task: %v", err)
+	}
+	evs := e.events(t, leases.EventEnded)
+	if len(evs) != 2 || evs[0].Data["ended_by"] != nil || evs[1].Data["ended_by"] != "claude@host" || evs[1].RefID != b.ID {
+		t.Errorf("events = %+v", evs)
+	}
+}
+
+func TestDoneEndsTheCallersLeaseAndRefusesOrForcesPastAnothersLease(t *testing.T) {
+	e := newEnv(t)
+	mine := e.start(t, me, "aa-1", nil).Lease
+	theirs := e.start(t, bob, "aa-1", nil).Lease
+	_, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{})
+	var held tasks.LeaseHeldError
+	if !errors.As(err, &held) || len(held.Holders) != 1 || held.Holders[0].Ref != theirs.Ref {
+		t.Fatalf("err = %v, want the done refused naming %s", err, theirs.Ref)
+	}
+	if got, _ := e.S.Get(ctx, mine.Ref); got.State != "live" || len(e.events(t, leases.EventEnded)) != 0 {
+		t.Errorf("a refused done changed the caller's lease: %+v", got)
+	}
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{Outcome: "shipped", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := e.S.Get(ctx, mine.Ref)
+	b, _ := e.S.Get(ctx, theirs.Ref)
+	if a.State != "ended" || a.Outcome != "shipped" || a.EndedBy != "" {
+		t.Errorf("own lease = %+v", a)
+	}
+	if b.State != "ended" || b.Outcome != "ended: task marked done by claude@host" || b.EndedBy != "claude@host" {
+		t.Errorf("other lease = %+v", b)
+	}
+}
+
+func TestDoneByTheHolderEndsItsLeaseWithTheDefaultOutcome(t *testing.T) {
+	e := newEnv(t)
+	l := e.start(t, me, "aa-1", nil).Lease
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.S.Get(ctx, l.Ref); got.State != "ended" || got.Outcome != "done" {
+		t.Errorf("lease = %+v", got)
+	}
+}
+
+func TestDoneOnATaskWhoseOtherLeaseRanOutExpiresItInsteadOfRefusing(t *testing.T) {
+	e := newEnv(t)
+	l := e.start(t, bob, "aa-1", secs(60)).Lease
+	e.Clock.add(2 * time.Minute)
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.S.Get(ctx, l.Ref); got.State != "expired" || len(e.events(t, leases.EventExpired)) != 1 || len(e.events(t, leases.EventEnded)) != 0 {
+		t.Errorf("lease = %+v", got)
+	}
+}
+
+func TestStartOnADoneTaskIsRefusedAndWritesNothing(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.S.Start(ctx, bob, "key:b", leases.Start{Task: "aa-1", Intent: "x"})
+	var ce leases.ConflictError
+	if !errors.Is(err, leases.ErrConflict) || !errors.As(err, &ce) || !strings.Contains(ce.Msg, "aa-1") || !strings.Contains(ce.Msg, "done") ||
+		ce.Next != "Run board task reopen aa-1 first, or start the lease on an open task." {
+		t.Fatalf("err = %v, next %q", err, ce.Next)
+	}
+	var n int
+	if err := e.S.Store.Reader().QueryRow(`SELECT COUNT(*) FROM leases`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("leases = %d, %v", n, err)
+	}
+	if err := e.S.Store.Reader().QueryRow(`SELECT COUNT(*) FROM actors WHERE handle = 'codex@host'`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("a refused start recorded the actor: %d", n)
 	}
 }
 
@@ -520,7 +606,7 @@ func TestGetReadsByRefAndUlidInEitherCase(t *testing.T) {
 		}
 	}
 	for _, ref := range []string{"L2", "L0", "x", "", "01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
-		if _, err := e.S.Get(ctx, ref); !errors.Is(err, ErrNotFound) {
+		if _, err := e.S.Get(ctx, ref); !errors.Is(err, leases.ErrNotFound) {
 			t.Errorf("Get(%q) = %v", ref, err)
 		}
 	}
@@ -537,11 +623,11 @@ func TestSameActorOnTwoTasksSharingAResourceConflicts(t *testing.T) {
 }
 
 func TestErrorTextsNameTheLeaseAndTheProblem(t *testing.T) {
-	g := GoneError{Ref: "L3", ExpiredAt: t0}
+	g := leases.GoneError{Ref: "L3", ExpiredAt: t0}
 	if got := g.Error(); got != "lease L3 expired at 2026-11-05T12:00:00Z" {
 		t.Errorf("GoneError = %q", got)
 	}
-	if got := (InvalidError{Msg: "bad", Next: "fix"}).Error(); got != "bad" {
+	if got := (leases.InvalidError{Msg: "bad", Next: "fix"}).Error(); got != "bad" {
 		t.Errorf("InvalidError = %q", got)
 	}
 }
@@ -586,16 +672,16 @@ func TestRefusedWritesChangeNothingWhileAnUnrelatedLeaseIsDue(t *testing.T) {
 	stranger := audit.Actor{Handle: "new@host"}
 	refusals := map[string]func() error{
 		"start closed": func() error {
-			_, err := e.S.Start(ctx, stranger, "key:n", Start{Task: "aa-2", Intent: "x"})
+			_, err := e.S.Start(ctx, stranger, "key:n", leases.Start{Task: "aa-2", Intent: "x"})
 			return err
 		},
 		"start unknown": func() error {
-			_, err := e.S.Start(ctx, stranger, "key:n", Start{Task: "aa-9", Intent: "x"})
+			_, err := e.S.Start(ctx, stranger, "key:n", leases.Start{Task: "aa-9", Intent: "x"})
 			return err
 		},
-		"renew ended":   func() error { _, err := e.S.Renew(ctx, stranger, "key:n", ended.Ref, Renew{}); return err },
-		"renew unknown": func() error { _, err := e.S.Renew(ctx, stranger, "key:n", "L99", Renew{}); return err },
-		"renew the due": func() error { _, err := e.S.Renew(ctx, stranger, "key:n", due.Ref, Renew{}); return err },
+		"renew ended":   func() error { _, err := e.S.Renew(ctx, stranger, "key:n", ended.Ref, leases.Renew{}); return err },
+		"renew unknown": func() error { _, err := e.S.Renew(ctx, stranger, "key:n", "L99", leases.Renew{}); return err },
+		"renew the due": func() error { _, err := e.S.Renew(ctx, stranger, "key:n", due.Ref, leases.Renew{}); return err },
 		"end ended":     func() error { _, err := e.S.End(ctx, stranger, "key:n", ended.Ref, ""); return err },
 		"end the due":   func() error { _, err := e.S.End(ctx, stranger, "key:n", due.Ref, ""); return err },
 		"end unknown":   func() error { _, err := e.S.End(ctx, stranger, "key:n", "L99", ""); return err },
@@ -619,13 +705,16 @@ func TestRefusedWritesChangeNothingWhileAnUnrelatedLeaseIsDue(t *testing.T) {
 }
 
 func TestEverySuccessfulLeaseWriteCommitsTheExpiryOfADueLeaseOnce(t *testing.T) {
-	writes := map[string]func(e env, held Lease) error{
-		"start": func(e env, _ Lease) error {
-			_, err := e.S.Start(ctx, bob, "key:b", Start{Task: "aa-2", Intent: "x"})
+	writes := map[string]func(e env, held leases.Lease) error{
+		"start": func(e env, _ leases.Lease) error {
+			_, err := e.S.Start(ctx, bob, "key:b", leases.Start{Task: "aa-2", Intent: "x"})
 			return err
 		},
-		"renew": func(e env, held Lease) error { _, err := e.S.Renew(ctx, me, "key:c", held.Ref, Renew{}); return err },
-		"end":   func(e env, held Lease) error { _, err := e.S.End(ctx, me, "key:c", held.Ref, ""); return err },
+		"renew": func(e env, held leases.Lease) error {
+			_, err := e.S.Renew(ctx, me, "key:c", held.Ref, leases.Renew{})
+			return err
+		},
+		"end": func(e env, held leases.Lease) error { _, err := e.S.End(ctx, me, "key:c", held.Ref, ""); return err },
 	}
 	for name, write := range writes {
 		e := newEnv(t)
@@ -638,7 +727,7 @@ func TestEverySuccessfulLeaseWriteCommitsTheExpiryOfADueLeaseOnce(t *testing.T) 
 		if got, _ := e.S.Get(ctx, due.Ref); got.State != "expired" {
 			t.Errorf("%s: due lease is %s", name, got.State)
 		}
-		if evs := e.events(t, EventExpired); len(evs) != 1 || evs[0].RefID != due.ID {
+		if evs := e.events(t, leases.EventExpired); len(evs) != 1 || evs[0].RefID != due.ID {
 			t.Errorf("%s: lease_expired events = %+v", name, evs)
 		}
 	}

@@ -54,10 +54,12 @@ Feature: Leases over HTTP
     And the response path "lease.ref" is "L2"
     And the response path "lease.actor" is "codex@laptop"
 
-  Scenario: starting on a task that is done is allowed
+  Scenario: starting on a task that is done is 409 and names the reopen
     Given I mark the task "aa-1" done as actor "claude@laptop"
     When I start a lease with body "{'task':'aa-1','intent':'x'}" as actor "claude@laptop"
-    Then the response status is 201
+    Then the response status is 409
+    And the response path "detail" is "cannot start a lease on task aa-1: it is done"
+    And there are 0 leases in the database
 
   Scenario: starting on a closed task is 409 and writes nothing
     Given I close the task "aa-1" with body "{'resolution':'dropped'}" as actor "claude@laptop"
@@ -266,7 +268,7 @@ Feature: Leases over HTTP
     When I request the lease "L1" as actor "codex@laptop"
     Then exactly 1 lease_expired event exists for the lease "L1"
 
-  Scenario: the task lists its live lease, which stays after the task is done and after it is closed
+  Scenario: the task lists its live lease, which ends with the task when it is closed
     Given I start a lease with body "{'task':'aa-1','intent':'first','resources':['db:x']}" as actor "claude@laptop"
     When I request the task "aa-1" as actor "claude@laptop"
     Then the response status is 200
@@ -276,20 +278,19 @@ Feature: Leases over HTTP
     And the response path "live_leases.0.actor" is "claude@laptop"
     And the response path "live_leases.0.state" is "live"
     And the response path "live_leases.0.resources" is "db:x"
-    When I mark the task "aa-1" done as actor "claude@laptop"
-    Then the response path "status" is "done"
-    And the response path "active" is "true"
-    And the response path "live_leases" has 1 items
-    When I request the task "aa-1" as actor "claude@laptop"
-    Then the response path "live_leases.0.ref" is "L1"
     When I close the task "aa-1" with body "{'resolution':'completed'}" as actor "claude@laptop"
     Then the response path "status" is "closed"
-    And the response path "active" is "true"
-    And the response path "live_leases" has 1 items
-    When I request the task "aa-1" as actor "claude@laptop"
-    Then the response path "active" is "true"
-    And the response path "live_leases.0.ref" is "L1"
-    And the lease "L1" is "live" in the database
+    And the response path "active" is "false"
+    And the response path "live_leases" has 0 items
+    And the lease "L1" is "ended" in the database
+
+  Scenario: the task lists its live lease, which ends with the task when it is done
+    Given I start a lease with body "{'task':'aa-1','intent':'first'}" as actor "claude@laptop"
+    When I mark the task "aa-1" done as actor "claude@laptop"
+    Then the response path "status" is "done"
+    And the response path "active" is "false"
+    And the response path "live_leases" has 0 items
+    And the lease "L1" is "ended" in the database
 
   Scenario: the task stops being active when its lease ends or runs out
     Given I start a lease with body "{'task':'aa-1','intent':'first'}" as actor "claude@laptop"

@@ -1,4 +1,4 @@
-package leases
+package leases_test
 
 import (
 	"errors"
@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/n-orlov/board/internal/leases"
 )
 
-func refsOf(p Page) []string {
+func refsOf(p leases.Page) []string {
 	out := []string{}
 	for _, l := range p.Items {
 		out = append(out, l.Ref)
@@ -30,7 +32,7 @@ func listEnv(t *testing.T) env {
 	e.start(t, bob, "aa-1", secs(60), "db:z")
 	e.Clock.add(2 * time.Minute)
 	for _, ref := range []string{"L1", "L2"} {
-		if _, err := e.S.Renew(ctx, me, "key:x", ref, Renew{}); err != nil {
+		if _, err := e.S.Renew(ctx, me, "key:x", ref, leases.Renew{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,19 +42,19 @@ func listEnv(t *testing.T) env {
 func TestListFiltersByStateActorTaskAndResource(t *testing.T) {
 	e := listEnv(t)
 	for _, tc := range []struct {
-		q    Query
+		q    leases.Query
 		want []string
 	}{
-		{Query{}, []string{"L1", "L2"}},
-		{Query{State: StateLive}, []string{"L1", "L2"}},
-		{Query{State: StateEnded}, []string{"L3"}},
-		{Query{State: StateExpired}, []string{"L4"}},
-		{Query{State: StateAll}, []string{"L1", "L2", "L3", "L4"}},
-		{Query{State: StateAll, Actor: "claude@host"}, []string{"L1", "L3"}},
-		{Query{State: StateAll, Task: "aa-1"}, []string{"L1", "L4"}},
-		{Query{State: StateAll, Resource: "repo:y"}, []string{"L2", "L3"}},
-		{Query{State: StateAll, Resource: "db:x", Actor: "codex@host", Task: "aa-2"}, []string{"L2"}},
-		{Query{Resource: "db:none"}, []string{}},
+		{leases.Query{}, []string{"L1", "L2"}},
+		{leases.Query{State: leases.StateLive}, []string{"L1", "L2"}},
+		{leases.Query{State: leases.StateEnded}, []string{"L3"}},
+		{leases.Query{State: leases.StateExpired}, []string{"L4"}},
+		{leases.Query{State: leases.StateAll}, []string{"L1", "L2", "L3", "L4"}},
+		{leases.Query{State: leases.StateAll, Actor: "claude@host"}, []string{"L1", "L3"}},
+		{leases.Query{State: leases.StateAll, Task: "aa-1"}, []string{"L1", "L4"}},
+		{leases.Query{State: leases.StateAll, Resource: "repo:y"}, []string{"L2", "L3"}},
+		{leases.Query{State: leases.StateAll, Resource: "db:x", Actor: "codex@host", Task: "aa-2"}, []string{"L2"}},
+		{leases.Query{Resource: "db:none"}, []string{}},
 	} {
 		p, err := e.S.List(ctx, tc.q)
 		if err != nil || !reflect.DeepEqual(refsOf(p), tc.want) {
@@ -64,33 +66,33 @@ func TestListFiltersByStateActorTaskAndResource(t *testing.T) {
 func TestListShowsResourcesSortedAndExpiresDueLeasesFirst(t *testing.T) {
 	e := listEnv(t)
 	e.Clock.add(3 * time.Hour)
-	p, err := e.S.List(ctx, Query{State: StateExpired})
+	p, err := e.S.List(ctx, leases.Query{State: leases.StateExpired})
 	if err != nil || !reflect.DeepEqual(refsOf(p), []string{"L1", "L2", "L4"}) {
 		t.Fatalf("expired = %v, %v", refsOf(p), err)
 	}
 	if got := p.Items[1].Resources; !reflect.DeepEqual(got, []string{"db:x", "repo:y"}) {
 		t.Errorf("resources = %v", got)
 	}
-	if n := len(e.events(t, EventExpired)); n != 3 {
+	if n := len(e.events(t, leases.EventExpired)); n != 3 {
 		t.Errorf("%d lease_expired events, want 3", n)
 	}
 }
 
 func TestListPagesWithLimitAndAfter(t *testing.T) {
 	e := listEnv(t)
-	first, err := e.S.List(ctx, Query{State: StateAll, Limit: 3})
+	first, err := e.S.List(ctx, leases.Query{State: leases.StateAll, Limit: 3})
 	if err != nil || !reflect.DeepEqual(refsOf(first), []string{"L1", "L2", "L3"}) || first.NextAfter != first.Items[2].ID {
 		t.Fatalf("first = %v %q, %v", refsOf(first), first.NextAfter, err)
 	}
-	rest, err := e.S.List(ctx, Query{State: StateAll, Limit: 3, After: first.NextAfter})
+	rest, err := e.S.List(ctx, leases.Query{State: leases.StateAll, Limit: 3, After: first.NextAfter})
 	if err != nil || !reflect.DeepEqual(refsOf(rest), []string{"L4"}) || rest.NextAfter != "" {
 		t.Errorf("rest = %v %q, %v", refsOf(rest), rest.NextAfter, err)
 	}
-	exact, _ := e.S.List(ctx, Query{State: StateAll, Limit: 4})
+	exact, _ := e.S.List(ctx, leases.Query{State: leases.StateAll, Limit: 4})
 	if exact.NextAfter != "" || len(exact.Items) != 4 {
 		t.Errorf("exact fit = %v %q", refsOf(exact), exact.NextAfter)
 	}
-	byRef, _ := e.S.List(ctx, Query{State: StateAll, After: "l2"})
+	byRef, _ := e.S.List(ctx, leases.Query{State: leases.StateAll, After: "l2"})
 	if !reflect.DeepEqual(refsOf(byRef), []string{"L3", "L4"}) {
 		t.Errorf("after l2 = %v", refsOf(byRef))
 	}
@@ -98,18 +100,18 @@ func TestListPagesWithLimitAndAfter(t *testing.T) {
 
 func TestListRefusesWhatItCannotRead(t *testing.T) {
 	e := listEnv(t)
-	for name, q := range map[string]Query{
+	for name, q := range map[string]leases.Query{
 		"state":     {State: "gone"},
 		"limit 0":   {Limit: -1},
 		"limit big": {Limit: 1001},
 		"after":     {After: "nonsense"},
 	} {
-		var bad InvalidError
-		if _, err := e.S.List(ctx, q); !errors.Is(err, ErrInvalid) || !errors.As(err, &bad) || bad.Next == "" {
+		var bad leases.InvalidError
+		if _, err := e.S.List(ctx, q); !errors.Is(err, leases.ErrInvalid) || !errors.As(err, &bad) || bad.Next == "" {
 			t.Errorf("%s: err = %v, want an InvalidError with a next", name, err)
 		}
 	}
-	if _, err := e.S.List(ctx, Query{Task: "aa-9"}); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "task aa-9") {
+	if _, err := e.S.List(ctx, leases.Query{Task: "aa-9"}); !errors.Is(err, leases.ErrNotFound) || !strings.Contains(err.Error(), "task aa-9") {
 		t.Errorf("unknown task: %v, want ErrNotFound naming it", err)
 	}
 }
@@ -122,14 +124,14 @@ func TestCurrentExpiresDueLeasesBeforeReading(t *testing.T) {
 	if err != nil || l.State != "expired" {
 		t.Fatalf("Current = %+v, %v; want expired", l, err)
 	}
-	if _, err := e.S.Current(ctx, "L9"); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "lease L9") {
+	if _, err := e.S.Current(ctx, "L9"); !errors.Is(err, leases.ErrNotFound) || !strings.Contains(err.Error(), "lease L9") {
 		t.Errorf("Current(L9) = %v", err)
 	}
 }
 
 func TestStartWithoutATaskIsInvalid(t *testing.T) {
 	e := newEnv(t)
-	if _, err := e.S.Start(ctx, me, "key:x", Start{Task: " ", Intent: "x"}); !errors.Is(err, ErrInvalid) {
+	if _, err := e.S.Start(ctx, me, "key:x", leases.Start{Task: " ", Intent: "x"}); !errors.Is(err, leases.ErrInvalid) {
 		t.Errorf("err = %v, want ErrInvalid", err)
 	}
 }

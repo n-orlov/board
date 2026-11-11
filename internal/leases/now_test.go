@@ -1,12 +1,14 @@
-package leases
+package leases_test
 
 import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/n-orlov/board/internal/leases"
 )
 
-func leaseRefs(list []Lease) []string {
+func leaseRefs(list []leases.Lease) []string {
 	out := []string{}
 	for _, l := range list {
 		out = append(out, l.Ref)
@@ -69,7 +71,7 @@ func TestNowExpiresTheDueLeasesWithOneEventAndLeavesThemOut(t *testing.T) {
 			t.Fatalf("read %d: mine %d, others %d, conflicts %d; want 0, 1, 0", i, len(got.Mine), len(got.Others), len(got.Conflicts))
 		}
 	}
-	if evs := e.events(t, EventExpired); len(evs) != 1 {
+	if evs := e.events(t, leases.EventExpired); len(evs) != 1 {
 		t.Errorf("%d lease_expired events after two reads, want 1", len(evs))
 	}
 }

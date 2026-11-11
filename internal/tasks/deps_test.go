@@ -213,7 +213,7 @@ func TestBlockedIsTrueWhileTheBlockerIsDoneNotClosedAndFalseOnceClosed(t *testin
 		want bool
 	}{
 		{"blocker open", func() error { return nil }, true},
-		{"blocker done", func() error { _, err := s.Done(ctx, who, "key:a", b.Ref); return err }, true},
+		{"blocker done", func() error { _, err := s.Done(ctx, who, "key:a", b.Ref, DoneOptions{}); return err }, true},
 		{"blocker closed", func() error { _, err := s.Close(ctx, who, "key:a", b.Ref, "completed"); return err }, false},
 		{"blocker reopened", func() error { _, err := s.Reopen(ctx, who, "key:a", b.Ref); return err }, true},
 	}

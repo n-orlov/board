@@ -65,7 +65,7 @@ func (f fixture) seed(t *testing.T) {
 	f.must(t, err)
 	_, err = f.tk.Patch(ctx, ann, "key:ann", tk.Ref, tasks.Patch{Description: tasks.Field[string]{Set: true, Value: "d"}})
 	f.must(t, err)
-	_, err = f.tk.Done(ctx, ann, "key:ann", tk.Ref)
+	_, err = f.tk.Done(ctx, ann, "key:ann", tk.Ref, tasks.DoneOptions{})
 	f.must(t, err)
 	_, err = f.tk.Reopen(ctx, ann, "key:ann", tk.Ref)
 	f.must(t, err)

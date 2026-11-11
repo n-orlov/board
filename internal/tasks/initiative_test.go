@@ -48,7 +48,7 @@ func TestCloseInitiativeRefusesATaskThatIsNotClosedWithoutForce(t *testing.T) {
 	initiative(t, s, "aa")
 	mk(t, s, "aa", "open one")
 	done := mk(t, s, "aa", "done one")
-	must(t)(s.Done(ctx, who, "key:a", done.Ref))
+	must(t)(s.Done(ctx, who, "key:a", done.Ref, DoneOptions{}))
 	before := count(t, s, `SELECT count(*) FROM events`)
 	_, err := s.CloseInitiative(ctx, who, "key:c", "aa", false)
 	var c initiatives.ConflictError
@@ -70,7 +70,7 @@ func TestCloseInitiativeWithForceDropsTheTasksThenClosesIt(t *testing.T) {
 	initiative(t, s, "aa")
 	mk(t, s, "aa", "open one")
 	done := mk(t, s, "aa", "done one")
-	must(t)(s.Done(ctx, who, "key:a", done.Ref))
+	must(t)(s.Done(ctx, who, "key:a", done.Ref, DoneOptions{}))
 	shut := mk(t, s, "aa", "closed one")
 	must(t)(s.Close(ctx, who, "key:a", shut.Ref, "completed"))
 	mk(t, s, "aa", "fourth")

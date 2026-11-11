@@ -315,7 +315,7 @@ export interface paths {
         put?: never;
         /**
          * Mark a task done
-         * @description Moves an open task to `done`, setting `done_at` and `done_by`, and appends `task_done`. A task that is already done or is closed is 409 and the problem names its current status.
+         * @description Moves an open task to `done`, setting `done_at` and `done_by`, and appends `task_done`. A task that is already done or is closed is 409 and the problem names its current status. A done task never holds a live lease. A live lease the caller holds on the task ends in the same transaction (`lease_ended`, outcome the `outcome` sent, else `done`). A live lease of another actor makes the request 409, the problem naming the holder, the lease and its intent, and nothing changes. With `force: true` every live lease on the task is ended in the same transaction, `ended_by` the caller and outcome `ended: task marked done by <handle>`.
          */
         post: operations["doneTask"];
         delete?: never;
@@ -355,7 +355,7 @@ export interface paths {
         put?: never;
         /**
          * Close a task
-         * @description Moves an open or done task to `closed` with the `resolution` sent (`completed`, `dropped`, `superseded` or `duplicate`), setting `closed_at` and `closed_by`, and appends `task_closed` whose `data.resolution` is the resolution. A missing or unknown resolution is 400. A closed task is 409 and the problem names its status. A `Board-On-Behalf-Of` header names the actor the close is made for, such as `operator` when an agent closes on instruction, and is stored as the event's `on_behalf_of`.
+         * @description Moves an open or done task to `closed` with the `resolution` sent (`completed`, `dropped`, `superseded` or `duplicate`), setting `closed_at` and `closed_by`, and appends `task_closed` whose `data.resolution` is the resolution. A missing or unknown resolution is 400. A closed task is 409 and the problem names its status. Every live lease on the task is ended in the same transaction (`lease_ended`, `ended_by` the caller when not the holder, outcome `ended: task closed by <handle>`). A `Board-On-Behalf-Of` header names the actor the close is made for, such as `operator` when an agent closes on instruction, and is stored as the event's `on_behalf_of`.
          */
         post: operations["closeTask"];
         delete?: never;
@@ -1222,6 +1222,18 @@ export interface components {
             /**
              * @description Close the tasks that are not closed as `dropped` and then the initiative. Without it, an initiative with such a task is not closed.
              * @example true
+             */
+            force?: boolean;
+        };
+        TaskDone: {
+            /**
+             * @description Optional, at most 200 characters. The outcome the caller's own live lease on the task ends with; `done` when left out.
+             * @example shipped
+             */
+            outcome?: string;
+            /**
+             * @description Optional, false when left out. Ends the live leases of other actors instead of refusing with 409. The operator's action: agents send it only when the operator says so.
+             * @example false
              */
             force?: boolean;
         };
@@ -2356,7 +2368,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskDone"];
+            };
+        };
         responses: {
             /** @description The task after the transition. */
             200: {

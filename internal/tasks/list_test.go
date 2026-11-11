@@ -25,7 +25,7 @@ func TestListFiltersByInitiativeStatusKindAndText(t *testing.T) {
 	mk(t, s, "aa", "Water plants")
 	mk(t, s, "bb", "other")
 	done := mk(t, s, "aa", "done one")
-	if _, err := s.Done(ctx, who, "key:c", done.Ref); err != nil {
+	if _, err := s.Done(ctx, who, "key:c", done.Ref, DoneOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {

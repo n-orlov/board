@@ -378,3 +378,57 @@ func TestTaskDocumentListsOpenAsksWhicheverOptionComesFirst(t *testing.T) {
 		})
 	}
 }
+
+func TestDoneTaskEndsLeasesAsTheBodyAsksAndRefusesAnotherActorsLease(t *testing.T) {
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	ls := &leases.Store{Store: s.st}
+	mine := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"mine"}`, "claude@host")
+	if mine.Code != http.StatusCreated {
+		t.Fatalf("start = %d %s", mine.Code, mine.Body)
+	}
+	theirs, err := ls.Start(context.Background(), audit.Actor{Handle: "codex@host"}, "key:other", leases.Start{Task: "aa-1", Intent: "refactor the parser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":"shipped"}`, "claude@host")
+	p := decode(t, rec)
+	detail, _ := p["detail"].(string)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("done past another's lease = %d %s", rec.Code, rec.Body)
+	}
+	for _, want := range []string{"aa-1", "codex@host", theirs.Lease.Ref, "refactor the parser"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q does not name %q", detail, want)
+		}
+	}
+	if p["next"] != "wait for "+theirs.Lease.Ref+" to end, or --force" {
+		t.Errorf("next = %v", p["next"])
+	}
+	if got := decode(t, s.send(http.MethodGet, "/api/v1/tasks/aa-1", "", "claude@host")); got["status"] != "open" {
+		t.Errorf("status after a refused done = %v", got["status"])
+	}
+	forced := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":"shipped","force":true}`, "claude@host")
+	if forced.Code != http.StatusOK {
+		t.Fatalf("forced done = %d %s", forced.Code, forced.Body)
+	}
+	doc := decode(t, forced)
+	if doc["status"] != "done" || doc["active"] != false || fmt.Sprint(doc["live_leases"]) != "[]" {
+		t.Errorf("task = %v", doc)
+	}
+	l := decode(t, s.send(http.MethodGet, "/api/v1/leases/"+theirs.Lease.Ref, "", "claude@host"))
+	if l["state"] != "ended" || l["ended_by"] != "claude@host" || l["outcome"] != "ended: task marked done by claude@host" {
+		t.Errorf("forced lease = %v", l)
+	}
+	own := decode(t, s.send(http.MethodGet, "/api/v1/leases/L1", "", "claude@host"))
+	if own["state"] != "ended" || own["outcome"] != "shipped" {
+		t.Errorf("own lease = %v", own)
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", `{"outcome":"`+strings.Repeat("x", 201)+`"}`, "claude@host"); rec.Code != http.StatusBadRequest {
+		t.Errorf("a 201-character outcome = %d %s", rec.Code, rec.Body)
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/tasks/aa-1/done", ``, "claude@host"); rec.Code != http.StatusConflict {
+		t.Errorf("done on a done task = %d %s", rec.Code, rec.Body)
+	}
+}
