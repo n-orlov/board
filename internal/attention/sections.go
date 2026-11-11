@@ -38,7 +38,8 @@ func asksSection(sc scope) section {
 		`k.n, k.question, k.mode, k.blocking, k.poll_seen_at, k.created_at, ti.slug, t.seq, a.handle, a.way_back, ki.slug`,
 		`asks k JOIN actors a ON a.id = k.actor_id LEFT JOIN tasks t ON t.id = k.task_id
 		 LEFT JOIN initiatives ti ON ti.id = t.initiative_id
-		 LEFT JOIN initiatives ki ON ki.id = k.initiative_id WHERE k.state = 'open'`,
+		 LEFT JOIN initiatives ki ON ki.id = k.initiative_id
+		 WHERE k.state = 'open' AND (k.task_id IS NULL OR t.status <> 'closed')`,
 		`k.created_at DESC, k.n DESC`)
 }
 
@@ -118,8 +119,9 @@ func expiredSection(sc scope) section {
 		`l.n, i.slug, t.seq, t.title, l.intent, l.renewed_at, l.expires_at, a.handle, a.way_back`,
 		`leases l JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id
 		 JOIN actors a ON a.id = l.actor_id
-		 WHERE l.state = 'expired' AND l.acked_at IS NULL
-		 AND NOT EXISTS (SELECT 1 FROM leases later WHERE later.task_id = l.task_id AND later.n > l.n)`,
+		 WHERE l.state = 'expired' AND l.acked_at IS NULL AND t.status <> 'closed'
+		 AND NOT EXISTS (SELECT 1 FROM leases later WHERE later.task_id = l.task_id
+		     AND (later.started_at > l.started_at OR (later.started_at = l.started_at AND later.n > l.n)))`,
 		`l.expires_at DESC, l.n DESC`)
 }
 

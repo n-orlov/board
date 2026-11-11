@@ -710,11 +710,19 @@ badges without the lists, and `fields=counts` answers only `counts`. The HTTP sh
 Derivation (`internal/attention`), judged at one instant after the leases that ran out are
 expired (§5.1):
 
+- **Per-task reasons.** `attention.Store.Reasons` is the one derivation of why a task needs a person, and the
+  `open_asks`, `done_not_closed` and `expired_leases` sections are the rows it returns, so a task is in a section exactly when it
+  carries the matching reason. A task has, in this order, `stranded` (its newest lease, by `started_at` then lease number, is
+  `expired` with no `acked_at`), `asking` (it has an open ask; `blocking` is true when any such ask is blocking and
+  `asker_waiting` when any has its asker waiting) and `done` (it is done and not closed). A closed task has no reason, so its
+  leftover asks and unacknowledged leases drop out of the view. Asks on no task stay in `open_asks` and carry no task reason.
+  `overdue_watches` and `conflicts` are not task reasons and are derived as before. Acknowledging an expired lease stays
+  manual (§18).
 - Each section is newest relevant first: open asks by creation, done tasks by `done_at`, expired
   leases by expiry, overdue watches by `next_check_at` (the one most recently due first), conflicts
   by their newest lease; ties go to the later row (conflicts: the resource name).
-- A lease is listed as expired when it is `expired`, has no `acked_at` and no lease of any state
-  and holder started on its task after it. The last outcome of a done task is that of its last
+- A lease is listed as expired when it is `expired`, has no `acked_at`, its task is not closed and no lease of any state
+  and holder started on its task after it (by `started_at`, ties to the later lease number). The last outcome of a done task is that of its last
   ended lease (nothing when none ended). An overdue watch is a `watch` task that is not closed and
   whose `next_check_at` is past; its last check is its latest `check_recorded` event.
 - A conflict is a resource that two or more live leases hold (§5.2, so two leases of one actor on
@@ -2981,4 +2989,4 @@ Each phase ends on a green `main` build with all gates still enforced.
 2. Should an initiative have an owner actor, or only tags?
 3. Retention: events and notes are kept forever in v1. Do we need an archive/compaction policy
    once the table is large?
-4. Should expired-lease acknowledgement be automatic after N days?
+4. ~~Should expired-lease acknowledgement be automatic after N days?~~ Closed: no. Acknowledgement stays manual (§5.3): a stranded task stays flagged until someone acknowledges the lease or a later lease starts.

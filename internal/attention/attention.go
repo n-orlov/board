@@ -182,11 +182,12 @@ func (s Store) Get(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	var r Result
+	d, err := s.derive(ctx, sc, now)
+	if err != nil {
+		return Result{}, err
+	}
+	r := Result{OpenAsks: d.OpenAsks, DoneNotClosed: d.DoneNotClosed, ExpiredLeases: d.ExpiredLeases}
 	for _, read := range []func() error{
-		func() (err error) { r.OpenAsks, err = s.openAsks(ctx, sc, now); return },
-		func() (err error) { r.DoneNotClosed, err = s.doneNotClosed(ctx, sc); return },
-		func() (err error) { r.ExpiredLeases, err = s.expiredLeases(ctx, sc); return },
 		func() (err error) { r.OverdueWatches, err = s.overdueWatches(ctx, sc, now); return },
 		func() (err error) { r.Conflicts, err = s.conflicts(ctx, sc); return },
 	} {
