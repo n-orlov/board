@@ -235,9 +235,12 @@ const waitingWindow = 60 * time.Second
 
 // Waiting is the derived asker_waiting of k: the ask is open, its mode is poll
 // and a long poll on it held or returned within the last 60 seconds.
-func (s Store) Waiting(k Ask) bool {
+func (s Store) Waiting(k Ask) bool { return s.waitingAt(k, s.now()) }
+
+// waitingAt is Waiting as of the instant at.
+func (s Store) waitingAt(k Ask, at time.Time) bool {
 	if k.State != domain.AskOpen || k.Mode != domain.AskModePoll || k.PollSeenAt == nil {
 		return false
 	}
-	return s.now().Sub(*k.PollSeenAt) <= waitingWindow
+	return at.Sub(*k.PollSeenAt) <= waitingWindow
 }

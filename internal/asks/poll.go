@@ -58,16 +58,19 @@ func (s Store) markPollTx(ctx context.Context, tx *sql.Tx, id string, at int64) 
 	if _, err := tx.ExecContext(ctx, q, at, before.ID); err != nil {
 		return fmt.Errorf("record the poll: %w", err)
 	}
-	if !s.startsWaiting(before) {
+	if !s.startsWaiting(before, store.DecodeTime(at)) {
 		return nil
 	}
 	return s.appendPolling(ctx, tx, before)
 }
 
 // startsWaiting reports whether a poll mark makes k's asker waiting: k is an
-// open poll ask whose asker is not yet counted as waiting.
-func (s Store) startsWaiting(k Ask) bool {
-	return k.State == domain.AskOpen && k.Mode == domain.AskModePoll && !s.Waiting(k)
+// open poll ask whose asker is not yet counted as waiting as of the instant the
+// mark stores. The same instant decides and is stored: a second clock read
+// could find the previous mark lapsed that the stored one never saw, and leave
+// a mark older than the event that announced it.
+func (s Store) startsWaiting(k Ask, at time.Time) bool {
+	return k.State == domain.AskOpen && k.Mode == domain.AskModePoll && !s.waitingAt(k, at)
 }
 
 // appendPolling appends the ask_polling event of k, made by its asker.

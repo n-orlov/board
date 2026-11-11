@@ -108,3 +108,40 @@ func TestMarkPollOfAnUnknownIDReturnsNoErrorAndWritesNothing(t *testing.T) {
 		t.Errorf("another ask's poll_seen_at = %v (%v), want none", got.PollSeenAt, err)
 	}
 }
+
+// A mark decides whether the asker was already waiting at the very instant it
+// stores. The clock here moves on with every read, as the real one does between
+// two reads inside one MarkPoll: a mark 30 s after the previous one renews a
+// wait that is still inside the 60 s window, so it appends no event, and the ask
+// shows its asker waiting at the instant the mark stored.
+func TestMarkPollDecidesAtTheInstantItStores(t *testing.T) {
+	e := newEnv(t)
+	k := e.raise(t, New{Question: "q?", Mode: "poll"})
+	if _, err := e.S.MarkPoll(ctx, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	first := e.Clock.now
+	events := e.pollEvents(t)
+	reads := 0
+	e.S.Now = func() time.Time {
+		reads++
+		return first.Add(30 * time.Second).Add(time.Duration(reads-1) * 31 * time.Second)
+	}
+	at, err := e.S.MarkPoll(ctx, k.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := first.Add(30 * time.Second); !at.Equal(want) {
+		t.Fatalf("MarkPoll stored %v, want %v", at, want)
+	}
+	if n := e.pollEvents(t); n != events {
+		t.Errorf("a mark 30 s after the previous one appended %d ask_polling event(s), want none", n-events)
+	}
+	got, err := e.S.Get(ctx, k.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.S.waitingAt(got, at) {
+		t.Error("the ask does not show its asker waiting at the instant the mark stored")
+	}
+}
