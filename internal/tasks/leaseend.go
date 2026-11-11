@@ -52,30 +52,36 @@ func (e LeaseHeldError) Next() string {
 	return "wait for " + e.Holders[0].Ref + " to end, or --force"
 }
 
-// doneLeases ends the caller's own live lease with outcome and, with force, the
-// leases of others with the forced outcome; without force a lease of another
-// actor refuses the done.
+// doneLeases ends the caller's own live lease with outcome; without force a
+// lease of another actor refuses the done. With force every live lease on the
+// task ends, the caller's own included, with ended_by the caller and the
+// outcome `ended: task marked done by <handle>`.
 func doneLeases(outcome string, force bool) leaseRule {
 	return func(ctx context.Context, s Store, tx *sql.Tx, c leaseCall) error {
-		ls := s.leaseStore()
-		live, err := ls.LiveOnTaskIn(ctx, tx, c.task.ID, c.now)
+		live, err := s.leaseStore().LiveOnTaskIn(ctx, tx, c.task.ID, c.now)
 		if err != nil {
 			return err
 		}
-		if others := heldByOthers(live, c.actorID); len(others) > 0 && !force {
+		if force {
+			return endAll(ctx, s, tx, c, live, "ended: task marked done by "+c.actor.Handle, true)
+		}
+		if others := heldByOthers(live, c.actorID); len(others) > 0 {
 			return LeaseHeldError{Ref: c.task.Ref, Holders: others}
 		}
-		for _, l := range live {
-			o := outcome
-			if l.ActorID != c.actorID {
-				o = "ended: task marked done by " + c.actor.Handle
-			}
-			if err := ls.EndIn(ctx, tx, c.actorID, c.principal, l, o, c.actor.Handle, c.now); err != nil {
-				return err
-			}
-		}
-		return nil
+		return endAll(ctx, s, tx, c, live, outcome, false)
 	}
+}
+
+// endAll ends each lease of live with outcome, recording the caller as
+// ended_by when byCaller is set.
+func endAll(ctx context.Context, s Store, tx *sql.Tx, c leaseCall, live []leases.Lease, outcome string, byCaller bool) error {
+	ls := s.leaseStore()
+	for _, l := range live {
+		if err := ls.EndIn(ctx, tx, c.actorID, c.principal, l, outcome, c.actor.Handle, c.now, byCaller); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // heldByOthers lists the leases of live that an actor other than actorID holds.
@@ -89,19 +95,14 @@ func heldByOthers(live []leases.Lease, actorID string) []LeaseHeld {
 	return held
 }
 
-// closeLeases ends every live lease on the task being closed.
+// closeLeases ends every live lease on the task being closed, ended_by the
+// caller and outcome `ended: task closed by <handle>`.
 func closeLeases(ctx context.Context, s Store, tx *sql.Tx, c leaseCall) error {
-	ls := s.leaseStore()
-	live, err := ls.LiveOnTaskIn(ctx, tx, c.task.ID, c.now)
+	live, err := s.leaseStore().LiveOnTaskIn(ctx, tx, c.task.ID, c.now)
 	if err != nil {
 		return err
 	}
-	for _, l := range live {
-		if err := ls.EndIn(ctx, tx, c.actorID, c.principal, l, "ended: task closed by "+c.actor.Handle, c.actor.Handle, c.now); err != nil {
-			return err
-		}
-	}
-	return nil
+	return endAll(ctx, s, tx, c, live, "ended: task closed by "+c.actor.Handle, true)
 }
 
 // leaseStore is the lease store of the same database and clock.

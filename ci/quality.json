@@ -123,6 +123,7 @@
                 "transitions.go"
             ],
             "internal/leases": [
+                "end.go",
                 "ontask.go",
                 "write.go"
             ]

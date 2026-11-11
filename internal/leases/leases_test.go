@@ -508,7 +508,7 @@ func TestClosingATaskEndsItsLiveLeasesAndTheyCanNoLongerBeRenewedOrEnded(t *test
 	}
 	got, _ := e.S.Get(ctx, l.Ref)
 	theirs, _ := e.S.Get(ctx, b.Ref)
-	if got.State != "ended" || got.Outcome != "ended: task closed by claude@host" || got.EndedBy != "" || got.EndedAt == nil {
+	if got.State != "ended" || got.Outcome != "ended: task closed by claude@host" || got.EndedBy != "claude@host" || got.EndedAt == nil {
 		t.Errorf("own lease = %+v", got)
 	}
 	if theirs.State != "ended" || theirs.Outcome != "ended: task closed by claude@host" || theirs.EndedBy != "claude@host" {
@@ -524,7 +524,7 @@ func TestClosingATaskEndsItsLiveLeasesAndTheyCanNoLongerBeRenewedOrEnded(t *test
 		t.Errorf("end on a closed task: %v", err)
 	}
 	evs := e.events(t, leases.EventEnded)
-	if len(evs) != 2 || evs[0].Data["ended_by"] != nil || evs[1].Data["ended_by"] != "claude@host" || evs[1].RefID != b.ID {
+	if len(evs) != 2 || evs[0].Data["ended_by"] != "claude@host" || evs[1].Data["ended_by"] != "claude@host" || evs[1].RefID != b.ID {
 		t.Errorf("events = %+v", evs)
 	}
 }
@@ -546,7 +546,7 @@ func TestDoneEndsTheCallersLeaseAndRefusesOrForcesPastAnothersLease(t *testing.T
 	}
 	a, _ := e.S.Get(ctx, mine.Ref)
 	b, _ := e.S.Get(ctx, theirs.Ref)
-	if a.State != "ended" || a.Outcome != "shipped" || a.EndedBy != "" {
+	if a.State != "ended" || a.Outcome != "ended: task marked done by claude@host" || a.EndedBy != "claude@host" {
 		t.Errorf("own lease = %+v", a)
 	}
 	if b.State != "ended" || b.Outcome != "ended: task marked done by claude@host" || b.EndedBy != "claude@host" {

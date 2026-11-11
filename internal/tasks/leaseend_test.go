@@ -114,16 +114,19 @@ func TestForcedDoneEndsEveryLiveLeaseAndMarksTheTaskDone(t *testing.T) {
 	if err != nil || got.Status != "done" {
 		t.Fatalf("done = %+v, %v", got, err)
 	}
-	a, b := leaseNow(t, ls, mine.Ref), leaseNow(t, ls, theirs.Ref)
-	if a.State != "ended" || a.Outcome != "shipped" || a.EndedBy != "" {
-		t.Errorf("own lease = %+v", a)
-	}
-	if b.State != "ended" || b.Outcome != "ended: task marked done by claude@host" || b.EndedBy != "claude@host" {
-		t.Errorf("other lease = %+v", b)
+	for _, l := range []leases.Lease{leaseNow(t, ls, mine.Ref), leaseNow(t, ls, theirs.Ref)} {
+		if l.State != "ended" || l.Outcome != "ended: task marked done by claude@host" || l.EndedBy != "claude@host" {
+			t.Errorf("lease %s = %+v, want ended by claude@host with the forced outcome", l.Ref, l)
+		}
 	}
 	ev := events(t, s, leases.EventEnded)
-	if len(ev) != 2 || ev[1].Data["ended_by"] != "claude@host" || ev[1].RefID != theirs.ID || ev[0].Data["ended_by"] != nil {
-		t.Errorf("events = %+v", ev)
+	if len(ev) != 2 || ev[0].RefID != mine.ID || ev[1].RefID != theirs.ID {
+		t.Fatalf("events = %+v", ev)
+	}
+	for _, e := range ev {
+		if e.Data["ended_by"] != "claude@host" || e.Data["outcome"] != "ended: task marked done by claude@host" {
+			t.Errorf("event data = %v", e.Data)
+		}
 	}
 }
 
@@ -182,12 +185,10 @@ func TestCloseEndsEveryLiveLeaseOnTheTask(t *testing.T) {
 	if _, err := s.Close(ctx, who, "key:p", tk.Ref, "dropped"); err != nil {
 		t.Fatal(err)
 	}
-	a, b := leaseNow(t, ls, mine.Ref), leaseNow(t, ls, theirs.Ref)
-	if a.State != "ended" || a.Outcome != "ended: task closed by claude@host" || a.EndedBy != "" {
-		t.Errorf("own lease = %+v", a)
-	}
-	if b.State != "ended" || b.Outcome != "ended: task closed by claude@host" || b.EndedBy != "claude@host" {
-		t.Errorf("other lease = %+v", b)
+	for _, l := range []leases.Lease{leaseNow(t, ls, mine.Ref), leaseNow(t, ls, theirs.Ref)} {
+		if l.State != "ended" || l.Outcome != "ended: task closed by claude@host" || l.EndedBy != "claude@host" {
+			t.Errorf("lease %s = %+v, want ended by claude@host with the close outcome", l.Ref, l)
+		}
 	}
 	if l := leaseNow(t, ls, elsewhere.Ref); l.State != "live" {
 		t.Errorf("a lease on another task = %+v, want live", l)

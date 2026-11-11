@@ -30,9 +30,10 @@ func (s Store) LiveOnTaskIn(ctx context.Context, tx *sql.Tx, taskID string, now 
 }
 
 // EndIn ends the live lease cur inside the transaction tx with the outcome and
-// appends its lease_ended event: ended_by is the actor row actorID when that is
-// not the holder, and the event data names handle then. The caller has read cur
-// live in the same transaction.
-func (s Store) EndIn(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Lease, outcome, handle string, now time.Time) error {
-	return s.writeEnd(ctx, tx, actorID, principal, cur, outcome, handle, now)
+// appends its lease_ended event. With byCaller, ended_by is the actor row
+// actorID and the event data names handle, whoever holds the lease (a forced
+// done, a close); without it neither is recorded (the holder's own done). The
+// caller has read cur live in the same transaction.
+func (s Store) EndIn(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Lease, outcome, handle string, now time.Time, byCaller bool) error {
+	return s.writeEnd(ctx, tx, actorID, principal, cur, outcome, handle, now, byCaller)
 }

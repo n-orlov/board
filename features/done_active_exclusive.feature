@@ -2,8 +2,8 @@ Feature: A task is never done or closed while it has a live lease
   Done and active are exclusive (R14). A lease starts only on an open task, so a done task and a closed task are
   409 and nothing changes. Marking a task done ends the caller's own live lease in the same transaction, with the
   outcome sent or `done`. Another actor's live lease makes done a 409 naming the holder, the lease and its intent,
-  and nothing changes, unless the request sends force, which ends every live lease. Closing a task ends every live
-  lease on it.
+  and nothing changes, unless the request sends force, which ends every live lease, the caller's own too, with
+  ended_by the caller. Closing a task ends every live lease on it the same way.
 
   Background:
     Given a new database for the board commands
@@ -74,9 +74,10 @@ Feature: A task is never done or closed while it has a live lease
     When I request the task "aa-1" as actor "claude@laptop"
     Then the response path "status" is "open"
 
-  Scenario: done with force ends every live lease and marks the task done
+  Scenario: done with force ends every live lease, the caller's own included, and marks the task done
     Given I start a lease with body "{'task':'aa-1','intent':'refactor the parser'}" as actor "codex@laptop"
-    When I mark the task "aa-1" done with body "{'force':true}" as actor "claude@laptop"
+    And I start a lease with body "{'task':'aa-1','intent':'build it'}" as actor "claude@laptop"
+    When I mark the task "aa-1" done with body "{'outcome':'shipped','force':true}" as actor "claude@laptop"
     Then the response status is 200
     And the response path "status" is "done"
     And the response path "active" is "false"
@@ -86,9 +87,15 @@ Feature: A task is never done or closed while it has a live lease
     And the response path "ended_by" is "claude@laptop"
     And the response path "outcome" is "ended: task marked done by claude@laptop"
     And exactly 1 lease_ended event exists for the lease "L1"
+    When I request the lease "L2" as actor "claude@laptop"
+    Then the response path "state" is "ended"
+    And the response path "ended_by" is "claude@laptop"
+    And the response path "outcome" is "ended: task marked done by claude@laptop"
+    And exactly 1 lease_ended event exists for the lease "L2"
 
-  Scenario: close ends the live leases of the task
+  Scenario: close ends every live lease of the task, the caller's own included
     Given I start a lease with body "{'task':'aa-1','intent':'refactor the parser'}" as actor "codex@laptop"
+    And I start a lease with body "{'task':'aa-1','intent':'build it'}" as actor "claude@laptop"
     When I close the task "aa-1" with body "{'resolution':'dropped'}" as actor "claude@laptop"
     Then the response status is 200
     And the response path "status" is "closed"
@@ -99,3 +106,8 @@ Feature: A task is never done or closed while it has a live lease
     And the response path "ended_by" is "claude@laptop"
     And the response path "outcome" is "ended: task closed by claude@laptop"
     And exactly 1 lease_ended event exists for the lease "L1"
+    When I request the lease "L2" as actor "claude@laptop"
+    Then the response path "state" is "ended"
+    And the response path "ended_by" is "claude@laptop"
+    And the response path "outcome" is "ended: task closed by claude@laptop"
+    And exactly 1 lease_ended event exists for the lease "L2"

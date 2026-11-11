@@ -1630,12 +1630,12 @@ type TaskDetailStatus string
 
 // TaskDone defines model for TaskDone.
 type TaskDone struct {
-	// Force Optional, false when left out. Ends the live leases of other actors instead of refusing with 409. The operator's action: agents send it only when the operator says so.
+	// Force Optional, false when left out. Ends every live lease on the task, the caller's own included, with `ended_by` the caller and outcome `ended: task marked done by <handle>`, instead of refusing with 409 on another actor's lease. The operator's action: agents send it only when the operator says so.
 	//
 	// Examples: false
 	Force *bool `json:"force,omitempty"`
 
-	// Outcome Optional, at most 200 characters. The outcome the caller's own live lease on the task ends with; `done` when left out.
+	// Outcome Optional, at most 200 characters. The outcome the caller's own live lease on the task ends with; `done` when left out. Not used with `force`, which ends every lease with the forced outcome.
 	//
 	// Examples: shipped
 	Outcome *string `json:"outcome,omitempty"`

@@ -351,9 +351,11 @@ transaction (a lease past its `expires_at` is expired first, with its `lease_exp
   characters, else `done`; `ended_by` stays null as the caller is the holder). A longer outcome is `ErrInvalid` and nothing is read.
 - `done` while another actor holds a live lease is `ErrConflict`, a `LeaseHeldError` naming each holder, lease and intent
   (`cannot mark task aa-1 done: codex@host holds lease L2 (refactor the parser)`) whose next is `wait for L2 to end, or --force`,
-  and writes no row, event or actor. With `force` every live lease on the task ends in the same transaction: the caller's own
-  with the outcome above, each other actor's with `ended_by` the caller and the outcome `ended: task marked done by <handle>`.
-- `close` ends every live lease on the task, `ended_by` the caller when not the holder, outcome `ended: task closed by <handle>`.
+  and writes no row, event or actor. With `force` every live lease on the task ends in the same transaction, the caller's own
+  included, each with `ended_by` the caller (and `data.ended_by` its handle) and the outcome `ended: task marked done by <handle>`;
+  the request's outcome is not used then.
+- `close` ends every live lease on the task the same way, the caller's own included: `ended_by` the caller and the outcome
+  `ended: task closed by <handle>`.
 - Starting a lease on a `done` or a `closed` task is refused (§4.4), so no transition leaves a done or closed task with a live lease.
 Every other transition ends nothing.
 
@@ -397,7 +399,7 @@ one is `ErrNotFound` with nothing written. `Store.Links` reads a task's `Deps` a
 | renewed_at | ts | last renewal (= started_at initially) |
 | expires_at | ts | renewed_at + ttl |
 | state | `live` \| `ended` \| `expired` | |
-| ended_at, ended_by | | `ended_by` set when someone other than the holder ends it |
+| ended_at, ended_by | | `ended_by` set when someone other than the holder ends it, and by a forced done or a close (§4.3) |
 | outcome | text, nullable | short summary written at end |
 | acked_at, acked_by | ts, fk actor, nullable | the acknowledgement of an expired lease (§5.3); null until acknowledged |
 
@@ -425,7 +427,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Renew** pushes `expires_at` to now plus the ttl and may replace intent and resources. A lease past its expiry is `ErrGone`, a
   `GoneError` carrying `ExpiredAt`, whether or not the sweep has marked it; an ended lease is `ErrConflict`. Any actor may renew.
 - **End** sets `ended_at` and `outcome` (at most 200 characters); `ended_by` is set, and `data.ended_by` written, only when
-  the ending actor is not the holder. A lease that is not live (ended or expired) is `ErrConflict`.
+  the ending actor is not the holder (a forced done and a close record it on every lease they end, §4.3). A lease that is not live (ended or expired) is `ErrConflict`.
 - **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
   event. A lease that has not expired is `ErrConflict`.
 - **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
@@ -964,13 +966,13 @@ principal may use them. The server answers 503 problem documents when it runs wi
   on an open task and `close` on a closed task; reopening a task of a closed initiative is **409** too. An unknown ref
   is **404**. `/reopen` takes no body. `/done` takes an optional body `{outcome?, force?}`: `outcome` (at most 200 characters,
   else **400**) is the outcome the caller's own live lease ends with, `done` when absent, and `force` (default false) ends
-  the live leases of other actors instead of refusing. **Done and active are exclusive** (R14, §4.3): `/done` and `/close`
+  every live lease on the task instead of refusing on another actor's. **Done and active are exclusive** (R14, §4.3): `/done` and `/close`
   end the task's live leases in the same transaction. `/done` ends the caller's own live lease (`lease_ended`, the outcome),
   and a live lease of another actor makes it **409** whose `detail` names the holder, the lease and its intent (`cannot mark
   task aa-1 done: codex@host holds lease L2 (refactor the parser)`) and whose `next` is `wait for L2 to end, or --force`; the
-  task and every lease stay as they were. With `force: true` every live lease ends, `ended_by` the caller and outcome
-  `ended: task marked done by <handle>`. `/close` ends every live lease on the task, outcome `ended: task closed by
-  <handle>`, `ended_by` the caller when not the holder. `/close` takes `{resolution}`, one of `completed`, `dropped`,
+  task and every lease stay as they were. With `force: true` every live lease ends, the caller's own included, each
+  with `ended_by` the caller and outcome `ended: task marked done by <handle>`. `/close` ends every live lease on the
+  task the same way, the caller's own included, `ended_by` the caller and outcome `ended: task closed by <handle>`. `/close` takes `{resolution}`, one of `completed`, `dropped`,
   `superseded` or `duplicate`; a missing body, a missing resolution or any other value (case counts) is **400** and
   the `next` lists the four. Each move runs in one transaction, upserts the acting actor and appends one event
   (`task_done`, `task_reopened`, `task_closed`) whose `data` is `{ref, from}` (the status it left), plus `resolution`

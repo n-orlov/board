@@ -42,8 +42,9 @@ type DoneOptions struct {
 // appends a task_done event, in one transaction. A live lease the caller holds
 // on the task ends in the same transaction (lease_ended, outcome opt.Outcome,
 // else "done"). A live lease of another actor refuses the request with
-// LeaseHeldError unless opt.Force is set, which ends every such lease with
-// ended_by the caller and the outcome "ended: task marked done by <handle>". It
+// LeaseHeldError unless opt.Force is set, which ends every live lease on the
+// task, the caller's own included, with ended_by the caller and the outcome
+// "ended: task marked done by <handle>". It
 // returns ErrInvalid for an outcome longer than 200 characters (checked before
 // the task is read), ErrNotFound for an unknown task and ErrConflict (naming
 // the current status) for a task that is not open, and writes no row or event
@@ -83,8 +84,8 @@ func (s Store) Reopen(ctx context.Context, actor audit.Actor, principal, ref str
 // task is read), ErrNotFound for an unknown task and ErrConflict (naming the
 // current status) for a closed one, and writes no row or event then. A done
 // task keeps its done_at and done_by. Every live lease on the task ends with
-// it (lease_ended, ended_by the caller when not the holder, outcome "ended: task
-// closed by <handle>").
+// it, the caller's own included (lease_ended, ended_by the caller, outcome
+// "ended: task closed by <handle>").
 func (s Store) Close(ctx context.Context, actor audit.Actor, principal, ref, resolution string) (Task, error) {
 	if err := domain.ValidateResolution(resolution); err != nil {
 		return Task{}, InvalidError{Msg: err.Error(), Next: "Send resolution completed, dropped, superseded or duplicate."}

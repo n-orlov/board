@@ -50,17 +50,17 @@ func (s Store) end(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal
 	if err != nil {
 		return Lease{}, err
 	}
-	if err := s.writeEnd(ctx, tx, actorID, principal, cur, outcome, actor.Handle, now); err != nil {
+	if err := s.writeEnd(ctx, tx, actorID, principal, cur, outcome, actor.Handle, now, actorID != cur.ActorID); err != nil {
 		return Lease{}, err
 	}
 	return s.find(ctx, tx, cur.ID)
 }
 
-// writeEnd ends cur, recording the ending actor only when it is not the holder,
-// and appends the lease_ended event.
-func (s Store) writeEnd(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Lease, outcome, handle string, now time.Time) error {
+// writeEnd ends cur, recording the ending actor as ended_by (and its handle in
+// the event data) only when recordBy is set, and appends the lease_ended event.
+func (s Store) writeEnd(ctx context.Context, tx *sql.Tx, actorID, principal string, cur Lease, outcome, handle string, now time.Time, recordBy bool) error {
 	var endedBy any
-	if actorID != cur.ActorID {
+	if recordBy {
 		endedBy = actorID
 	}
 	_, err := tx.ExecContext(ctx, s.Store.Dialect().Rebind(`UPDATE leases SET state = 'ended', ended_at = ?, ended_by = ?, outcome = ? WHERE id = ?`),
