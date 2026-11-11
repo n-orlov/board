@@ -177,7 +177,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err := prepareSchema(ctx, st, migrate); err != nil {
 		return fail(stderr, err)
 	}
-	if _, err := (&tasks.Store{Store: st}).ReopenLeased(ctx); err != nil {
+	if err := reopenLeased(ctx, st); err != nil {
 		return fail(stderr, err)
 	}
 	login, err := loginFromEnv(env, st)
@@ -226,6 +226,17 @@ func startFeed(ctx context.Context, stderr io.Writer, env Env, st *store.Store) 
 	done := make(chan struct{})
 	go func() { defer close(done); f.Run(ctx) }()
 	return server.WithStream(f, heartbeat), func() { cancel(); <-done }, nil
+}
+
+// reopenLeased reopens the done tasks that hold a live lease (SPEC 4.3). A database that
+// does not carry every migration (BOARD_MIGRATE=off on a fresh or older one) has nothing to
+// reopen: serve reports it as not ready and this step waits for the next start.
+func reopenLeased(ctx context.Context, st *store.Store) error {
+	if st.Ready(ctx) != nil {
+		return nil
+	}
+	_, err := (&tasks.Store{Store: st}).ReopenLeased(ctx)
+	return err
 }
 
 // prepareSchema refuses a database ahead of this binary whatever

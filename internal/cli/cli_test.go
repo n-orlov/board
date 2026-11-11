@@ -266,3 +266,21 @@ func (s *syncBuffer) Write(p []byte) (int, error) {
 	return s.b.Write(p)
 }
 func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func TestReopenLeasedLeavesADatabaseWithoutTheSchemaAlone(t *testing.T) {
+	st, err := store.Open(sqliteURL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := reopenLeased(ctx, st); err != nil {
+		t.Errorf("unmigrated database: %v", err)
+	}
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopenLeased(ctx, st); err != nil {
+		t.Errorf("migrated database: %v", err)
+	}
+}
