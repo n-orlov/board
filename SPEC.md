@@ -2737,7 +2737,7 @@ API putting its actor first within 5 s without a reload.
 a "Closed within" select and held in the fragment query as `#/archive?window=7|90|all`; the default, 30 days, leaves the query
 empty (`#/archive`), and a missing or unknown value is the default. The window is sent as `closed_within=<n>d` (none for all). A choice
 rewrites the fragment in place (no history entry per choice) and reads again; a fragment edited by hand or reached by the back button
-is read the same way (`windowFromHash`, `archiveHash`). A row shows the title as a link to the task or initiative page, its ref or
+is read the same way (`viewFromQuery`, `archiveViewHash` in `web/src/lib/archiveView.ts`). A row shows the title as a link to the task or initiative page, its ref or
 slug, the kind (`task` or `initiative`), the **resolution** (a task's `completed`, `dropped`, `superseded` or `duplicate`; an
 initiative has none of its own and says `initiative closed`), when and by whom it was closed (the absolute time in the `title`), and a
 **Reopen** button (44 px, named "Reopen task E1-3" or "Reopen initiative <slug>"). Reopen opens the shared `Dialog` (bottom sheet at
@@ -2747,11 +2747,13 @@ the Tasks view or the Initiatives list (a reopened initiative's closed tasks sta
 a closed initiative) shows inside the dialog, which stays open. From 768 px it is one table (Item, Kind, Resolution, Closed, action),
 below it each item is a card. The view subscribes to the stream (§7.1) and reads again, in place and debounced, on
 `task_closed`, `task_reopened`, `initiative_closed` and `initiative_reopened`; nothing polls on a timer. Sorting by column and the
-saved window are R16 work of their own. `e2e/archive.spec.ts` covers, at phone and desktop: a task closed through the API in the 7 day
+saved view state are described in the next paragraph. `e2e/archive.spec.ts` covers, at phone and desktop: a task closed through the API in the 7 day
 window and a task whose `closed_at` the e2e store (`e2e/store.ts`, a direct write to the SQLite file) moves 30 days back absent from it
 and present in `all`, newest first; the same for two closed initiatives; the default window and the window read from a link; Reopen on
 a task and on an initiative (Cancel changes nothing; confirming brings the task back to `#/tasks` and the initiative back to
 `#/initiatives`); and the refusal shown in the dialog. `web/src/lib/archive.test.ts` covers the window <-> URL encoding.
+
+**Archive view sort and saved state** (R16, `web/src/lib/archiveView.ts`, `web/src/Archive.svelte`, key `board.view.v1.archive`). The table sorts by Item (text, the title), Kind (kind: `initiative` before `task` ascending), Resolution (status) and Closed (time, an item with no `closed_at` last in both directions); the ref sits under the title and is not a column of its own, and Action holds no value. Desktop uses the `SortHeader` buttons (click, Enter or Space: ascending, descending, back to the default), phone the Sort select above the cards. The sort is client-side: it reorders the rows the view holds and makes no request, while a window change reads the lists again. The default order is `closed_at` newest first; a chosen sort replaces it and ties keep it. The fragment query holds the window first and then `sort` and `dir` (`#/archive?window=90&sort=item&dir=asc`); only what differs from the defaults (30 days, no sort) is written. Every change rewrites the fragment in place and saves the whole query, and the defaults remove the saved key. `#/archive` with no query restores the saved query before the first fetch (`openView`); a fragment with a query wins and is saved; an unknown window, an unknown column or a bad `dir` is the default. `web/src/lib/archiveView.test.ts` covers the window and sort <-> query encoding and the saved state; `e2e/archive-view.spec.ts` covers, at phone and desktop, sorting by Item, Kind, Resolution and Closed (rows ordered, `aria-sort` set, the third step back to the default), the window and the sort surviving nav away and back, a fresh page and a reload, a link's own query winning, an unusable saved query, and the keyboard on desktop.
 
 **Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
 of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`

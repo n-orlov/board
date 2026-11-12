@@ -2,53 +2,76 @@
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
   import Toast from './Toast.svelte';
   import {
     ARCHIVE_WINDOWS,
     ArchiveApi,
     ArchiveStore,
     affectsArchive,
-    archiveHash,
     archiveRows,
     reopenBody,
     reopenLabel,
     reopenedToast,
-    windowFromHash,
     type ArchiveRow,
     type ArchiveState,
     type ArchiveWindow,
   } from './lib/archive';
+  import { ARCHIVE_COLUMNS, ARCHIVE_SORT_LABELS, ARCHIVE_VIEW, archiveViewHash, queryOfHash, viewFromQuery, viewToQuery, type ArchiveViewState } from './lib/archiveView';
   import { live } from './lib/live';
   import { hashPath } from './lib/routes';
   import { currentBrowser } from './lib/session';
+  import { sortRows, type SortState } from './lib/tableSort';
+  import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   // The Archive view (PRD R7, SPEC 11): the closed tasks and closed initiatives of a window, newest closed first, each
-  // with a Reopen button that confirms in the shared Dialog. The window lives in the fragment query. The data layer is
-  // lib/archive.ts.
+  // with a Reopen button that confirms in the shared Dialog. The window and the table's sort (Item, Kind, Resolution,
+  // Closed: headers from 768 px, the Sort select on the phone) live in the fragment query and are saved under
+  // board.view.v1.archive. The data layer is lib/archive.ts, the view state lib/archiveView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
-  const store = new ArchiveStore(new ArchiveApi(currentBrowser(), () => csrf), (s) => (view = s), windowFromHash(window.location.hash));
+  const viewEnv = currentViewEnv();
+  // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  const opened = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
+  const store = new ArchiveStore(new ArchiveApi(currentBrowser(), () => csrf), (s) => (view = s), opened.window);
+  let sort: SortState = $state(opened.sort);
   let view: ArchiveState = $state.raw(store.state);
   let reopening: ArchiveRow | undefined = $state(undefined);
   let toast = $state('');
   // Ages are phrased at the moment of each draw; a refetch redraws them.
-  const rows = $derived(archiveRows(view.tasks, view.initiatives, new Date()));
+  // The default order (newest closed first) is the one a sort replaces.
+  const rows = $derived(sortRows(archiveRows(view.tasks, view.initiatives, new Date()), sort, ARCHIVE_COLUMNS));
 
   $effect(() => {
     void store.load();
     return live().subscribe(affectsArchive, () => store.load());
   });
 
-  // A choice rewrites the fragment in place (no history entry per choice) and reads again.
+  // A change rewrites the fragment in place (no history entry per choice) and saves the query.
+  function remember(next: ArchiveViewState) {
+    window.history.replaceState(null, '', archiveViewHash(next));
+    saveViewQuery(viewEnv.storage, ARCHIVE_VIEW, viewToQuery(next));
+  }
+
+  // A window reads the lists again.
   function choose(next: ArchiveWindow) {
-    window.history.replaceState(null, '', archiveHash(next));
+    remember({ window: next, sort });
     void store.setWindow(next);
   }
 
-  // The fragment edited by hand, or the back button after a link with another window.
+  // A sort only reorders the rows the view holds: no request is made.
+  function setSort(next: SortState) {
+    sort = next;
+    remember({ window: view.window, sort: next });
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare '#/archive' restores the saved query.
   function hashChanged() {
     if (hashPath(window.location.hash) !== '#/archive') return;
-    void store.setWindow(windowFromHash(window.location.hash));
+    const next = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
+    sort = next.sort;
+    void store.setWindow(next.window);
   }
 
   function openReopen(row: ArchiveRow) {
@@ -85,14 +108,15 @@
   {:else if view.loaded && rows.length === 0}
     <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="archive-empty">Nothing was closed in this window.</p>
   {:else if rows.length > 0}
+    <div class="mb-3 flex"><SortSelect columns={ARCHIVE_SORT_LABELS} {sort} onsort={setSort} /></div>
     <!-- One table: from 768 px a dense table, below it each closed item is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <th scope="col" class="{head} md:w-2/5">Item</th>
-          <th scope="col" class="{head} md:w-32">Kind</th>
-          <th scope="col" class="{head} md:w-36">Resolution</th>
-          <th scope="col" class="{head} md:w-40">Closed</th>
+          <SortHeader column="item" label="Item" {sort} onsort={setSort} class="{head} md:w-2/5" />
+          <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-32" />
+          <SortHeader column="resolution" label="Resolution" {sort} onsort={setSort} class="{head} md:w-36" />
+          <SortHeader column="closed" label="Closed" {sort} onsort={setSort} class="{head} md:w-40" />
           <th scope="col" class="{head} md:w-28"><span class="sr-only">Action</span></th>
         </tr>
       </thead>

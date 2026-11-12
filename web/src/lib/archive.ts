@@ -1,6 +1,6 @@
 // The Archive view's data layer and mapping (PRD R7, SPEC 11): the closed tasks and closed initiatives of a time
-// window, newest closed first. The window is held in the fragment query (`#/archive?window=7`); the default window
-// (30 days) leaves the query empty. `ArchiveApi` reads the two lists and reopens; `ArchiveStore` keeps the newest
+// window, newest closed first. The window is held in the fragment query (`#/archive?window=7`, with the sort beside it, lib/archiveView.ts); the
+// default window (30 days) leaves the query empty. `ArchiveApi` reads the two lists and reopens; `ArchiveStore` keeps the newest
 // answer and the refusal of the last reopen.
 import type { components } from './api/schema';
 import { errorText, Fetches } from './fetches';
@@ -37,18 +37,6 @@ export function windowFromQuery(query: string): ArchiveWindow {
 /** The query of a window for the URL fragment: empty for the default, so `#/archive` is the default view. */
 export function windowToQuery(window: ArchiveWindow): string {
   return window === DEFAULT_ARCHIVE_WINDOW ? '' : new URLSearchParams({ window }).toString();
-}
-
-/** The fragment of the view under a window. */
-export function archiveHash(window: ArchiveWindow): string {
-  const query = windowToQuery(window);
-  return query === '' ? '#/archive' : `#/archive?${query}`;
-}
-
-/** The window held by a fragment: everything after the first `?` is the query. */
-export function windowFromHash(hash: string): ArchiveWindow {
-  const at = hash.indexOf('?');
-  return windowFromQuery(at < 0 ? '' : hash.slice(at + 1));
 }
 
 /** The `GET /tasks` and `GET /initiatives` query of a window: closed items, and `closed_within` unless it is all. */

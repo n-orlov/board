@@ -3,7 +3,6 @@ import {
   affectsArchive,
   ARCHIVE_WINDOWS,
   ArchiveApi,
-  archiveHash,
   archiveQuery,
   archiveRows,
   ArchiveStore,
@@ -12,7 +11,6 @@ import {
   reopenBody,
   reopenedToast,
   reopenLabel,
-  windowFromHash,
   windowFromQuery,
   windowToQuery,
   type ArchiveState,
@@ -46,9 +44,6 @@ describe('the window <-> URL encoding', () => {
     expect(windowToQuery('7')).toBe('window=7');
     expect(windowToQuery('90')).toBe('window=90');
     expect(windowToQuery('all')).toBe('window=all');
-    expect(archiveHash('30')).toBe('#/archive');
-    expect(archiveHash('7')).toBe('#/archive?window=7');
-    expect(archiveHash('all')).toBe('#/archive?window=all');
   });
 
   it('reads the window back from a query, with or without its question mark', () => {
@@ -64,17 +59,6 @@ describe('the window <-> URL encoding', () => {
     }
     expect(parseWindow(null)).toBe('30');
     expect(parseWindow(undefined)).toBe('30');
-  });
-
-  it('reads the window from a fragment, after its first question mark', () => {
-    expect(windowFromHash('#/archive')).toBe('30');
-    expect(windowFromHash('#/archive?window=7')).toBe('7');
-    expect(windowFromHash('#/archive?window=all')).toBe('all');
-    expect(windowFromHash('#/archive?x=1&window=90')).toBe('90');
-  });
-
-  it('round-trips every window through the fragment', () => {
-    for (const { value } of ARCHIVE_WINDOWS) expect(windowFromHash(archiveHash(value))).toBe(value);
   });
 
   it('asks the API for closed items closed within the days, and for every closed item with all', () => {
