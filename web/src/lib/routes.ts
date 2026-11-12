@@ -69,6 +69,13 @@ export const ROUTES = [
     icon: '',
   },
   {
+    id: 'timeline',
+    hash: '#/timeline',
+    title: 'Timeline',
+    label: 'Timeline',
+    icon: 'M3 3v18h18M7 7h8M10 12h9M7 17h6',
+  },
+  {
     id: 'notes',
     hash: '#/notes',
     title: 'Notes',

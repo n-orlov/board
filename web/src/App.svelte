@@ -9,6 +9,7 @@
   import Shell from './Shell.svelte';
   import TaskPage from './TaskPage.svelte';
   import Tasks from './Tasks.svelte';
+  import Timeline from './Timeline.svelte';
   import { live } from './lib/live';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
   import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
@@ -20,6 +21,7 @@
     initiative: InitiativePage,
     tasks: Tasks,
     task: TaskPage,
+    timeline: Timeline,
     notes: Notes,
     keys: ApiKeys,
   };

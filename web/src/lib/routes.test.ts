@@ -28,6 +28,8 @@ describe('resolveRoute', () => {
     ['#/settings', 'attention'],
     ['#/settings/keys/', 'attention'],
     ['#/tasks', 'tasks'],
+    ['#/timeline', 'timeline'],
+    ['#/timeline?initiative=aa&closed=30', 'timeline'],
     ['#/tasks?status=done&kind=watch', 'tasks'],
     ['#/tasks/', 'attention'],
     ['#/i/phone-onboard?x=1', 'initiative'],
@@ -115,6 +117,7 @@ describe('ROUTES', () => {
       ['attention', false],
       ['initiatives', true],
       ['tasks', false],
+      ['timeline', false],
       ['notes', false],
       ['keys', false],
     ]);
@@ -129,17 +132,19 @@ describe('ROUTES', () => {
       ['attention', false],
       ['initiatives', false],
       ['tasks', true],
+      ['timeline', false],
       ['notes', false],
       ['keys', false],
     ]);
   });
 
-  it('puts Tasks between Initiatives and Settings in the navigation, current on its filtered fragment', () => {
+  it('puts Tasks between Initiatives and Timeline in the navigation, current on its filtered fragment', () => {
     const route = resolveRoute('#/tasks?status=done', ROUTES);
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.href, e.current])).toEqual([
       ['attention', '#/attention', false],
       ['initiatives', '#/initiatives', false],
       ['tasks', '#/tasks', true],
+      ['timeline', '#/timeline', false],
       ['notes', '#/notes', false],
       ['keys', '#/settings/keys', false],
     ]);
@@ -165,6 +170,7 @@ describe('ROUTES', () => {
       ['attention', true],
       ['initiatives', false],
       ['tasks', false],
+      ['timeline', false],
       ['notes', false],
       ['keys', false],
     ]);
@@ -181,10 +187,10 @@ describe('hashPath', () => {
 });
 
 describe('the navigation order', () => {
-  it('lists Attention, Initiatives, Tasks, Notes, then Settings, Attention first and the default', () => {
+  it('lists Attention, Initiatives, Tasks, Timeline, Notes, then Settings, Attention first and the default', () => {
     const entries = navEntries(ROUTES[0], ROUTES);
-    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'notes', 'keys']);
-    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes', 'Settings']);
+    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'timeline', 'notes', 'keys']);
+    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Notes', 'Settings']);
     expect(resolveRoute('', ROUTES).id).toBe('attention');
   });
 });
@@ -231,6 +237,7 @@ describe('the Attention badge on the navigation entries', () => {
         ['attention', text, label],
         ['initiatives', '', ''],
         ['tasks', '', ''],
+        ['timeline', '', ''],
         ['notes', '', ''],
         ['keys', '', ''],
       ]);

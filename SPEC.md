@@ -2636,6 +2636,16 @@ acknowledged", "Check recorded on aa-1"). Nothing refetches by itself: the acted
 event (`ask_answered`, `ask_withdrawn`, `task_closed`, `lease_acked`, `check_recorded`) refreshes the view.
 `e2e/attention.spec.ts` covers the six actions and the refusal at phone and desktop, and `a11y.spec.ts` scans the Answer sheet.
 
+**Timeline view** (`#/timeline`, `web/src/Timeline.svelte`, R6). The route table holds it as the entry `timeline` (nav
+label Timeline) between Tasks and Notes. It reads `GET /api/v1/timeline` (§6.10) under the filter in the fragment's query
+for the server's default window (14 days back, 7 days ahead) through `TimelineApi`, and `TimelineViewStore`
+(`web/src/lib/timelineView.ts`) holds the mapped model (§6.10, `web/src/lib/timeline.ts`); a read that lands after a
+newer one is dropped, and a refusal shows as an alert above what was drawn. vis-timeline and vis-data are npm
+dependencies bundled into the app (the view imports `vis-timeline/peer`, `vis-data/peer` and vis-timeline's stylesheet;
+nothing is loaded from a CDN), and `mountChart` hands the groups and items to vis-timeline inside a frame that scrolls on
+its own, so the page never scrolls sideways (`chartOptions`: zoom from an hour to a quarter, lease bars stacked in their
+subgroup, rows in the mapping's order). Until the first read lands it says it is loading; a window with no task says so.
+
 **Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
 of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`
 (`web/src/lib/notesView.ts`, a `ThreadApi`) reads every page of the filtered list with `fields=summary` and `NotesViewStore`
@@ -2791,11 +2801,11 @@ with the Now panel open and a conflict, and the task page with a conflict, and `
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Attention, the default view: `#/` lands on it) and
-its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Notes, Settings. The Attention entry
+its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Notes, Settings. The Attention entry
 (the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
 `live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
-danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all five entries,
-each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but five fit, so none exists yet. The shell
+danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all six entries,
+each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but six fit, so none exists yet. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
 fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-bottom)`;
