@@ -1152,9 +1152,9 @@ paths:
         The tasks, leases and markers that fall in a window of time, with the initiatives that hold the tasks, for the
         Timeline view. `from` and `to` are RFC 3339 instants; `to` must be after `from` and at most 400 days after it;
         left out they default to 14 days before now and 7 days after now. A task is in the window when its actual span
-        (`created_at` to `closed_at`, or to now while it is not closed) or its planned span overlaps it; a lease when
-        its span (`started_at` to its end, open while it is live) overlaps it, so a window that cuts a lease keeps it; a
-        marker when its `at` is inside it. Closed tasks are left out unless `closed_within` (`7d`, `30d`, `90d` or an
+        (`created_at` to `closed_at`, open-ended while it is not closed, so an open task is in every window that ends
+        after it was created) or its planned span overlaps it; a lease when its span (`started_at` to its end, open
+        while it is live) overlaps it, so a window that cuts a lease keeps it; a marker when its `at` is inside it. Closed tasks are left out unless `closed_within` (`7d`, `30d`, `90d` or an
         integer of days) keeps those closed that recently; the leases and markers of a task that is left out are left
         out with it. `initiative` (by slug or ULID, repeatable) and `tag` (repeatable; the initiative must carry every
         tag given) keep tasks as they do for `GET /api/v1/tasks`; `actor` (a handle) keeps the tasks on which that actor
