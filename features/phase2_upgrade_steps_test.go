@@ -23,6 +23,21 @@ type seedTable struct {
 	vals     []any
 	defaults []string
 	key      string
+	bools    []string // boolean columns: vals hold a Go bool, bound per dialect
+}
+
+// bound is vals as the dialect binds them: a boolean column of vals holds a
+// bool, which SQLite stores as 0 or 1.
+func (t seedTable) bound(d store.Dialect) []any {
+	out := append([]any{}, t.vals...)
+	for i, c := range t.cols {
+		for _, b := range t.bools {
+			if c == b {
+				out[i] = d.EncodeBool(t.vals[i].(bool))
+			}
+		}
+	}
+	return out
 }
 
 // phase1Seed is one row in each of six tables (and the actor they refer to),
@@ -51,6 +66,28 @@ var phase1Seed = []seedTable{
 		cols: []string{"id", "at", "actor_id", "principal", "on_behalf_of", "initiative_id", "task_id", "type", "ref_id", "summary", "data"},
 		vals: []any{"EV1", 9300, "ACTOR1", "oidc:op@example.com", "ACTOR1", "INIT1", "TASK1", "initiative_created", "INIT1", "initiative phone-onboard created", `{"slug":"phone-onboard"}`}, defaults: []string{"n"}},
 }
+
+// phase2Head is the last migration the launch commit shipped (Phase 2).
+const phase2Head = 8
+
+// phase2Extra are the tables Phase 2 added to Phase 1's: one row in each, so
+// that together with phase1Seed the seed holds nine tables. Every value
+// differs from its column's default, including the two ask columns later
+// migrations added (ended_at, end_commit_ns).
+var phase2Extra = []seedTable{
+	{name: "asks", key: "id",
+		cols: []string{"id", "task_id", "initiative_id", "actor_id", "question", "details", "options", "mode", "blocking", "state", "answer", "answered_by", "on_behalf_of", "channel", "created_at", "answered_at", "withdrawn_at", "withdraw_reason", "poll_seen_at", "ended_at", "end_commit_ns"},
+		vals: []any{"ASK1", "TASK1", "INIT1", "ACTOR1", "Ship it?", "context", `["yes","no"]`, "poll", true, "answered", "yes", "ACTOR1", "ACTOR1", "relay", 9400, 9500, 9600, "changed mind", 9700, 9800, 9900000000}, defaults: []string{"n"}, bools: []string{"blocking"}},
+	{name: "notes", key: "id",
+		cols: []string{"id", "actor_id", "summary", "body", "task_id", "initiative_id", "resource", "mentions", "created_at"},
+		vals: []any{"NOTE1", "ACTOR1", "a note", "the body", "TASK1", "INIT1", "repo:board", `["op@host"]`, 10000}, defaults: []string{"n"}},
+	{name: "cursors", key: "actor_id, stream",
+		cols: []string{"actor_id", "stream", "position"},
+		vals: []any{"ACTOR1", "events", "EV1"}},
+}
+
+// phase2Seed is phase1Seed with the Phase 2 tables, in foreign-key order.
+var phase2Seed = append(append([]seedTable{}, phase1Seed...), phase2Extra...)
 
 // upgradeState is what the scenario's seed step read before the migration.
 type upgradeState struct {
@@ -91,7 +128,7 @@ func (t seedTable) allColumns() []string {
 
 // seedPhase1 builds the schema of the Phase 1 release in the scenario's
 // database, writes the seed and remembers what it reads back.
-func (h *harness) seedPhase1(ctx context.Context, up *upgradeState) error {
+func (h *harness) seedAt(ctx context.Context, up *upgradeState, head int64, seed []seedTable) error {
 	if err := h.freshDatabase(); err != nil {
 		return err
 	}
@@ -100,20 +137,20 @@ func (h *harness) seedPhase1(ctx context.Context, up *upgradeState) error {
 		return err
 	}
 	defer s.Close()
-	if err := s.MigrateTo(ctx, phase1Head); err != nil {
+	if err := s.MigrateTo(ctx, head); err != nil {
 		return err
 	}
 	v, err := s.SchemaVersion(ctx)
 	if err != nil {
 		return fmt.Errorf("read the schema version: %w", err)
 	}
-	if v != phase1Head {
-		return fmt.Errorf("schema version before the seed = %d, want %d", v, phase1Head)
+	if v != head {
+		return fmt.Errorf("schema version before the seed = %d, want %d", v, head)
 	}
 	d := s.Dialect()
 	up.before = map[string][][]string{}
-	for _, t := range phase1Seed {
-		if _, err := s.Writer().ExecContext(ctx, d.Rebind(d.Insert(t.name, t.cols)), t.vals...); err != nil {
+	for _, t := range seed {
+		if _, err := s.Writer().ExecContext(ctx, d.Rebind(d.Insert(t.name, t.cols)), t.bound(d)...); err != nil {
 			return fmt.Errorf("seed %s: %w", t.name, err)
 		}
 		rows, err := h.readColumns(ctx, s, t.name, t.key, t.allColumns())
@@ -148,7 +185,7 @@ func (h *harness) migratedPast(ctx context.Context, version int) error {
 
 // seededRowsRead requires, for each seeded table, the same single row as before
 // the migration, and in it every seeded column holding the seeded value.
-func (h *harness) seededRowsRead(ctx context.Context, up *upgradeState) error {
+func (h *harness) seededRowsRead(ctx context.Context, up *upgradeState, seed []seedTable) error {
 	if up.before == nil {
 		return errors.New("no Phase 1 database was seeded")
 	}
@@ -157,8 +194,9 @@ func (h *harness) seededRowsRead(ctx context.Context, up *upgradeState) error {
 		return err
 	}
 	defer s.Close()
+	d := s.Dialect()
 	var problems []string
-	for _, t := range phase1Seed {
+	for _, t := range seed {
 		after, err := h.readColumns(ctx, s, t.name, t.key, t.allColumns())
 		if err != nil {
 			return err
@@ -173,7 +211,7 @@ func (h *harness) seededRowsRead(ctx context.Context, up *upgradeState) error {
 			}
 		}
 		for i, col := range t.cols {
-			if got := after[0][i][strings.Index(after[0][i], ":")+1:]; got != fmt.Sprint(t.vals[i]) {
+			if got := after[0][i][strings.Index(after[0][i], ":")+1:]; got != fmt.Sprint(t.bound(d)[i]) {
 				problems = append(problems, fmt.Sprintf("%s.%s = %s, seeded %v", t.name, col, got, t.vals[i]))
 			}
 		}
@@ -184,11 +222,29 @@ func (h *harness) seededRowsRead(ctx context.Context, up *upgradeState) error {
 	return nil
 }
 
+// tableExists requires the migrated database to hold the named table.
+func (h *harness) tableExists(ctx context.Context, table string) error {
+	s, err := store.Open(h.dbURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if _, err := s.Reader().ExecContext(ctx, "SELECT 1 FROM "+table+" WHERE 1 = 0"); err != nil {
+		return fmt.Errorf("the %s table is not readable after the migration: %w", table, err)
+	}
+	return nil
+}
+
 func registerPhase2UpgradeSteps(sc *godog.ScenarioContext, h *harness) {
 	up := &upgradeState{}
 	sc.Step(`^a Phase 1 database at schema version 4 holding rows in initiatives, tasks, leases, API keys, sessions and events$`,
-		func(ctx context.Context) error { return h.seedPhase1(ctx, up) })
+		func(ctx context.Context) error { return h.seedAt(ctx, up, phase1Head, phase1Seed) })
+	sc.Step(`^a Phase 2 database at schema version 8 holding rows in initiatives, tasks, leases, asks, notes, cursors, API keys, sessions and events$`,
+		func(ctx context.Context) error { return h.seedAt(ctx, up, phase2Head, phase2Seed) })
+	sc.Step(`^the seeded rows of those nine tables read back with identical column values$`,
+		func(ctx context.Context) error { return h.seededRowsRead(ctx, up, phase2Seed) })
+	sc.Step(`^the (\w+) table exists$`, h.tableExists)
 	sc.Step(`^the database has migrated past schema version (\d+)$`, h.migratedPast)
 	sc.Step(`^the seeded rows of those six tables read back with identical column values$`,
-		func(ctx context.Context) error { return h.seededRowsRead(ctx, up) })
+		func(ctx context.Context) error { return h.seededRowsRead(ctx, up, phase1Seed) })
 }
