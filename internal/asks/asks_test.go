@@ -552,3 +552,51 @@ func TestTouchWritesNoEventForAStopAskOrAnAskThatIsNotOpen(t *testing.T) {
 		t.Errorf("counts after touching a stop ask and a withdrawn ask = %v, want %v", after, before)
 	}
 }
+
+func (e env) notifications(t *testing.T) (kinds []string) {
+	t.Helper()
+	rs, err := e.S.Store.Reader().QueryContext(ctx, `SELECT n.kind FROM notifications n JOIN events ev ON ev.id = n.event_id ORDER BY ev.n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var k string
+		if err := rs.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, k)
+	}
+	return kinds
+}
+
+func TestRaiseEnqueuesAnAskingNotificationForEachScopeAndAnswerEnqueuesNone(t *testing.T) {
+	e := newEnv(t)
+	e.S.Store.SetNotify(store.NotifyKinds)
+	task := e.raise(t, New{Task: "aa-1", Question: "q1"})
+	e.raise(t, New{Initiative: "aa", Question: "q2"})
+	e.raise(t, New{Question: "q3"})
+	want := []string{"asking", "asking", "asking"}
+	if got := e.notifications(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notifications = %q, want %q", got, want)
+	}
+	if _, err := e.S.Answer(ctx, bob, "key:y", task.Ref, Reply{Answer: "yes", Channel: "api"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.notifications(t); !reflect.DeepEqual(got, want) {
+		t.Fatalf("an answer changed the notifications to %q", got)
+	}
+}
+
+func TestRaiseEnqueuesNothingWhenAskingIsOffOrARaiseIsRefused(t *testing.T) {
+	e := newEnv(t)
+	e.S.Store.SetNotify([]string{store.NotifyDone})
+	e.raise(t, New{Question: "q"})
+	e.S.Store.SetNotify(store.NotifyKinds)
+	if _, err := e.S.Raise(ctx, me, "key:x", New{Task: "aa-99", Question: "q"}); err == nil {
+		t.Fatal("an ask on an unknown task was raised")
+	}
+	if got := e.notifications(t); len(got) != 0 {
+		t.Fatalf("notifications = %q", got)
+	}
+}

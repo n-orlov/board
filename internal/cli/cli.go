@@ -161,6 +161,9 @@ func serve(stderr io.Writer, env Env) int {
 	if _, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT")); err != nil {
 		return fail(stderr, err)
 	}
+	if _, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON")); err != nil {
+		return fail(stderr, err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serveUntil(ctx, stderr, env, dbURL(env), addr, migrate != "off")
@@ -175,6 +178,9 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	}
 	defer func() { _ = st.Close() }()
 	if err := prepareSchema(ctx, st, migrate); err != nil {
+		return fail(stderr, err)
+	}
+	if err := configureNotify(st, env); err != nil {
 		return fail(stderr, err)
 	}
 	if err := reopenLeased(ctx, st); err != nil {
@@ -202,6 +208,19 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 		return fail(stderr, err)
 	}
 	return ExitOK
+}
+
+// configureNotify turns on the alerts BOARD_NOTIFY_URL and BOARD_NOTIFY_ON ask for
+// (SPEC 13): with no URL no write enqueues a notification.
+func configureNotify(st *store.Store, env Env) error {
+	kinds, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON"))
+	if err != nil {
+		return err
+	}
+	if env("BOARD_NOTIFY_URL") != "" {
+		st.SetNotify(kinds)
+	}
+	return nil
 }
 
 // streamSettings reads BOARD_STREAM_POLL and BOARD_STREAM_HEARTBEAT.

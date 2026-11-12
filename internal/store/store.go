@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // the Postgres database/sql driver
 	"github.com/pressly/goose/v3"
@@ -48,6 +49,8 @@ type Store struct {
 	writer     *sql.DB
 	reader     *sql.DB
 	migrations fs.FS
+	// notify holds the kinds of alert a write enqueues; nil means alerts are off.
+	notify atomic.Pointer[map[string]bool]
 }
 
 // Open opens the database named by a BOARD_DB_URL value. It does not migrate.

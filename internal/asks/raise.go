@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
 	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/store"
 )
 
@@ -107,12 +109,21 @@ func (s Store) raise(ctx context.Context, tx *sql.Tx, actor audit.Actor, princip
 	if err != nil {
 		return Ask{}, err
 	}
-	err = audit.AppendAs(ctx, tx, d, actorID, now, audit.Event{
-		Principal: principal, Type: EventRaised, InitiativeID: sc.initiativeID, TaskID: sc.taskID, RefID: id,
+	return k, s.appendRaised(ctx, tx, actorID, principal, now, k, sc)
+}
+
+// appendRaised appends the ask_raised event of k and enqueues its asking notification.
+func (s Store) appendRaised(ctx context.Context, tx *sql.Tx, actorID, principal string, now time.Time, k Ask, sc scope) error {
+	d := s.Store.Dialect()
+	eventID, err := audit.AppendAsID(ctx, tx, d, actorID, now, audit.Event{
+		Principal: principal, Type: EventRaised, InitiativeID: sc.initiativeID, TaskID: sc.taskID, RefID: k.ID,
 		Summary: eventSummary(k, "raised", k.Question),
 		Data:    raisedData(k),
 	})
-	return k, err
+	if err != nil {
+		return err
+	}
+	return notify.Enqueue(ctx, tx, s.Store, eventID, store.NotifyAsking, now)
 }
 
 // raisedData is the data of an ask_raised event.

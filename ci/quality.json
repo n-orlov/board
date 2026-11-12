@@ -46,6 +46,7 @@
             "internal/events",
             "internal/feed",
             "internal/notes",
+            "internal/notify",
             "internal/audit",
             "internal/initiatives",
             "internal/tasks",
@@ -67,6 +68,7 @@
                 "internal/events",
                 "internal/feed",
                 "internal/notes",
+                "internal/notify",
                 "internal/audit",
                 "internal/initiatives",
                 "internal/tasks",
@@ -139,6 +141,7 @@
             ],
             "internal/leases": [
                 "end.go",
+                "expire.go",
                 "ontask.go",
                 "write.go"
             ]

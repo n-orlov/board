@@ -2,10 +2,13 @@ package tasks
 
 import (
 	"errors"
-	"github.com/n-orlov/board/internal/audit"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/board/internal/store"
 )
 
 type rowState struct {
@@ -302,5 +305,65 @@ func TestRefusedCloseRecordsNoActorForTheHeader(t *testing.T) {
 	var n int
 	if err := s.Store.Reader().QueryRowContext(ctx, `SELECT count(*) FROM actors WHERE handle = 'operator'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("operator rows = %d (%v), want 0", n, err)
+	}
+}
+
+func notificationKinds(t *testing.T, s Store) (kinds []string) {
+	t.Helper()
+	rs, err := s.Store.Reader().QueryContext(ctx, `SELECT n.kind FROM notifications n JOIN events ev ON ev.id = n.event_id ORDER BY ev.n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var k string
+		if err := rs.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, k)
+	}
+	return kinds
+}
+
+func TestDoneEnqueuesOneDoneNotificationAndNoOtherTransitionDoes(t *testing.T) {
+	s := newStore(t)
+	s.Store.SetNotify(store.NotifyKinds)
+	initiative(t, s, "aa")
+	a, b, c := mk(t, s, "aa", "one"), mk(t, s, "aa", "two"), mk(t, s, "aa", "three")
+	if _, err := s.Done(ctx, who, "key:x", a.Ref, DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := notificationKinds(t, s); !reflect.DeepEqual(got, []string{"done"}) {
+		t.Fatalf("notifications after done = %q", got)
+	}
+	if _, err := s.Reopen(ctx, who, "key:x", a.Ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Close(ctx, who, "key:x", b.Ref, "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloseInitiative(ctx, who, "key:x", "aa", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := notificationKinds(t, s); !reflect.DeepEqual(got, []string{"done"}) {
+		t.Fatalf("notifications after reopen and closes = %q", got)
+	}
+	if _, err := s.Done(ctx, who, "key:x", c.Ref, DoneOptions{}); err == nil {
+		t.Fatal("marked a closed task done")
+	}
+	if got := notificationKinds(t, s); !reflect.DeepEqual(got, []string{"done"}) {
+		t.Fatalf("a refused done changed the notifications to %q", got)
+	}
+}
+
+func TestDoneEnqueuesNothingWhenDoneIsOff(t *testing.T) {
+	s := newStore(t)
+	s.Store.SetNotify([]string{store.NotifyAsking})
+	initiative(t, s, "aa")
+	if _, err := s.Done(ctx, who, "key:x", mk(t, s, "aa", "one").Ref, DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := notificationKinds(t, s); len(got) != 0 {
+		t.Fatalf("notifications = %q", got)
 	}
 }

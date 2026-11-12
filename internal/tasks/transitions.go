@@ -9,6 +9,7 @@ import (
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/store"
 )
 
@@ -192,11 +193,15 @@ func (s Store) appendTransition(ctx context.Context, tx *sql.Tx, actorID, onBeha
 		data["resolution"] = r
 		summary += " as " + r.(string)
 	}
-	return audit.AppendAs(ctx, tx, s.Store.Dialect(), actorID, now, audit.Event{
+	eventID, err := audit.AppendAsID(ctx, tx, s.Store.Dialect(), actorID, now, audit.Event{
 		Principal: principal, OnBehalfOfID: onBehalf, Type: tr.event, InitiativeID: cur.InitiativeID, TaskID: cur.ID, RefID: cur.ID,
 		Summary: summary,
 		Data:    data,
 	})
+	if err != nil || tr.event != EventDone {
+		return err
+	}
+	return notify.Enqueue(ctx, tx, s.Store, eventID, store.NotifyDone, now)
 }
 
 var eventVerb = map[string]string{EventDone: "marked done", EventReopened: "reopened", EventClosed: "closed"}

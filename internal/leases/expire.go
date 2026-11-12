@@ -8,6 +8,7 @@ import (
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/store"
 )
 
@@ -88,9 +89,13 @@ func (s Store) dueAt(ctx context.Context, tx *sql.Tx, now time.Time) ([]due, err
 }
 
 func (s Store) appendExpired(ctx context.Context, tx *sql.Tx, l due, now time.Time) error {
-	return audit.AppendAs(ctx, tx, s.Store.Dialect(), l.ActorID, now, audit.Event{
+	eventID, err := audit.AppendAsID(ctx, tx, s.Store.Dialect(), l.ActorID, now, audit.Event{
 		Principal: systemPrincipal, Type: EventExpired, InitiativeID: l.InitiativeID, TaskID: l.TaskID, RefID: l.ID,
 		Summary: l.Ref + " expired on " + l.Task,
 		Data:    map[string]any{"ref": l.Ref, "task": l.Task, "expired_at": l.ExpiresAt.Format(time.RFC3339Nano)},
 	})
+	if err != nil {
+		return err
+	}
+	return notify.EnqueueStranded(ctx, tx, s.Store, eventID, l.ID, now)
 }

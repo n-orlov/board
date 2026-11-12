@@ -224,3 +224,38 @@ func TestOnBehalfUpsertsTheNamedActorAndAppendStoresItOnTheEvent(t *testing.T) {
 		t.Errorf("on_behalf_of = %q (%v), want operator", handle, err)
 	}
 }
+
+func TestAppendAsIDReturnsTheIDOfTheEventItWrote(t *testing.T) {
+	st := newStore(t)
+	var id string
+	inTx(t, st, func(tx *sql.Tx) {
+		actorID, err := UpsertActor(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host"}, t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id, err = AppendAsID(context.Background(), tx, st.Dialect(), actorID, t0, Event{Principal: "key:x", Type: "note_posted", Summary: "s"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var typ string
+	if err := st.Reader().QueryRowContext(context.Background(), st.Dialect().Rebind(`SELECT type FROM events WHERE id = ?`), id).Scan(&typ); err != nil || typ != "note_posted" {
+		t.Fatalf("event %q has type %q (%v)", id, typ, err)
+	}
+}
+
+func TestAppendAsIDReturnsNoIDWhenTheEventIsRefused(t *testing.T) {
+	st := newStore(t)
+	tx, err := st.Writer().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	actorID, err := UpsertActor(context.Background(), tx, st.Dialect(), Actor{Handle: "claude@host"}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := AppendAsID(context.Background(), tx, st.Dialect(), actorID, t0, Event{Principal: "key:x", Type: "t", InitiativeID: "no-such", Summary: "s"})
+	if err == nil || id != "" {
+		t.Fatalf("id = %q, err = %v, want no id and an error", id, err)
+	}
+}

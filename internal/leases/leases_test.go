@@ -732,3 +732,47 @@ func TestEverySuccessfulLeaseWriteCommitsTheExpiryOfADueLeaseOnce(t *testing.T) 
 		}
 	}
 }
+
+func notifications(t *testing.T, e env) (kinds []string) {
+	t.Helper()
+	rs, err := e.S.Store.Reader().QueryContext(ctx, `SELECT n.kind FROM notifications n JOIN events ev ON ev.id = n.event_id ORDER BY ev.n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var k string
+		if err := rs.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, k)
+	}
+	return kinds
+}
+
+func TestExpiryEnqueuesAStrandedNotificationOnlyForTheNewestLeaseOfATask(t *testing.T) {
+	e := newEnv(t)
+	e.S.Store.SetNotify(store.NotifyKinds)
+	e.start(t, me, "aa-1", secs(60))
+	e.start(t, bob, "aa-1", secs(60))
+	e.start(t, me, "aa-2", secs(60))
+	e.Clock.add(2 * time.Minute)
+	if n, err := e.S.ExpireDue(ctx); err != nil || n != 3 {
+		t.Fatalf("ExpireDue = %d, %v", n, err)
+	}
+	if got := notifications(t, e); !reflect.DeepEqual(got, []string{"stranded", "stranded"}) {
+		t.Fatalf("notifications = %q, want one for aa-1's newest lease and one for aa-2's", got)
+	}
+}
+
+func TestExpiryEnqueuesNothingWhenAlertsAreOff(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", secs(60))
+	e.Clock.add(2 * time.Minute)
+	if _, err := e.S.ExpireDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := notifications(t, e); len(got) != 0 {
+		t.Fatalf("notifications = %q", got)
+	}
+}

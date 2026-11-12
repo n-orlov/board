@@ -652,7 +652,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`. The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -667,6 +667,28 @@ an upgrade survive it. `events.task_id` is a plain nullable column with no forei
 - `asks(state, created_at)`: open asks.
 - `tasks(status, initiative_id)`, `tasks(kind, next_check_at)`, `tasks(closed_at)`: attention and archive.
 - `initiative_tags(tag)`.
+- `notifications(event_id, kind)` (unique) and `notifications(state, next_attempt_at)`: one row per event and kind, and the rows a delivery is due on.
+
+### 4.11 `notifications`
+
+| column | type | notes |
+|---|---|---|
+| id | ULID | primary key |
+| kind | text | `stranded`, `asking` or `done` (a check constraint refuses any other) |
+| event_id | fk | the `events` row whose write enqueued it |
+| payload | text (JSON) | the body a delivery POSTs |
+| state | text | `pending` (the default), `sent` or `failed` |
+| attempts | integer | deliveries tried, 0 when enqueued |
+| next_attempt_at | timestamp | when the row is next due; the enqueue time when new |
+| claimed_until | timestamp, null | the short claim a delivering server holds on the row |
+| last_error | text, null | the status or error class of the last failed delivery, never a body |
+| created_at | timestamp | when it was enqueued |
+| sent_at | timestamp, null | when a delivery got a 2xx |
+
+The outbox of alerts (§5.4). It is unique on `(event_id, kind)`, so one event never enqueues the same kind twice.
+`00009_notifications` creates it, with the same DDL on SQLite and Postgres, and is additive: no existing table changes.
+A row is only ever written by the transaction that appends its event (§5.4), so a refused or rolled-back write
+leaves none, and nothing deletes or cancels a row afterwards.
 
 ---
 
@@ -746,6 +768,25 @@ expired (§5.1):
   them) keep the items on a task or ask of a matching initiative; an ask on no initiative is left
   out under either filter, and a conflict is kept when any of its leases is on a kept task. The
   counts and `total` (their sum) follow the filters. An empty board counts 0 everywhere.
+
+### 5.4 Notification triggers
+
+Three writes enqueue an alert, each one `notifications` row (§4.11) written in the same transaction as the event it
+follows, through `internal/notify`:
+
+| kind | event | when |
+|---|---|---|
+| `stranded` | `lease_expired` | the lease that expired is the newest of its task, by `started_at` and then lease `id` (the rule of §5.3); an older lease of a task that has a later one enqueues nothing |
+| `asking` | `ask_raised` | an ask is raised, on a task, on an initiative or on the board |
+| `done` | `task_done` | a task is marked done; a done request that also ends its holder's live lease (§6.4) enqueues the one `done` row, and the `lease_ended` event it writes enqueues none |
+
+A row is enqueued only when `BOARD_NOTIFY_URL` is set and `BOARD_NOTIFY_ON` names the kind (§13); with the URL unset no
+row is ever written. A renewal, an end, an answer, a withdrawal, a close and a note enqueue nothing, and neither
+does a write that is refused, since its transaction writes no event. A row is not cancelled when its condition clears
+(the lease acknowledged, the ask answered): what was enqueued is what is delivered. `serve` turns the triggers on once at
+start-up, before it takes a request, and a word in `BOARD_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
+whether or not the URL is set. The row's `payload` starts as `{"kind": "<kind>"}`; the readable text and the fields
+around it, the delivery with its retries and claims, and `GET /api/v1/notifications` follow in later tasks of this wave.
 
 ---
 
@@ -2811,6 +2852,8 @@ All configuration is by environment variable:
 | `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
 | `BOARD_SQLITE_CHECKPOINT` | `10m` | how often `board serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
 | `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
+| `BOARD_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
+| `BOARD_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `BOARD_NOTIFY_URL` is set |
 | `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
@@ -3039,7 +3082,7 @@ Each phase ends on a green `main` build with all gates still enforced.
 - **MCP endpoint** exposing the same operations as tools.
 - **Asks and autonomous runners**: how a runner's own "operator input required" review relates
   to board asks (poll vs defer vs stop). Discussed separately.
-- Notifications out of the board (webhooks on attention changes).
+- Other notification channels (email, chat apps, per-actor routes). The webhook alerts of §5.4 are the only channel that exists.
 - MySQL/MariaDB support (only with CI coverage, §12.2).
 
 ---
