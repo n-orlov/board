@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, resolveRoute, routeParam, type Route } from './routes';
+import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, phoneSplit, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -124,6 +124,7 @@ describe('ROUTES', () => {
       ['tasks', false],
       ['timeline', false],
       ['actors', false],
+      ['archive', false],
       ['notes', false],
       ['keys', false],
     ]);
@@ -140,6 +141,7 @@ describe('ROUTES', () => {
       ['tasks', true],
       ['timeline', false],
       ['actors', false],
+      ['archive', false],
       ['notes', false],
       ['keys', false],
     ]);
@@ -153,6 +155,7 @@ describe('ROUTES', () => {
       ['tasks', '#/tasks', true],
       ['timeline', '#/timeline', false],
       ['actors', '#/actors', false],
+      ['archive', '#/archive', false],
       ['notes', '#/notes', false],
       ['keys', '#/settings/keys', false],
     ]);
@@ -180,6 +183,7 @@ describe('ROUTES', () => {
       ['tasks', false],
       ['timeline', false],
       ['actors', false],
+      ['archive', false],
       ['notes', false],
       ['keys', false],
     ]);
@@ -196,10 +200,10 @@ describe('hashPath', () => {
 });
 
 describe('the navigation order', () => {
-  it('lists Attention, Initiatives, Tasks, Timeline, Actors, Notes, then Settings, Attention first and the default', () => {
+  it('lists Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, then Settings, Attention first and the default', () => {
     const entries = navEntries(ROUTES[0], ROUTES);
-    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'timeline', 'actors', 'notes', 'keys']);
-    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Notes', 'Settings']);
+    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'timeline', 'actors', 'archive', 'notes', 'keys']);
+    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
     expect(resolveRoute('', ROUTES).id).toBe('attention');
   });
 });
@@ -248,6 +252,7 @@ describe('the Attention badge on the navigation entries', () => {
         ['tasks', '', ''],
         ['timeline', '', ''],
         ['actors', '', ''],
+        ['archive', '', ''],
         ['notes', '', ''],
         ['keys', '', ''],
       ]);
@@ -261,5 +266,35 @@ describe('the Attention badge on the navigation entries', () => {
   it('puts the badge on whichever entry of the table names it', () => {
     const table: Route[] = [{ ...synthetic[0] }, { ...synthetic[1], badge: 'attention' }];
     expect(navEntries(table[0], table, 7).map((e) => e.badge)).toEqual(['', '7']);
+  });
+});
+
+describe('the phone tab bar split', () => {
+  it('keeps Attention, Initiatives, Tasks and Notes as tabs and puts Timeline, Actors, Archive and Settings under More, in table order', () => {
+    const { tabs, more } = phoneSplit(navEntries(resolveRoute('#/attention', ROUTES), ROUTES));
+    expect(tabs.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes']);
+    expect(more.map((e) => [e.label, e.href])).toEqual([
+      ['Timeline', '#/timeline'],
+      ['Actors', '#/actors'],
+      ['Archive', '#/archive'],
+      ['Settings', '#/settings/keys'],
+    ]);
+  });
+
+  it('lists the route table in the order Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings', () => {
+    expect(navEntries(ROUTES[0], ROUTES).map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
+  });
+
+  it('is a function of the table: a table with no phone flag has no tabs, one that flags all has no More', () => {
+    const none = navEntries(synthetic[0], synthetic);
+    expect(phoneSplit(none)).toEqual({ tabs: [], more: none });
+    const all = navEntries(synthetic[0], synthetic.map((r) => ({ ...r, phone: true as const })));
+    expect(phoneSplit(all)).toEqual({ tabs: all, more: [] });
+  });
+
+  it('flags a view under More as current there: the Archive entry is current on #/archive, not Tasks', () => {
+    const entries = navEntries(resolveRoute('#/archive', ROUTES), ROUTES);
+    expect(entries.filter((e) => e.current).map((e) => e.id)).toEqual(['archive']);
+    expect(phoneSplit(entries).more.some((e) => e.current)).toBe(true);
   });
 });

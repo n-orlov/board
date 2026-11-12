@@ -55,7 +55,13 @@ for (const vp of viewports) {
     test('a key created on the Settings -> API keys page is shown once, copied, works, and gets 401 once revoked', async ({ page, playwright, baseURL }) => {
       const name = keyName('ui');
       await page.goto('/');
-      await page.getByRole('link', { name: 'Settings' }).click();
+      if (vp.name === 'phone') {
+        // Settings sits under the tab bar's More entry on the phone.
+        await page.getByRole('button', { name: 'More' }).click();
+        await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: 'Settings' }).click();
+      } else {
+        await page.getByRole('link', { name: 'Settings' }).click();
+      }
       await expect(page.getByRole('heading', { level: 2, name: 'API keys' })).toBeVisible();
       // global-setup.ts's own key is already listed; the new one is not.
       await expect(page.getByTestId('key-row').first()).toBeVisible();

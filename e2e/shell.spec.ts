@@ -1,4 +1,4 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import { ROUTES } from '../web/src/lib/routes';
 
 // The responsive shell: one navigation surface per viewport (phone tab bar, tablet icon rail,
@@ -15,6 +15,10 @@ const allNavs = ['nav-tabbar', 'nav-rail', 'nav-sidebar'];
 
 // The route table the shell is built from: the navs must list exactly its entries that are not pages inside another view.
 const navRoutes = ROUTES.filter((route) => !('parent' in route));
+// The phone tab bar keeps the routes flagged `phone` and lists the others under its "More" entry (a dialog).
+const isTab = (route: { id: string }): boolean => 'phone' in viewOf(route.id);
+const tabRoutes = navRoutes.filter(isTab);
+const moreRoutes = navRoutes.filter((route) => !isTab(route));
 const SEED_SLUG = `shl${'w'.repeat(37)}`; // the longest slug, with a 200-character title
 const seeded = { taskRef: '' };
 
@@ -29,6 +33,7 @@ const states = [
   { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
   { name: '#/timeline', hash: () => '#/timeline', view: 'timeline', loaded: 'timeline-chart' },
   { name: '#/actors', hash: () => '#/actors', view: 'actors', loaded: 'actors-view' },
+  { name: '#/archive', hash: () => '#/archive', view: 'archive', loaded: 'archive-view' },
   { name: '#/notes', hash: () => '#/notes', view: 'notes', loaded: 'notes-view' },
   { name: '#/t/<ref>', hash: () => `#/t/${seeded.taskRef}`, view: 'task', loaded: 'task-title' },
   { name: '#/settings/keys', hash: () => '#/settings/keys', view: 'keys', loaded: 'key-row' },
@@ -41,6 +46,26 @@ function viewOf(id: string) {
 }
 // The nav entry of a view: the view itself, or the view it is a page of.
 const navIdOf = (id: string): string => ('parent' in viewOf(id) ? (viewOf(id) as { parent: string }).parent : id);
+
+// Follows a nav entry the way the viewport allows: a link of the bar itself, or at phone width through the "More" dialog.
+async function goTo(page: Page, nav: Locator, phone: boolean, route: { id: string; label: string }) {
+  if (phone && !isTab(route)) {
+    await nav.getByTestId('more-button').click();
+    const dialog = page.getByRole('dialog', { name: 'More' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('link', { name: route.label }).click();
+    await expect(dialog).toHaveCount(0);
+  } else {
+    await nav.getByRole('link', { name: route.label }).click();
+  }
+}
+
+// Exactly one entry of the nav is current: the entry's link, or at phone width the More button when the view is listed under it.
+async function expectCurrent(nav: Locator, phone: boolean, route: { id: string; label: string }) {
+  await expect(nav.locator('[aria-current]')).toHaveCount(1);
+  if (phone && !isTab(route)) await expect(nav.getByTestId('more-button')).toHaveAttribute('aria-current', 'true');
+  else await expect(nav.getByRole('link', { name: route.label })).toHaveAttribute('aria-current', 'page');
+}
 
 async function noHorizontalOverflow(page: Page) {
   const { scrollWidth, clientWidth } = await page.evaluate(() => ({
@@ -86,15 +111,16 @@ for (const vp of viewports) {
         for (const other of allNavs.filter((id) => id !== vp.nav)) await expect(page.getByTestId(other)).toBeHidden();
 
         // The route table drives the nav: one link per entry that is not a page inside another view, in table order.
+        const phone = vp.name === 'phone';
+        const shown = phone ? tabRoutes : navRoutes;
         const links = nav.getByRole('link');
-        await expect(links).toHaveCount(navRoutes.length);
-        expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(navRoutes.map((route) => route.hash));
-        await expect(nav.locator('[aria-current=page]')).toHaveCount(1);
+        await expect(links).toHaveCount(shown.length);
+        expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(shown.map((route) => route.hash));
+        await expect(nav.getByTestId('more-button')).toHaveCount(phone ? 1 : 0);
         const current = navIdOf(state.view);
-        for (const route of navRoutes) {
-          const link = nav.getByRole('link', { name: route.label });
-          if (route.id === current) await expect(link).toHaveAttribute('aria-current', 'page');
-          else await expect(link).not.toHaveAttribute('aria-current', /.*/);
+        await expectCurrent(nav, phone, viewOf(current));
+        for (const route of shown) {
+          if (route.id !== current) await expect(nav.getByRole('link', { name: route.label })).not.toHaveAttribute('aria-current', /.*/);
         }
         await expect(page.getByTestId(state.loaded).first()).toBeVisible();
         // The live indicator is on screen in this layout with its accessible name (the other two layouts' are display: none).
@@ -102,19 +128,18 @@ for (const vp of viewports) {
         await expect(indicator).toHaveCount(1);
         await expect(indicator).toBeVisible();
         await expect(indicator).toHaveAccessibleName(/^Live updates: (live|reconnecting|offline)$/);
-        if (vp.name === 'phone') await expect(page.getByTestId('topbar-title')).toHaveText(viewOf(state.view).title);
+        if (phone) await expect(page.getByTestId('topbar-title')).toHaveText(viewOf(state.view).title);
         await noHorizontalOverflow(page);
 
         // A nav click moves aria-current to the clicked entry; then back to this state through the fragment.
         for (const target of navRoutes.filter((route) => route.id !== current)) {
-          await nav.getByRole('link', { name: target.label }).click();
+          await goTo(page, nav, phone, target);
           await expect(page).toHaveURL(new RegExp(`${target.hash}$`));
-          await expect(nav.locator('[aria-current=page]')).toHaveCount(1);
-          await expect(nav.getByRole('link', { name: target.label })).toHaveAttribute('aria-current', 'page');
+          await expectCurrent(nav, phone, target);
           await noHorizontalOverflow(page);
           await page.goto('/' + state.hash());
           await expect(page.getByTestId(state.loaded).first()).toBeVisible();
-          await expect(nav.getByRole('link', { name: viewOf(current).label })).toHaveAttribute('aria-current', 'page');
+          await expectCurrent(nav, phone, viewOf(current));
         }
       });
     }
@@ -197,9 +222,12 @@ async function sendTotal(page: Page, total: number) {
 }
 
 test.describe('the route table and the navigation order', () => {
-  test('the table holds Attention first and Notes, and the default route is Attention', async ({ page }) => {
+  test('the table holds Attention first, then Timeline, Actors and Archive before Notes, and the default route is Attention', async ({ page }) => {
     expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'archive', 'notes', 'keys']);
-    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Notes', 'Settings']);
+    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
+    // The phone tab bar keeps four of them; the rest is listed under "More", in table order.
+    expect(tabRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes']);
+    expect(moreRoutes.map((route) => route.label)).toEqual(['Timeline', 'Actors', 'Archive', 'Settings']);
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const hash of ['/', '/#/', '/#/nowhere']) {
       await page.goto(hash);
@@ -207,7 +235,7 @@ test.describe('the route table and the navigation order', () => {
       await expect(page.getByTestId('section-open_asks').first()).toBeVisible();
     }
     const links = page.getByTestId('nav-sidebar').getByRole('link');
-    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/timeline', '#/actors', '#/notes', '#/settings/keys']);
+    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/timeline', '#/actors', '#/archive', '#/notes', '#/settings/keys']);
   });
 });
 
@@ -251,7 +279,7 @@ for (const vp of viewports) {
 test.describe('the phone tab bar', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('holds Attention, Initiatives, Tasks, Timeline, Actors, Notes and Settings, all of them fitting in 44 px targets at 390 px, even with the badge at 99+', async ({ page }) => {
+  test('holds Attention, Initiatives, Tasks, Notes and More, each a 44 px target inside 390 px, even with the badge at 99+', async ({ page }) => {
     await feedStream(page);
     await page.goto('/#/attention');
     const nav = page.getByTestId('nav-tabbar');
@@ -259,15 +287,17 @@ test.describe('the phone tab bar', () => {
     await sendTotal(page, 120);
     await expect(nav.getByTestId('attention-badge')).toHaveText('99+');
     const links = nav.getByRole('link');
-    await expect(links).toHaveCount(7);
-    // Everything that fits is a link of its own; there is no "more" entry while the table fits the bar.
-    await expect(nav.getByRole('button')).toHaveCount(0);
-    const boxes = await links.evaluateAll((els) =>
+    await expect(links).toHaveCount(4);
+    await expect(links).toHaveText(tabRoutes.map((route) => new RegExp(route.label)));
+    await expect(nav.getByRole('button')).toHaveCount(1);
+    await expect(nav.getByRole('button', { name: 'More' })).toHaveAttribute('aria-haspopup', 'dialog');
+    const boxes = await nav.locator('a, button').evaluateAll((els) =>
       els.map((el) => {
         const r = el.getBoundingClientRect();
         return { name: el.textContent?.trim() ?? '', left: r.left, right: r.right, width: r.width, height: r.height };
       }),
     );
+    expect(boxes).toHaveLength(5);
     let previousRight = 0;
     for (const box of boxes) {
       expect(box.width, `${box.name} width`).toBeGreaterThanOrEqual(44);
@@ -276,10 +306,48 @@ test.describe('the phone tab bar', () => {
       expect(box.right, `${box.name} right edge`).toBeLessThanOrEqual(390.5);
       previousRight = box.right;
     }
-    // No label is clipped inside its link.
-    const clipped = await links.evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
+    // No label is clipped inside its target.
+    const clipped = await nav.locator('a, button').evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent));
     expect(clipped).toEqual([]);
     await noHorizontalOverflow(page);
+  });
+
+  test('More opens the one dialog listing Timeline, Actors, Archive and Settings in table order as 44 px links that reach their views, and Escape closes it', async ({ page }) => {
+    await page.goto('/#/attention');
+    const nav = page.getByTestId('nav-tabbar');
+    const more = nav.getByTestId('more-button');
+    await expect(nav.locator('[aria-current]')).toHaveCount(1); // Attention's link: More is not current there
+    await expect(more).not.toHaveAttribute('aria-current', /.*/);
+    await more.click();
+    const dialog = page.getByRole('dialog', { name: 'More' });
+    await expect(dialog).toBeVisible();
+    const items = dialog.getByRole('link');
+    await expect(items).toHaveText(moreRoutes.map((route) => route.label));
+    expect(await items.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(moreRoutes.map((route) => route.hash));
+    const boxes = await items.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ w: r.width, h: r.height, right: r.right })));
+    expect(boxes).toHaveLength(moreRoutes.length);
+    for (const box of boxes) {
+      expect(box.h).toBeGreaterThanOrEqual(44);
+      expect(box.w).toBeGreaterThanOrEqual(44);
+      expect(box.right).toBeLessThanOrEqual(390.5);
+    }
+    await noHorizontalOverflow(page);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(more).toBeFocused();
+    // Each entry opens its view, closes the dialog and leaves More current.
+    for (const route of moreRoutes) {
+      await more.click();
+      await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: route.label }).click();
+      await expect(page).toHaveURL(new RegExp(`${route.hash}$`));
+      await expect(page.getByRole('dialog', { name: 'More' })).toHaveCount(0);
+      await expect(more).toHaveAttribute('aria-current', 'true');
+      await expect(page.getByTestId('topbar-title')).toHaveText(viewOf(route.id).title);
+      // Reopened, the entry of the view on screen is the one marked current.
+      await more.click();
+      await expect(page.getByRole('dialog', { name: 'More' }).locator('[aria-current=page]')).toHaveText(route.label);
+      await page.keyboard.press('Escape');
+    }
   });
 });
 

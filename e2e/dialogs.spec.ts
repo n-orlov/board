@@ -462,7 +462,7 @@ for (const vp of viewports) {
     });
 
     test('a nav entry shows a visible focus ring after keyboard focus', async ({ page }) => {
-      const entry = page.getByTestId(vp.nav).getByRole('link', { name: 'Settings' });
+      const entry = page.getByTestId(vp.nav).getByRole('link', { name: 'Notes' });
       expect(await entry.evaluate((el) => getComputedStyle(el).outlineStyle), 'no ring before focus').toBe('none');
       await tabTo(page, entry);
       await expectRing(entry);

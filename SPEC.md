@@ -2717,8 +2717,7 @@ every live view, on any board event but an API key event (any write moves an act
 that acted later but holds nothing, its lease linking to its task, the way back of each copied, and a lease started through the
 API putting its actor first within 5 s without a reload.
 
-**Archive view** (`#/archive`, `web/src/Archive.svelte`, R7). The route table holds it as the entry `archive`, a page inside the Tasks
-entry as far as the navigation goes (it has no entry of its own yet). It lists the **closed tasks** (`GET /tasks?status=closed`) and the
+**Archive view** (`#/archive`, `web/src/Archive.svelte`, R7). The route table holds it as the entry `archive` (nav label Archive, after Actors; it is listed under the phone tab bar's "More"). It lists the **closed tasks** (`GET /tasks?status=closed`) and the
 **closed initiatives** (`GET /initiatives?status=closed`) in one table, in the order of `archiveRows` (`web/src/lib/archive.ts`):
 `closed_at` newest first, equal times by key, an item with no `closed_at` last. The **window** is 7, 30 or 90 days or all, chosen in
 a "Closed within" select and held in the fragment query as `#/archive?window=7|90|all`; the default, 30 days, leaves the query
@@ -2895,11 +2894,11 @@ with the Now panel open and a conflict, and the task page with a conflict, and `
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Attention, the default view: `#/` lands on it) and
-its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Actors, Notes, Settings. The Attention entry
+its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings; the table's ids are, in order, `attention`, `initiatives`, `initiative`, `tasks`, `task`, `timeline`, `actors`, `archive`, `notes`, `keys`. The Attention entry
 (the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
 `live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
-danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all seven entries,
-each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but seven fit (the tab bar's links keep 2 px of side padding), so none exists yet. The shell
+danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar keeps the entries the table flags `phone: true` (Attention, Initiatives, Tasks and Notes)
+and ends with a **More** button (`aria-haspopup="dialog"`) that opens the one `Dialog` (a bottom sheet) listing every other navigation entry, Timeline, Actors, Archive and Settings, in table order (`phoneSplit` in `web/src/lib/routes.ts`, `Nav.svelte`, `MoreMenu.svelte`): each entry a link of at least 44 px, choosing one closes the sheet, Escape closes it and returns focus to More. The five targets of the bar are each at least 44 px wide and tall at 390 px, even with the badge at 99+. While the view on screen is one of the entries under More, the More button carries `aria-current="true"` (so exactly one entry of the bar is current) and the entry's link in the sheet `aria-current="page"`. The tablet rail and the desktop sidebar list all eight entries. Every view that streams declares its live-refresh predicate with `live().subscribe` (Timeline, Actors, `affectsActors`, and Archive, `affectsArchive`), so a change made through the API shows within 5 s without a reload. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
 fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-bottom)`;
@@ -2911,8 +2910,8 @@ account button opens the account menu (the email and Sign out) in the dialog com
 every width. The first focusable element of the page is a "Skip to content" link that moves focus
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:
-Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/` and `#/attention` (the Attention view), `#/initiatives`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>` and
-`#/settings/keys` as states (and asserts the table order, the default route, the badge at 0, 3 and 120 on a fed stand-in stream, and the tab bar's five 44 px targets at 390 px) and, at 390x844, 820x1180 and 1440x900, asserts the nav links are
+Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/` and `#/attention` (the Attention view), `#/initiatives`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>`,
+`#/archive` and `#/settings/keys` as states (and asserts the table order, the default route, the badge at 0, 3 and 120 on a fed stand-in stream, the tab bar's five 44 px targets at 390 px, and the More sheet's contents, links and focus return at 390 px) and, at 390x844, 820x1180 and 1440x900, asserts the nav links are (at 390 px the four tabs, with More)
 exactly the route table's (imported, not copied), the right entry carries `aria-current`, and
 navigating by nav click moves it. The page never scrolls horizontally (the same spec), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
 and from 768 px use `table-layout: fixed` with fixed widths for the short columns (status, tags,

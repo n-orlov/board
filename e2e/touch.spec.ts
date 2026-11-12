@@ -125,6 +125,11 @@ async function seedPhase1(playwright: PlaywrightTestArgs['playwright'], baseURL:
 }
 
 // A visible button of the page: on the phone the action bar sits above the tab bar.
+// Settings sits under the tab bar's More entry on the phone.
+const openSettings = async (page: Page) => {
+  await page.getByTestId('nav-tabbar').getByRole('button', { name: 'More' }).click();
+  await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: 'Settings' }).click();
+};
 const button = (page: Page, name: string | RegExp, exact = false) => page.getByRole('button', { name, exact }).locator('visible=true').first();
 
 const openDialog = async (page: Page, name: string) => {
@@ -506,7 +511,7 @@ test.describe('phone 390x844', () => {
   });
 
   test('the Settings -> API keys view', async ({ page }) => {
-    await page.getByTestId('nav-tabbar').getByRole('link', { name: 'Settings' }).click();
+    await openSettings(page);
     await expect(page.getByTestId('key-row').first()).toBeVisible();
     await expectTouchFriendly(page, 5);
   });
@@ -528,7 +533,7 @@ test.describe('phone 390x844', () => {
   });
 
   test('the new-key sheet', async ({ page }) => {
-    await page.getByTestId('nav-tabbar').getByRole('link', { name: 'Settings' }).click();
+    await openSettings(page);
     await page.getByRole('button', { name: 'New API key' }).click();
     const dialog = page.getByRole('dialog', { name: 'New API key' });
     await expect(dialog).toBeVisible();
@@ -536,7 +541,7 @@ test.describe('phone 390x844', () => {
   });
 
   test('the revoke confirmation', async ({ page }) => {
-    await page.getByTestId('nav-tabbar').getByRole('link', { name: 'Settings' }).click();
+    await openSettings(page);
     await page.getByTestId('key-row').first().getByRole('button', { name: 'Revoke' }).click();
     const dialog = page.getByRole('dialog', { name: 'Revoke API key' });
     await expect(dialog).toBeVisible();

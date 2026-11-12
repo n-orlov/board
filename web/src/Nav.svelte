@@ -1,11 +1,20 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import type { NavEntry } from './lib/routes';
+  import MoreMenu from './MoreMenu.svelte';
+  import { phoneSplit, type NavEntry } from './lib/routes';
 
   // One navigation surface of the shell, drawn from the route table's entries. The shell shows
   // exactly one of the three at a time (Tailwind breakpoints): the phone tab bar, the tablet icon
   // rail, the desktop sidebar. A hidden one is display:none, so it is out of the accessibility tree.
   let { entries, variant, testid }: { entries: NavEntry[]; variant: 'tabbar' | 'rail' | 'sidebar'; testid: string } = $props();
+
+  // The tab bar keeps the entries flagged `phone` and lists the rest under a "More" entry; the other two surfaces list them all.
+  const split = $derived(variant === 'tabbar' ? phoneSplit(entries) : { tabs: entries, more: [] as NavEntry[] });
+  let moreOpen = $state(false);
+  // More is current while the view on screen is one of the entries it lists.
+  const moreCurrent = $derived(split.more.some((entry) => entry.current));
+
+  const MORE = 'M5 12h.01M12 12h.01M19 12h.01';
 
   const link: Record<typeof variant, string> = {
     tabbar: 'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-xs',
@@ -21,7 +30,7 @@
 
 <nav aria-label="Main" data-testid={testid}>
   <ul class={list[variant]}>
-    {#each entries as entry (entry.id)}
+    {#each split.tabs as entry (entry.id)}
       <li class={variant === 'tabbar' ? 'flex flex-1' : ''}>
         <a
           href={entry.href}
@@ -46,5 +55,24 @@
         </a>
       </li>
     {/each}
+    {#if split.more.length > 0}
+      <li class="flex flex-1">
+        <button
+          type="button"
+          class="{link[variant]} text-text-muted hover:text-text aria-[current=true]:font-semibold aria-[current=true]:text-accent"
+          aria-haspopup="dialog"
+          aria-current={moreCurrent ? 'true' : undefined}
+          data-testid="more-button"
+          onclick={() => (moreOpen = true)}
+        >
+          <Icon d={MORE} />
+          <span>More</span>
+        </button>
+      </li>
+    {/if}
   </ul>
 </nav>
+
+{#if moreOpen}
+  <MoreMenu entries={split.more} onclose={() => (moreOpen = false)} />
+{/if}

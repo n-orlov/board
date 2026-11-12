@@ -139,6 +139,58 @@ for (const vp of viewports) {
       expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
     });
 
+    test('the Actors view shows an actor that first acts, and the lease it takes, through the API within 5 s, without a reload', async ({ page, playwright, baseURL }) => {
+      const handle = `live-actor-${vp.name}`;
+      const slug = `e2e-live-actors-${vp.name}`;
+      const api = await apiAs(playwright, baseURL);
+      await post(api, '/api/v1/initiatives', { slug, title: `Live actors ${vp.name}` }, 201);
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Taken by a new actor' }, 201);
+      await page.goto('/#/actors');
+      await expect(page.getByTestId('actors-view')).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByTestId('actor-row').first()).toBeVisible(FIVE_SECONDS);
+      const row = page.locator(`[data-testid="actor-row"][data-handle="${handle}"]`);
+      await expect(row).toHaveCount(0);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      const actor = await playwright.request.newContext({
+        baseURL,
+        extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': handle },
+      });
+      await post(actor, '/api/v1/notes', { summary: `First sign of ${handle}` }, 201);
+      await expect(row).toHaveAttribute('data-alive', 'false', FIVE_SECONDS);
+
+      await post(actor, '/api/v1/leases', { task: ref, intent: 'live edit', resources: [`repo:${handle}`] }, 201);
+      await expect(row).toHaveAttribute('data-alive', 'true', FIVE_SECONDS);
+      await expect(row.getByTestId('lease-task')).toHaveText(ref, FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
+
+    test('the Archive shows a task and an initiative closed through the API within 5 s, and drops them again when reopened, without a reload', async ({ page, playwright, baseURL }) => {
+      const api = await apiAs(playwright, baseURL);
+      const slug = `e2e-live-archive-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Live archive ${vp.name}` }, 201);
+      const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Closed while the Archive is open' }, 201);
+      const taskRow = page.locator(`[data-testid="archive-row"][data-kind="task"][data-ref="${ref}"]`);
+      const initiativeRow = page.locator(`[data-testid="archive-row"][data-kind="initiative"][data-ref="${slug}"]`);
+      await page.goto('/#/archive');
+      await expect(page.getByTestId('archive-view')).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
+      await expect(taskRow).toHaveCount(0);
+      await page.evaluate(() => ((window as unknown as { liveMark: boolean }).liveMark = true));
+
+      await post(api, `/api/v1/tasks/${ref}/close`, { resolution: 'dropped' }, 200);
+      await expect(taskRow).toBeVisible(FIVE_SECONDS);
+      await expect(taskRow.getByTestId('archive-resolution')).toHaveText('dropped');
+      await post(api, `/api/v1/initiatives/${slug}/close`, {}, 200);
+      await expect(initiativeRow).toBeVisible(FIVE_SECONDS);
+
+      await post(api, `/api/v1/initiatives/${slug}/reopen`, {}, 200);
+      await expect(initiativeRow).toHaveCount(0, FIVE_SECONDS);
+      await post(api, `/api/v1/tasks/${ref}/reopen`, {}, 200);
+      await expect(taskRow).toHaveCount(0, FIVE_SECONDS);
+      expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
+    });
+
     test('a row closed through the API disappears from the Tasks view with no error toast', async ({ page, playwright, baseURL }) => {
       const api = await apiAs(playwright, baseURL);
       const slug = `e2e-live-closed-${vp.name}`;

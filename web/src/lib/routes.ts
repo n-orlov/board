@@ -25,12 +25,18 @@ export interface Route {
   parent?: string;
   /** The count this entry's navigation link carries as a badge (the Attention total); a view without one has none. */
   badge?: 'attention';
+  /**
+   * True for the entries that keep their own link in the phone tab bar; every other navigation entry is listed
+   * under the tab bar's "More" entry. The tablet rail and the desktop sidebar list all of them.
+   */
+  phone?: true;
 }
 
 export const ROUTES = [
   {
     id: 'attention',
     hash: '#/attention',
+    phone: true,
     title: 'Attention',
     label: 'Attention',
     badge: 'attention',
@@ -39,6 +45,7 @@ export const ROUTES = [
   {
     id: 'initiatives',
     hash: '#/initiatives',
+    phone: true,
     title: 'Initiatives',
     label: 'Initiatives',
     icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
@@ -55,6 +62,7 @@ export const ROUTES = [
   {
     id: 'tasks',
     hash: '#/tasks',
+    phone: true,
     title: 'Tasks',
     label: 'Tasks',
     icon: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
@@ -83,17 +91,16 @@ export const ROUTES = [
     icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   },
   {
-    // Closed work: reached by its fragment, and a page inside Tasks as far as the navigation goes.
     id: 'archive',
     hash: '#/archive',
-    parent: 'tasks',
     title: 'Archive',
     label: 'Archive',
-    icon: '',
+    icon: 'M21 8v13H3V8M1 3h22v5H1zM10 12h4',
   },
   {
     id: 'notes',
     hash: '#/notes',
+    phone: true,
     title: 'Notes',
     label: 'Notes',
     icon: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5',
@@ -144,6 +151,8 @@ export interface NavEntry {
   icon: string;
   /** True for the entry of the view on screen: it gets `aria-current="page"`. */
   current: boolean;
+  /** True for an entry that keeps its own link in the phone tab bar (the route's `phone`). */
+  phone: boolean;
   /** The badge's visible text (`3`, `99+`), the empty string when there is none to show. */
   badge: string;
   /** The badge's words for assistive technology ("3 items need attention"), the empty string with no badge. */
@@ -178,7 +187,13 @@ export function navEntries(current: Route, table: readonly Route[], attentionTot
       label: route.label,
       icon: route.icon,
       current: route.id === current.id || route.id === current.parent,
+      phone: route.phone === true,
       badge: route.badge === 'attention' ? badgeText(attentionTotal) : '',
       badgeLabel: route.badge === 'attention' ? badgeLabel(attentionTotal) : '',
     }));
+}
+
+/** The phone tab bar's entries: `tabs` keep a link of their own, `more` is what the "More" entry lists, both in table order. */
+export function phoneSplit(entries: readonly NavEntry[]): { tabs: NavEntry[]; more: NavEntry[] } {
+  return { tabs: entries.filter((entry) => entry.phone), more: entries.filter((entry) => !entry.phone) };
 }
