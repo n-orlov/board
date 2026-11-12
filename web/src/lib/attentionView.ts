@@ -4,11 +4,21 @@
 import { mountPrefix } from './apibase';
 import type { components } from './api/schema';
 import { initiativeOfHref } from './attentionActions';
-import { ageText, askerWaitingLabel, apiQuery, DEFAULT_ATTENTION_FILTER, type AttentionFilter, type SectionKey } from './attention';
+import {
+  ageText,
+  askerWaitingLabel,
+  apiQuery,
+  DEFAULT_ATTENTION_FILTER,
+  filterFromQuery,
+  filterToQuery,
+  type AttentionFilter,
+  type SectionKey,
+} from './attention';
 import { errorText, Fetches } from './fetches';
 import { relativeTime } from './format';
 import { problemText } from './keys';
 import type { Browser } from './session';
+import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
 export type Attention = components['schemas']['Attention'];
 type Actor = components['schemas']['AttentionActor'];
@@ -205,4 +215,48 @@ export class AttentionStore {
     this.current = { ...this.current, filter };
     await this.load();
   }
+}
+
+/** The name of the view's saved state (PRD R16): the key is `board.view.v1.attention`. */
+export const ATTENTION_VIEW = 'attention';
+
+/** What opening the view found: the filter to start with, and whether it came from the saved query (a bare route). */
+export interface OpenedAttention {
+  filter: AttentionFilter;
+  restored: boolean;
+}
+
+/**
+ * Opens the view for the fragment it is on, before its first fetch. A fragment with a query wins and is saved; a bare
+ * one (`#/attention`, or any fragment the router sends here) restores the saved query by rewriting the fragment in
+ * place, so the view reads `GET /attention` once, under the restored filter.
+ */
+export function openAttention(env: ViewEnv, hash: string): OpenedAttention {
+  const at = hash.indexOf('?');
+  const own = at < 0 ? '' : hash.slice(at + 1);
+  const query = openView(env, ATTENTION_VIEW, '#/attention', own);
+  return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+}
+
+/** Saves the filter's query after a change (the empty filter is the default and removes the key). */
+export function saveAttention(storage: ViewStorage | undefined, filter: AttentionFilter): void {
+  saveViewQuery(storage, ATTENTION_VIEW, filterToQuery(filter));
+}
+
+/** Clear filters: forgets the saved query. */
+export function forgetAttention(storage: ViewStorage | undefined): void {
+  clearViewQuery(storage, ATTENTION_VIEW);
+}
+
+/**
+ * A restored filter without the initiatives and tags the board no longer has: `known` is the list of initiatives with
+ * their tags. A filter with nothing to drop is returned as it is (the same object).
+ */
+export function dropUnknown(filter: AttentionFilter, known: readonly { slug: string; tags: readonly string[] }[]): AttentionFilter {
+  const slugs = new Set(known.map((i) => i.slug));
+  const tags = new Set(known.flatMap((i) => i.tags));
+  const initiatives = filter.initiatives.filter((slug) => slugs.has(slug));
+  const kept = filter.tags.filter((tag) => tags.has(tag));
+  if (initiatives.length === filter.initiatives.length && kept.length === filter.tags.length) return filter;
+  return { initiatives, tags: kept };
 }

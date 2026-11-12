@@ -16,27 +16,37 @@
     type ActionKind,
     type ActionsState,
   } from './lib/attentionActions';
-  import { SECTIONS, attentionHash, emptyText, filterFromHash, isFiltered, sectionCount, toggled, type AttentionFilter } from './lib/attention';
+  import { untrack } from 'svelte';
+  import { SECTIONS, attentionHash, emptyText, isFiltered, sectionCount, toggled, type AttentionFilter } from './lib/attention';
   import {
     AttentionApi,
     AttentionStore,
     affectsAttention,
     copyLabel,
+    dropUnknown,
     filterChoices,
+    forgetAttention,
+    openAttention,
     rowsFor,
+    saveAttention,
     type AttentionState,
     type ItemActor,
   } from './lib/attentionView';
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
+  import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
   import type { Resolution } from './lib/tasks';
+  import { currentViewEnv } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const browser = currentBrowser();
-  const initial = filterFromHash(window.location.hash);
+  const viewEnv = currentViewEnv();
+  // A fragment with a query wins and is saved; a bare one restores the saved filter (in place, before the first fetch).
+  const opened = openAttention(viewEnv, window.location.hash);
+  const initial = opened.filter;
   let view: AttentionState = $state({ attention: undefined, filter: initial, loading: true, error: undefined });
   let known: { slug: string; tags: string[] }[] = $state([]);
   let toast = $state('');
@@ -45,24 +55,56 @@
   let acting: ActionsState = $state(NO_ACTIONS);
   const actions = new AttentionActions(new ActionsApi(browser, () => csrf), (s) => (acting = s));
 
-  $effect(() => {
-    void store.load();
-    void new InitiativesApi(browser, () => csrf)
+  // A restored filter may name an initiative or a tag the board no longer has: the first fetch waits for the list to drop them.
+  async function start() {
+    const listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => (known = list.map((i) => ({ slug: i.slug, tags: i.tags }))))
       .catch(() => undefined); // the chips then offer only what the URL names; the sections show the error
+    if (opened.restored) await listed;
+    // Only a restored filter is checked: values a link names stay, and the sections show the server's answer for them.
+    const kept = opened.restored && known.length > 0 ? dropUnknown(initial, known) : initial;
+    if (kept === initial) {
+      void store.load();
+    } else {
+      persist(kept);
+      void store.setFilter(kept);
+    }
+  }
+
+  $effect(() => {
+    // Read nothing reactive here: a filter change must not run the first load again.
+    void untrack(start);
     return live().subscribe(affectsAttention, () => store.load());
   });
 
-  // The filter lives in the fragment: a change rewrites it in place (no history entry per choice) and fetches.
-  function apply(filter: AttentionFilter) {
+  // The filter lives in the fragment and in the saved query: a change rewrites both in place (no history entry per choice).
+  function persist(filter: AttentionFilter) {
     window.history.replaceState(null, '', attentionHash(filter));
+    saveAttention(viewEnv.storage, filter);
+  }
+
+  function apply(filter: AttentionFilter) {
+    persist(filter);
     void store.setFilter(filter);
   }
 
-  // The fragment edited by hand, or the back button after a link with another query.
+  // Clear filters: the defaults, and nothing saved.
+  function clear() {
+    forgetAttention(viewEnv.storage);
+    window.history.replaceState(null, '', '#/attention');
+    void store.setFilter({ initiatives: [], tags: [] });
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filter.
   function hashChanged() {
-    const filter = filterFromHash(window.location.hash);
+    if (resolveRoute(window.location.hash, ROUTES).id !== 'attention') return;
+    const next = openAttention(viewEnv, window.location.hash);
+    let filter = next.filter;
+    if (next.restored && known.length > 0) {
+      filter = dropUnknown(filter, known);
+      if (filter !== next.filter) persist(filter);
+    }
     if (attentionHash(filter) !== attentionHash(view.filter)) void store.setFilter(filter);
   }
 
@@ -121,7 +163,7 @@
         </div>
       {/if}
       {#if isFiltered(view.filter)}
-        <div><button type="button" class={action} data-testid="clear-filters" onclick={() => apply({ initiatives: [], tags: [] })}>Clear filters</button></div>
+        <div><button type="button" class={action} data-testid="clear-filters" onclick={clear}>Clear filters</button></div>
       {/if}
     </div>
   {/if}

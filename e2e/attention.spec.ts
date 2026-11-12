@@ -252,6 +252,8 @@ for (const vp of viewports) {
       await expect(item.getByTestId('item-link')).toHaveCount(0);
 
       const global = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Anything at all?' }, 201);
+      // The view saves its filter (R16), so a bare route would restore the initiative filter: clear it first.
+      await page.getByTestId('clear-filters').click();
       await page.goto('/#/attention');
       const mine = section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: global.ref });
       await expect(mine).toHaveCount(1, FIVE_SECONDS);

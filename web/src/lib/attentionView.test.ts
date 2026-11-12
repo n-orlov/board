@@ -3,14 +3,20 @@ import { DEFAULT_ATTENTION_FILTER } from './attention';
 import {
   AttentionApi,
   AttentionStore,
+  ATTENTION_VIEW,
   affectsAttention,
   copyLabel,
+  dropUnknown,
   filterChoices,
+  forgetAttention,
+  openAttention,
   rowsFor,
+  saveAttention,
   type Attention,
   type AttentionState,
 } from './attentionView';
 import type { Browser } from './session';
+import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 
 const NOW = new Date('2026-01-01T12:00:00Z');
 const counts = { open_asks: 0, done_not_closed: 0, expired_leases: 0, overdue_watches: 0, conflicts: 0, total: 0 };
@@ -301,5 +307,97 @@ describe('AttentionStore', () => {
     waits[0]!(full);
     await p;
     expect(last().loading).toBe(false);
+  });
+});
+
+function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+    key: (i) => [...data.keys()][i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+}
+
+function env(storage: ViewStorage | undefined): ViewEnv & { hashes: string[] } {
+  const hashes: string[] = [];
+  return { storage, replaceHash: (h) => void hashes.push(h), hashes };
+}
+
+describe('saved Attention filters', () => {
+  const KEY = 'board.view.v1.attention';
+
+  it('is saved under board.view.v1.attention', () => {
+    expect(viewKey(ATTENTION_VIEW)).toBe(KEY);
+  });
+
+  it('saves the filter as the fragment query and removes the key for the empty filter', () => {
+    const storage = memory();
+    saveAttention(storage, { tags: ['work', 'home'], initiatives: ['aa'] });
+    expect(JSON.parse(storage.data.get(KEY)!)).toEqual({ v: 1, query: 'tag=work&tag=home&initiative=aa' });
+    saveAttention(storage, DEFAULT_ATTENTION_FILTER);
+    expect(storage.data.has(KEY)).toBe(false);
+  });
+
+  it('restores a bare route in place, before any fetch, and reports it as restored', () => {
+    const e = env(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work&initiative=aa' }) }));
+    expect(openAttention(e, '#/attention')).toEqual({ filter: { tags: ['work'], initiatives: ['aa'] }, restored: true });
+    expect(e.hashes).toEqual(['#/attention?tag=work&initiative=aa']);
+    // Any fragment the router sends to Attention is bare too.
+    expect(openAttention(env(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work' }) })), '#/').restored).toBe(true);
+  });
+
+  it('lets a fragment with its own query win and saves it, without restoring', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=old' }) });
+    const e = env(storage);
+    expect(openAttention(e, '#/attention?tag=new')).toEqual({ filter: { tags: ['new'], initiatives: [] }, restored: false });
+    expect(e.hashes).toEqual([]);
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=new');
+  });
+
+  it('starts at the defaults with nothing saved, a malformed value, another version or no storage', () => {
+    for (const raw of [undefined, 'nope', '{"v":2,"query":"tag=x"}', '{"v":1,"query":5}']) {
+      const e = env(memory(raw === undefined ? {} : { [KEY]: raw }));
+      expect(openAttention(e, '#/attention')).toEqual({ filter: DEFAULT_ATTENTION_FILTER, restored: false });
+      expect(e.hashes).toEqual([]);
+    }
+    expect(openAttention(env(undefined), '#/attention').restored).toBe(false);
+  });
+
+  it('forgets the saved filter', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=x' }) });
+    forgetAttention(storage);
+    expect(storage.data.has(KEY)).toBe(false);
+    expect(openAttention(env(storage), '#/attention').restored).toBe(false);
+  });
+});
+
+describe('dropUnknown', () => {
+  const known = [
+    { slug: 'aa', tags: ['work'] },
+    { slug: 'bb', tags: ['home', 'work'] },
+  ];
+
+  it('keeps a filter whose values are all known, as the same object', () => {
+    const filter = { initiatives: ['bb'], tags: ['home', 'work'] };
+    expect(dropUnknown(filter, known)).toBe(filter);
+    expect(dropUnknown(DEFAULT_ATTENTION_FILTER, known)).toBe(DEFAULT_ATTENTION_FILTER);
+  });
+
+  it('drops an unknown initiative and keeps the rest', () => {
+    expect(dropUnknown({ initiatives: ['ghost', 'aa'], tags: ['work'] }, known)).toEqual({ initiatives: ['aa'], tags: ['work'] });
+  });
+
+  it('drops an unknown tag and keeps the rest', () => {
+    expect(dropUnknown({ initiatives: ['aa'], tags: ['gone', 'home'] }, known)).toEqual({ initiatives: ['aa'], tags: ['home'] });
+  });
+
+  it('drops everything when the board knows nothing the filter names', () => {
+    expect(dropUnknown({ initiatives: ['ghost'], tags: ['gone'] }, known)).toEqual({ initiatives: [], tags: [] });
   });
 });
