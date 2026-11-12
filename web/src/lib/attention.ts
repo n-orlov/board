@@ -2,6 +2,7 @@
 // empty states, the age of an ask, the asker-waiting label, and the tag/initiative filter's encoding in the URL
 // fragment's query (`#/attention?tag=work&tag=home&initiative=aa`) and in the query of `GET /attention`.
 import type { components } from './api/schema';
+import type { Tone } from './presentation';
 
 export type AttentionCounts = components['schemas']['AttentionCounts'];
 export type SectionKey = 'open_asks' | 'done_not_closed' | 'expired_leases' | 'overdue_watches' | 'conflicts';
@@ -111,4 +112,65 @@ export function isFiltered(filter: AttentionFilter): boolean {
 /** The list with `value` added when absent, or removed when present (a tag chip toggles). */
 export function toggled(values: readonly string[], value: string): string[] {
   return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
+}
+
+export type TaskAttention = components['schemas']['TaskAttention'];
+
+/** One reason a task needs a person, as a badge: visible text, a tone (colour is never the only signal) and an accessible name. */
+export interface AttentionBadge {
+  reason: TaskAttention['reason'];
+  /** The visible text. */
+  label: string;
+  tone: Tone;
+  /** The accessible name: the label spelled out, with what `blocking` and `asker_waiting` add. */
+  name: string;
+}
+
+function sentence(parts: readonly string[]): string {
+  const text = parts.join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function badgeOf(item: TaskAttention): AttentionBadge {
+  if (item.reason === 'stranded') {
+    return { reason: 'stranded', label: 'stranded', tone: 'warning', name: 'Stranded, its lease ran out and was not acknowledged' };
+  }
+  if (item.reason === 'done') {
+    return { reason: 'done', label: 'done, not closed', tone: 'warning', name: 'Done, not closed' };
+  }
+  const parts = ['waiting on you'];
+  if (item.blocking === true) parts.push('blocking');
+  if (item.asker_waiting === true) parts.push('agent waiting');
+  return { reason: 'asking', label: parts.join(' · '), tone: 'warning', name: sentence(parts) };
+}
+
+/** The badges of a task's `attention` list, one per reason, in the order the list gives them; an empty list has none. */
+export function attentionBadges(attention: readonly TaskAttention[]): AttentionBadge[] {
+  return attention.map(badgeOf);
+}
+
+/** What the ordering reads of a task: its reasons and the time of its last change. */
+export interface AttentionOrdered {
+  attention: readonly TaskAttention[];
+  updated_at: string;
+}
+
+/** The ordering key of a task: 0 stranded, 1 asking with a blocking ask, 2 asking, 3 done, 4 no reason. A task sits in the group of its first reason. */
+function groupOf(task: AttentionOrdered): number {
+  const first = task.attention[0];
+  if (first === undefined) return 4;
+  if (first.reason === 'asking') return first.blocking === true ? 1 : 2;
+  return first.reason === 'stranded' ? 0 : 3;
+}
+
+/**
+ * The Needs attention order (PRD R2): stranded, then asking (blocking first), then done, each group by most recent
+ * change (`updated_at`) first. A task with several reasons is in the group of its first one (the list's own order is
+ * stranded, asking, done). Equal keys keep their input order; the input is not changed.
+ */
+export function orderNeedsAttention<T extends AttentionOrdered>(tasks: readonly T[]): T[] {
+  return tasks
+    .map((task, index) => ({ task, index, group: groupOf(task), at: Date.parse(task.updated_at) }))
+    .sort((a, b) => a.group - b.group || b.at - a.at || a.index - b.index)
+    .map((entry) => entry.task);
 }

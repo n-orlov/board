@@ -2524,6 +2524,14 @@ in the URL fragment's query as repeated keys, tags first (`#/attention?tag=work&
 `#/attention`), with blanks and repeats dropped, so a reload reads the same filter back; `apiQuery` sends the same repeated keys
 to `GET /attention`.
 
+**Attention badges and the Needs attention order** (R2, `web/src/lib/attention.ts`). `attentionBadges(attention)` turns a task's
+`attention` list (§6.4) into one badge per reason, in the list's order: `{reason, label, tone, name}`. Every badge has the warning
+tone and visible text, so no badge rides on colour alone. `stranded` is labelled "stranded" (accessible name "Stranded, its lease ran
+out and was not acknowledged"); `asking` is labelled "waiting on you", with " · blocking" added when `blocking` is true and
+" · agent waiting" when `asker_waiting` is true (name "Waiting on you, blocking, agent waiting"); `done` is labelled "done, not
+closed". `orderNeedsAttention(tasks)` returns the Needs attention order without changing its input: stranded, then asking with a
+blocking ask first, then asking, then done, each group by `updated_at` newest first; a task with several reasons is in the group of
+its first reason, and equal keys keep their input order. It is the same order `board task ls` uses (§8.3).
 **Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
 the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
 `modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a

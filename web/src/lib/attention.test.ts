@@ -14,6 +14,9 @@ import {
   sectionCount,
   toggled,
   type AttentionFilter,
+  type TaskAttention,
+  attentionBadges,
+  orderNeedsAttention,
 } from './attention';
 
 describe('ask ages', () => {
@@ -117,5 +120,81 @@ describe('toggling a value', () => {
     expect(toggled(['a'], 'b')).toEqual(['a', 'b']);
     expect(toggled(['a', 'b'], 'a')).toEqual(['b']);
     expect(toggled([], 'a')).toEqual(['a']);
+  });
+});
+
+describe('attention badges', () => {
+  const cases: [string, TaskAttention, string, string][] = [
+    ['stranded', { reason: 'stranded' }, 'stranded', 'Stranded, its lease ran out and was not acknowledged'],
+    ['asking', { reason: 'asking' }, 'waiting on you', 'Waiting on you'],
+    ['asking, blocking', { reason: 'asking', blocking: true }, 'waiting on you · blocking', 'Waiting on you, blocking'],
+    ['asking, agent waiting', { reason: 'asking', asker_waiting: true }, 'waiting on you · agent waiting', 'Waiting on you, agent waiting'],
+    [
+      'asking, blocking and agent waiting',
+      { reason: 'asking', blocking: true, asker_waiting: true },
+      'waiting on you · blocking · agent waiting',
+      'Waiting on you, blocking, agent waiting',
+    ],
+    ['done', { reason: 'done' }, 'done, not closed', 'Done, not closed'],
+  ];
+  it.each(cases)('%s has its label and accessible name', (_title, item, label, name) => {
+    const [badge] = attentionBadges([item]);
+    expect(badge.label).toBe(label);
+    expect(badge.name).toBe(name);
+    expect(badge.reason).toBe(item.reason);
+  });
+
+  it('gives every reason the warning tone and visible text', () => {
+    const badges = attentionBadges([{ reason: 'stranded' }, { reason: 'asking', blocking: true }, { reason: 'done' }]);
+    expect(badges.map((b) => b.tone)).toEqual(['warning', 'warning', 'warning']);
+    expect(badges.every((b) => b.label.trim() !== '' && b.name.trim() !== '')).toBe(true);
+  });
+
+  it('keeps the list order, one badge per reason, none for an empty list', () => {
+    expect(attentionBadges([{ reason: 'stranded' }, { reason: 'done' }]).map((b) => b.reason)).toEqual(['stranded', 'done']);
+    expect(attentionBadges([])).toEqual([]);
+  });
+
+  it('does not say blocking or agent waiting when the flags are false', () => {
+    expect(attentionBadges([{ reason: 'asking', blocking: false, asker_waiting: false }])[0].name).toBe('Waiting on you');
+  });
+});
+
+describe('Needs attention order', () => {
+  const task = (ref: string, updated_at: string, attention: TaskAttention[]) => ({ ref, updated_at, attention });
+  const refs = (tasks: { ref: string }[]) => tasks.map((t) => t.ref);
+
+  it('puts stranded, then asking with blocking first, then done, newest change first in a group', () => {
+    const mixed = [
+      task('d-old', '2026-01-01T00:00:00Z', [{ reason: 'done' }]),
+      task('a-new', '2026-01-09T00:00:00Z', [{ reason: 'asking' }]),
+      task('s-old', '2026-01-02T00:00:00Z', [{ reason: 'stranded' }]),
+      task('d-new', '2026-01-08T00:00:00Z', [{ reason: 'done' }]),
+      task('b-old', '2026-01-03T00:00:00Z', [{ reason: 'asking', blocking: true }]),
+      task('s-new', '2026-01-07T00:00:00Z', [{ reason: 'stranded' }]),
+      task('a-old', '2026-01-04T00:00:00Z', [{ reason: 'asking', asker_waiting: true }]),
+      task('b-new', '2026-01-06T00:00:00Z', [{ reason: 'asking', blocking: true, asker_waiting: true }]),
+    ];
+    expect(refs(orderNeedsAttention(mixed))).toEqual(['s-new', 's-old', 'b-new', 'b-old', 'a-new', 'a-old', 'd-new', 'd-old']);
+  });
+
+  it('puts a task with several reasons in the group of its first one', () => {
+    const tasks = [
+      task('done-only', '2026-02-02T00:00:00Z', [{ reason: 'done' }]),
+      task('stranded-and-done', '2026-02-01T00:00:00Z', [{ reason: 'stranded' }, { reason: 'done' }]),
+      task('asking-and-done', '2026-02-03T00:00:00Z', [{ reason: 'asking' }, { reason: 'done' }]),
+    ];
+    expect(refs(orderNeedsAttention(tasks))).toEqual(['stranded-and-done', 'asking-and-done', 'done-only']);
+  });
+
+  it('keeps the input order for equal changes, does not change its input and puts a task with no reason last', () => {
+    const tasks = [
+      task('none', '2026-03-09T00:00:00Z', []),
+      task('x', '2026-03-01T00:00:00Z', [{ reason: 'done' }]),
+      task('y', '2026-03-01T00:00:00Z', [{ reason: 'done' }]),
+    ];
+    expect(refs(orderNeedsAttention(tasks))).toEqual(['x', 'y', 'none']);
+    expect(refs(tasks)).toEqual(['none', 'x', 'y']);
+    expect(orderNeedsAttention([])).toEqual([]);
   });
 });
