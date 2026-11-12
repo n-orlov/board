@@ -8,11 +8,12 @@
   import { newestFirst, type NoteForm as PostForm } from './lib/notes';
   import { ThreadApi, ThreadStore, type ThreadState } from './lib/threads';
   import { taskHref } from './lib/taskPage';
+  import { untrack } from 'svelte';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import { absoluteTime, relativeTime } from './lib/format';
   import { countBadges } from './lib/counts';
-  import { TASK_FILTERS, type TaskFilter } from './lib/initiativeFilters';
+  import { DEFAULT_TASK_FILTER, TASK_FILTERS, type TaskFilter } from './lib/initiativeFilters';
   import { InitiativePageStore, concerns, liveLeaseCount, pageNeedsHref, pageNeedsQuery, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import InitiativeEditForm from './InitiativeEditForm.svelte';
@@ -26,6 +27,22 @@
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
+  import { sortRows, type SortState } from './lib/tableSort';
+  import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
+  import {
+    INITIATIVE_VIEW,
+    PAGE_TASK_COLUMNS,
+    PAGE_TASK_SORT_LABELS,
+    isCustomised,
+    isPageHash,
+    pagePath,
+    viewFromQuery,
+    viewHash,
+    viewToQuery,
+    type PageViewState,
+  } from './lib/initiativePageView';
   import { leasesText } from './lib/counts';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
@@ -37,6 +54,49 @@
 
   const api = new InitiativesApi(currentBrowser(), () => csrf);
   const store = new InitiativePageStore(api, (s) => (view = s));
+
+  // The task filter and the sort live in the fragment and in ONE saved query shared by every initiative. A fragment with a
+  // query wins and is saved; a bare one restores the saved query in place, before the first fetch.
+  const viewEnv = currentViewEnv();
+  const queryOf = (hash: string) => (hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
+  const slug = untrack(() => param);
+  const opened = viewFromQuery(openView(viewEnv, INITIATIVE_VIEW, pagePath(slug), queryOf(window.location.hash)));
+  let sort: SortState = $state(opened.sort);
+  store.setFilter(opened.filter);
+
+  // Rewrites the fragment in place (no history entry per choice) and saves the query under the shared key.
+  function persist(state: PageViewState) {
+    window.history.replaceState(null, '', viewHash(slug, state));
+    saveViewQuery(viewEnv.storage, INITIATIVE_VIEW, viewToQuery(state));
+  }
+
+  function filterChanged(filter: TaskFilter) {
+    persist({ filter, sort });
+    store.setFilter(filter);
+  }
+
+  // The sort only reorders the rows the page holds: no request.
+  function setSort(next: SortState) {
+    sort = next;
+    persist({ filter: view.filter, sort });
+  }
+
+  // Clear filters: the defaults, and nothing saved.
+  function clear() {
+    sort = null;
+    clearViewQuery(viewEnv.storage, INITIATIVE_VIEW);
+    window.history.replaceState(null, '', pagePath(slug));
+    store.setFilter(DEFAULT_TASK_FILTER);
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare page fragment restores the saved query.
+  function hashChanged() {
+    const hash = window.location.hash;
+    if (!isPageHash(slug, hash)) return;
+    const next = viewFromQuery(openView(viewEnv, INITIATIVE_VIEW, pagePath(slug), queryOf(hash)));
+    sort = next.sort;
+    if (next.filter !== view.filter) store.setFilter(next.filter);
+  }
   let needsView: NeedsState = $state({ needs: NO_NEEDS, error: undefined });
   const needsStore = new NeedsStore((query) => api.needs(query), (s) => (needsView = s));
   // The section reads this initiative's tasks that need attention under the page's task filter, again whenever the filter changes.
@@ -107,13 +167,16 @@
   const pending = $derived(notClosedCount(view.tasks));
   const needs = $derived(needsView.needs);
   const needsRows = $derived(taskRows(needs.items, 'all'));
-  const rows = $derived(taskRows(withoutNeeds(view.tasks, needs), view.filter));
+  // The table sorts by the chosen column; the Needs attention section above it keeps its own order.
+  const rows = $derived(sortRows(taskRows(withoutNeeds(view.tasks, needs), view.filter), sort, PAGE_TASK_COLUMNS));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const cell = 'md:table-cell md:px-3 md:py-3';
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
   const action = 'min-h-11 rounded-md border border-border bg-surface-raised px-4 text-sm font-medium text-text';
   const back = 'inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline';
 </script>
+
+<svelte:window onhashchange={hashChanged} />
 
 <!-- From 1536 px (2xl) the page is a grid: the main column (header, Needs attention, Tasks) and a 420 px side column (Open asks, Notes). Below it the side column follows the main one, in flow. -->
 <section
@@ -184,7 +247,13 @@
 
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-testid="tasks-heading">
       <h3 class="text-lg font-bold">Tasks</h3>
-      <FilterSelect label="Tasks" options={TASK_FILTERS} value={view.filter} onchange={(f: TaskFilter) => store.setFilter(f)} testid="task-filter" />
+      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
+        <FilterSelect label="Tasks" options={TASK_FILTERS} value={view.filter} onchange={filterChanged} testid="task-filter" />
+        <SortSelect columns={PAGE_TASK_SORT_LABELS} {sort} onsort={setSort} />
+        {#if isCustomised({ filter: view.filter, sort })}
+          <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
+        {/if}
+      </div>
     </div>
 
     {#if rows.length === 0 && needsRows.length === 0}
@@ -194,14 +263,14 @@
     {:else}
       <!-- One table: from 768 px a dense table, below it each row is a card. -->
       <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
-        <thead class="sr-only md:table-header-group md:not-sr-only">
+        <thead class="sr-only max-md:[&_th]:block max-md:[&_tr]:block md:table-header-group md:not-sr-only">
           <tr class="md:border-b md:border-border">
-            <th scope="col" class="{head} md:w-32">Ref</th>
-            <th scope="col" class="{head}">Title</th>
-            <th scope="col" class="{head} md:w-20">Kind</th>
-            <th scope="col" class="{head} md:w-24">Status</th>
+            <SortHeader column="ref" label="Ref" {sort} onsort={setSort} class="{head} md:w-32" />
+            <SortHeader column="title" label="Title" {sort} onsort={setSort} class={head} />
+            <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-20" />
+            <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{head} md:w-24" />
             <th scope="col" class="{head} md:w-1/5">Flags</th>
-            <th scope="col" class="{head} md:w-32">Lease holder</th>
+            <SortHeader column="holder" label="Lease holder" {sort} onsort={setSort} class="{head} md:w-32" />
           </tr>
         </thead>
         <tbody class="flex flex-col gap-3 md:table-row-group">
