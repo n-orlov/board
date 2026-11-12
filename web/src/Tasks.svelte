@@ -91,14 +91,25 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="tasks-heading" class="pb-16 md:pb-0" data-testid="tasks-view">
-  <div class="mb-4 flex items-center justify-between gap-3">
+<!-- From 1536 px: the heading and the rest in the main column, the Now panel in a 400 px side column that sticks at the top and scrolls on its own; the pair is at most 2560 px wide, centred. Below it the panel sits above the filters. -->
+<section
+  aria-labelledby="tasks-heading"
+  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-x-6"
+  data-testid="tasks-view"
+>
+  <div class="mb-4 flex items-center justify-between gap-3 2xl:col-start-1 2xl:row-start-1">
     <h2 id="tasks-heading" class="text-xl font-bold">Tasks</h2>
     <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={() => (formOpen = true)}>New task</button>
   </div>
 
-  <NowPanel {csrf} />
+  <div
+    class="2xl:sticky 2xl:top-6 2xl:col-start-2 2xl:row-span-2 2xl:row-start-1 2xl:max-h-[calc(100vh-3rem)] 2xl:self-start 2xl:overflow-y-auto"
+    data-testid="now-side"
+  >
+    <NowPanel {csrf} />
+  </div>
 
+  <div class="min-w-0 2xl:col-start-1 2xl:row-start-2" data-testid="tasks-main">
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="task-filters">
     <FilterSelect label="Status" options={STATUS_OPTIONS} value={view.filter.status} onchange={(v) => apply({ ...view.filter, status: v })} testid="status-filter" />
     <FilterSelect label="Kind" options={KIND_OPTIONS} value={view.filter.kind} onchange={(v) => apply({ ...view.filter, kind: v })} testid="kind-filter" />
@@ -185,6 +196,7 @@
       </tbody>
     </table>
   {/if}
+  </div>
 
   <button
     type="button"
