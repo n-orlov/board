@@ -7,7 +7,7 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. R12 (Phase 3) adds PHASE3_STATES, the finite list of 18 states: the views `#/timeline`, `#/actors` and `#/archive`, the Needs attention sections of the Tasks view and the initiative page, the Stranded panel, the attention chip, badges and navigation badge, the three new dialogs (acknowledge on the task page, archive Reopen, force-done confirm) and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables; they run at the phone and the desktop viewport in both themes. WIDE_STATES scans the Tasks view, the task page, the initiative page and Attention at 2560x1080 in both themes. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -571,6 +571,232 @@ const PHASE2_STATES: Phase2State[] = [
   },
 ];
 
+// ---- Phase 3 (R12) -------------------------------------------------------------------------------------------------
+
+const P3_SLUG = 'e2e-a11y-p3';
+const P3_CLOSED_SLUG = 'e2e-a11y-p3-closed';
+const P3_ACTOR = 'a11y-p3-a';
+const P3_HOLDER = 'a11y-p3-b';
+
+type Seed3 = { stranded: string; lease: string; done: string; held: string; forced: string; closed: string };
+let seeded3: Promise<Seed3> | undefined;
+
+// One initiative with a stranded task (an expired lease nobody acknowledged), a done task, a task with an open ask under a live lease,
+// a task under another actor's live lease (so Done asks first) and a task closed as superseded; a second initiative, closed, for the Archive.
+async function seedPhase3(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed3> {
+  const a = await actorApi(playwright, baseURL, P3_ACTOR);
+  const b = await actorApi(playwright, baseURL, P3_HOLDER);
+  // A 409 is a second seeding by a worker the runner restarted after a failure: the initiatives stay, their items are made again.
+  for (const slug of [P3_SLUG, P3_CLOSED_SLUG]) {
+    const created = await a.post('/api/v1/initiatives', { data: { slug, title: `A11y Phase 3 ${slug}`, tags: ['a11y'] } });
+    expect([201, 409], `seed ${slug}: ${created.status()}`).toContain(created.status());
+  }
+  const task = async (title: string) => (await send(a, '/api/v1/tasks', { initiative: P3_SLUG, title }, 201)).ref as string;
+
+  const stranded = await task('A11y p3 stranded');
+  const old = await send(a, '/api/v1/leases', { task: stranded, intent: 'will strand', resources: ['repo:a11y-p3-old'] }, 201);
+  await expireLease(a, old.lease.ref);
+  const done = await task('A11y p3 done');
+  await send(a, `/api/v1/tasks/${done}/done`, {}, 200);
+  const held = await task('A11y p3 held');
+  await send(a, '/api/v1/leases', { task: held, intent: 'holding', resources: ['repo:a11y-p3'] }, 201);
+  await send(a, '/api/v1/asks', { question: 'Is this readable?', task: held }, 201);
+  const forced = await task('A11y p3 forced');
+  await send(b, '/api/v1/leases', { task: forced, intent: 'also holding', resources: ['repo:a11y-p3-b'] }, 201);
+  const closed = await task('A11y p3 closed');
+  await send(a, `/api/v1/tasks/${closed}/close`, { resolution: 'superseded' }, 200);
+  const closedInitiative = await a.post(`/api/v1/initiatives/${P3_CLOSED_SLUG}/close`, { data: {} });
+  expect([200, 409], `close ${P3_CLOSED_SLUG}: ${closedInitiative.status()}`).toContain(closedInitiative.status());
+  await a.dispose();
+  await b.dispose();
+  return { stranded, lease: old.lease.ref as string, done, held, forced, closed };
+}
+
+const needsRow = (page: Page, ref: string) => page.locator(`[data-testid=needs-row][data-ref="${ref}"]`);
+
+// The table is sorted as the URL says: at the phone the Sort select holds `<column>:<dir>`, from 768 px the column's th carries aria-sort.
+async function expectSorted(page: Page, column: string, dir: 'asc' | 'desc') {
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:${dir}`);
+  } else {
+    await expect(page.getByTestId(`sort-${column}`).locator('xpath=..')).toHaveAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+  }
+}
+
+type Phase3State = { name: string; open: (page: Page, seed: Seed3) => Promise<void> };
+
+// The finite list of Phase 3 states this spec scans: the 3 views, the Needs attention sections of the Tasks view and the initiative
+// page, the Stranded panel, the 3 attention chips and badges, the 3 new dialogs and the 6 sorted tables.
+const PHASE3_STATES: Phase3State[] = [
+  {
+    name: 'view #/timeline',
+    open: async (page) => {
+      await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
+      await expect(page.getByTestId('timeline-chart')).toBeVisible();
+      await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
+      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+    },
+  },
+  {
+    name: 'view #/actors',
+    open: async (page) => {
+      await page.goto('/#/actors');
+      await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`).getByTestId('actor-lease').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'view #/archive',
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await expect(page.locator(`[data-testid=archive-row][data-kind=task][data-ref="${seed.closed}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=archive-row][data-kind=initiative][data-ref="${P3_CLOSED_SLUG}"]`)).toBeVisible();
+    },
+  },
+  {
+    name: 'Needs attention on #/tasks',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Needs attention on #/i/<slug>',
+    open: async (page, seed) => {
+      await page.goto(`/#/i/${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Stranded panel on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      const panel = page.getByTestId('stranded-panel');
+      await expect(panel).toBeVisible();
+      await expect(panel.getByTestId('stranded-holder')).toHaveText(P3_ACTOR);
+      await expect(panel.getByRole('button', { name: `Acknowledge lease ${seed.lease}` })).toBeVisible();
+    },
+  },
+  {
+    name: 'attention chip on #/initiatives',
+    open: async (page) => {
+      await page.goto('/#/initiatives');
+      const row = page.locator(`[data-testid=initiative-row][data-slug=${P3_SLUG}]`);
+      await expect(row.getByTestId('initiative-attention')).toContainText(/need(s)? attention/);
+    },
+  },
+  {
+    name: 'attention badges on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await expect(page.getByTestId('task-title')).toHaveText('A11y p3 stranded');
+      await expect(page.getByTestId('task-page').getByTestId('attention-stranded')).toBeVisible();
+    },
+  },
+  {
+    name: 'attention badge in the navigation',
+    open: async (page) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      await expect(page.locator('[data-testid=attention-badge]').locator('visible=true').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog acknowledge on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await page.getByTestId('stranded-panel').getByRole('button', { name: `Acknowledge lease ${seed.lease}` }).click();
+      await openDialog(page, `Acknowledge lease ${seed.lease}`);
+    },
+  },
+  {
+    name: 'dialog archive Reopen',
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`).getByRole('button', { name: `Reopen task ${seed.closed}` }).click();
+      await openDialog(page, 'Reopen task');
+    },
+  },
+  {
+    name: 'dialog force-done confirm',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.forced}`);
+      await expect(page.getByTestId('task-title')).toHaveText('A11y p3 forced');
+      await button(page, 'Done', true).click();
+      const dialog = await openDialog(page, `Mark ${seed.forced} done`);
+      await expect(dialog.getByTestId('dialog-body')).toContainText(P3_HOLDER);
+    },
+  },
+  {
+    name: 'sorted Initiatives table',
+    open: async (page) => {
+      await page.goto('/#/initiatives?sort=title&dir=desc');
+      await expect(page.locator(`[data-testid=initiative-row][data-slug=${P3_SLUG}]`)).toBeVisible();
+      await expectSorted(page, 'title', 'desc');
+    },
+  },
+  {
+    name: 'sorted Tasks table',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}&sort=holder&dir=desc`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
+      await expectSorted(page, 'holder', 'desc');
+    },
+  },
+  {
+    name: 'sorted initiative page Tasks table',
+    open: async (page, seed) => {
+      await page.goto(`/#/i/${P3_SLUG}?sort=holder&dir=desc`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
+      await expectSorted(page, 'holder', 'desc');
+    },
+  },
+  {
+    name: 'sorted API keys table',
+    open: async (page) => {
+      await page.goto('/#/settings/keys?sort=created&dir=desc');
+      await expect(page.getByTestId('key-row').first()).toBeVisible();
+      await expectSorted(page, 'created', 'desc');
+    },
+  },
+  {
+    name: 'sorted Actors table',
+    open: async (page) => {
+      await page.goto('/#/actors?sort=seen&dir=asc');
+      await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`)).toBeVisible();
+      await expectSorted(page, 'seen', 'asc');
+    },
+  },
+  {
+    name: 'sorted Archive table',
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7&sort=item&dir=desc');
+      await expect(page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`)).toBeVisible();
+      await expectSorted(page, 'item', 'desc');
+    },
+  },
+];
+
+// The wide viewport's states: the four views R13 lays out in two columns or a grid.
+const WIDE_STATES: { name: string; open: (page: Page, seed: Seed, seed2: Seed2) => Promise<void> }[] = [
+  {
+    name: 'Tasks view',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
+    },
+  },
+  { name: 'task page', open: taskPage },
+  {
+    name: 'initiative page',
+    open: async (page, seed) => {
+      await initiativePage(page);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
+    },
+  },
+  { name: 'Attention', open: async (page, _seed, seed2) => openAttention(page, seed2) },
+];
+
 const LIVE_STATES = ['live', 'offline', 'reconnecting'] as const;
 
 for (const vp of viewports) {
@@ -646,6 +872,14 @@ for (const vp of viewports) {
         });
       }
 
+      for (const state of PHASE3_STATES) {
+        test(`${state.name} has no serious or critical axe violation`, async ({ page, playwright, baseURL }) => {
+          seeded3 ??= seedPhase3(playwright, baseURL);
+          await state.open(page, await seeded3);
+          await scan(page, theme);
+        });
+      }
+
       for (const word of LIVE_STATES) {
         test(`the live indicator reading ${word} has no serious or critical axe violation`, async ({ page, context }) => {
           if (word === 'reconnecting') {
@@ -676,6 +910,22 @@ for (const vp of viewports) {
   }
 }
 
+// R12 at the wide viewport (R13's two-column and grid layouts), in both themes.
+for (const theme of themes) {
+  test.describe(`wide 2560x1080, ${theme} theme`, () => {
+    test.use({ viewport: { width: 2560, height: 1080 }, colorScheme: theme });
+
+    for (const state of WIDE_STATES) {
+      test(`${state.name} has no serious or critical axe violation`, async ({ page, playwright, baseURL }) => {
+        seeded ??= seedPhase1(playwright, baseURL);
+        seeded2 ??= seedPhase2(playwright, baseURL);
+        await state.open(page, await seeded, await seeded2);
+        await scan(page, theme);
+      });
+    }
+  });
+}
+
 test('the Phase 1 list names the 3 views and the 9 dialogs', () => {
   const names = PHASE1_STATES.map((s) => s.name);
   expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/tasks', 'view #/i/<slug>', 'view #/t/<ref>']);
@@ -704,4 +954,28 @@ test('the Phase 2 list names the 2 views, the six dialogs and the three live ind
     'record check from attention',
   ]);
   expect(LIVE_STATES).toEqual(['live', 'offline', 'reconnecting']);
+});
+
+test('the Phase 3 list names the 3 views, the Needs attention sections, the Stranded panel, the chips, the 3 dialogs and the 6 sorted tables, and the wide list the 4 views', () => {
+  expect(PHASE3_STATES.map((s) => s.name)).toEqual([
+    'view #/timeline',
+    'view #/actors',
+    'view #/archive',
+    'Needs attention on #/tasks',
+    'Needs attention on #/i/<slug>',
+    'Stranded panel on #/t/<ref>',
+    'attention chip on #/initiatives',
+    'attention badges on #/t/<ref>',
+    'attention badge in the navigation',
+    'dialog acknowledge on #/t/<ref>',
+    'dialog archive Reopen',
+    'dialog force-done confirm',
+    'sorted Initiatives table',
+    'sorted Tasks table',
+    'sorted initiative page Tasks table',
+    'sorted API keys table',
+    'sorted Actors table',
+    'sorted Archive table',
+  ]);
+  expect(WIDE_STATES.map((s) => s.name)).toEqual(['Tasks view', 'task page', 'initiative page', 'Attention']);
 });
