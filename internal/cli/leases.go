@@ -114,6 +114,9 @@ func startFailure(err error, task string) error {
 	case http.StatusNotFound:
 		return withNext(err, ae.Status, "board task ls")
 	case http.StatusConflict:
+		if strings.HasSuffix(ae.Detail, ": it is done") {
+			return conflictError(ae, "board task reopen "+strings.ToLower(task)+" first")
+		}
 		return conflictError(ae, "board task show "+strings.ToLower(task))
 	}
 	return err

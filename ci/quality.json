@@ -120,6 +120,7 @@
                 "now.go",
                 "taskattention.go",
                 "tasks.go",
+                "tasktransitions.go",
                 "taskview.go",
                 "tree.go"
             ],
@@ -180,6 +181,7 @@
                     "now.go",
                     "taskattention.go",
                     "tasks.go",
+                    "tasktransitions.go",
                     "taskview.go"
                 ]
             }

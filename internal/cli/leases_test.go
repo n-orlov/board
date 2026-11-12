@@ -126,6 +126,11 @@ func TestLeaseStartRefusalsWordTheirNext(t *testing.T) {
 			t.Errorf("%d: got %d %q %q", c.status, code, out, errs)
 		}
 	}
+	done := startFailure(&apiError{Status: http.StatusConflict, Detail: "cannot start a lease on task aa-1: it is done"}, "AA-1")
+	var ae *apiError
+	if !errors.As(done, &ae) || ae.Next != "board task reopen aa-1 first" || ae.exitCode() != ExitConflict {
+		t.Errorf("done task: got %v", done)
+	}
 	if got := startFailure(http.ErrServerClosed, "aa-1"); !errors.Is(got, http.ErrServerClosed) {
 		t.Errorf("got %v", got)
 	}

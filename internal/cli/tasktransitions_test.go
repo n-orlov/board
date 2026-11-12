@@ -15,6 +15,9 @@ func TestTaskTransitionsPostToTheirPath(t *testing.T) {
 		out  string
 	}{
 		{[]string{"done", "aa-1"}, "/api/v1/tasks/aa-1/done", nil, "ok task aa-1 done\n"},
+		{[]string{"done", "aa-1", "shipped"}, "/api/v1/tasks/aa-1/done", map[string]any{"outcome": "shipped"}, "ok task aa-1 done\n"},
+		{[]string{"done", "aa-1", "--force"}, "/api/v1/tasks/aa-1/done", map[string]any{"force": true}, "ok task aa-1 done\n"},
+		{[]string{"done", "aa-1", "shipped", "--force"}, "/api/v1/tasks/aa-1/done", map[string]any{"outcome": "shipped", "force": true}, "ok task aa-1 done\n"},
 		{[]string{"reopen", "aa-1"}, "/api/v1/tasks/aa-1/reopen", nil, "ok task aa-1 reopened\n"},
 		{[]string{"close", "aa-1"}, "/api/v1/tasks/aa-1/close", map[string]any{"resolution": "completed"}, "ok task aa-1 closed\n"},
 		{[]string{"close", "aa-1", "--resolution", "superseded"}, "/api/v1/tasks/aa-1/close", map[string]any{"resolution": "superseded"}, "ok task aa-1 closed\n"},
@@ -74,7 +77,10 @@ func TestTaskTransitionRefusalsWordTheirNext(t *testing.T) {
 func TestTaskTransitionBadFlagsExit2(t *testing.T) {
 	for _, args := range [][]string{
 		{"task", "done"},
-		{"task", "done", "aa-1", "aa-2"},
+		{"task", "done", "aa-1", "aa-2", "aa-3"},
+		{"task", "reopen", "aa-1", "outcome"},
+		{"task", "close", "aa-1", "outcome"},
+		{"task", "reopen", "aa-1", "--force"},
 		{"task", "reopen", "aa-1", "--resolution", "dropped"},
 		{"task", "done", "aa-1", "--for", "operator"},
 		{"task", "close", "aa-1", "--resolution"},
@@ -83,6 +89,25 @@ func TestTaskTransitionBadFlagsExit2(t *testing.T) {
 	} {
 		if code, out, _ := run(args...); code != ExitUsage || out != "" {
 			t.Errorf("%v: got %d %q, want exit 2", args, code, out)
+		}
+	}
+}
+
+func TestTaskDoneRefusedByAnotherLeaseKeepsTheServersNext(t *testing.T) {
+	f := answering(http.StatusConflict, `{"detail":"task aa-1 is leased by codex","next":"wait for L1 to end, or --force"}`)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	code, out, errs := runEnv(f.env(srv), "task", "done", "aa-1")
+	if code != ExitConflict || out != "" || errs != "task aa-1 is leased by codex → wait for L1 to end, or --force\n" {
+		t.Errorf("got %d %q %q", code, out, errs)
+	}
+	for _, verb := range []string{"reopen", "close"} {
+		g := answering(http.StatusConflict, `{"detail":"no","next":"wait for L1 to end, or --force"}`)
+		s := httptest.NewServer(g)
+		_, _, errs := runEnv(g.env(s), "task", verb, "aa-1")
+		s.Close()
+		if errs != "no → board task show aa-1\n" {
+			t.Errorf("%s: got %q", verb, errs)
 		}
 	}
 }

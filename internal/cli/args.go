@@ -34,7 +34,7 @@ var (
 		{"--link", true}, {"--no-links", false}, {"--json", false},
 	}
 	taskDepFlags    = []flagSpec{{"--json", false}}
-	taskDoneFlags   = []flagSpec{{"--json", false}}
+	taskDoneFlags   = []flagSpec{{"--force", false}, {"--json", false}}
 	taskReopenFlags = []flagSpec{{"--json", false}}
 	taskCloseFlags  = []flagSpec{{"--resolution", true}, {"--for", true}, {"--json", false}}
 	taskEventsFlags = []flagSpec{{"--limit", true}, {"--all", false}, {"--json", false}}

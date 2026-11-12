@@ -112,7 +112,7 @@ Feature: Marking tasks done, reopening and closing them from the command line
     Then the exit code is 2
     And stdout is empty
     And stderr is exactly one line containing "usage: board task"
-    When I run the client 'board task done aa-1 aa-2' as actor "claude@laptop"
+    When I run the client 'board task done aa-1 aa-2 aa-3' as actor "claude@laptop"
     Then the exit code is 2
     When I run the client 'board task reopen aa-1 --resolution dropped' as actor "claude@laptop"
     Then the exit code is 2
@@ -128,3 +128,41 @@ Feature: Marking tasks done, reopening and closing them from the command line
     And stderr is exactly one line containing "board: --for: invalid actor"
     When I run the client 'board task show aa-1' as actor "claude@laptop"
     Then stdout line 1 matches "^aa-1  open  Task 1$"
+
+  Scenario: done with an outcome ends the caller's own lease with it
+    Given I run the client 'board lease start aa-1 "build it"' as actor "claude@laptop"
+    When I run the client 'board task done aa-1 "shipped the thing"' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok task aa-1 done"
+    And the lease "L1" is "ended" in the database
+    When I run the client 'board lease ls --state ended --task aa-1 --json' as actor "claude@laptop"
+    Then stdout JSON path "0.outcome" is "shipped the thing"
+
+  Scenario: done while another actor holds a lease exits 6 naming the holder and --force ends that lease
+    Given I run the client 'board lease start aa-1 "refactor the parser"' as actor "codex@laptop"
+    When I run the client 'board task done aa-1 "shipped"' as actor "claude@laptop"
+    Then the exit code is 6
+    And stdout is empty
+    And stderr is exactly one line containing "codex@laptop"
+    And stderr is exactly one line containing "L1"
+    And stderr is exactly one line containing "→ wait for L1 to end, or --force"
+    And the lease "L1" is "live" in the database
+    When I run the client 'board task show aa-1' as actor "claude@laptop"
+    Then stdout line 1 matches "^aa-1  open  Task 1  \(active\)$"
+    When I run the client 'board task done aa-1 "shipped" --force' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok task aa-1 done"
+    And the lease "L1" is "ended" in the database
+    When I run the client 'board lease ls --state ended --task aa-1 --json' as actor "claude@laptop"
+    Then stdout JSON path "0.ended_by" is "claude@laptop"
+    When I run the client 'board task show aa-1' as actor "claude@laptop"
+    Then stdout line 1 matches "^aa-1  done  Task 1  !done$"
+
+  Scenario: starting a lease on a done task exits 6 and says to reopen it first
+    Given I run the client 'board task done aa-1' as actor "claude@laptop"
+    When I run the client 'board lease start aa-1 "x"' as actor "claude@laptop"
+    Then the exit code is 6
+    And stdout is empty
+    And stderr is exactly one line containing "it is done"
+    And stderr is exactly one line containing "→ board task reopen aa-1 first"
+    And there are 0 leases in the database

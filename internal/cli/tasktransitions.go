@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 )
 
 // resolutions are the four ways a task closes; completed is the default.
@@ -52,17 +53,20 @@ func closeBody(p parsedArgs) (map[string]any, string, error) {
 // taskTransition runs `board task done|reopen|close <ref>`.
 func taskTransition(cmd string, args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, transitionFlags(cmd))
-	if !ok || len(p.pos) != 1 {
+	if !ok || !transitionArity(cmd, len(p.pos)) {
 		return usageLine(stderr, TaskUsage)
 	}
 	var body any
 	who := ""
-	if cmd == "close" {
+	switch cmd {
+	case "close":
 		b, w, err := closeBody(p)
 		if err != nil {
 			return badFlagValue(stderr, err)
 		}
 		body, who = b, w
+	case "done":
+		body = doneBody(p)
 	}
 	c, err := newClient(env)
 	if err != nil {
@@ -74,7 +78,7 @@ func taskTransition(cmd string, args []string, stdout, stderr io.Writer, env Env
 	ref := p.pos[0]
 	var raw json.RawMessage
 	if err := c.do(ctx, "POST", "/api/v1/tasks/"+url.PathEscape(ref)+"/"+cmd, nil, body, &raw); err != nil {
-		return report(stderr, transitionFailure(err, ref))
+		return report(stderr, transitionFailure(err, cmd, ref))
 	}
 	return printTaskWrite(p, raw, transitionVerbs[cmd], stdout, stderr)
 }
@@ -82,7 +86,7 @@ func taskTransition(cmd string, args []string, stdout, stderr io.Writer, env Env
 // transitionFailure words the next action of a refused transition: an unknown
 // task exits 4 with task ls, a status that does not allow the move exits 6
 // with task show.
-func transitionFailure(err error, ref string) error {
+func transitionFailure(err error, cmd, ref string) error {
 	var ae *apiError
 	if !errors.As(err, &ae) {
 		return err
@@ -91,7 +95,32 @@ func transitionFailure(err error, ref string) error {
 	case http.StatusNotFound:
 		return withNext(err, ae.Status, "board task ls")
 	case http.StatusConflict:
+		if cmd == "done" && strings.HasPrefix(ae.Next, "wait for L") {
+			return conflictError(ae, ae.Next)
+		}
 		return conflictError(ae, "board task show "+ref)
 	}
 	return err
+}
+
+// transitionArity is whether a transition takes that many positional arguments:
+// the ref, and for done an optional outcome after it.
+func transitionArity(cmd string, n int) bool {
+	return n == 1 || (cmd == "done" && n == 2)
+}
+
+// doneBody is the POST body of task done: the outcome when one is given and
+// force when --force is. Neither given sends no body.
+func doneBody(p parsedArgs) map[string]any {
+	body := map[string]any{}
+	if len(p.pos) == 2 {
+		body["outcome"] = p.pos[1]
+	}
+	if p.has("--force") {
+		body["force"] = true
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return body
 }

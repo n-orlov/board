@@ -255,6 +255,9 @@ Conventions are carried by the agent protocol (`board help agent`, §8.6), not e
   (`answered_by` = the agent, `on_behalf_of` = operator, `channel = "relay"`).
 - Agents never end or expire another actor's lease. The operator may end any lease from the UI
   (recorded as `lease_ended` with `ended_by`).
+- `--force` on done (`board task done <ref> --force`) ends every live lease on the task, another actor's too, and marks it
+  done. It is the operator's action, like `--for operator` on close: an agent uses it only when the operator told it to, and
+  otherwise waits for the other lease to end.
 
 The server records **who** did everything (§4.6), so misuse is visible after the fact.
 
@@ -1475,7 +1478,7 @@ Exit codes:
 | 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board note show` of an unknown `N<n>`, `board ask`, `board note` and `board notes` on an unknown task or initiative |
 | 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board lease ack` of a lease that has not expired (live or ended); `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board task done` while another actor holds a live lease and `--force` is not given (`→ wait for L<n> to end, or --force`) and `board lease start` on a done task (`→ board task reopen <ref> first`); `board lease ack` of a lease that has not expired (live or ended); `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | `board lease start` and `board lease renew` when a live lease of another holds a resource of the lease; `board now --resources` and `board now` when a conflict touches one of my live leases or a resource given; `board start` arrives later |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
@@ -1520,7 +1523,7 @@ A server problem document is printed as one line, `<detail> → <next>`, with th
 CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
-anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `lease ack` (a lease that has not expired) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
+anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move, or for done another actor's live lease without `--force`) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed or done task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `lease ack` (a lease that has not expired) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
 - `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
@@ -1590,7 +1593,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
   `--link` with `--no-links` are exit 2 with the usage line. An unknown task exits 4 with `→ board task ls`; a closed task
   or a task of a closed initiative exits 6 with `→ board task show <ref>`.
-- `board task done <ref> [--json]`, `board task reopen <ref> [--json]` and `board task close <ref> [--resolution
+- `board task done <ref> ["outcome"] [--force] [--json]`, `board task reopen <ref> [--json]` and `board task close <ref> [--resolution
   completed|dropped|superseded|duplicate] [--for operator] [--json]` call `POST /api/v1/tasks/<ref>/done|reopen|close` and
   print `ok task <ref> done`, `ok task <ref> reopened` and `ok task <ref> closed` (`--json`: the task after the move).
   `close` sends the resolution, `completed` when `--resolution` is not given. `--for operator` sends
@@ -1600,6 +1603,11 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   sent; `--resolution` and `--for` belong to `close` alone. A move the task's status does not allow (done on a done or
   closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → board
   task show <ref>`; an unknown task exits 4 with `→ board task ls`. Done and close end the live leases on the task (§4.3, §6.4).
+  `done` takes an optional outcome after the ref and sends it as `outcome`; the caller's own live lease ends with it (`done`
+  when none is given). `--force` sends `force: true`, which ends every live lease on the task, the caller's own too, with
+  `ended_by` the caller. While another actor holds a live lease and `--force` is not given, done exits 6 with the server's
+  detail naming the holder, the lease and its intent, and `→ wait for L<n> to end, or --force`; nothing changes. `--force` and
+  the outcome belong to `done` alone.
 - `board task dep add <ref> <blocked-by-ref> [--json]` and `board task dep rm <ref> <blocked-by-ref> [--json]` call
   `POST` and `DELETE /api/v1/tasks/<ref>/deps/<blocked-by-ref>` (the refs in either letter case, the two tasks possibly in
   different initiatives) and print `ok task <ref> blocked by <blocked-by-ref>` and `ok task <ref> no longer blocked by
@@ -1612,7 +1620,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   letter case; `--ttl` a duration such as `90m` or `4h`, clamped by the server to 60 s to 12 h, 2 h without it; `--res` repeatable)
   and prints `ok lease L<n> <task> exp <ttl>` (`exp 2h`, `exp 1h30m`: the time from the lease's last renewal to its expiry),
   then one line per conflict (below). A start on a task where I already hold a live lease renews that lease and prints the same
-  line. An unknown task exits 4 with `→ board task ls`, a closed task exits 6 with `<detail> → board task show <task>`, a bad
+  line. An unknown task exits 4 with `→ board task ls`, a closed task exits 6 with `<detail> → board task show <task>`, a done task exits 6 with `<detail> → board task reopen <task> first`, a bad
   `--ttl` is exit 2 with `board: --ttl: invalid duration …` before any request is sent. `--json` prints the server's
   `{lease, conflicts}` object.
 - `board lease renew [<L…>|<task>] [--ttl D] [--intent text] [--json]` calls `POST /api/v1/leases/<ref>/renew` and prints
@@ -1789,7 +1797,7 @@ board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|cl
 board task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
 board task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] | show <ref>
                 | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links]
-board task done|reopen <ref> | close <ref> [--resolution dropped] [--for operator]
+board task done <ref> ["outcome"] [--force] | reopen <ref> | close <ref> [--resolution dropped] [--for operator]
 board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
 board lease renew [<L…>|<task>] [--ttl 4h] [--intent …]      # no argument: all my live leases
 board lease end   [<L…>|<task>] ["<outcome>"]
