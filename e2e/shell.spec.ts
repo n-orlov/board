@@ -28,6 +28,7 @@ const states = [
   { name: '#/tasks', hash: () => '#/tasks', view: 'tasks', loaded: 'task-row' },
   { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
   { name: '#/timeline', hash: () => '#/timeline', view: 'timeline', loaded: 'timeline-chart' },
+  { name: '#/actors', hash: () => '#/actors', view: 'actors', loaded: 'actors-view' },
   { name: '#/notes', hash: () => '#/notes', view: 'notes', loaded: 'notes-view' },
   { name: '#/t/<ref>', hash: () => `#/t/${seeded.taskRef}`, view: 'task', loaded: 'task-title' },
   { name: '#/settings/keys', hash: () => '#/settings/keys', view: 'keys', loaded: 'key-row' },
@@ -197,8 +198,8 @@ async function sendTotal(page: Page, total: number) {
 
 test.describe('the route table and the navigation order', () => {
   test('the table holds Attention first and Notes, and the default route is Attention', async ({ page }) => {
-    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'notes', 'keys']);
-    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Notes', 'Settings']);
+    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'notes', 'keys']);
+    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Notes', 'Settings']);
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const hash of ['/', '/#/', '/#/nowhere']) {
       await page.goto(hash);
@@ -206,7 +207,7 @@ test.describe('the route table and the navigation order', () => {
       await expect(page.getByTestId('section-open_asks').first()).toBeVisible();
     }
     const links = page.getByTestId('nav-sidebar').getByRole('link');
-    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/timeline', '#/notes', '#/settings/keys']);
+    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/timeline', '#/actors', '#/notes', '#/settings/keys']);
   });
 });
 
@@ -250,7 +251,7 @@ for (const vp of viewports) {
 test.describe('the phone tab bar', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('holds Attention, Initiatives, Tasks, Timeline, Notes and Settings, all of them fitting in 44 px targets at 390 px, even with the badge at 99+', async ({ page }) => {
+  test('holds Attention, Initiatives, Tasks, Timeline, Actors, Notes and Settings, all of them fitting in 44 px targets at 390 px, even with the badge at 99+', async ({ page }) => {
     await feedStream(page);
     await page.goto('/#/attention');
     const nav = page.getByTestId('nav-tabbar');
@@ -258,7 +259,7 @@ test.describe('the phone tab bar', () => {
     await sendTotal(page, 120);
     await expect(nav.getByTestId('attention-badge')).toHaveText('99+');
     const links = nav.getByRole('link');
-    await expect(links).toHaveCount(6);
+    await expect(links).toHaveCount(7);
     // Everything that fits is a link of its own; there is no "more" entry while the table fits the bar.
     await expect(nav.getByRole('button')).toHaveCount(0);
     const boxes = await links.evaluateAll((els) =>

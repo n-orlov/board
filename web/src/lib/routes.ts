@@ -76,6 +76,13 @@ export const ROUTES = [
     icon: 'M3 3v18h18M7 7h8M10 12h9M7 17h6',
   },
   {
+    id: 'actors',
+    hash: '#/actors',
+    title: 'Actors',
+    label: 'Actors',
+    icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  },
+  {
     id: 'notes',
     hash: '#/notes',
     title: 'Notes',

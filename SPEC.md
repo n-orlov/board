@@ -2319,7 +2319,7 @@ operator. Live via SSE (§7.1).
 | **Initiatives** (`#/initiatives`) | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
-| **Actors** | who is alive now (live leases, last seen), with way back. |
+| **Actors** (shipped, `#/actors`) | who is alive now: actors with a live lease first (each lease links to its task), then the rest by last seen, a copy way back button on each. |
 | **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
 | **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
@@ -2702,6 +2702,21 @@ seeded board: the rows, bars and markers, collapse and expand, the buttons and t
 limits), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
 end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows.
 
+**Actors view** (`#/actors`, `web/src/Actors.svelte`, R7). The route table holds it as the entry `actors` (nav label Actors, after Timeline).
+It reads `GET /actors` (`ActorsApi`, a `ThreadApi`, in `web/src/lib/actorsView.ts`) and draws one row per actor the board has
+recorded, in the order of `orderActors`: the actors that hold a **live lease** first (an `alive` badge, `data-alive="true"`),
+then the others, each group by `last_seen` newest first and equal times by handle. A row shows the handle and kind, the number
+of open asks, and the **live leases** (`actor-lease`: the lease ref, the task ref as a link to `#/t/<ref>`, the intent and
+"expires in 41m"; "no live lease" when it holds none), the relative last seen (absolute time in the `title`) and the way back
+as `code` with a **Copy way back** button (named "Copy way back of <handle>", 44 px, `copy-way-back`) that puts exactly the
+way back on the clipboard and toasts "Copied the way back of <handle>" (or tells how to copy by hand when the browser refuses);
+an actor with no way back on record has no button and says so. From 768 px it is one table (Actor, Live leases, Last seen,
+Way back), below it each actor is a card. The view subscribes to the stream (§7.1) and reads again, in place and debounced like
+every live view, on any board event but an API key event (any write moves an actor's `last_seen`); nothing polls on a timer.
+`e2e/actors.spec.ts` covers, at phone and desktop, an actor with a live lease started through the API listed before an actor
+that acted later but holds nothing, its lease linking to its task, the way back of each copied, and a lease started through the
+API putting its actor first within 5 s without a reload.
+
 **Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
 of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`
 (`web/src/lib/notesView.ts`, a `ThreadApi`) reads every page of the filtered list with `fields=summary` and `NotesViewStore`
@@ -2857,11 +2872,11 @@ with the Now panel open and a conflict, and the task page with a conflict, and `
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
 view that fragment selects (anything the table does not name is its first entry, Attention, the default view: `#/` lands on it) and
-its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Notes, Settings. The Attention entry
+its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Actors, Notes, Settings. The Attention entry
 (the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
 `live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
-danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all six entries,
-each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but six fit, so none exists yet. The shell
+danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar holds all seven entries,
+each at least 44 px wide and tall at 390 px; it would give the entries that do not fit a "more" entry, but seven fit (the tab bar's links keep 2 px of side padding), so none exists yet. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
 fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-bottom)`;

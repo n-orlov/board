@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Component } from 'svelte';
+  import Actors from './Actors.svelte';
   import Attention from './Attention.svelte';
   import ApiKeys from './ApiKeys.svelte';
   import Notes from './Notes.svelte';
@@ -22,6 +23,7 @@
     tasks: Tasks,
     task: TaskPage,
     timeline: Timeline,
+    actors: Actors,
     notes: Notes,
     keys: ApiKeys,
   };

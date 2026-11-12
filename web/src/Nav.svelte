@@ -8,7 +8,7 @@
   let { entries, variant, testid }: { entries: NavEntry[]; variant: 'tabbar' | 'rail' | 'sidebar'; testid: string } = $props();
 
   const link: Record<typeof variant, string> = {
-    tabbar: 'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 px-2 text-xs',
+    tabbar: 'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-xs',
     rail: 'flex size-11 items-center justify-center rounded-md',
     sidebar: 'flex min-h-11 items-center gap-3 rounded-md px-3 text-sm',
   };
