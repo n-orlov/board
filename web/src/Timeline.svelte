@@ -124,7 +124,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="timeline-heading" class="pb-16 md:pb-0" data-testid="timeline-view">
+<section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
     <FilterSelect label="Initiative" options={choiceOptions(slugs, view.filter.initiatives[0] ?? '', 'Any initiative')} value={view.filter.initiatives[0] ?? ''} onchange={(v) => apply(withInitiative(view.filter, v))} testid="initiative-filter" />

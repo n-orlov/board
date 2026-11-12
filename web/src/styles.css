@@ -133,6 +133,8 @@ summary:focus-visible,
 /* A rendered Markdown description (lib/markdown.ts writes only these elements). */
 .description {
   line-height: 1.6;
+  /* R13: long text is held to 75 characters a line however wide the column is. */
+  max-width: 75ch;
 }
 .description > * + * {
   margin-top: var(--space-3);

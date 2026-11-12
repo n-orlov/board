@@ -29,7 +29,7 @@
         {#if blockingLabel(ask) !== ''}<span class="{badge} border-warning text-warning" data-testid="ask-blocking">{blockingLabel(ask)}</span>{/if}
         {#if showTask && ask.task !== undefined}<a class="inline-flex min-h-11 items-center text-accent hover:underline" href={taskHref(ask.task)} data-testid="ask-task">{ask.task}</a>{/if}
       </p>
-      <p class="font-medium" data-testid="ask-question">{ask.question}</p>
+      <p class="max-w-[75ch] font-medium" data-testid="ask-question">{ask.question}</p>
       <p class="text-text-muted">
         asked by <span data-testid="ask-asker">{ask.asker}</span>, <span data-testid="ask-mode">{modeLabel(ask.mode)}</span>,
         <time datetime={ask.created_at} title={absoluteTime(ask.created_at)}>{relativeTime(ask.created_at, now)}</time>
@@ -40,7 +40,7 @@
       {/if}
       <p class="text-text-muted" data-testid="ask-line">{stateLine(ask)}</p>
       {#if ask.state === 'answered'}
-        <p data-testid="ask-answer"><span class="text-text-muted">Answer:</span> {ask.answer ?? ''}</p>
+        <p class="max-w-[75ch]" data-testid="ask-answer"><span class="text-text-muted">Answer:</span> {ask.answer ?? ''}</p>
       {/if}
       {#if canAct(ask)}
         <p class="mt-2 flex flex-wrap gap-2">

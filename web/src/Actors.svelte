@@ -31,7 +31,7 @@
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
 </script>
 
-<section aria-labelledby="actors-heading" class="pb-16 md:pb-0" data-testid="actors-view">
+<section aria-labelledby="actors-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="actors-view">
   <h2 id="actors-heading" class="mb-4 text-xl font-bold">Actors</h2>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="actors-error">{view.error}</p>

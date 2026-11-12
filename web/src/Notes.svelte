@@ -59,7 +59,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="notes-heading" class="pb-16 md:pb-0" data-testid="notes-view">
+<section aria-labelledby="notes-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="notes-view">
   <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <h2 id="notes-heading" class="text-xl font-bold">Notes</h2>
     <button

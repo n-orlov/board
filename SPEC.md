@@ -2937,6 +2937,8 @@ withdraw ask, post note, close from attention, acknowledge and record check from
 the toast it raises once confirmed. The live indicator is held to the bar in each of `live`, `offline` and
 `reconnecting`. No state scrolls sideways or reaches past the viewport at the four widths.
 
+**Wide layout caps (R13).** On a wide screen the views that are one table or one list do not stretch with the window. Initiatives, Notes, API keys (Settings), Actors and Archive keep their content (`<section>`) at most 1280 px wide and centred in the main column (`mx-auto max-w-[1280px]`), so on a 2560 px or 3440 px screen the table has an equal margin on each side; below 1280 px of main column they take the whole column as before. The Timeline takes the full width of the main column, since a chart gains from the room. Long running text is held to a measure of 75 characters a line: a rendered Markdown description (task descriptions, note bodies, ask details; the `.description` class) has `max-width: 75ch`, and so do an ask's question and answer. `e2e/wide.spec.ts` asserts it at 2560x1080 and 3440x1440 by bounding box and computed style: the Initiatives and Archive tables are at most 1280 px wide with left and right margins equal within 2 px (the same for Notes, API keys and Actors), the Timeline frame is as wide as the main column, and a seeded long task description has a computed `max-width` of at most 75 `ch` and is no wider.
+
 **Session states.** The page is always in one state of `SessionController` (`web/src/lib/session.ts`):
 *loading* (it asks `GET /auth/session`), *signed-in* (the app shows), *redirecting* (the session answered
 401, so the page goes to `/auth/login`, which starts the OIDC flow), *error* (the session could not be

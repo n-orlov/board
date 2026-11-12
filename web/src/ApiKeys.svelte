@@ -57,7 +57,7 @@
   const label = 'mr-1 text-xs text-text-muted md:hidden';
 </script>
 
-<section aria-labelledby="keys-heading" class="pb-16 md:pb-0">
+<section aria-labelledby="keys-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
     <h2 id="keys-heading" class="text-xl font-bold">API keys</h2>
     <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={openForm}>New API key</button>

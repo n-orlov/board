@@ -72,7 +72,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="archive-heading" class="pb-16 md:pb-0" data-testid="archive-view">
+<section aria-labelledby="archive-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="archive-view">
   <h2 id="archive-heading" class="mb-4 text-xl font-bold">Archive</h2>
   <div class="mb-4">
     <FilterSelect label="Closed within" options={ARCHIVE_WINDOWS} value={view.window} onchange={choose} testid="archive-window" />
