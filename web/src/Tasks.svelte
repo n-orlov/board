@@ -16,22 +16,43 @@
     KIND_OPTIONS,
     STATUS_OPTIONS,
     attentionHref,
-    filterFromHash,
     flagOptions,
     initiativeOptions,
     isFiltered,
     needsFilterQuery,
-    tasksHash,
     type FlagName,
     type TasksFilter,
   } from './lib/taskFilters';
   import { TasksApi, TasksStore, affectsTasks, type TasksState } from './lib/tasks';
   import { live } from './lib/live';
+  import { untrack } from 'svelte';
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
+  import { sortRows, type SortState } from './lib/tableSort';
+  import {
+    TASKS_VIEW,
+    TASK_COLUMNS,
+    TASK_SORT_LABELS,
+    dropUnknownInitiative,
+    viewFromQuery,
+    viewHash,
+    viewToQuery,
+    type TasksViewState,
+  } from './lib/tasksView';
+  import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const browser = currentBrowser();
-  const initial = filterFromHash(window.location.hash);
+  const viewEnv = currentViewEnv();
+  const queryOf = (hash: string) => (hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
+  // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  const bare = queryOf(window.location.hash) === '';
+  const opened = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(window.location.hash)));
+  const initial = opened.filter;
+  // A restored initiative may have been deleted since: the first fetch waits for the list of initiatives to drop it.
+  const restoredInitiative = bare && initial.initiative !== '';
+  let sort: SortState = $state(opened.sort);
   let view: TasksState = $state({ tasks: [], filter: initial, loading: true, error: undefined });
   let initiatives: string[] = $state([]);
   let formOpen = $state(false);
@@ -44,36 +65,78 @@
   // The section reads under the same filters as the table, plus attention=true; the table below it holds the other tasks.
   const reloadNeeds = () => needsStore.load(needsFilterQuery(view.filter));
 
-  $effect(() => {
-    void store.load();
-    void needsStore.load(needsFilterQuery(initial));
-    void new InitiativesApi(browser, () => csrf)
+  // Rewrites the fragment in place (no history entry per choice) and saves the query under the view's key.
+  function persist(state: TasksViewState) {
+    window.history.replaceState(null, '', viewHash(state));
+    saveViewQuery(viewEnv.storage, TASKS_VIEW, viewToQuery(state));
+  }
+
+  async function start() {
+    const listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => (initiatives = list.map((i) => i.slug)))
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
+    if (restoredInitiative) await listed;
+    // Only a restored initiative is checked: one a link names stays, and a refusal for it shows in the list.
+    const kept = restoredInitiative && initiatives.length > 0 ? dropUnknownInitiative({ filter: initial, sort }, initiatives) : { filter: initial, sort };
+    if (kept.filter === initial) {
+      void store.load();
+    } else {
+      persist(kept);
+      void store.setFilter(kept.filter);
+    }
+    void needsStore.load(needsFilterQuery(kept.filter));
+  }
+
+  $effect(() => {
+    // Read nothing reactive here: a sort or a filter change must not run the first load again.
+    void untrack(start);
     // A change elsewhere refreshes the rows in place under the filter shown: no skeleton, so scroll and an open dialog stay.
     return live().subscribe(affectsTasks, () => Promise.all([store.refresh(), reloadNeeds()]));
   });
 
-  // The filter lives in the fragment: a change rewrites it in place (no history entry per choice) and fetches.
+  // The filters and the sort live in the fragment and in the saved query: a change fetches (the sort only reorders).
   function apply(filter: TasksFilter) {
-    window.history.replaceState(null, '', tasksHash(filter));
+    persist({ filter, sort });
     void store.setFilter(filter);
     void reloadNeeds();
   }
 
-  // The fragment edited by hand, or the back button after a link with another query.
+  function setSort(next: SortState) {
+    sort = next;
+    persist({ filter: view.filter, sort });
+  }
+
+  // Clear filters: the defaults, and nothing saved.
+  function clear() {
+    sort = null;
+    clearViewQuery(viewEnv.storage, TASKS_VIEW);
+    window.history.replaceState(null, '', '#/tasks');
+    void store.setFilter(DEFAULT_TASKS_FILTER);
+    void reloadNeeds();
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare `#/tasks` restores the saved query.
   function hashChanged() {
-    const filter = filterFromHash(window.location.hash);
-    if (tasksHash(filter) === tasksHash(view.filter)) return;
-    void store.setFilter(filter);
+    const hash = window.location.hash;
+    if (hash !== '#/tasks' && !hash.startsWith('#/tasks?')) return;
+    const restoring = queryOf(hash) === '';
+    let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
+    if (restoring && initiatives.length > 0 && next.filter.initiative !== '') {
+      next = dropUnknownInitiative(next, initiatives);
+      persist(next);
+    }
+    sort = next.sort;
+    if (viewToQuery({ filter: next.filter, sort: null }) === viewToQuery({ filter: view.filter, sort: null })) return;
+    void store.setFilter(next.filter);
     void reloadNeeds();
   }
 
   const setFlag = (name: FlagName, value: string) => apply({ ...view.filter, [name]: value });
   const needs = $derived(needsView.needs);
   const needsRows = $derived(taskRows(needs.items, 'all'));
-  const rows = $derived(taskRows(withoutNeeds(view.tasks, needs), 'all'));
+  // The table sorts by the chosen column; the Needs attention section above it keeps its own order.
+  const rows = $derived(sortRows(taskRows(withoutNeeds(view.tasks, needs), 'all'), sort, TASK_COLUMNS));
   const empty = $derived(!view.loading && view.error === undefined && rows.length === 0 && needsRows.length === 0);
 
   function created(ref: string) {
@@ -128,8 +191,9 @@
         onchange={(e) => apply({ ...view.filter, text: e.currentTarget.value.trim() })}
       />
     </label>
+    <SortSelect columns={TASK_SORT_LABELS} {sort} onsort={setSort} />
     {#if isFiltered(view.filter)}
-      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={() => apply(DEFAULT_TASKS_FILTER)}>Clear filters</button>
+      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
   </div>
 
@@ -164,13 +228,13 @@
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <th scope="col" class="{head} md:w-32">Ref</th>
-          <th scope="col" class={head}>Title</th>
-          <th scope="col" class="{head} md:w-32">Initiative</th>
-          <th scope="col" class="{head} md:w-20">Kind</th>
-          <th scope="col" class="{head} md:w-24">Status</th>
+          <SortHeader column="ref" label="Ref" {sort} onsort={setSort} class="{head} md:w-32" />
+          <SortHeader column="title" label="Title" {sort} onsort={setSort} class={head} />
+          <SortHeader column="initiative" label="Initiative" {sort} onsort={setSort} class="{head} md:w-32" />
+          <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-20" />
+          <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{head} md:w-24" />
           <th scope="col" class="{head} md:w-1/6">Flags</th>
-          <th scope="col" class="{head} md:w-28">Lease holder</th>
+          <SortHeader column="holder" label="Lease holder" {sort} onsort={setSort} class="{head} md:w-28" />
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
