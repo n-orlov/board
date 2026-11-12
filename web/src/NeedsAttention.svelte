@@ -21,12 +21,12 @@
           data-ref={row.ref}
           class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-warning bg-surface-raised p-4"
         >
-          <a class="inline-flex min-h-11 min-w-11 items-center font-mono text-sm text-accent hover:underline" href={taskHref(row.ref)} data-testid="needs-ref">{row.ref}</a>
+          <a class="inline-flex min-h-11 max-w-full min-w-11 items-center font-mono text-sm wrap-anywhere text-accent hover:underline" href={taskHref(row.ref)} data-testid="needs-ref">{row.ref}</a>
           {#if showInitiative}
-            <a class="inline-flex min-h-11 min-w-11 items-center text-sm text-accent hover:underline" href="#/i/{row.initiative}" data-testid="needs-initiative">{row.initiative}</a>
+            <a class="inline-flex min-h-11 max-w-full min-w-11 items-center text-sm wrap-anywhere text-accent hover:underline" href="#/i/{row.initiative}" data-testid="needs-initiative">{row.initiative}</a>
           {/if}
           <span class="order-last w-full min-w-0 font-medium wrap-anywhere md:order-none md:w-auto md:flex-1" data-testid="needs-title">{row.title}</span>
-          <span class="flex flex-wrap gap-1" data-testid="needs-badges">
+          <span class="flex max-w-full min-w-0 flex-wrap gap-1" data-testid="needs-badges">
             {#each row.attention as reason (reason.reason)}
               <span class="{badge} {toneClasses(reason.tone)}" data-testid="attention-{reason.reason}">
                 <span aria-hidden="true">{reason.label}</span><span class="sr-only">{reason.name}</span>
@@ -37,7 +37,7 @@
             {/each}
           </span>
           {#if row.holder !== ''}
-            <span class="text-sm text-text-muted" data-testid="needs-holder">{row.holder}</span>
+            <span class="max-w-full min-w-0 text-sm wrap-anywhere text-text-muted" data-testid="needs-holder">{row.holder}</span>
           {/if}
         </li>
       {/each}

@@ -645,6 +645,24 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    // The Tasks view's Needs attention section (R2): a task with an open ask whose live lease is held by a 40-character
+    // handle, a done task and a blocking ask, all in the 40-character-slug initiative, so each card carries the longest
+    // ref and initiative link, and one the longest holder.
+    test('the Needs attention section on the Tasks view holds the longest refs, slugs and holders without scrolling sideways', async ({ page, playwright, baseURL }) => {
+      seeded2 ??= seedPhase2(playwright, baseURL);
+      const seed = await seeded2;
+      const api = await actorContext(playwright, baseURL, P2_ACTOR, P2_WAY_BACK);
+      const held = (await send(api, '/api/v1/tasks', { initiative: P2_SLUG, title: wide(200, 'M') }, 201)).ref as string;
+      await send(api, '/api/v1/leases', { task: held, intent: wide(200), resources: [P2_RESOURCE] }, 201);
+      await send(api, '/api/v1/asks', { question: wide(200), task: held }, 201);
+      await page.goto(`/#/tasks?initiative=${P2_SLUG}`);
+      for (const ref of [held, seed.doneTask, seed.askTask]) await expect(page.locator(`[data-testid=needs-row][data-ref="${ref}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=needs-row][data-ref="${held}"]`).getByTestId('needs-holder')).toContainText(P2_ACTOR);
+      await expectNoSidewaysScroll(page);
+      await expectNothingPastRight(page, '[data-testid=needs-row], [data-testid=needs-row] *', vp.size.width);
+      await api.dispose();
+    });
+
     for (const word of LIVE_STATES) {
       test(`the live indicator reading ${word} stays inside the viewport without scrolling sideways`, async ({ page, context }) => {
         if (word === 'reconnecting') await neverOpen(page);
