@@ -190,17 +190,39 @@ func TestSixFailuresEndFailed(t *testing.T) {
 	})
 }
 
+// hangs are the two ways a receiver outlasts BOARD_NOTIFY_TIMEOUT: before its
+// status line, and after a 200 status line with the body still unfinished.
+var hangs = map[string]func(w http.ResponseWriter, r *http.Request, release <-chan struct{}){
+	"before the status": func(_ http.ResponseWriter, r *http.Request, release <-chan struct{}) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	},
+	"inside a 200 body": func(w http.ResponseWriter, r *http.Request, release <-chan struct{}) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":`))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	},
+}
+
 func TestAHungReceiverTimesOutUnderBoardNotifyTimeoutAndIsRetried(t *testing.T) {
+	for name, hang := range hangs {
+		t.Run(name, func(t *testing.T) { hungReceiverIsRetried(t, hang) })
+	}
+}
+
+func hungReceiverIsRetried(t *testing.T, hang func(http.ResponseWriter, *http.Request, <-chan struct{})) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		release := make(chan struct{})
-		hung := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-			_, _ = io.Copy(io.Discard, r.Body)
-			select {
-			case <-release:
-			case <-r.Context().Done():
-			}
-		}))
+		hung := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { hang(rw, r, release) }))
 		defer hung.Close()
 		defer close(release)
 		timeout, err := notify.ParseTimeout("200ms")

@@ -127,8 +127,9 @@ func (w *Worker) claim(ctx context.Context, id string) (bool, error) {
 	return n == 1, nil
 }
 
-// post sends the payload and returns "" for a 2xx, else the error: the HTTP
-// status or an error class, never a body, a URL or a header value.
+// post sends the payload and returns "" for a 2xx whose body was read to its
+// end, else the error: the HTTP status or an error class, never a body, a URL
+// or a header value.
 func (w *Worker) post(ctx context.Context, payload string) string {
 	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
 	defer cancel()
@@ -145,7 +146,11 @@ func (w *Worker) post(ctx context.Context, payload string) string {
 		return errorClass(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	// The timeout runs to the last byte: a body that stalls or breaks is a
+	// failure even after a 2xx status line.
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return errorClass(err)
+	}
 	if resp.StatusCode/100 == 2 {
 		return ""
 	}

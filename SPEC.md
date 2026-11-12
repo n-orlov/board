@@ -799,13 +799,16 @@ stopped before the store closes) that looks for due rows every 2 s. A row is due
    it and the others skip it. A server that dies mid-delivery leaves the claim, and the row is delivered by whichever
    server ticks after the claim lapses.
 2. **POSTs** the `payload` as `Content-Type: application/json` to `BOARD_NOTIFY_URL`, with `BOARD_NOTIFY_HEADER` added
-   when it is set, under `BOARD_NOTIFY_TIMEOUT` for the whole request. A redirect is not followed.
-3. **Records the outcome** and releases the claim. A 2xx makes the row `sent` and sets `sent_at`. Anything else
-   (another status, a timeout, a connection error) sets `last_error` to `http <status>`, `timeout` or `network error`,
-   never a response body, a URL or a header value, and counts one attempt. The first failure schedules a retry 30 s later,
-   and the following failures 2 min, 10 min, 30 min and 1 h later; the sixth failure (the failure of the fifth retry)
-   ends the row `failed`, and a `failed` row is never tried again. `attempts` counts the POSTs made. A later 2xx leaves
-   the earlier `last_error` in place.
+   when it is set, under `BOARD_NOTIFY_TIMEOUT` for the whole exchange, from connect to the last byte of the response:
+   the response body is read to its end and discarded, so a receiver that sends a 2xx status line and then stalls its
+   body past the timeout fails with `timeout`, and one whose body breaks off fails with `network error`. A redirect is
+   not followed.
+3. **Records the outcome** and releases the claim. A 2xx with its whole body read makes the row `sent` and sets
+   `sent_at`. Anything else (another status, a timeout, a connection error) sets `last_error` to `http <status>`,
+   `timeout` or `network error`, never a response body, a URL or a header value, and counts one attempt. The first
+   failure schedules a retry 30 s later, and the following failures 2 min, 10 min, 30 min and 1 h later; the sixth
+   failure (the failure of the fifth retry) ends the row `failed`, and a `failed` row is never tried again. `attempts`
+   counts the POSTs made. A later 2xx leaves the earlier `last_error` in place.
 
 The tick, the claim and its lapse and the backoff all read the server's clock (the injected one in tests). A tick ended
 by shutdown leaves its row claimed, not failed, so it is delivered again after the claim lapses.
