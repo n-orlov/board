@@ -3,8 +3,9 @@
 // order, so the store reads every page of the filtered list (summaries only, bodies are read when a note is
 // expanded), turns it around and reveals `PAGE_SIZE` notes at a time: "Load more" shows the next page.
 import { errorText, Fetches } from './fetches';
-import { apiQuery, newestFirst, toNotePost, type Note, type NoteForm, type NotesFilter } from './notes';
+import { apiQuery, filterFromQuery, filterToQuery, newestFirst, toNotePost, type Note, type NoteForm, type NotesFilter } from './notes';
 import { ThreadApi } from './threads';
+import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
 /** How many notes the view shows first and each "Load more" adds. */
 export const PAGE_SIZE = 20;
@@ -159,4 +160,28 @@ export class NotesViewStore {
 /** Whether a live event can change the Notes view: a note posted (the filter decides whether it shows). */
 export function affectsNotes(event: { type: string }): boolean {
   return event.type.startsWith('note_');
+}
+
+/** The name of the view's saved state (PRD R16): the key is `board.view.v1.notes`. */
+export const NOTES_VIEW = 'notes';
+
+/**
+ * Opens the view for the fragment it is on, before its first fetch, and returns the filter to start with. A fragment
+ * with a query wins and is saved; a bare one (`#/notes`) restores the saved query by rewriting the fragment in place, so
+ * the view reads `GET /notes` once, under the restored filter.
+ */
+export function openNotes(env: ViewEnv, hash: string): NotesFilter {
+  const at = hash.indexOf('?');
+  const own = at < 0 ? '' : hash.slice(at + 1);
+  return filterFromQuery(openView(env, NOTES_VIEW, '#/notes', own));
+}
+
+/** Saves the filter's query after a change (the empty filter is the default and removes the key). */
+export function saveNotes(storage: ViewStorage | undefined, filter: NotesFilter): void {
+  saveViewQuery(storage, NOTES_VIEW, filterToQuery(filter));
+}
+
+/** Clear filters: forgets the saved query. */
+export function forgetNotes(storage: ViewStorage | undefined): void {
+  clearViewQuery(storage, NOTES_VIEW);
 }

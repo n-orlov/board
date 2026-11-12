@@ -4,16 +4,20 @@
   import NoteList from './NoteList.svelte';
   import Toast from './Toast.svelte';
   import { live } from './lib/live';
+  import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
-  import { filterFromHash, isFiltered, notesHash, DEFAULT_NOTES_FILTER, type NoteForm as PostForm, type NotesFilter } from './lib/notes';
-  import { affectsNotes, moreCount, NotesApi, NotesViewStore, visibleNotes, type NoteScope, type NotesViewState } from './lib/notesView';
+  import { currentViewEnv } from './lib/viewState';
+  import { isFiltered, notesHash, DEFAULT_NOTES_FILTER, type NoteForm as PostForm, type NotesFilter } from './lib/notes';
+  import { affectsNotes, forgetNotes, moreCount, NotesApi, NotesViewStore, openNotes, saveNotes, visibleNotes, type NoteScope, type NotesViewState } from './lib/notesView';
 
   // The Notes view (PRD R10): every note newest first, the six filters in the fragment's query, a page at a time and
   // Post note. The data layer is lib/notesView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const browser = currentBrowser();
-  const initial = filterFromHash(window.location.hash);
+  const viewEnv = currentViewEnv();
+  // A fragment with a query wins and is saved; a bare one restores the saved filters (in place, before the first fetch).
+  const initial = openNotes(viewEnv, window.location.hash);
   let draft: NotesFilter = $state({ ...initial });
   let posting = $state(false);
   let toast = $state('');
@@ -27,16 +31,24 @@
     return live().subscribe(affectsNotes, () => store.refresh());
   });
 
-  // The filter lives in the fragment: applying rewrites it in place (no history entry per choice) and reads again.
+  // The filter lives in the fragment and in the saved query: applying rewrites both in place (no history entry per
+  // choice) and reads again. Clear filters (the defaults) forgets the saved query.
   function apply(filter: NotesFilter) {
     draft = { ...filter };
     window.history.replaceState(null, '', notesHash(filter));
+    saveNotes(viewEnv.storage, filter);
     void store.setFilter(filter);
   }
 
-  // The fragment edited by hand, or the back button after a link with another query.
+  function clear() {
+    forgetNotes(viewEnv.storage);
+    apply(DEFAULT_NOTES_FILTER);
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filters.
   function hashChanged() {
-    const filter = filterFromHash(window.location.hash);
+    if (resolveRoute(window.location.hash, ROUTES).id !== 'notes') return;
+    const filter = openNotes(viewEnv, window.location.hash);
     if (notesHash(filter) === notesHash(view.filter)) return;
     draft = { ...filter };
     void store.setFilter(filter);
@@ -98,7 +110,7 @@
     <div class="flex items-end gap-2">
       <button type="submit" class="{button} border-accent text-accent" data-testid="apply-filters">Apply filters</button>
       {#if isFiltered(view.filter) || isFiltered(draft)}
-        <button type="button" class="{button} border-border text-text" data-testid="clear-filters" onclick={() => apply(DEFAULT_NOTES_FILTER)}>Clear filters</button>
+        <button type="button" class="{button} border-border text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
       {/if}
     </div>
   </form>

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_NOTES_FILTER, type Note } from './notes';
-import { affectsNotes, moreCount, NotesApi, NotesViewStore, PAGE_SIZE, postScope, visibleNotes, type NotesViewState } from './notesView';
+import { affectsNotes, forgetNotes, moreCount, NOTES_VIEW, NotesApi, NotesViewStore, openNotes, PAGE_SIZE, postScope, saveNotes, visibleNotes, type NotesViewState } from './notesView';
 import type { Browser } from './session';
+import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 
 const json = (body: object, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const notes = (count: number): Note[] => Array.from({ length: count }, (_, i) => ({ ref: `N${i + 1}`, summary: `s${i + 1}` }) as Note);
@@ -258,5 +259,141 @@ describe('affectsNotes', () => {
     expect(affectsNotes({ type: 'note_posted' })).toBe(true);
     expect(affectsNotes({ type: 'task_done' })).toBe(false);
     expect(affectsNotes({ type: 'key_created' })).toBe(false);
+  });
+});
+
+function memory(
+  initial: Record<string, string> = {},
+): ViewStorage & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+    key: (i) => [...data.keys()][i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+}
+
+function env(storage: ViewStorage | undefined): ViewEnv & { hashes: string[] } {
+  const hashes: string[] = [];
+  return { storage, replaceHash: (h) => void hashes.push(h), hashes };
+}
+
+describe('saved Notes filters', () => {
+  const KEY = 'board.view.v1.notes';
+  const FILTER = {
+    ...DEFAULT_NOTES_FILTER,
+    broadcastOnly: true,
+    author: 'ann',
+    resource: 'host:b-1',
+  };
+
+  it('is saved under board.view.v1.notes', () => {
+    expect(viewKey(NOTES_VIEW)).toBe(KEY);
+  });
+
+  it('saves the filter as the fragment query and removes the key for the empty filter', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    expect(JSON.parse(storage.data.get(KEY)!)).toEqual({
+      v: 1,
+      query: 'broadcast=only&resource=host%3Ab-1&author=ann',
+    });
+    saveNotes(storage, DEFAULT_NOTES_FILTER);
+    expect(storage.data.has(KEY)).toBe(false);
+  });
+
+  it('restores the saved filter on a bare route, rewriting the fragment in place once', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    const e = env(storage);
+    expect(openNotes(e, '#/notes')).toEqual(FILTER);
+    expect(e.hashes).toEqual([
+      '#/notes?broadcast=only&resource=host%3Ab-1&author=ann',
+    ]);
+  });
+
+  it('lets a fragment with its own query win, and saves it', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    const e = env(storage);
+    expect(openNotes(e, '#/notes?mention=bob')).toEqual({
+      ...DEFAULT_NOTES_FILTER,
+      mention: 'bob',
+    });
+    expect(e.hashes).toEqual([]);
+    expect(JSON.parse(storage.data.get(KEY)!)).toEqual({
+      v: 1,
+      query: 'mention=bob',
+    });
+  });
+
+  it('restores the saved filter for a fragment with an empty query', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    expect(openNotes(env(storage), '#/notes?')).toEqual(FILTER);
+  });
+
+  it('reads the query after the first question mark wherever it is', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    expect(openNotes(env(storage), '?author=bob').author).toBe('bob');
+  });
+
+  it('forgets the saved filter on Clear filters', () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    forgetNotes(storage);
+    expect(storage.data.has(KEY)).toBe(false);
+    const e = env(storage);
+    expect(openNotes(e, '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+    expect(e.hashes).toEqual([]);
+  });
+
+  it('opens at the defaults for a malformed or foreign-version value, no storage or a storage that throws', () => {
+    for (const bad of [
+      'not json',
+      JSON.stringify({ v: 2, query: 'author=ann' }),
+      JSON.stringify({ v: 1, query: 7 }),
+      JSON.stringify({ v: 1, query: '' }),
+    ]) {
+      const e = env(memory({ [KEY]: bad }));
+      expect(openNotes(e, '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+      expect(e.hashes).toEqual([]);
+    }
+    expect(openNotes(env(undefined), '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+    const throwing = {
+      ...memory(),
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('quota');
+      },
+    };
+    expect(openNotes(env(throwing), '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+    expect(openNotes(env(throwing), '#/notes?author=ann').author).toBe('ann');
+  });
+
+  it('a restored filter is what the first read uses (one GET /notes under it)', async () => {
+    const storage = memory();
+    saveNotes(storage, FILTER);
+    const e = env(storage);
+    const api = {
+      filtered: vi.fn(async () => notes(1)),
+      note: vi.fn(),
+      postNote: vi.fn(),
+    };
+    const store = new NotesViewStore(
+      api,
+      () => undefined,
+      openNotes(e, '#/notes'),
+    );
+    await store.load();
+    expect(api.filtered.mock.calls).toEqual([[FILTER]]);
   });
 });
