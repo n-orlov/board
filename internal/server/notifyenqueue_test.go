@@ -23,6 +23,7 @@ import (
 // configured as the test asks.
 type outboxWorld struct {
 	t      *testing.T
+	url    string
 	st     *store.Store
 	now    time.Time
 	tasks  tasks.Store
@@ -41,14 +42,15 @@ var (
 // allows once BOARD_NOTIFY_URL is set; a nil kinds leaves the URL unset.
 func newOutboxWorld(t *testing.T, dbs databases, kinds []string) *outboxWorld {
 	t.Helper()
-	st := openStore(t, dbs.New(t))
+	url := dbs.New(t)
+	st := openStore(t, url)
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if kinds != nil {
 		st.SetNotify(kinds)
 	}
-	w := &outboxWorld{t: t, st: st, now: outboxStart}
+	w := &outboxWorld{t: t, url: url, st: st, now: outboxStart}
 	clock := func() time.Time { return w.now }
 	w.tasks, w.leases = tasks.Store{Store: st, Now: clock}, leases.Store{Store: st, Now: clock}
 	w.asks, w.notes = asks.Store{Store: st, Now: clock}, notes.Store{Store: st, Now: clock}

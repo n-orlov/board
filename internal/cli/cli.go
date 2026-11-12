@@ -19,6 +19,7 @@ import (
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
+	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/server"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/sweep"
@@ -152,21 +153,38 @@ func serve(stderr io.Writer, env Env) int {
 		_, _ = fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
 		return ExitError
 	}
-	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
-		return fail(stderr, err)
-	}
-	if _, _, err := streamSettings(env); err != nil {
-		return fail(stderr, err)
-	}
-	if _, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT")); err != nil {
-		return fail(stderr, err)
-	}
-	if _, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON")); err != nil {
+	if err := validateSettings(env); err != nil {
 		return fail(stderr, err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serveUntil(ctx, stderr, env, dbURL(env), addr, migrate != "off")
+}
+
+// validateSettings checks the settings serve reads at start-up parse, so a bad one
+// exits 1 before anything is opened.
+func validateSettings(env Env) error {
+	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
+		return err
+	}
+	if _, _, err := streamSettings(env); err != nil {
+		return err
+	}
+	if _, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT")); err != nil {
+		return err
+	}
+	return validateNotifySettings(env)
+}
+
+func validateNotifySettings(env Env) error {
+	if _, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON")); err != nil {
+		return err
+	}
+	if _, err := notify.ParseTimeout(env("BOARD_NOTIFY_TIMEOUT")); err != nil {
+		return err
+	}
+	_, err := notify.ParseHeader(env("BOARD_NOTIFY_HEADER"))
+	return err
 }
 
 // serveUntil opens the database, migrates it when migrate is set, and serves
@@ -199,6 +217,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	defer startCheckpointer(ctx, stderr, env, st)()
 	stopSweeper := startSweeper(ctx, stderr, env, st)
 	defer stopSweeper()
+	defer startNotifier(ctx, stderr, env, st)()
 	stream, stopFeed, err := startFeed(ctx, stderr, env, st)
 	if err != nil {
 		return fail(stderr, err)
@@ -343,4 +362,23 @@ func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store)
 	sweep.Run(ctx, interval, func(err error) { _, _ = fmt.Fprintf(stderr, "board: sweep: %v\n", err) },
 		func(ctx context.Context) error { _, err := ls.ExpireDue(ctx); return err },
 		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err })
+}
+
+// startNotifier delivers the notifications outbox to BOARD_NOTIFY_URL every
+// notify.TickInterval until ctx ends, and returns the function that stops it and
+// waits for it. With the URL unset it runs nothing. serve has already checked
+// the timeout and the header parse.
+func startNotifier(ctx context.Context, stderr io.Writer, env Env, st *store.Store) func() {
+	url := env("BOARD_NOTIFY_URL")
+	timeout, err := notify.ParseTimeout(env("BOARD_NOTIFY_TIMEOUT"))
+	header, herr := notify.ParseHeader(env("BOARD_NOTIFY_HEADER"))
+	if url == "" || err != nil || herr != nil {
+		return func() {}
+	}
+	w := &notify.Worker{Store: st, URL: url, Header: header, Timeout: timeout}
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: notify: %v\n", err) }
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); sweep.Run(ctx, notify.TickInterval, report, w.Tick) }()
+	return func() { cancel(); <-done }
 }

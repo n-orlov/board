@@ -1,9 +1,18 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/store"
 )
 
@@ -89,5 +98,85 @@ func TestConfigureNotifyRefusesAPublicURLThatIsNotAbsolute(t *testing.T) {
 	}
 	if st.Notifies("done") {
 		t.Fatal("alerts were turned on with a bad BOARD_PUBLIC_URL")
+	}
+}
+
+func TestServeRejectsABadNotifyTimeoutOrHeaderWithoutRepeatingTheValue(t *testing.T) {
+	for name, tc := range map[string]struct{ key, val string }{
+		"timeout zero": {"BOARD_NOTIFY_TIMEOUT", "0s"}, "timeout word": {"BOARD_NOTIFY_TIMEOUT", "soon"},
+		"header no value": {"BOARD_NOTIFY_HEADER", "X-Token"}, "header newline": {"BOARD_NOTIFY_HEADER", "X-Token: hunter2\nX-Other: 1"},
+	} {
+		for _, url := range []string{"", "http://receiver.invalid/hook"} {
+			code, errs := runServe(t, envWith(map[string]string{tc.key: tc.val, "BOARD_NOTIFY_URL": url}))
+			if code != ExitError || !strings.Contains(errs, tc.key) || strings.Contains(errs, "hunter2") {
+				t.Errorf("%s url=%q: code=%d err=%q", name, url, code, errs)
+			}
+		}
+	}
+}
+
+// TestServeDeliversTheOutboxWithTheHeaderAndLogsNoSecret runs serve against a
+// receiver and an outbox row, and checks BOARD_NOTIFY_HEADER reached the
+// receiver and appears in no log line, no event and no outbox row.
+func TestServeDeliversTheOutboxWithTheHeaderAndLogsNoSecret(t *testing.T) {
+	const secret = "hunter2-receiver-token"
+	url := sqliteURL(t)
+	st, err := store.Open(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st.SetNotify(store.NotifyKinds)
+	if _, err := (asks.Store{Store: st}).Raise(context.Background(), audit.Actor{Handle: "claude@host"}, "key:x", asks.New{Question: "ship it?"}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var got []string
+	rc := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got = append(got, r.Header.Get("X-Receiver-Token")+"|"+r.Header.Get("Content-Type")+"|"+string(b))
+		mu.Unlock()
+	}))
+	defer rc.Close()
+	env := envWith(map[string]string{"BOARD_NOTIFY_URL": rc.URL, "BOARD_NOTIFY_HEADER": "X-Receiver-Token: " + secret, "BOARD_NOTIFY_TIMEOUT": "2s", "BOARD_PUBLIC_URL": "https://board.example"})
+	ctx, cancel := context.WithCancel(context.Background())
+	var errb bytes.Buffer
+	exit := make(chan int, 1)
+	go func() { exit <- serveUntil(ctx, &errb, env, url, "127.0.0.1:0", false) }()
+	sent := func() bool {
+		var n int
+		_ = st.Reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM notifications WHERE state = 'sent'`).Scan(&n)
+		return n == 1
+	}
+	delivered := sent()
+	for deadline := time.Now().Add(8 * time.Second); !delivered && time.Now().Before(deadline); delivered = sent() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	if code := <-exit; code != ExitOK {
+		t.Fatalf("serve exited %d: %s", code, errb.String())
+	}
+	if !delivered {
+		t.Fatalf("the outbox row was not delivered; stderr %q", errb.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || !strings.HasPrefix(got[0], secret+"|application/json|{") {
+		t.Fatalf("receiver got %q", got)
+	}
+	if strings.Contains(errb.String(), secret) {
+		t.Errorf("a log line carries the header value: %q", errb.String())
+	}
+	for _, q := range []string{`SELECT COALESCE(group_concat(summary || type || principal), '') FROM events`, `SELECT COALESCE(group_concat(payload || COALESCE(last_error, '')), '') FROM notifications`} {
+		var all string
+		if err := st.Reader().QueryRowContext(context.Background(), q).Scan(&all); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(all, secret) {
+			t.Errorf("%s carries the header value", q)
+		}
 	}
 }

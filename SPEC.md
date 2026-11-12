@@ -785,8 +785,34 @@ row is ever written. A renewal, an end, an answer, a withdrawal, a close and a n
 does a write that is refused, since its transaction writes no event. A row is not cancelled when its condition clears
 (the lease acknowledged, the ask answered): what was enqueued is what is delivered. `serve` turns the triggers on once at
 start-up, before it takes a request, and a word in `BOARD_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
-whether or not the URL is set. The delivery with its retries and claims, and `GET /api/v1/notifications`, follow in later
-tasks of this wave.
+whether or not the URL is set. `GET /api/v1/notifications` follows in a later task of this wave.
+
+#### Delivery
+
+When `BOARD_NOTIFY_URL` is set, `serve` runs one background worker (`notify.Worker`, started after the sweeper and
+stopped before the store closes) that looks for due rows every 2 s. A row is due when it is `pending`, its
+`next_attempt_at` is not after the clock's now and its `claimed_until` is empty or not after now. The worker takes up to
+20 due rows per tick, oldest first, and for each one:
+
+1. **Claims it** with one conditional `UPDATE` that sets `claimed_until` to now plus `BOARD_NOTIFY_TIMEOUT` plus 30 s and
+   holds only while the row is still `pending`, due and unclaimed, so of several servers on one database exactly one wins
+   it and the others skip it. A server that dies mid-delivery leaves the claim, and the row is delivered by whichever
+   server ticks after the claim lapses.
+2. **POSTs** the `payload` as `Content-Type: application/json` to `BOARD_NOTIFY_URL`, with `BOARD_NOTIFY_HEADER` added
+   when it is set, under `BOARD_NOTIFY_TIMEOUT` for the whole request. A redirect is not followed.
+3. **Records the outcome** and releases the claim. A 2xx makes the row `sent` and sets `sent_at`. Anything else
+   (another status, a timeout, a connection error) sets `last_error` to `http <status>`, `timeout` or `network error`,
+   never a response body, a URL or a header value, and counts one attempt. The first failure schedules a retry 30 s later,
+   and the following failures 2 min, 10 min, 30 min and 1 h later; the sixth failure (the failure of the fifth retry)
+   ends the row `failed`, and a `failed` row is never tried again. `attempts` counts the POSTs made. A later 2xx leaves
+   the earlier `last_error` in place.
+
+The tick, the claim and its lapse and the backoff all read the server's clock (the injected one in tests). A tick ended
+by shutdown leaves its row claimed, not failed, so it is delivered again after the claim lapses.
+
+Delivery is **at least once**: a server that dies between the POST and the update, or whose claim lapses during a slow
+POST, delivers the row again, so a receiver may see a duplicate. A delivery writes no event and no log line carrying
+the payload, the response or the header.
 
 #### Payload
 
@@ -2882,6 +2908,8 @@ All configuration is by environment variable:
 | `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `BOARD_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
 | `BOARD_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `BOARD_NOTIFY_URL` is set |
+| `BOARD_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take, connect to last byte (§5.4). A Go duration above zero; any other value exits 1, whether or not `BOARD_NOTIFY_URL` is set. A POST that exceeds it fails with `last_error` `timeout` and is retried |
+| `BOARD_NOTIFY_HEADER` | (unset: none) | one `Name: value` header sent with every alert POST, for a receiver that wants a token (§5.4). A value that is not a header name, a colon and a non-empty one-line value exits 1, with a message that never repeats it. It comes from the environment only; it is never logged, never written to an event or an outbox row and never part of a payload |
 | `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
