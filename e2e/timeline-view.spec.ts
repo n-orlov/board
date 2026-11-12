@@ -54,8 +54,8 @@ for (const vp of viewports) {
 
     test('the filters survive Initiatives and back, and a new page of the same context, with one GET /timeline each', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
-      const slug = `e2e-tv-restore-${vp.name}`;
-      const tag = `tv-restore-${vp.name}`;
+      const slug = `e2e-tlv-restore-${vp.name}`;
+      const tag = `tlv-restore-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug, title: `Timeline view ${vp.name}`, tags: [tag] }, 201);
 
       await page.goto('/#/timeline');
@@ -98,8 +98,8 @@ for (const vp of viewports) {
 
     test('a fragment with its own query overrides the saved one, and Clear filters then nav away and back shows the defaults', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
-      const a = `e2e-tv-own-a-${vp.name}`;
-      const b = `e2e-tv-own-b-${vp.name}`;
+      const a = `e2e-tlv-own-a-${vp.name}`;
+      const b = `e2e-tlv-own-b-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug: a, title: `Own a ${vp.name}` }, 201);
       await post(api, '/api/v1/initiatives', { slug: b, title: `Own b ${vp.name}` }, 201);
 
@@ -138,12 +138,12 @@ for (const vp of viewports) {
 
     test('a restored deleted initiative and removed tag are dropped before the first fetch, the valid tag, actor and closed-within stay', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
-      const slug = `e2e-tv-drop-${vp.name}`;
-      const tag = `tv-drop-${vp.name}`;
+      const slug = `e2e-tlv-drop-${vp.name}`;
+      const tag = `tlv-drop-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug, title: `Drop ${vp.name}`, tags: [tag] }, 201);
       await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
-      const seeded = `initiative=e2e-tv-ghost&tag=tv-ghost-tag&tag=${tag}&actor=playwright&closed=7`;
+      const seeded = `initiative=e2e-tlv-ghost&tag=tlv-ghost-tag&tag=${tag}&actor=playwright&closed=7`;
       await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, seeded] as const);
 
       const fresh = await page.context().newPage();
@@ -171,7 +171,7 @@ for (const vp of viewports) {
     test('a restored filter is emptied when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
       await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
-      const seeded = 'initiative=e2e-tv-empty-ghost&tag=tv-empty-gone';
+      const seeded = 'initiative=e2e-tlv-empty-ghost&tag=tlv-empty-gone';
       await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, seeded] as const);
 
       const fresh = await page.context().newPage();
