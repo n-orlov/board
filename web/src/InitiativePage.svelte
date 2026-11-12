@@ -13,14 +13,16 @@
   import { absoluteTime, relativeTime } from './lib/format';
   import { countBadges } from './lib/counts';
   import { TASK_FILTERS, type TaskFilter } from './lib/initiativeFilters';
-  import { InitiativePageStore, concerns, liveLeaseCount, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
+  import { InitiativePageStore, concerns, liveLeaseCount, pageNeedsHref, pageNeedsQuery, targetsText, taskCounts, taskRows, type InitiativePageState } from './lib/initiativePage';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import InitiativeEditForm from './InitiativeEditForm.svelte';
+  import NeedsAttention from './NeedsAttention.svelte';
   import NewTaskDialog from './NewTaskDialog.svelte';
   import Toast from './Toast.svelte';
   import { closedToast, closeBody, closeLabel, notClosedCount, REOPEN_BODY } from './lib/initiativeDialogs';
   import { InitiativesApi, toEditForm, type InitiativeEdit } from './lib/initiatives';
   import { renderMarkdown } from './lib/markdown';
+  import { NO_NEEDS, NeedsStore, withoutNeeds, type NeedsState } from './lib/needsAttention';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
@@ -33,7 +35,12 @@
   let dialog: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string } | undefined = $state(undefined);
   let toast = $state('');
 
-  const store = new InitiativePageStore(new InitiativesApi(currentBrowser(), () => csrf), (s) => (view = s));
+  const api = new InitiativesApi(currentBrowser(), () => csrf);
+  const store = new InitiativePageStore(api, (s) => (view = s));
+  let needsView: NeedsState = $state({ needs: NO_NEEDS, error: undefined });
+  const needsStore = new NeedsStore((query) => api.needs(query), (s) => (needsView = s));
+  // The section reads this initiative's tasks that need attention under the page's task filter, again whenever the filter changes.
+  const reloadNeeds = () => needsStore.load(pageNeedsQuery(param, view.filter));
 
   const threads = new ThreadStore(new ThreadApi(currentBrowser(), () => csrf), (s) => (thread = s));
 
@@ -41,7 +48,13 @@
     void store.load(param);
     void threads.load({ initiative: param });
     // An event naming this initiative reads the page again in place: no skeleton, so scroll, expanded notes and open dialogs stay.
-    return live().subscribe(concerns(param), () => Promise.all([store.reload(param), threads.load({ initiative: param })]));
+    return live().subscribe(concerns(param), () => Promise.all([store.reload(param), threads.load({ initiative: param }), reloadNeeds()]));
+  });
+
+  // Only a change of the filter's value (not every update of the page state) reads the section again.
+  const filterNow = $derived(view.filter);
+  $effect(() => {
+    void needsStore.load(pageNeedsQuery(param, filterNow));
   });
 
   function open(which: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string }) {
@@ -61,6 +74,7 @@
     dialog = undefined;
     toast = `Task ${ref} created`;
     void store.reload(param);
+    void reloadNeeds();
   }
 
   const save = (form: InitiativeEdit) => finish(store.edit(param, form), 'Initiative saved');
@@ -74,6 +88,7 @@
       dialog = undefined;
       toast = message;
       void store.reload(param);
+      void reloadNeeds();
     }
   }
   const answer = (ask: Ask, text: string) => settle(threads.answer(scope, ask.ref, text), `Answered ${ask.ref}`);
@@ -90,7 +105,9 @@
   const notes = $derived(newestFirst(thread.notes));
   const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const pending = $derived(notClosedCount(view.tasks));
-  const rows = $derived(taskRows(view.tasks, view.filter));
+  const needs = $derived(needsView.needs);
+  const needsRows = $derived(taskRows(needs.items, 'all'));
+  const rows = $derived(taskRows(withoutNeeds(view.tasks, needs), view.filter));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const cell = 'md:table-cell md:px-3 md:py-3';
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
@@ -154,13 +171,20 @@
       <span class="text-sm text-text-muted" data-testid="initiative-leases">{leasesText(liveLeaseCount(view.tasks))}</span>
     </div>
 
+    {#if needsView.error !== undefined}
+      <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="needs-error">{needsView.error}</p>
+    {/if}
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter)} showInitiative={false} />
+
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
       <h3 class="text-lg font-bold">Tasks</h3>
       <FilterSelect label="Tasks" options={TASK_FILTERS} value={view.filter} onchange={(f: TaskFilter) => store.setFilter(f)} testid="task-filter" />
     </div>
 
-    {#if rows.length === 0}
+    {#if rows.length === 0 && needsRows.length === 0}
       <p class="rounded-md border border-dashed border-border px-4 py-8 text-center text-text-muted" data-testid="no-tasks">No tasks match this filter.</p>
+    {:else if rows.length === 0}
+      <p class="text-sm text-text-muted" data-testid="no-other-tasks">No other tasks match this filter.</p>
     {:else}
       <!-- One table: from 768 px a dense table, below it each row is a card. -->
       <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">

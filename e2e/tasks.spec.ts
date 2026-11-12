@@ -12,7 +12,8 @@ const viewports = [
 ] as const;
 
 const taskRow = (page: Page, ref: string) => page.locator(`[data-testid=task-row][data-ref=${ref}]`);
-const shownRefs = (page: Page) => page.getByTestId('task-ref').allTextContents();
+// Every task the view lists: the ones in Needs attention above the table, then the table's own (a task is in one of them).
+const shownRefs = async (page: Page) => [...(await page.getByTestId('needs-ref').allTextContents()), ...(await page.getByTestId('task-ref').allTextContents())];
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'New task' });
 
 async function post(api: APIRequestContext, path: string, data: object, status: number) {

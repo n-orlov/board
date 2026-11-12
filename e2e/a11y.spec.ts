@@ -83,7 +83,7 @@ const states: State[] = [
     name: 'Initiative page',
     open: async (page) => {
       await page.getByTestId('initiative-row').locator('[data-testid=initiative-link]').getByText('Accessibility').click();
-      await expect(page.getByTestId('task-row')).toHaveCount(1);
+      await expect(page.locator('[data-testid=task-row], [data-testid=needs-row]')).toHaveCount(1); // the task is in Needs attention or the table
       await expect(page.getByTestId('initiative-description').getByRole('link')).toHaveCount(1);
     },
   },
@@ -107,14 +107,14 @@ const states: State[] = [
     name: 'Tasks view',
     open: async (page) => {
       await page.goto('/#/tasks?initiative=e2e-a11y');
-      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      await expect(page.locator('[data-testid=task-row], [data-testid=needs-row]').first()).toBeVisible();
     },
   },
   {
     name: 'Tasks view with the Now panel open and a conflict',
     open: async (page) => {
       await page.goto('/#/tasks?initiative=e2e-a11y');
-      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      await expect(page.locator('[data-testid=task-row], [data-testid=needs-row]').first()).toBeVisible();
       const toggle = page.getByTestId('now-toggle');
       if (await toggle.isVisible()) await toggle.click();
       await expect(page.locator('[data-testid=now-conflict][data-resource="repo:a11y"]')).toBeVisible();
@@ -124,7 +124,7 @@ const states: State[] = [
     name: 'new-task sheet',
     open: async (page) => {
       await page.goto('/#/tasks?initiative=e2e-a11y');
-      await expect(page.getByTestId('task-row').first()).toBeVisible();
+      await expect(page.locator('[data-testid=task-row], [data-testid=needs-row]').first()).toBeVisible();
       await page.getByRole('button', { name: 'New task' }).locator('visible=true').click();
       const dialog = page.getByRole('dialog', { name: 'New task' });
       await expect(dialog).toBeVisible();
@@ -333,14 +333,14 @@ const PHASE1_STATES: Phase1State[] = [
     name: 'view #/tasks',
     open: async (page, seed) => {
       await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
-      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
     },
   },
   {
     name: 'view #/i/<slug>',
     open: async (page, seed) => {
       await initiativePage(page);
-      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
     },
   },
   { name: 'view #/t/<ref>', open: taskPage },
@@ -364,7 +364,7 @@ const PHASE1_STATES: Phase1State[] = [
     name: 'dialog new task',
     open: async (page, seed) => {
       await page.goto(`/#/tasks?initiative=${P1_SLUG}`);
-      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
       await button(page, 'New task').click();
       const dialog = await openDialog(page, 'New task');
       await dialog.getByLabel('Kind').selectOption('watch'); // the longest form: the cadence field shows
@@ -480,7 +480,9 @@ async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL:
   return { ask, doneTask, watch, note: onTask };
 }
 
-const attentionItem = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
+// The item that names `text` as a whole ref: `A1` is not `A11`, nor the "A11" inside "A11y" or "e2e-a11y-p2-1" inside "...-p2-10".
+const attentionItem = (page: Page, text: string) =>
+  page.getByTestId('attention-item').filter({ hasText: new RegExp(`(?<![\\w-])${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`) });
 
 const openAttention = async (page: Page, seed: Seed2) => {
   await page.goto(`/#/attention?initiative=${P2_SLUG}`);

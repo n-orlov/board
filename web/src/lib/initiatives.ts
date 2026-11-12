@@ -7,6 +7,7 @@ import { errorText, Fetches } from './fetches';
 import type { components } from './api/schema';
 import { problemText } from './keys';
 import { DEFAULT_INITIATIVE_FILTER, initiativeStatusParam, type InitiativeFilter } from './initiativeFilters';
+import { readNeeds, type NeedsAttention, type TaskList } from './needsAttention';
 import type { Browser } from './session';
 
 export type Initiative = components['schemas']['Initiative'];
@@ -143,6 +144,14 @@ export class InitiativesApi {
       after = page.next_after;
     } while (after !== undefined);
     return items;
+  }
+
+  /** The Needs attention section for a `GET /tasks` query: the first 200 tasks that need a person and how many more there are. */
+  needs(query: URLSearchParams): Promise<NeedsAttention> {
+    return readNeeds(async (page) => {
+      const response = await this.call(`/api/v1/tasks?${page.toString()}`, 'Listing the tasks that need attention', { headers: { Accept: 'application/json' } });
+      return (await response.json()) as TaskList;
+    }, query);
   }
 
   private async write(path: string, what: string, method: 'PATCH' | 'POST', body?: object): Promise<Initiative> {

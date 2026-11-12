@@ -7,7 +7,7 @@ export type TaskStatusFilter = TaskFilter | 'open';
 export type TaskKindFilter = '' | 'work' | 'watch';
 /** A yes/no flag filter: '' keeps both, 'yes' keeps the tasks with the flag, 'no' those without. */
 export type FlagFilter = '' | 'yes' | 'no';
-export type FlagName = 'active' | 'blocked' | 'overdue';
+export type FlagName = 'active' | 'blocked' | 'overdue' | 'attention';
 
 export interface TasksFilter {
   status: TaskStatusFilter;
@@ -17,6 +17,8 @@ export interface TasksFilter {
   active: FlagFilter;
   blocked: FlagFilter;
   overdue: FlagFilter;
+  /** 'yes' keeps the tasks that need a person (stranded, asking, done and not closed), 'no' those that do not. */
+  attention: FlagFilter;
   /** The text the title or description contains; empty for no search. */
   text: string;
 }
@@ -28,6 +30,7 @@ export const DEFAULT_TASKS_FILTER: TasksFilter = {
   active: '',
   blocked: '',
   overdue: '',
+  attention: '',
   text: '',
 };
 
@@ -61,7 +64,14 @@ export function flagOptions(noun: string): readonly { value: FlagFilter; label: 
   ];
 }
 
-const FLAGS: readonly FlagName[] = ['active', 'blocked', 'overdue'];
+/** The options of the attention select: the tasks that need a person, or the ones that do not. */
+export const ATTENTION_OPTIONS: readonly { value: FlagFilter; label: string }[] = [
+  { value: '', label: 'Any' },
+  { value: 'yes', label: 'Needs attention' },
+  { value: 'no', label: 'Needs nothing' },
+];
+
+const FLAGS: readonly FlagName[] = ['active', 'blocked', 'overdue', 'attention'];
 
 function pick<T extends string>(allowed: readonly { value: T }[], raw: string | null, fallback: T): T {
   return allowed.find((o) => o.value === raw)?.value ?? fallback;
@@ -86,6 +96,7 @@ export function filterFromQuery(query: string): TasksFilter {
     active: flagFromParam(params.get('active')),
     blocked: flagFromParam(params.get('blocked')),
     overdue: flagFromParam(params.get('overdue')),
+    attention: flagFromParam(params.get('attention')),
     text: params.get('q') ?? '',
   };
 }
@@ -130,4 +141,20 @@ export function apiQuery(filter: TasksFilter): URLSearchParams {
 /** Whether any field differs from the default (the view offers "clear filters" then). */
 export function isFiltered(filter: TasksFilter): boolean {
   return filterToQuery(filter) !== '';
+}
+
+/**
+ * The query of the Needs attention section for a filter: the same filters with `attention=true` (the section then adds the
+ * limit), or `null` when the filter keeps only tasks that need nothing, which the section cannot hold.
+ */
+export function needsFilterQuery(filter: TasksFilter): URLSearchParams | null {
+  if (filter.attention === 'no') return null;
+  const params = apiQuery(filter);
+  params.set('attention', 'true');
+  return params;
+}
+
+/** The fragment of the Tasks view filtered to the tasks that need attention (what `+K more` links to). */
+export function attentionHref(filter: TasksFilter): string {
+  return tasksHash({ ...filter, attention: 'yes' });
 }

@@ -2532,6 +2532,20 @@ out and was not acknowledged"); `asking` is labelled "waiting on you", with " ·
 closed". `orderNeedsAttention(tasks)` returns the Needs attention order without changing its input: stranded, then asking with a
 blocking ask first, then asking, then done, each group by `updated_at` newest first; a task with several reasons is in the group of
 its first reason, and equal keys keep their input order. It is the same order `board task ls` uses (§8.3).
+**The Needs attention section** (R2, `web/src/lib/needsAttention.ts`, `NeedsAttention.svelte`). The Tasks view and the initiative page
+show a Needs attention section above their tasks table. Each reads `GET /tasks` under the filters of its own view (the Tasks view's
+filters; the initiative page's initiative and task filter) with `attention=true` and `limit=200`, and orders the answer with
+`orderNeedsAttention`. A Tasks view whose Attention filter is "Needs nothing" (`attention=false` in the fragment) has no such tasks, so
+its section is empty without a request. The Attention filter is a select on the Tasks view: Any, Needs attention (`attention=true`),
+Needs nothing (`attention=false`). The section is a list of cards (one layout at every width) headed "Needs attention (N)", each card
+with the task ref (a link to its page), its initiative on the Tasks view, its title, one badge per attention reason (§ Attention
+badges above; the text is visible and the accessible name spelled out) followed by the task's own active, blocked and overdue flags,
+and its lease holder. A task shown in the section is not repeated in the table below, which lists the other tasks that match the
+filters. The section is not rendered at all when it is empty. Beyond 200 tasks a "+K more" link, K counted by following the API's
+`next_after`, goes to the Tasks view filtered by `attention=true` (with the view's filters, and the initiative's slug on the initiative
+page), where the table lists the tasks past the 200. A live event that names a task refreshes the section in place (no skeleton, no
+reload), so an answered ask or a closed task leaves it within a moment. A failed read keeps the section it had and says why in an
+inline alert.
 **Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
 the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
 `modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a

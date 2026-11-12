@@ -6,7 +6,9 @@ import { errorText } from './fetches';
 import { DEFAULT_TASK_FILTER, filterTasks, type TaskFilter } from './initiativeFilters';
 import type { Initiative, InitiativeEdit, InitiativesApi, TaskListItem } from './initiatives';
 import { toPatch } from './initiatives';
+import { attentionBadges, type AttentionBadge } from './attention';
 import type { Tone } from './presentation';
+import { DEFAULT_TASKS_FILTER, attentionHref, needsFilterQuery } from './taskFilters';
 
 /** How many of the tasks are in each status. */
 export function taskCounts(tasks: readonly { status: string }[]): TaskCounts {
@@ -66,6 +68,8 @@ export interface TaskRow {
   kind: string;
   status: string;
   badges: TaskBadge[];
+  /** Why the task needs a person, one badge per reason; empty when it needs nothing. */
+  attention: AttentionBadge[];
   holder: string;
 }
 
@@ -79,6 +83,7 @@ export function taskRows(tasks: readonly TaskListItem[], filter: TaskFilter): Ta
     kind: task.kind,
     status: task.status,
     badges: taskBadges(task),
+    attention: attentionBadges(task.attention),
     holder: leaseHolder(task),
   }));
 }
@@ -177,4 +182,19 @@ export class InitiativePageStore {
 /** The live-event predicate of the page of initiative `slug`: events that name that initiative (its tasks, leases, asks, notes). */
 export function concerns(slug: string): (event: { initiative?: string }) => boolean {
   return (event) => event.initiative === slug;
+}
+
+/** The Tasks view's filter that matches the initiative page's task filter on initiative `slug`. */
+function tasksFilterOf(slug: string, filter: TaskFilter) {
+  return { ...DEFAULT_TASKS_FILTER, initiative: slug, status: filter };
+}
+
+/** The query of the page's Needs attention section: its initiative's tasks under the page's task filter, with `attention=true`. */
+export function pageNeedsQuery(slug: string, filter: TaskFilter): URLSearchParams {
+  return needsFilterQuery(tasksFilterOf(slug, filter))!;
+}
+
+/** The fragment of the Tasks view that lists the initiative's tasks that need attention (what `+K more` links to). */
+export function pageNeedsHref(slug: string, filter: TaskFilter): string {
+  return attentionHref(tasksFilterOf(slug, filter));
 }

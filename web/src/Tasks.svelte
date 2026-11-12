@@ -1,21 +1,26 @@
 <script lang="ts">
   import { taskHref } from './lib/taskPage';
   import FilterSelect from './FilterSelect.svelte';
+  import NeedsAttention from './NeedsAttention.svelte';
   import NewTaskDialog from './NewTaskDialog.svelte';
   import NowPanel from './NowPanel.svelte';
   import Toast from './Toast.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { taskRows } from './lib/initiativePage';
+  import { NO_NEEDS, NeedsStore, withoutNeeds, type NeedsState } from './lib/needsAttention';
   import { toneClasses } from './lib/presentation';
   import { currentBrowser } from './lib/session';
   import {
+    ATTENTION_OPTIONS,
     DEFAULT_TASKS_FILTER,
     KIND_OPTIONS,
     STATUS_OPTIONS,
+    attentionHref,
     filterFromHash,
     flagOptions,
     initiativeOptions,
     isFiltered,
+    needsFilterQuery,
     tasksHash,
     type FlagName,
     type TasksFilter,
@@ -32,38 +37,50 @@
   let formOpen = $state(false);
   let toast = $state('');
 
-  const store = new TasksStore(new TasksApi(browser, () => csrf), (s) => (view = s), initial);
+  const api = new TasksApi(browser, () => csrf);
+  const store = new TasksStore(api, (s) => (view = s), initial);
+  let needsView: NeedsState = $state({ needs: NO_NEEDS, error: undefined });
+  const needsStore = new NeedsStore((query) => api.needs(query), (s) => (needsView = s));
+  // The section reads under the same filters as the table, plus attention=true; the table below it holds the other tasks.
+  const reloadNeeds = () => needsStore.load(needsFilterQuery(view.filter));
 
   $effect(() => {
     void store.load();
+    void needsStore.load(needsFilterQuery(initial));
     void new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => (initiatives = list.map((i) => i.slug)))
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
     // A change elsewhere refreshes the rows in place under the filter shown: no skeleton, so scroll and an open dialog stay.
-    return live().subscribe(affectsTasks, () => store.refresh());
+    return live().subscribe(affectsTasks, () => Promise.all([store.refresh(), reloadNeeds()]));
   });
 
   // The filter lives in the fragment: a change rewrites it in place (no history entry per choice) and fetches.
   function apply(filter: TasksFilter) {
     window.history.replaceState(null, '', tasksHash(filter));
     void store.setFilter(filter);
+    void reloadNeeds();
   }
 
   // The fragment edited by hand, or the back button after a link with another query.
   function hashChanged() {
     const filter = filterFromHash(window.location.hash);
-    if (tasksHash(filter) !== tasksHash(view.filter)) void store.setFilter(filter);
+    if (tasksHash(filter) === tasksHash(view.filter)) return;
+    void store.setFilter(filter);
+    void reloadNeeds();
   }
 
   const setFlag = (name: FlagName, value: string) => apply({ ...view.filter, [name]: value });
-  const rows = $derived(taskRows(view.tasks, 'all'));
-  const empty = $derived(!view.loading && view.error === undefined && rows.length === 0);
+  const needs = $derived(needsView.needs);
+  const needsRows = $derived(taskRows(needs.items, 'all'));
+  const rows = $derived(taskRows(withoutNeeds(view.tasks, needs), 'all'));
+  const empty = $derived(!view.loading && view.error === undefined && rows.length === 0 && needsRows.length === 0);
 
   function created(ref: string) {
     formOpen = false;
     toast = `Task ${ref} created`;
     void store.load();
+    void reloadNeeds();
   }
 
   const primary = 'min-h-11 rounded-md border border-accent bg-surface-raised px-4 text-sm font-medium text-accent';
@@ -89,6 +106,7 @@
     <FilterSelect label="Active" options={flagOptions('active')} value={view.filter.active} onchange={(v) => setFlag('active', v)} testid="active-filter" />
     <FilterSelect label="Blocked" options={flagOptions('blocked')} value={view.filter.blocked} onchange={(v) => setFlag('blocked', v)} testid="blocked-filter" />
     <FilterSelect label="Overdue" options={flagOptions('overdue')} value={view.filter.overdue} onchange={(v) => setFlag('overdue', v)} testid="overdue-filter" />
+    <FilterSelect label="Attention" options={ATTENTION_OPTIONS} value={view.filter.attention} onchange={(v) => setFlag('attention', v)} testid="attention-filter" />
     <label class="flex items-center gap-2 text-sm text-text-muted">
       <span>Search</span>
       <input
@@ -106,6 +124,14 @@
 
   {#if view.error !== undefined}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
+  {/if}
+
+  {#if needsView.error !== undefined}
+    <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="needs-error">{needsView.error}</p>
+  {/if}
+
+  {#if !view.loading}
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={attentionHref(view.filter)} showInitiative />
   {/if}
 
   {#if view.loading}

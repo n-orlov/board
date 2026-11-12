@@ -87,7 +87,10 @@ for (const vp of viewports) {
       await expect(row).toContainText('open');
 
       await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
-      await expect(row).toContainText('done', FIVE_SECONDS);
+      // A done task needs closing, so it moves from the table into Needs attention above it, with its badge.
+      const needs = page.getByTestId('needs-row').filter({ hasText: 'Added through the API' });
+      await expect(needs.getByTestId('attention-done')).toContainText('done, not closed', FIVE_SECONDS);
+      await expect(row).toBeHidden(FIVE_SECONDS);
 
       const patched = await api.patch(`/api/v1/initiatives/${slug}`, { data: { title: `Renamed ${vp.name}` } });
       expect(patched.status(), await patched.text()).toBe(200);
@@ -129,7 +132,10 @@ for (const vp of viewports) {
       await expect(row.getByTestId('task-status')).toHaveText('open');
 
       await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
-      await expect(row.getByTestId('task-status')).toHaveText('done', FIVE_SECONDS);
+      // A done task needs closing, so it moves from the table into Needs attention above it, with its badge.
+      const needs = page.locator(`[data-testid="needs-row"][data-ref="${ref}"]`);
+      await expect(needs.getByTestId('attention-done')).toContainText('done, not closed', FIVE_SECONDS);
+      await expect(row).toBeHidden(FIVE_SECONDS);
       expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
     });
 

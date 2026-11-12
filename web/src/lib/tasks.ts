@@ -9,6 +9,7 @@ import { InitiativesApi, InitiativesError, type InitiativeListItem, type TaskLis
 import { toTaskCreate, type NewTaskForm, type TaskCreate } from './newTask';
 import { apiQuery, DEFAULT_TASKS_FILTER, type TasksFilter } from './taskFilters';
 import type { Ask } from './asks';
+import { readNeeds, type NeedsAttention, type TaskList } from './needsAttention';
 import type { Note, NotePost } from './notes';
 import type { Browser } from './session';
 
@@ -55,6 +56,14 @@ export class TasksApi {
       after = body.next_after;
     } while (after !== undefined);
     return items;
+  }
+
+  /** The Needs attention section for a `GET /tasks` query: the first 200 tasks that need a person and how many more there are. */
+  needs(query: URLSearchParams): Promise<NeedsAttention> {
+    return readNeeds(async (page) => {
+      const response = await this.call(`/api/v1/tasks?${page.toString()}`, 'Listing the tasks that need attention', { headers: { Accept: 'application/json' } });
+      return (await response.json()) as TaskList;
+    }, query);
   }
 
   /** The tasks a filter keeps, across initiatives. */

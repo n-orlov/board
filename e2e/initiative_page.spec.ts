@@ -12,7 +12,10 @@ const viewports = [
 
 const row = (page: Page, slug: string) => page.locator(`[data-testid=initiative-row][data-slug=${slug}]`);
 const taskRow = (page: Page, ref: string) => page.locator(`[data-testid=task-row][data-ref=${ref}]`);
-const shownRefs = (page: Page) => page.getByTestId('task-ref').allTextContents();
+// A task's row wherever the page lists it: in the table, or in Needs attention above it.
+const listedRow = (page: Page, ref: string) => page.locator(`[data-testid=task-row][data-ref=${ref}], [data-testid=needs-row][data-ref=${ref}]`);
+// Every task the view lists: the ones in Needs attention above the table, then the table's own (a task is in one of them).
+const shownRefs = async (page: Page) => [...(await page.getByTestId('needs-ref').allTextContents()), ...(await page.getByTestId('task-ref').allTextContents())];
 
 async function post(api: APIRequestContext, path: string, data: object, status: number) {
   const response = await api.post(path, { data });
@@ -110,7 +113,7 @@ for (const vp of viewports) {
 
       // The tasks table starts on "not closed": open and done tasks.
       await expect(page.getByTestId('task-filter')).toHaveValue('not-closed');
-      await expect(page.getByTestId('task-row')).toHaveCount(3);
+      await expect.poll(async () => (await shownRefs(page)).length).toBe(3); // the done task is in Needs attention, the others in the table
       const leased = taskRow(page, seeded.leased);
       await expect(leased.getByTestId('task-title')).toHaveText('Leased work');
       await expect(leased.getByTestId('task-kind')).toHaveText('work');
@@ -118,7 +121,7 @@ for (const vp of viewports) {
       await expect(leased.getByTestId('flag-active')).toHaveText('active');
       await expect(leased.getByTestId('task-holder')).toHaveText('playwright');
       await expect(taskRow(page, seeded.blocked).getByTestId('flag-blocked')).toHaveText('blocked');
-      await expect(taskRow(page, seeded.done).getByTestId('task-status')).toHaveText('done');
+      await expect(page.locator(`[data-testid=needs-row][data-ref=${seeded.done}]`).getByTestId('attention-done')).toContainText('done, not closed');
       await expect(taskRow(page, seeded.dropped)).toHaveCount(0);
 
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({
@@ -146,7 +149,7 @@ for (const vp of viewports) {
         'all',
       ]);
 
-      await expect(page.getByTestId('task-row')).toHaveCount(3);
+      await expect.poll(async () => (await shownRefs(page)).length).toBe(3);
       expect((await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.blocked].sort());
 
       await filter.selectOption('done');
@@ -157,7 +160,7 @@ for (const vp of viewports) {
       await filter.selectOption('all');
       expect((await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.dropped, seeded.blocked].sort());
       await filter.selectOption('not-closed');
-      await expect(page.getByTestId('task-row')).toHaveCount(3);
+      await expect.poll(async () => (await shownRefs(page)).length).toBe(3);
       // The counts above the table do not follow the filter.
       await expect(page.getByTestId('count-closed')).toHaveText('1 closed');
     });
@@ -395,7 +398,7 @@ for (const vp of viewports) {
       await expect(other.getByTestId('ask-question')).toHaveText('Ship on Friday?');
       await expect(other.getByTestId('ask-task')).toHaveCount(0);
       await expect(page.locator(`[data-testid=ask][data-ref=${settled}]`)).toHaveCount(0);
-      await expect(taskRow(page, task).getByTestId('flag-blocked')).toHaveText('blocked');
+      await expect(listedRow(page, task).getByTestId('flag-blocked')).toHaveText('blocked');
 
       await one.getByRole('button', { name: `Answer ${onTask}` }).click();
       const answer = dialog(page, 'Answer ask');
@@ -404,7 +407,8 @@ for (const vp of viewports) {
       await expect(answer).toHaveCount(0);
       await expect(page.getByTestId('toast')).toContainText(`Answered ${onTask}`);
       await expect(asks).toHaveCount(1);
-      await expect(taskRow(page, task).getByTestId('flag-blocked')).toHaveCount(0);
+      await expect(listedRow(page, task).getByTestId('flag-blocked')).toHaveCount(0);
+      await expect(listedRow(page, task)).toHaveCount(1);
 
       await other.getByRole('button', { name: `Withdraw ${onInitiative}` }).click();
       const withdraw = dialog(page, 'Withdraw ask');
