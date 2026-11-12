@@ -120,75 +120,86 @@
   const headingRow = 'mb-2 mt-6 flex flex-wrap items-center justify-between gap-2';
 </script>
 
-<section aria-labelledby="task-heading" class="pb-20 md:pb-0" data-testid="task-page">
-  <div class="flex flex-wrap items-center gap-x-6">
-    <a class={back} href="#/tasks" data-testid="back-link">← Tasks</a>
-    {#if view.task !== undefined}
-      <a class={back} href="#/i/{view.task.initiative}" data-testid="task-initiative">{view.task.initiative}</a>
+<section
+  aria-labelledby="task-heading"
+  class="mx-auto w-full max-w-[2560px] pb-20 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
+  data-testid="task-page"
+>
+  <div class="min-w-0 2xl:col-start-1 2xl:row-start-1">
+    <div class="flex flex-wrap items-center gap-x-6">
+      <a class={back} href="#/tasks" data-testid="back-link">← Tasks</a>
+      {#if view.task !== undefined}
+        <a class={back} href="#/i/{view.task.initiative}" data-testid="task-initiative">{view.task.initiative}</a>
+      {/if}
+    </div>
+
+    {#if view.error !== undefined}
+      <p role="alert" class="my-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
     {/if}
+
+    {#if view.loading}
+      <div aria-busy="true" class="mt-4 flex flex-col gap-3" data-testid="task-skeleton">
+        <span class="sr-only">Loading task…</span>
+        <div class="h-6 w-2/3 animate-pulse rounded-md bg-border"></div>
+        <div class="h-4 w-1/3 animate-pulse rounded-md bg-border"></div>
+      </div>
+    {:else if view.task !== undefined && actions !== undefined}
+      {@const task = view.task}
+      <header class="mb-4">
+        <code class="wrap-anywhere font-mono text-sm text-text-muted" data-testid="task-ref">{task.ref}</code>
+        <h2 id="task-heading" class="wrap-anywhere text-xl font-bold" data-testid="task-title">{task.title}</h2>
+        <div class="mt-1 flex flex-wrap items-center gap-2">
+          <span class="{badge} border-border text-text-muted" data-testid="task-status">{task.status}</span>
+          {#if task.resolution !== undefined}
+            <span class="{badge} border-border text-text-muted" data-testid="task-resolution">{task.resolution}</span>
+          {/if}
+          <span class="text-sm text-text-muted" data-testid="task-kind">{kindText(task)}</span>
+          {#each attentionBadges(task.attention) as badge_ (badge_.reason)}
+            <span class="{badge} {toneClasses(badge_.tone)}" role="img" aria-label={badge_.name} data-testid="attention-{badge_.reason}">{badge_.label}</span>
+          {/each}
+          {#each taskBadges(task) as flag (flag.key)}
+            <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
+          {/each}
+        </div>
+        {#each reasons as reason (reason)}
+          <p class="mt-1 text-sm text-warning wrap-anywhere" data-testid="blocked-reason">{reason}</p>
+        {/each}
+        <p class="mt-2 text-sm text-text-muted">
+          Created <time datetime={task.created_at} title={absoluteTime(task.created_at)}>{relativeTime(task.created_at, now)}</time> by {task.created_by}
+        </p>
+
+        {#if view.actionError !== undefined && dialog === undefined}
+          <p role="alert" class="mt-3 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="action-error">{view.actionError}</p>
+        {/if}
+
+        <!-- On the phone the main actions sit in a bar above the tab bar; from 768 px they are part of the header. -->
+        <div
+          class="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 flex gap-2 border-t border-border bg-surface-raised p-2 md:static md:mt-3 md:flex-wrap md:border-0 md:bg-transparent md:p-0"
+          role="group"
+          aria-label="Task actions"
+          data-testid="task-actions"
+        >
+          {#if actions.edit}
+            <button type="button" class={action} onclick={() => openEdit(toTaskEditForm(task))}>Edit</button>
+          {/if}
+          {#if actions.done}
+            <button type="button" class="{action} border-accent text-accent" onclick={pressDone}>Done</button>
+          {/if}
+          {#if actions.reopen}
+            <button type="button" class={action} onclick={reopen}>Reopen</button>
+          {/if}
+          {#if actions.close}
+            <button type="button" class={action} onclick={openClose}>Close</button>
+          {/if}
+        </div>
+      </header>
+  {/if}
   </div>
 
-  {#if view.error !== undefined}
-    <p role="alert" class="my-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
-  {/if}
-
-  {#if view.loading}
-    <div aria-busy="true" class="mt-4 flex flex-col gap-3" data-testid="task-skeleton">
-      <span class="sr-only">Loading task…</span>
-      <div class="h-6 w-2/3 animate-pulse rounded-md bg-border"></div>
-      <div class="h-4 w-1/3 animate-pulse rounded-md bg-border"></div>
-    </div>
-  {:else if view.task !== undefined && actions !== undefined}
+  {#if view.task !== undefined && actions !== undefined}
     {@const task = view.task}
-    <header class="mb-4">
-      <code class="wrap-anywhere font-mono text-sm text-text-muted" data-testid="task-ref">{task.ref}</code>
-      <h2 id="task-heading" class="wrap-anywhere text-xl font-bold" data-testid="task-title">{task.title}</h2>
-      <div class="mt-1 flex flex-wrap items-center gap-2">
-        <span class="{badge} border-border text-text-muted" data-testid="task-status">{task.status}</span>
-        {#if task.resolution !== undefined}
-          <span class="{badge} border-border text-text-muted" data-testid="task-resolution">{task.resolution}</span>
-        {/if}
-        <span class="text-sm text-text-muted" data-testid="task-kind">{kindText(task)}</span>
-        {#each attentionBadges(task.attention) as badge_ (badge_.reason)}
-          <span class="{badge} {toneClasses(badge_.tone)}" role="img" aria-label={badge_.name} data-testid="attention-{badge_.reason}">{badge_.label}</span>
-        {/each}
-        {#each taskBadges(task) as flag (flag.key)}
-          <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
-        {/each}
-      </div>
-      {#each reasons as reason (reason)}
-        <p class="mt-1 text-sm text-warning wrap-anywhere" data-testid="blocked-reason">{reason}</p>
-      {/each}
-      <p class="mt-2 text-sm text-text-muted">
-        Created <time datetime={task.created_at} title={absoluteTime(task.created_at)}>{relativeTime(task.created_at, now)}</time> by {task.created_by}
-      </p>
-
-      {#if view.actionError !== undefined && dialog === undefined}
-        <p role="alert" class="mt-3 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="action-error">{view.actionError}</p>
-      {/if}
-
-      <!-- On the phone the main actions sit in a bar above the tab bar; from 768 px they are part of the header. -->
-      <div
-        class="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 flex gap-2 border-t border-border bg-surface-raised p-2 md:static md:mt-3 md:flex-wrap md:border-0 md:bg-transparent md:p-0"
-        role="group"
-        aria-label="Task actions"
-        data-testid="task-actions"
-      >
-        {#if actions.edit}
-          <button type="button" class={action} onclick={() => openEdit(toTaskEditForm(task))}>Edit</button>
-        {/if}
-        {#if actions.done}
-          <button type="button" class="{action} border-accent text-accent" onclick={pressDone}>Done</button>
-        {/if}
-        {#if actions.reopen}
-          <button type="button" class={action} onclick={reopen}>Reopen</button>
-        {/if}
-        {#if actions.close}
-          <button type="button" class={action} onclick={openClose}>Close</button>
-        {/if}
-      </div>
-    </header>
-
+    <!-- The side column (2xl): what needs doing now. Below 1536 px it sits under the header, in flow. -->
+    <aside aria-label="Leases and asks" class="mt-4 min-w-0 2xl:sticky 2xl:top-6 2xl:col-start-2 2xl:row-span-2 2xl:row-start-1 2xl:mt-0 2xl:max-h-[calc(100vh-3rem)] 2xl:self-start 2xl:overflow-y-auto" data-testid="task-side">
     {#if stranded !== undefined}
       <section class="mb-4 rounded-md border border-warning p-3 text-sm wrap-anywhere" aria-labelledby="stranded-heading" data-testid="stranded-panel" data-lease={stranded.lease}>
         <h3 id="stranded-heading" class="text-lg font-bold">Stranded</h3>
@@ -223,6 +234,67 @@
       </section>
     {/if}
 
+    <section data-testid="live-leases-section">
+      <div class={headingRow}><h3 class={heading}>Live leases</h3></div>
+      {#if leases.length === 0}
+        <p class="text-sm text-text-muted" data-testid="no-leases">No live lease.</p>
+      {:else}
+        <ul class="flex flex-col gap-2" data-testid="task-leases">
+          {#each leases as lease (lease.ref)}
+            <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="lease" data-ref={lease.ref}>
+              <p><span class="font-medium" data-testid="lease-holder">{lease.holder}</span> <span class="text-text-muted" data-testid="lease-ref">{lease.ref}</span></p>
+              <p data-testid="lease-intent">{lease.intent}</p>
+              {#if lease.resources !== ''}<p class="font-mono text-text-muted" data-testid="lease-resources">{lease.resources}</p>{/if}
+              <p class="text-text-muted" data-testid="lease-expires">{lease.expires}</p>
+              <button type="button" class="{small} mt-2" aria-label="End lease {lease.ref}" onclick={() => openNote({ endLease: lease.ref })}>End lease</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if conflicts.length > 0}
+      <div class={headingRow}><h3 class={heading}>Conflicts</h3></div>
+      <ul class="flex flex-col gap-2" data-testid="task-conflicts">
+        {#each conflicts as conflict (conflict.resource)}
+          <li class="rounded-md border border-warning p-3 text-sm wrap-anywhere" data-testid="conflict" data-resource={conflict.resource}>
+            <p data-testid="conflict-text">{taskConflictText(conflict)}</p>
+            <p class="flex flex-wrap gap-x-3">
+              {#each conflict.others as other (other.lease)}
+                <a class={link} href={taskHref(other.task)} data-testid="conflict-task" data-ref={other.task}>{other.task}</a>
+              {/each}
+            </p>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if expired.length > 0}
+      <div class={headingRow}><h3 class={heading}>Expired leases</h3></div>
+      <ul class="flex flex-col gap-2" data-testid="task-expired">
+        {#each expired as lease (lease.ref)}
+          <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="expired-lease" data-ref={lease.ref}>
+            <p><span class="font-medium">{lease.holder}</span> <span class="text-text-muted">{lease.ref}</span></p>
+            <p>{lease.intent}</p>
+            {#if lease.resources !== ''}<p class="font-mono text-text-muted">{lease.resources}</p>{/if}
+            <p class="text-text-muted" data-testid="expired-when">{lease.expired}</p>
+            <button type="button" class="{small} mt-2" aria-label="Acknowledge lease {lease.ref}" onclick={() => openNote({ ack: lease.ref })}>Acknowledge</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <section data-testid="asks-section">
+      <div class={headingRow}><h3 class={heading}>Asks</h3></div>
+      {#if asks.length === 0}
+        <p class="text-sm text-text-muted" data-testid="no-asks">No asks.</p>
+      {:else}
+        <AskList {asks} testid="task-asks" onanswer={(ask) => openNote({ answer: ask })} onwithdraw={(askRef) => openNote({ withdraw: askRef })} />
+      {/if}
+    </section>
+    </aside>
+
+    <div class="min-w-0 2xl:col-start-1 2xl:row-start-2" data-testid="task-main">
     {#if task.description !== ''}
       <!-- renderMarkdown escapes the source first and writes only its own markup (lib/markdown.ts). -->
       <div class="description wrap-anywhere" data-testid="task-description">{@html renderMarkdown(task.description)}</div>
@@ -288,13 +360,6 @@
       </ul>
     {/if}
 
-    <div class={headingRow}><h3 class={heading}>Asks</h3></div>
-    {#if asks.length === 0}
-      <p class="text-sm text-text-muted" data-testid="no-asks">No asks.</p>
-    {:else}
-      <AskList {asks} testid="task-asks" onanswer={(ask) => openNote({ answer: ask })} onwithdraw={(askRef) => openNote({ withdraw: askRef })} />
-    {/if}
-
     <div class={headingRow}>
       <h3 class={heading}>Notes</h3>
       <button type="button" class={small} onclick={() => openNote('note')}>Post note</button>
@@ -305,76 +370,31 @@
       <NoteList {notes} bodies={view.bodies} testid="task-notes" onexpand={(noteRef) => void store.loadBody(noteRef)} />
     {/if}
 
-    <div class={headingRow}><h3 class={heading}>Live leases</h3></div>
-    {#if leases.length === 0}
-      <p class="text-sm text-text-muted" data-testid="no-leases">No live lease.</p>
-    {:else}
-      <ul class="flex flex-col gap-2" data-testid="task-leases">
-        {#each leases as lease (lease.ref)}
-          <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="lease" data-ref={lease.ref}>
-            <p><span class="font-medium" data-testid="lease-holder">{lease.holder}</span> <span class="text-text-muted" data-testid="lease-ref">{lease.ref}</span></p>
-            <p data-testid="lease-intent">{lease.intent}</p>
-            {#if lease.resources !== ''}<p class="font-mono text-text-muted" data-testid="lease-resources">{lease.resources}</p>{/if}
-            <p class="text-text-muted" data-testid="lease-expires">{lease.expires}</p>
-            <button type="button" class="{small} mt-2" aria-label="End lease {lease.ref}" onclick={() => openNote({ endLease: lease.ref })}>End lease</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    {#if conflicts.length > 0}
-      <div class={headingRow}><h3 class={heading}>Conflicts</h3></div>
-      <ul class="flex flex-col gap-2" data-testid="task-conflicts">
-        {#each conflicts as conflict (conflict.resource)}
-          <li class="rounded-md border border-warning p-3 text-sm wrap-anywhere" data-testid="conflict" data-resource={conflict.resource}>
-            <p data-testid="conflict-text">{taskConflictText(conflict)}</p>
-            <p class="flex flex-wrap gap-x-3">
-              {#each conflict.others as other (other.lease)}
-                <a class={link} href={taskHref(other.task)} data-testid="conflict-task" data-ref={other.task}>{other.task}</a>
-              {/each}
-            </p>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    {#if expired.length > 0}
-      <div class={headingRow}><h3 class={heading}>Expired leases</h3></div>
-      <ul class="flex flex-col gap-2" data-testid="task-expired">
-        {#each expired as lease (lease.ref)}
-          <li class="rounded-md border border-border bg-surface-raised p-3 text-sm wrap-anywhere" data-testid="expired-lease" data-ref={lease.ref}>
-            <p><span class="font-medium">{lease.holder}</span> <span class="text-text-muted">{lease.ref}</span></p>
-            <p>{lease.intent}</p>
-            {#if lease.resources !== ''}<p class="font-mono text-text-muted">{lease.resources}</p>{/if}
-            <p class="text-text-muted" data-testid="expired-when">{lease.expired}</p>
-            <button type="button" class="{small} mt-2" aria-label="Acknowledge lease {lease.ref}" onclick={() => openNote({ ack: lease.ref })}>Acknowledge</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    <div class={headingRow}>
-      <h3 class={heading}>Timeline</h3>
-      <div class="flex gap-2">
-        <button type="button" class={small} onclick={() => openNote('milestone')}>Milestone</button>
-        {#if actions.recordCheck}<button type="button" class={small} onclick={() => openNote('check')}>Record check</button>{/if}
+    <section data-testid="timeline-section">
+      <div class={headingRow}>
+        <h3 class={heading}>Timeline</h3>
+        <div class="flex gap-2">
+          <button type="button" class={small} onclick={() => openNote('milestone')}>Milestone</button>
+          {#if actions.recordCheck}<button type="button" class={small} onclick={() => openNote('check')}>Record check</button>{/if}
+        </div>
       </div>
+      {#if timeline.length === 0}
+        <p class="text-sm text-text-muted" data-testid="no-events">No events.</p>
+      {:else}
+        <ol class="flex flex-col gap-2" data-testid="task-timeline">
+          {#each timeline as event (event.id)}
+            <li class="rounded-md border border-border p-3 text-sm wrap-anywhere" data-testid="event" data-type={event.type}>
+              <p data-testid="event-summary">{event.summary}</p>
+              <p class="text-text-muted">
+                <time datetime={event.at} title={event.title} data-testid="event-when">{event.when}</time> ·
+                <span data-testid="event-actor">{event.actor}</span> · <span class="font-mono">{event.type}</span>
+              </p>
+            </li>
+          {/each}
+        </ol>
+      {/if}
+    </section>
     </div>
-    {#if timeline.length === 0}
-      <p class="text-sm text-text-muted" data-testid="no-events">No events.</p>
-    {:else}
-      <ol class="flex flex-col gap-2" data-testid="task-timeline">
-        {#each timeline as event (event.id)}
-          <li class="rounded-md border border-border p-3 text-sm wrap-anywhere" data-testid="event" data-type={event.type}>
-            <p data-testid="event-summary">{event.summary}</p>
-            <p class="text-text-muted">
-              <time datetime={event.at} title={event.title} data-testid="event-when">{event.when}</time> ·
-              <span data-testid="event-actor">{event.actor}</span> · <span class="font-mono">{event.type}</span>
-            </p>
-          </li>
-        {/each}
-      </ol>
-    {/if}
   {/if}
 </section>
 
