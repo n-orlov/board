@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import InitiativeForm from './InitiativeForm.svelte';
@@ -6,21 +7,32 @@
   import { absoluteTime, relativeTime } from './lib/format';
   import { InitiativesApi, InitiativesStore, affectsInitiatives, attentionChip, orderInitiatives, type InitiativeForm as FormValues, type InitiativesState } from './lib/initiatives';
   import { countsText, leasesText } from './lib/counts';
-  import { INITIATIVE_FILTERS, emptyInitiativesText, type InitiativeFilter } from './lib/initiativeFilters';
+  import { DEFAULT_INITIATIVE_FILTER, INITIATIVE_FILTERS, emptyInitiativesText, type InitiativeFilter } from './lib/initiativeFilters';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
+  import { sortRows, type SortState } from './lib/tableSort';
+  import { INITIATIVES_VIEW, INITIATIVE_COLUMNS, INITIATIVE_SORT_LABELS, isCustomised, viewFromQuery, viewHash, viewToQuery, type InitiativesViewState } from './lib/initiativesView';
+  import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string } = $props();
 
-  let view: InitiativesState = $state({ initiatives: [], filter: 'open', loading: true, error: undefined, formError: undefined });
+  const viewEnv = currentViewEnv();
+  const queryOf = (hash: string) => (hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
+  // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  const opened = viewFromQuery(openView(viewEnv, INITIATIVES_VIEW, '#/initiatives', queryOf(window.location.hash)));
+  let sort: SortState = $state(opened.sort);
+  let view: InitiativesState = $state({ initiatives: [], filter: opened.filter, loading: true, error: undefined, formError: undefined });
   let formOpen = $state(false);
   let toast = $state('');
 
   const store = new InitiativesStore(new InitiativesApi(currentBrowser(), () => csrf), (s) => (view = s));
 
   $effect(() => {
-    void store.load();
+    // The store starts at the default filter: a restored one is set with its single fetch. Nothing reactive is read here.
+    void untrack(() => (opened.filter === DEFAULT_INITIATIVE_FILTER ? store.load() : store.setFilter(opened.filter)));
     // A change elsewhere refreshes the rows in place; a new fetch of the filter shown follows the store's own filter.
     return live().subscribe(affectsInitiatives, () => store.refresh());
   });
@@ -37,16 +49,49 @@
     }
   }
 
+  // The filter and the sort live in the fragment and in the saved query: a change rewrites it in place (no history entry per choice).
+  function persist(state: InitiativesViewState) {
+    window.history.replaceState(null, '', viewHash(state));
+    saveViewQuery(viewEnv.storage, INITIATIVES_VIEW, viewToQuery(state));
+  }
+
   function filterChanged(filter: InitiativeFilter) {
+    persist({ filter, sort });
     void store.setFilter(filter);
   }
 
+  // The sort only reorders the rows the view holds: no request.
+  function setSort(next: SortState) {
+    sort = next;
+    persist({ filter: view.filter, sort });
+  }
+
+  // Clear filters: the defaults, and nothing saved.
+  function clear() {
+    sort = null;
+    clearViewQuery(viewEnv.storage, INITIATIVES_VIEW);
+    window.history.replaceState(null, '', '#/initiatives');
+    void store.setFilter(DEFAULT_INITIATIVE_FILTER);
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare '#/initiatives' restores the saved query.
+  function hashChanged() {
+    const hash = window.location.hash;
+    if (hash !== '#/initiatives' && !hash.startsWith('#/initiatives?')) return;
+    const next = viewFromQuery(openView(viewEnv, INITIATIVES_VIEW, '#/initiatives', queryOf(hash)));
+    sort = next.sort;
+    if (next.filter !== view.filter) void store.setFilter(next.filter);
+  }
+
   const now = new Date();
-  const ordered = $derived(orderInitiatives(view.initiatives));
+  // The default order puts the initiatives with tasks that need a person first; a chosen sort replaces it.
+  const ordered = $derived(sortRows(orderInitiatives(view.initiatives), sort, INITIATIVE_COLUMNS));
   const empty = $derived(!view.loading && view.error === undefined && view.initiatives.length === 0);
   const primary = 'min-h-11 rounded-md border border-accent bg-surface-raised px-4 text-sm font-medium text-accent';
   const skeletonBar = 'h-4 animate-pulse rounded-md bg-border';
 </script>
+
+<svelte:window onhashchange={hashChanged} />
 
 <section aria-labelledby="initiatives-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
@@ -55,8 +100,12 @@
       <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={openForm}>New initiative</button>
     {/if}
   </div>
-  <div class="mb-4">
+  <div class="mb-4 flex flex-wrap items-end gap-3">
     <FilterSelect label="Status" options={INITIATIVE_FILTERS} value={view.filter} onchange={filterChanged} testid="initiative-filter" />
+    <SortSelect columns={INITIATIVE_SORT_LABELS} {sort} onsort={setSort} />
+    {#if isCustomised({ filter: view.filter, sort })}
+      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
+    {/if}
   </div>
 
   {#if view.error !== undefined}
@@ -84,11 +133,11 @@
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Title</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-24">Status</th>
+          <SortHeader column="title" label="Title" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted" />
+          <SortHeader column="status" label="Status" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-28" />
           <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/5">Tags</th>
           <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-44">Tasks</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-32">Created</th>
+          <SortHeader column="created" label="Created" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-32" />
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
