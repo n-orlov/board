@@ -287,3 +287,15 @@ export class InitiativesStore {
 export function affectsInitiatives(event: { type: string }): boolean {
   return !event.type.startsWith('note_') && !event.type.startsWith('key_');
 }
+
+/** The chip an initiative row shows for the tasks that need a person: absent at 0, else the count and its label. */
+export function attentionChip(initiative: Pick<InitiativeListItem, 'attention_count'>): { count: number; label: string } | undefined {
+  const count = initiative.attention_count;
+  if (count <= 0) return undefined;
+  return { count, label: count === 1 ? 'needs attention' : 'need attention' };
+}
+
+/** The list with the initiatives that have tasks needing attention first; each group keeps the order the server gave. The input is not changed. */
+export function orderInitiatives<T extends Pick<InitiativeListItem, 'attention_count'>>(initiatives: readonly T[]): T[] {
+  return [...initiatives.filter((i) => i.attention_count > 0), ...initiatives.filter((i) => i.attention_count <= 0)];
+}

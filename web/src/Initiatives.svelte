@@ -4,7 +4,7 @@
   import InitiativeForm from './InitiativeForm.svelte';
   import Toast from './Toast.svelte';
   import { absoluteTime, relativeTime } from './lib/format';
-  import { InitiativesApi, InitiativesStore, affectsInitiatives, type InitiativeForm as FormValues, type InitiativesState } from './lib/initiatives';
+  import { InitiativesApi, InitiativesStore, affectsInitiatives, attentionChip, orderInitiatives, type InitiativeForm as FormValues, type InitiativesState } from './lib/initiatives';
   import { countsText, leasesText } from './lib/counts';
   import { INITIATIVE_FILTERS, emptyInitiativesText, type InitiativeFilter } from './lib/initiativeFilters';
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
@@ -42,6 +42,7 @@
   }
 
   const now = new Date();
+  const ordered = $derived(orderInitiatives(view.initiatives));
   const empty = $derived(!view.loading && view.error === undefined && view.initiatives.length === 0);
   const primary = 'min-h-11 rounded-md border border-accent bg-surface-raised px-4 text-sm font-medium text-accent';
   const skeletonBar = 'h-4 animate-pulse rounded-md bg-border';
@@ -91,7 +92,7 @@
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
-        {#each view.initiatives as initiative (initiative.id)}
+        {#each ordered as initiative (initiative.id)}
           <tr
             data-testid="initiative-row"
             data-slug={initiative.slug}
@@ -105,6 +106,12 @@
               >
               <br />
               <code class="font-mono text-sm text-text-muted">{initiative.slug}</code>
+              {#if attentionChip(initiative) !== undefined}
+                {@const chip = attentionChip(initiative)!}
+                <span class="ml-2 inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses('warning')}" data-testid="initiative-attention"
+                  ><span data-testid="initiative-attention-count">{chip.count}</span> {chip.label}</span
+                >
+              {/if}
             </td>
             <td class="md:table-cell md:px-3 md:py-3" data-testid="initiative-status">
               <span class="inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses(initiativeTone(initiative.status))}">{initiative.status}</span>

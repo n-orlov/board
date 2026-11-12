@@ -2546,6 +2546,13 @@ filters. The section is not rendered at all when it is empty. Beyond 200 tasks a
 page), where the table lists the tasks past the 200. A live event that names a task refreshes the section in place (no skeleton, no
 reload), so an answered ask or a closed task leaves it within a moment. A failed read keeps the section it had and says why in an
 inline alert.
+**Attention on the Initiatives list** (R2, `attentionChip` and `orderInitiatives` in `web/src/lib/initiatives.ts`, `Initiatives.svelte`).
+An initiative whose `attention_count` (the number of its tasks with a non-empty `attention` list) is above zero shows a warning-tone chip
+under its title, "1 needs attention" or "N need attention" (the count in `data-testid="initiative-attention-count"`, the chip
+`initiative-attention`, visible text at every width); an initiative with a count of 0 has no chip. The list puts the initiatives with
+attention first and the others after them, each group in the order the server gave (creation order), so the Inbox moves down once
+another initiative needs a person. The chip and the order follow the live refresh of the list without a reload. `e2e/initiative_attention.spec.ts`
+checks both at phone and desktop.
 **Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
 the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
 `modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a

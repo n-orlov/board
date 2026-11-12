@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InitiativesApi, InitiativesError, InitiativesStore, affectsInitiatives, parseTags, toCreate, toEditForm, toPatch, type Initiative, type InitiativesState } from './initiatives';
+import { InitiativesApi, InitiativesError, InitiativesStore, affectsInitiatives, attentionChip, orderInitiatives, parseTags, toCreate, toEditForm, toPatch, type Initiative, type InitiativesState } from './initiatives';
 import type { Browser } from './session';
 
 const initiative = (slug: string, extra: Partial<Initiative> = {}): Initiative => ({
@@ -533,5 +533,27 @@ describe('affectsInitiatives', () => {
       expect(affectsInitiatives({ type }), type).toBe(true);
     }
     for (const type of ['note_posted', 'key_created', 'key_revoked']) expect(affectsInitiatives({ type }), type).toBe(false);
+  });
+});
+
+describe('attentionChip', () => {
+  it('is absent at zero and says how many need attention otherwise', () => {
+    expect(attentionChip({ attention_count: 0 })).toBeUndefined();
+    expect(attentionChip({ attention_count: 1 })).toEqual({ count: 1, label: 'needs attention' });
+    expect(attentionChip({ attention_count: 3 })).toEqual({ count: 3, label: 'need attention' });
+  });
+});
+
+describe('orderInitiatives', () => {
+  const row = (slug: string, attention_count: number) => ({ slug, attention_count });
+
+  it('puts the initiatives with attention first and keeps the given order inside each group', () => {
+    const input = [row('a', 0), row('b', 2), row('c', 0), row('d', 1), row('e', 5)];
+    expect(orderInitiatives(input).map((i) => i.slug)).toEqual(['b', 'd', 'e', 'a', 'c']);
+    expect(input.map((i) => i.slug)).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('leaves a list with no attention as it was', () => {
+    expect(orderInitiatives([row('a', 0), row('b', 0)]).map((i) => i.slug)).toEqual(['a', 'b']);
   });
 });
