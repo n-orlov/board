@@ -87,7 +87,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="attention-heading" class="pb-16 md:pb-0" data-testid="attention-view">
+<section aria-labelledby="attention-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="attention-view">
   <h2 id="attention-heading" class="mb-4 text-xl font-bold">Attention</h2>
 
   {#if choices.tags.length + choices.initiatives.length > 0}
@@ -141,10 +141,10 @@
     {/if}
   {:else}
     {@const data = view.attention}
-    <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-6 2xl:grid 2xl:grid-cols-2 2xl:items-start min-[144rem]:grid-cols-3" data-testid="attention-sections">
       {#each SECTIONS as section (section.key)}
         {@const rows = rowsFor(section.key, data, now)}
-        <section aria-labelledby="section-{section.key}" data-testid="section-{section.key}">
+        <section aria-labelledby="section-{section.key}" class="min-w-0 2xl:rounded-lg 2xl:border 2xl:border-border 2xl:p-4" data-testid="section-{section.key}">
           <h3 id="section-{section.key}" class="mb-2 flex items-baseline gap-2 text-lg font-semibold">
             {section.title}
             <span class="text-sm font-normal text-text-muted" data-testid="section-count">{sectionCount(data.counts, section.key)}</span>
