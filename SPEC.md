@@ -2642,9 +2642,39 @@ for the server's default window (14 days back, 7 days ahead) through `TimelineAp
 (`web/src/lib/timelineView.ts`) holds the mapped model (§6.10, `web/src/lib/timeline.ts`); a read that lands after a
 newer one is dropped, and a refusal shows as an alert above what was drawn. vis-timeline and vis-data are npm
 dependencies bundled into the app (the view imports `vis-timeline/peer`, `vis-data/peer` and vis-timeline's stylesheet;
-nothing is loaded from a CDN), and `mountChart` hands the groups and items to vis-timeline inside a frame that scrolls on
-its own, so the page never scrolls sideways (`chartOptions`: zoom from an hour to a quarter, lease bars stacked in their
-subgroup, rows in the mapping's order). Until the first read lands it says it is loading; a window with no task says so.
+nothing is loaded from a CDN), and `mountChart` hands the groups and items to vis-timeline inside a frame with
+`overflow: hidden`, so the page never scrolls sideways; the chart pans and zooms inside it (`chartOptions`: zoom from an
+hour to a quarter, lease bars stacked in their subgroup, rows in the mapping's order). Until the first read lands it says
+it is loading; a window with no task says so.
+
+*Rows and bars.* An initiative is a row whose label is a collapsible toggle (a click on it hides and shows its task rows);
+a task is a row below it (label `<ref> <title>`, with the attention badge). On a task row the planned bar is dashed
+(`tl-planned`), the actual span is the bar named by its status (`tl-actual tl-open|done|closed`), each lease is a bar
+stacked below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
+(`tl-marker tl-marker-<type>`, glyph from the mapping). The bars, rows and the toggle take their colours from the design
+tokens, light and dark, over vis-timeline's own sheet; at phone the label column is capped at the smaller of 10 rem and
+28 vw (longer labels are ellipsised, the full text is the tooltip) and every label row is at least 44 px high.
+
+*Zoom and open.* Two buttons, **Zoom out** (`zoom-out`) and **Zoom in** (`zoom-in`), both 44 px, halve and double the
+visible range without animation; the readout `timeline-span` says it in words ("Showing 3 weeks", `data-span-ms` holds
+the milliseconds) and each button is disabled at its limit (an hour in, 92 days out). The wheel over the chart and a pinch
+zoom the same range and a drag pans it (vis-timeline's own handling, `zoomMin` and `zoomMax` bound all of them). A click on
+a task bar, a lease bar, a marker or a task row's label opens that task's page (`#/t/<ref>`); a click on an initiative
+row collapses it instead.
+
+*Dependency arrows.* `buildTimeline` pairs each task with each task it is blocked by that the answer holds
+(`DependencyPair`, from the blocking task's actual bar to the blocked task's). vis-timeline draws no arrows, so
+`web/src/lib/timelineArrows.ts` makes one SVG path per pair, `M x1 y1 C ... x2 y2` from the right edge of the blocking
+bar to the left edge of the dependent bar, both at mid-height, with an arrowhead, and `web/src/arrowSurface.ts` lays them
+in an `svg.tl-arrows` (`pointer-events: none`) inside vis-timeline's centre panel, which clips them to the rows and the
+time axis. Each path carries `data-from` and `data-to` (the two refs). `mountChart` redraws them after every vis-timeline
+`changed`, `rangechange` and `rangechanged`, so they follow a zoom, a pan, a collapse and new data. An arrow is drawn
+only while both bars are drawn: a collapsed row, or a bar outside the visible range, has none. After the first
+`rangechanged` the chart is redrawn once, because vis-timeline counts its first draw done only then and until it does
+its loading cover swallows the wheel. `e2e/timeline.spec.ts` reads all of this through the DOM at phone and desktop on a
+seeded board: the rows, bars and markers, collapse and expand, the buttons and the wheel (and the readout at both
+limits), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
+end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows.
 
 **Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
 of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`

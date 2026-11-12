@@ -4,7 +4,8 @@
 // view imports its classes and passes them in as `ChartLib`, so this module stays testable without a DOM.
 import { errorText, Fetches } from './fetches';
 import { ThreadApi } from './threads';
-import { apiQuery, buildTimeline, type Timeline, type TimelineFilter, type TimelineModel } from './timeline';
+import { apiQuery, buildTimeline, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
+import { drawArrows, type ArrowSurface } from './timelineArrows';
 
 export const HOUR_MS = 3_600_000;
 export const DAY_MS = 24 * HOUR_MS;
@@ -90,6 +91,36 @@ export class TimelineViewStore {
   }
 }
 
+// --- zoom ---
+
+/** One button press scales the visible range by this factor (in) or its inverse (out). */
+export const ZOOM_FACTOR = 0.5;
+/** A range within this fraction of a zoom limit counts as at it (vis-timeline clamps with rounding). */
+const LIMIT_SLACK = 1.02;
+
+/** The length of the visible range in milliseconds. */
+export function spanOf(range: { start: Date; end: Date }): number {
+  return range.end.getTime() - range.start.getTime();
+}
+
+export function canZoomIn(spanMs: number): boolean {
+  return spanMs > ZOOM_MIN_MS * LIMIT_SLACK;
+}
+
+export function canZoomOut(spanMs: number): boolean {
+  return spanMs < ZOOM_MAX_MS / LIMIT_SLACK;
+}
+
+/** A visible range as words: `6 hours`, `3 days`, `2 weeks`, `3 months` (the nearest whole unit). */
+export function spanLabel(spanMs: number): string {
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  if (spanMs < DAY_MS) return plural(Math.max(1, Math.round(spanMs / HOUR_MS)), 'hour');
+  const days = spanMs / DAY_MS;
+  if (days < 14) return plural(Math.round(days), 'day');
+  if (days < 60) return plural(Math.round(days / 7), 'week');
+  return plural(Math.round(days / 30), 'month');
+}
+
 // --- vis-timeline ---
 
 /** The slice of vis-data's DataSet the chart uses. */
@@ -98,9 +129,22 @@ export interface ChartData<T> {
   add(rows: T[]): unknown;
 }
 
+/** What vis-timeline tells a `click` listener: what was hit, and the item or group under the pointer. */
+export interface ChartClick {
+  what: string | null;
+  item?: string | number | null;
+  group?: string | number | null;
+}
+
 /** The slice of vis-timeline's Timeline the chart uses. */
 export interface ChartTimeline {
   destroy(): void;
+  on(event: 'click', listener: (props: ChartClick) => void): void;
+  on(event: 'changed' | 'rangechange' | 'rangechanged', listener: () => void): void;
+  getWindow(): { start: Date; end: Date };
+  redraw(): void;
+  zoomIn(percentage: number, options: { animation: boolean }): void;
+  zoomOut(percentage: number, options: { animation: boolean }): void;
 }
 
 /** vis-timeline's classes, passed in by the view that imports them. */
@@ -119,12 +163,9 @@ export interface ChartOptions {
   stackSubgroups: boolean;
   groupOrder: 'order';
   selectable: boolean;
-  /** The chart grows with its rows; the frame around it scrolls. */
-  verticalScroll: boolean;
-  maxHeight: string;
 }
 
-/** The vis-timeline options of the view for a window. */
+/** The vis-timeline options of the view for a window. The wheel zooms (vis-timeline's default), a pinch zooms, a drag pans. */
 export function chartOptions(window: TimeWindow): ChartOptions {
   return {
     start: window.from,
@@ -136,28 +177,69 @@ export function chartOptions(window: TimeWindow): ChartOptions {
     stackSubgroups: true,
     groupOrder: 'order',
     selectable: false,
-    verticalScroll: true,
-    maxHeight: '70vh',
   };
 }
 
-/** A mounted chart: `show` replaces what it draws, `destroy` takes it off the page. */
+/** The ref of the task a click on the chart opens: a bar of any kind (task, lease or marker) or a task row's label. */
+export function clickedTask(click: ChartClick, itemOf: (id: string) => TimelineItem | undefined): string | undefined {
+  if (click.what === 'item' && click.item !== undefined && click.item !== null) return itemOf(String(click.item))?.task;
+  if (click.what === 'group-label' && click.group !== undefined && click.group !== null) return taskOfGroup(String(click.group));
+  return undefined;
+}
+
+/** What the view hands the chart: where a click on a task goes, where arrows are drawn, and who hears the range. */
+export interface ChartHooks {
+  open(ref: string): void;
+  arrows: ArrowSurface;
+  /** The visible range's length, after every redraw. */
+  onSpan(spanMs: number): void;
+}
+
+/** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
 export interface Chart {
   show(model: TimelineModel): void;
+  zoom(direction: 'in' | 'out'): void;
   destroy(): void;
 }
 
+const NO_ANIMATION = { animation: false } as const;
+
 /** Draws `model` with vis-timeline into `container`. */
-export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow): Chart {
+export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks): Chart {
   const items = new lib.DataSet<unknown>(model.items);
   const groups = new lib.DataSet<unknown>(model.groups);
   const timeline = new lib.Timeline(container, items, groups, chartOptions(window));
+  let current = model;
+  const byId = (id: string) => current.items.find((item) => item.id === id);
+  timeline.on('click', (click) => {
+    const ref = clickedTask(click, byId);
+    if (ref !== undefined) hooks.open(ref);
+  });
+  // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
+  // range moves (a zoom, a pan). The span readout and the arrows follow all three.
+  const sync = () => {
+    hooks.onSpan(spanOf(timeline.getWindow()));
+    drawArrows(hooks.arrows, current.dependencies);
+  };
+  timeline.on('changed', sync);
+  timeline.on('rangechange', sync);
+  // vis-timeline counts its first draw done only on a redraw after the first `rangechanged` (200 ms after it opens); until
+  // then its loading screen covers the chart and swallows the wheel. Nothing else redraws a chart that is left alone.
+  timeline.on('rangechanged', () => {
+    timeline.redraw();
+    sync();
+  });
   return {
     show(next: TimelineModel) {
+      current = next;
       items.clear();
       groups.clear();
       groups.add(next.groups);
       items.add(next.items);
+    },
+    zoom(direction) {
+      if (direction === 'in') timeline.zoomIn(ZOOM_FACTOR, NO_ANIMATION);
+      else timeline.zoomOut(ZOOM_FACTOR, NO_ANIMATION);
     },
     destroy() {
       timeline.destroy();

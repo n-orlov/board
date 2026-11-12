@@ -1,16 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Browser } from './session';
+import type { ArrowPath, ArrowSurface, Box } from './timelineArrows';
 import { DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
 import {
+  canZoomIn,
+  canZoomOut,
   chartOptions,
+  clickedTask,
   DAY_MS,
   HOUR_MS,
   initialWindow,
   mountChart,
+  spanLabel,
+  spanOf,
   TimelineApi,
   TimelineViewStore,
+  ZOOM_FACTOR,
   ZOOM_MAX_MS,
   ZOOM_MIN_MS,
+  type ChartClick,
+  type ChartHooks,
   type ChartLib,
   type TimelineViewState,
 } from './timelineView';
@@ -167,11 +176,64 @@ describe('chartOptions', () => {
       stackSubgroups: true,
       groupOrder: 'order',
       selectable: false,
-      verticalScroll: true,
-      maxHeight: '70vh',
     });
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
     expect(ZOOM_MAX_MS).toBe(92 * DAY_MS);
+  });
+});
+
+describe('zoom', () => {
+  it('measures the range and limits the buttons at an hour and a quarter', () => {
+    expect(spanOf({ start: new Date(1000), end: new Date(4000) })).toBe(3000);
+    expect(canZoomIn(2 * HOUR_MS)).toBe(true);
+    expect(canZoomIn(HOUR_MS)).toBe(false);
+    expect(canZoomIn(HOUR_MS * 1.01)).toBe(false); // vis-timeline clamps with a little rounding
+    expect(canZoomIn(HOUR_MS * 1.02)).toBe(false);
+    expect(canZoomIn(HOUR_MS * 1.03)).toBe(true);
+    expect(canZoomOut(30 * DAY_MS)).toBe(true);
+    expect(canZoomOut(ZOOM_MAX_MS)).toBe(false);
+    expect(canZoomOut(ZOOM_MAX_MS * 0.99)).toBe(false);
+    expect(canZoomOut(ZOOM_MAX_MS / 1.02)).toBe(false);
+    expect(canZoomOut(ZOOM_MAX_MS / 1.03)).toBe(true);
+  });
+
+  it('says the visible range as words in hours, days, weeks and months', () => {
+    expect(spanLabel(HOUR_MS)).toBe('1 hour');
+    expect(spanLabel(0)).toBe('1 hour');
+    expect(spanLabel(6 * HOUR_MS)).toBe('6 hours');
+    expect(spanLabel(DAY_MS)).toBe('1 day');
+    expect(spanLabel(3.4 * DAY_MS)).toBe('3 days');
+    expect(spanLabel(14 * DAY_MS)).toBe('2 weeks');
+    expect(spanLabel(21 * DAY_MS)).toBe('3 weeks');
+    expect(spanLabel(60 * DAY_MS)).toBe('2 months');
+    expect(spanLabel(92 * DAY_MS)).toBe('3 months');
+  });
+});
+
+describe('clickedTask', () => {
+  const items = new Map([
+    ['act:T1', { id: 'act:T1', task: 'T1' }],
+    ['lease:L1', { id: 'lease:L1', task: 'T2', lease: 'L1' }],
+  ]);
+  const itemOf = (id: string) => items.get(id) as TimelineModel['items'][number] | undefined;
+
+  it('opens the task of a bar of any kind', () => {
+    expect(clickedTask({ what: 'item', item: 'act:T1' }, itemOf)).toBe('T1');
+    expect(clickedTask({ what: 'item', item: 'lease:L1' }, itemOf)).toBe('T2');
+    expect(clickedTask({ what: 'item', item: 'gone' }, itemOf)).toBeUndefined();
+    expect(clickedTask({ what: 'item', item: null }, itemOf)).toBeUndefined();
+    expect(clickedTask({ what: 'item' }, itemOf)).toBeUndefined();
+  });
+
+  it('opens the task of a task row label and leaves an initiative row to collapse', () => {
+    expect(clickedTask({ what: 'group-label', group: 't:T9' }, itemOf)).toBe('T9');
+    expect(clickedTask({ what: 'group-label', group: 'i:alpha' }, itemOf)).toBeUndefined();
+    expect(clickedTask({ what: 'group-label', group: null }, itemOf)).toBeUndefined();
+    expect(clickedTask({ what: 'group-label' }, itemOf)).toBeUndefined();
+  });
+
+  it('opens nothing for the background, the axis or a click on nothing', () => {
+    for (const what of ['background', 'axis', 'custom-time', null]) expect(clickedTask({ what, item: 'act:T1', group: 't:T1' }, itemOf)).toBeUndefined();
   });
 });
 
@@ -188,27 +250,56 @@ describe('mountChart', () => {
       this.rows.push(...rows);
     }
   }
+  type Listener = (props?: ChartClick) => void;
   function fakeLib() {
-    const made: { container: unknown; items: FakeData<unknown>; groups: FakeData<unknown>; options: unknown; destroy: ReturnType<typeof vi.fn> }[] = [];
     class FakeTimeline {
       destroy = vi.fn();
-      constructor(container: unknown, items: FakeData<unknown>, groups: FakeData<unknown>, options: unknown) {
-        made.push({ container, items, groups, options, destroy: this.destroy });
+      zoomIn = vi.fn();
+      zoomOut = vi.fn();
+      redraw = vi.fn();
+      window = { start: new Date(0), end: new Date(2 * DAY_MS) };
+      listeners = new Map<string, Listener>();
+      constructor(
+        readonly container: unknown,
+        readonly items: FakeData<unknown>,
+        readonly groups: FakeData<unknown>,
+        readonly options: unknown,
+      ) {
+        made.push(this);
+      }
+      on(event: string, listener: Listener) {
+        this.listeners.set(event, listener);
+      }
+      getWindow() {
+        return this.window;
+      }
+      emit(event: string, props?: ChartClick) {
+        this.listeners.get(event)?.(props);
       }
     }
+    const made: FakeTimeline[] = [];
     return { lib: { DataSet: FakeData, Timeline: FakeTimeline } as unknown as ChartLib, made };
   }
-  const model = (refs: string[]): TimelineModel => ({
+  const model = (refs: string[], dependencies: TimelineModel['dependencies'] = []): TimelineModel => ({
     groups: refs.map((ref, order) => ({ id: `t:${ref}`, ref, order }) as TimelineModel['groups'][number]),
-    items: refs.map((ref) => ({ id: `act:${ref}`, group: `t:${ref}` }) as TimelineModel['items'][number]),
-    dependencies: [],
+    items: refs.map((ref) => ({ id: `act:${ref}`, group: `t:${ref}`, task: ref }) as TimelineModel['items'][number]),
+    dependencies,
   });
+  function hooks() {
+    const opened: string[] = [];
+    const spans: number[] = [];
+    const drawn: ArrowPath[][] = [];
+    const boxes = new Map<string, Box>();
+    const arrows: ArrowSurface = { boxOf: (id) => boxes.get(id), render: (paths) => drawn.push([...paths]) };
+    const h: ChartHooks = { open: (ref) => opened.push(ref), arrows, onSpan: (ms) => spans.push(ms) };
+    return { h, opened, spans, drawn, boxes };
+  }
 
   it('hands the groups, items and options to vis-timeline in the container', () => {
     const { lib, made } = fakeLib();
     const container = {} as HTMLElement;
     const w = initialWindow(NOW);
-    mountChart(lib, container, model(['A1', 'A2']), w);
+    mountChart(lib, container, model(['A1', 'A2']), w, hooks().h);
     expect(made).toHaveLength(1);
     expect(made[0]!.container).toBe(container);
     expect(made[0]!.options).toEqual(chartOptions(w));
@@ -218,12 +309,64 @@ describe('mountChart', () => {
 
   it('replaces what it draws on show and takes vis-timeline off the page on destroy', () => {
     const { lib, made } = fakeLib();
-    const chart = mountChart(lib, {} as HTMLElement, model(['A1', 'A2']), initialWindow(NOW));
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1', 'A2']), initialWindow(NOW), hooks().h);
     chart.show(model(['B1']));
     expect(made[0]!.groups.rows.map((g) => (g as { id: string }).id)).toEqual(['t:B1']);
     expect(made[0]!.items.rows.map((i) => (i as { id: string }).id)).toEqual(['act:B1']);
     expect(made[0]!.destroy).not.toHaveBeenCalled();
     chart.destroy();
     expect(made[0]!.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('zooms in and out by the factor, without animation', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h);
+    chart.zoom('in');
+    expect(made[0]!.zoomIn).toHaveBeenCalledWith(ZOOM_FACTOR, { animation: false });
+    expect(made[0]!.zoomOut).not.toHaveBeenCalled();
+    chart.zoom('out');
+    expect(made[0]!.zoomOut).toHaveBeenCalledWith(ZOOM_FACTOR, { animation: false });
+    expect(made[0]!.zoomIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the task of a click on a bar or a task row, from the model last shown', () => {
+    const { lib, made } = fakeLib();
+    const h = hooks();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), h.h);
+    made[0]!.emit('click', { what: 'item', item: 'act:A1' });
+    made[0]!.emit('click', { what: 'group-label', group: 't:A7' });
+    made[0]!.emit('click', { what: 'group-label', group: 'i:alpha' });
+    made[0]!.emit('click', { what: 'background' });
+    expect(h.opened).toEqual(['A1', 'A7']);
+    chart.show(model(['B1']));
+    made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // no longer drawn
+    made[0]!.emit('click', { what: 'item', item: 'act:B1' });
+    expect(h.opened).toEqual(['A1', 'A7', 'B1']);
+  });
+
+  it('reports the span and redraws the arrows after every redraw and every range change, and redraws vis-timeline once the range settles', () => {
+    const { lib, made } = fakeLib();
+    const h = hooks();
+    const pair = { id: 'dep:A1>A2', from: 'A1', fromItem: 'act:A1', to: 'A2', toItem: 'act:A2' };
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1', 'A2'], [pair]), initialWindow(NOW), h.h);
+    h.boxes.set('act:A1', { left: 0, top: 0, right: 10, bottom: 10 });
+    h.boxes.set('act:A2', { left: 30, top: 20, right: 40, bottom: 30 });
+    made[0]!.emit('changed');
+    expect(h.spans).toEqual([2 * DAY_MS]);
+    expect(h.drawn).toHaveLength(1);
+    expect(h.drawn[0]!.map((p) => p.id)).toEqual(['dep:A1>A2']);
+
+    made[0]!.window = { start: new Date(0), end: new Date(DAY_MS) };
+    made[0]!.emit('rangechange');
+    expect(h.spans).toEqual([2 * DAY_MS, DAY_MS]);
+    expect(made[0]!.redraw).not.toHaveBeenCalled();
+    made[0]!.emit('rangechanged');
+    expect(made[0]!.redraw).toHaveBeenCalledTimes(1);
+    expect(h.spans).toHaveLength(3);
+    expect(h.drawn).toHaveLength(3);
+
+    chart.show(model(['A1', 'A2'])); // the new model has no dependency: the next redraw draws no arrow
+    made[0]!.emit('changed');
+    expect(h.drawn[h.drawn.length - 1]).toEqual([]);
   });
 });

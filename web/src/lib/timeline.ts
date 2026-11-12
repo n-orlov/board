@@ -108,6 +108,11 @@ export function actualItemId(ref: string): string {
   return `act:${ref}`;
 }
 
+/** The CSS class that names an item in the DOM (vis-timeline draws no id attribute), for the dependency arrows. */
+export function itemClass(itemId: string): string {
+  return `tl-id-${itemId.replace(/[^A-Za-z0-9_-]/g, '-')}`;
+}
+
 export function leaseItemId(ref: string): string {
   return `lease:${ref}`;
 }
@@ -162,8 +167,9 @@ function plannedItem(task: TimelineTask): TimelineItem | undefined {
 function actualItem(task: TimelineTask, nowIso: string): TimelineItem {
   const end = actualEnd(task, nowIso);
   const closed = task.closed_at === undefined ? 'still open' : `closed ${task.closed_at}`;
+  const id = actualItemId(task.ref);
   return {
-    id: actualItemId(task.ref),
+    id,
     group: taskGroupId(task.ref),
     subgroup: 'actual',
     kind: 'actual',
@@ -172,7 +178,7 @@ function actualItem(task: TimelineTask, nowIso: string): TimelineItem {
     title: escapeHtml(`${task.ref} ${task.status}: created ${task.created_at}, ${closed}`),
     start: task.created_at,
     end,
-    className: `tl-actual tl-${task.status}`,
+    className: `tl-actual tl-${task.status} ${itemClass(id)}`,
     task: task.ref,
   };
 }

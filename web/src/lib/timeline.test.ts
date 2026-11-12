@@ -3,6 +3,8 @@ import {
   CLOSED_WITHIN_OPTIONS,
   DEFAULT_TIMELINE_FILTER,
   MARKER_GLYPHS,
+  actualItemId,
+  itemClass,
   apiQuery,
   buildTimeline,
   escapeHtml,
@@ -107,7 +109,7 @@ describe('planned and actual bars', () => {
       type: 'range',
       start: '2026-02-28T09:00:00Z',
       end: NOW.toISOString(),
-      className: 'tl-actual tl-open',
+      className: 'tl-actual tl-open tl-id-act-T1',
       subgroup: 'actual',
       content: 'First',
       title: 'T1 open: created 2026-02-28T09:00:00Z, still open',
@@ -117,7 +119,7 @@ describe('planned and actual bars', () => {
   it('ends the actual span of a closed task where it closed', () => {
     const t = answer({ tasks: [{ ...answer().tasks[0]!, status: 'closed', closed_at: '2026-03-05T00:00:00Z' }] });
     const actual = buildTimeline(t, NOW).items.find((i) => i.kind === 'actual')!;
-    expect(actual).toMatchObject({ end: '2026-03-05T00:00:00Z', className: 'tl-actual tl-closed', title: 'T1 closed: created 2026-02-28T09:00:00Z, closed 2026-03-05T00:00:00Z' });
+    expect(actual).toMatchObject({ end: '2026-03-05T00:00:00Z', className: 'tl-actual tl-closed tl-id-act-T1', title: 'T1 closed: created 2026-02-28T09:00:00Z, closed 2026-03-05T00:00:00Z' });
   });
 
   it('never ends a span before it began', () => {
@@ -313,5 +315,19 @@ describe('filter round trip', () => {
     expect(params.get('closed_within')).toBe('30d');
     expect(params.get('from')).toBe('2026-02-24T12:00:00.000Z');
     expect(params.get('to')).toBe('2026-03-17T12:00:00.000Z');
+  });
+});
+
+describe('itemClass', () => {
+  it('names an item in the DOM by its id, with a character the CSS can select by', () => {
+    expect(itemClass('act:alpha-1')).toBe('tl-id-act-alpha-1');
+    expect(itemClass('lease:L3')).toBe('tl-id-lease-L3');
+    expect(itemClass('a b.c')).toBe('tl-id-a-b-c');
+  });
+
+  it('is on the actual bar of every task, so an arrow finds it', () => {
+    const task = answer().tasks[0]!;
+    const bar = buildTimeline(answer(), NOW).items.find((i) => i.kind === 'actual')!;
+    expect(bar.className.split(' ')).toContain(itemClass(actualItemId(task.ref)));
   });
 });
