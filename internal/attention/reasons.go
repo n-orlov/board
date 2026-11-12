@@ -95,42 +95,60 @@ func (s Store) derive(ctx context.Context, sc scope, now time.Time) (d Derivatio
 
 // reasonsOf groups the rows of d by task, in reason order.
 func reasonsOf(d Derivation) []TaskReasons {
-	by := map[string]*TaskReasons{}
-	of := func(task string) *TaskReasons {
-		if by[task] == nil {
-			by[task] = &TaskReasons{Task: task}
-		}
-		return by[task]
-	}
+	g := grouping{}
 	for i := range d.ExpiredLeases {
-		of(d.ExpiredLeases[i].Task).Stranded = &d.ExpiredLeases[i]
+		g.of(d.ExpiredLeases[i].Task).Stranded = &d.ExpiredLeases[i]
 	}
 	for _, k := range d.OpenAsks {
-		if k.Task != "" {
-			t := of(k.Task)
-			t.Asks = append(t.Asks, k)
-			t.Blocking = t.Blocking || k.Blocking
-			t.AskerWaiting = t.AskerWaiting || k.AskerWaiting
-		}
+		g.addAsk(k)
 	}
 	for i := range d.DoneNotClosed {
-		of(d.DoneNotClosed[i].Task).Done = &d.DoneNotClosed[i]
+		g.of(d.DoneNotClosed[i].Task).Done = &d.DoneNotClosed[i]
 	}
-	out := make([]TaskReasons, 0, len(by))
-	for _, t := range by {
-		if t.Stranded != nil {
-			t.Reasons = append(t.Reasons, ReasonStranded)
-		}
-		if len(t.Asks) > 0 {
-			t.Reasons = append(t.Reasons, ReasonAsking)
-		}
-		if t.Done != nil {
-			t.Reasons = append(t.Reasons, ReasonDone)
-		}
+	out := make([]TaskReasons, 0, len(g))
+	for _, t := range g {
+		t.Reasons = reasonList(t)
 		out = append(out, *t)
 	}
 	sort.Slice(out, func(i, j int) bool { return refLess(out[i].Task, out[j].Task) })
 	return out
+}
+
+// grouping holds one TaskReasons per task ref while reasonsOf collects rows.
+type grouping map[string]*TaskReasons
+
+// of returns the entry for task, creating it on first use.
+func (g grouping) of(task string) *TaskReasons {
+	if g[task] == nil {
+		g[task] = &TaskReasons{Task: task}
+	}
+	return g[task]
+}
+
+// addAsk files an open ask under its task; an ask on an initiative has none and is skipped.
+func (g grouping) addAsk(k OpenAsk) {
+	if k.Task == "" {
+		return
+	}
+	t := g.of(k.Task)
+	t.Asks = append(t.Asks, k)
+	t.Blocking = t.Blocking || k.Blocking
+	t.AskerWaiting = t.AskerWaiting || k.AskerWaiting
+}
+
+// reasonList names t's reasons in order: stranded, asking, done.
+func reasonList(t *TaskReasons) []Reason {
+	var r []Reason
+	if t.Stranded != nil {
+		r = append(r, ReasonStranded)
+	}
+	if len(t.Asks) > 0 {
+		r = append(r, ReasonAsking)
+	}
+	if t.Done != nil {
+		r = append(r, ReasonDone)
+	}
+	return r
 }
 
 // refLess orders task refs by initiative slug, then task number.

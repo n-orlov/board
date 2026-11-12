@@ -370,6 +370,8 @@ func TestListEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 		ListTasksParamsKindWork, ListTasksParamsKindWatch,
 		ListTasksParamsStatusOpen, ListTasksParamsStatusDone, ListTasksParamsStatusClosed, ListTasksParamsStatusNotClosed, ListTasksParamsStatusAll,
 		NowLeaseStateLive, NowLeaseStateEnded, NowLeaseStateExpired,
+		InitiativeDetailStatusOpen, InitiativeDetailStatusClosed,
+		TaskAttentionReasonStranded, TaskAttentionReasonAsking, TaskAttentionReasonDone,
 	}
 	for _, v := range valid {
 		if !v.Valid() {
@@ -379,6 +381,7 @@ func TestListEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 	for _, v := range []interface{ Valid() bool }{
 		InitiativeListItemStatus("x"), ListInitiativesParamsStatus("x"), TaskListItemKind("x"), TaskListItemStatus("x"),
 		TaskListItemResolution("x"), ListTasksParamsKind("x"), ListTasksParamsStatus("x"), NowLeaseState("x"),
+		InitiativeDetailStatus("x"), TaskAttentionReason("x"),
 	} {
 		if v.Valid() {
 			t.Errorf("%T: an undeclared value is valid", v)
