@@ -270,8 +270,11 @@ for (const vp of viewports) {
       await expect.poll(async () => JSON.stringify(await drawn(page))).not.toBe(first); // moved with the bars
       await expectTwoArrows(page, s);
 
+      // The filters above the chart wrap onto several rows at phone width, so the chart's lower edge can be below the fold:
+      // drag on the part of it that is on screen and clear of the phone tab bar (the bottom 60 px).
+      await page.getByTestId('timeline-chart').scrollIntoViewIfNeeded();
       const chart = (await page.getByTestId('timeline-chart').boundingBox())!;
-      const y = chart.y + chart.height - 20;
+      const y = Math.min(chart.y + chart.height - 20, vp.size.height - 100);
       const before = JSON.stringify(await drawn(page));
       await page.mouse.move(chart.x + chart.width / 2, y);
       await page.mouse.down();

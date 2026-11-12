@@ -3,6 +3,12 @@ import {
   CLOSED_WITHIN_OPTIONS,
   DEFAULT_TIMELINE_FILTER,
   MARKER_GLYPHS,
+  affectsTimeline,
+  choiceOptions,
+  tagChoices,
+  withClosedWithin,
+  withInitiative,
+  withTag,
   actualItemId,
   itemClass,
   apiQuery,
@@ -329,5 +335,44 @@ describe('itemClass', () => {
     const task = answer().tasks[0]!;
     const bar = buildTimeline(answer(), NOW).items.find((i) => i.kind === 'actual')!;
     expect(bar.className.split(' ')).toContain(itemClass(actualItemId(task.ref)));
+  });
+});
+
+describe('the filter controls', () => {
+  it('offers "any" first, then the values sorted and once, and keeps a current value the list lacks', () => {
+    expect(choiceOptions(['beta', 'alpha', 'beta', ' '], '', 'Any tag')).toEqual([
+      { value: '', label: 'Any tag' },
+      { value: 'alpha', label: 'alpha' },
+      { value: 'beta', label: 'beta' },
+    ]);
+    expect(choiceOptions(['beta'], 'zed', 'Any tag').map((o) => o.value)).toEqual(['', 'beta', 'zed']);
+    expect(choiceOptions([], '', 'Any actor')).toEqual([{ value: '', label: 'Any actor' }]);
+  });
+
+  it('collects the tags of the initiatives, each once', () => {
+    expect(tagChoices([{ tags: ['work', 'home'] }, { tags: ['work'] }, { tags: [] }])).toEqual(['work', 'home']);
+  });
+
+  it('sets one initiative or tag, and an empty choice clears it', () => {
+    const f = { ...DEFAULT_TIMELINE_FILTER, initiatives: ['a', 'b'], tags: ['x', 'y'], actor: 'ada' };
+    expect(withInitiative(f, 'c')).toEqual({ ...f, initiatives: ['c'] });
+    expect(withInitiative(f, '')).toEqual({ ...f, initiatives: [] });
+    expect(withTag(f, 'z')).toEqual({ ...f, tags: ['z'] });
+    expect(withTag(f, '')).toEqual({ ...f, tags: [] });
+  });
+
+  it('reads the closed-within select, an unknown value is off', () => {
+    expect(withClosedWithin(DEFAULT_TIMELINE_FILTER, '30').closedWithin).toBe(30);
+    expect(withClosedWithin({ ...DEFAULT_TIMELINE_FILTER, closedWithin: 7 }, '0').closedWithin).toBe(0);
+    expect(withClosedWithin({ ...DEFAULT_TIMELINE_FILTER, closedWithin: 7 }, 'x').closedWithin).toBe(0);
+  });
+
+  it('refetches on lease, task, ask and milestone events, a check and a dependency, and on nothing else', () => {
+    for (const type of ['lease_started', 'lease_renewed', 'lease_ended', 'lease_expired', 'task_created', 'task_done', 'task_closed', 'ask_raised', 'ask_answered', 'milestone', 'milestone_added', 'check_recorded', 'dep_added', 'dep_removed']) {
+      expect(affectsTimeline({ type }), type).toBe(true);
+    }
+    for (const type of ['note_added', 'initiative_created', 'key_created', 'notification_sent', 'xlease_started', '']) {
+      expect(affectsTimeline({ type }), type).toBe(false);
+    }
   });
 });

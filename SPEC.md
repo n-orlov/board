@@ -2315,7 +2315,7 @@ operator. Live via SSE (§7.1).
 | view | content |
 |---|---|
 | **Attention** (default, `#/attention`; `#/` lands on it) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
-| **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters: tags, initiatives, actor, "show archived closed within N days". |
+| **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters (shipped): initiative, tag, actor, "show closed within N days"; they live in the fragment and survive reload. |
 | **Initiatives** (`#/initiatives`) | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
@@ -2638,7 +2638,7 @@ event (`ask_answered`, `ask_withdrawn`, `task_closed`, `lease_acked`, `check_rec
 
 **Timeline view** (`#/timeline`, `web/src/Timeline.svelte`, R6). The route table holds it as the entry `timeline` (nav
 label Timeline) between Tasks and Notes. It reads `GET /api/v1/timeline` (§6.10) under the filter in the fragment's query
-for the server's default window (14 days back, 7 days ahead) through `TimelineApi`, and `TimelineViewStore`
+for the visible window (it opens on the server's default, 14 days back and 7 days ahead, and follows the pan, below) through `TimelineApi`, and `TimelineViewStore`
 (`web/src/lib/timelineView.ts`) holds the mapped model (§6.10, `web/src/lib/timeline.ts`); a read that lands after a
 newer one is dropped, and a refusal shows as an alert above what was drawn. vis-timeline and vis-data are npm
 dependencies bundled into the app (the view imports `vis-timeline/peer`, `vis-data/peer` and vis-timeline's stylesheet;
@@ -2661,6 +2661,32 @@ the milliseconds) and each button is disabled at its limit (an hour in, 92 days 
 zoom the same range and a drag pans it (vis-timeline's own handling, `zoomMin` and `zoomMax` bound all of them). A click on
 a task bar, a lease bar, a marker or a task row's label opens that task's page (`#/t/<ref>`); a click on an initiative
 row collapses it instead.
+
+*Filters.* Four selects above the chart (44 px, 16 px text, wrapping on a phone) narrow what is drawn, each in the fragment's
+query and in the query of `GET /timeline`: **Initiative** (`initiative-filter`, `initiative=<slug>`; the board's initiatives,
+read from `GET /initiatives?status=all`), **Tag** (`tag-filter`, `tag=<tag>`; the tags those initiatives carry), **Actor**
+(`actor-filter`, `actor=<handle>`; `GET /actors`, the tasks that actor held a lease on in the window) and **Closed within**
+(`closed-filter`, `closed=7|30|90`, `Off` by default; closed tasks are left out unless it keeps those closed that recently).
+A choice rewrites the fragment in place (`history.replaceState`, no history entry per choice) and reads again, so the filter
+survives a reload and a link carries it; a link that opens with a filter makes one read under it. A value in the fragment that
+the selects do not list is still offered and kept. **Clear filters** (`clear-filters`, shown only while one is set) empties the
+fragment. A fragment edited by hand, or the back button, applies the filter it now holds. The helpers are in
+`web/src/lib/timeline.ts` (`withInitiative`, `withTag`, `withClosedWithin`, `choiceOptions`, `tagChoices`).
+
+*Panning and live refresh.* When the visible range stops moving (`rangechanged`: the end of a drag, a wheel or a pinch, a zoom
+button) and differs from the window last read by more than 1% of its length at either end, `TimelineViewStore.panTo` waits
+`PAN_DEBOUNCE_MS` (300 ms, a new move inside it replaces the pending range) and then reads `GET /timeline` for that range under
+the same filter; a long drag is one read. The opening range counts as read, so opening the view is one read. A filter change
+and a live refresh read for the window as panned. The view subscribes to the stream (§7.1) and reads again, in place and
+debounced like every live view, on an event of the `lease_*`, `task_*`, `ask_*` and `milestone` kinds (the milestone event's
+type is `milestone`), and on `check_recorded` and `dep_*`, which also change a bar or an arrow; a `reset` or a reconnect reads
+again too. Nothing polls on a timer. A refresh merges the new rows into the chart (`replaceRows`: rows that are gone are
+removed, the others updated and new ones added, never cleared and re-added), so an initiative the user collapsed stays
+collapsed and the chart does not flicker; an arrow or bar that the answer drops disappears with its row.
+`e2e/timeline_filters.spec.ts` covers, at phone and desktop, each of the four filters changing the task rows and surviving a
+reload, a link with filters making one read, a pan (one read after a long drag, a later window, the filter riding along) and a
+zoom each making a read, a refresh keeping a collapse, and a lease started through the API, a milestone and a new task
+appearing within 5 s without a reload.
 
 *Dependency arrows.* `buildTimeline` pairs each task with each task it is blocked by that the answer holds
 (`DependencyPair`, from the blocking task's actual bar to the blocked task's). vis-timeline draws no arrows, so
@@ -3321,7 +3347,7 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 |---|---|
 | 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
 | 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
-| 3 | Timeline UI (`vis-timeline`, archive window, filters), remaining UI views. |
+| 3 | **Phase 3 is shipped.** Timeline UI (`vis-timeline` bundled with the app; filters: initiative, tag, actor and closed within, in the fragment; zoom hour to quarter, panning refetch, live refresh), archive window, remaining UI views. |
 | 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 
 Each phase ends on a green `main` build with all gates still enforced.

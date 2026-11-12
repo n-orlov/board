@@ -6,7 +6,24 @@
   import { domSurface } from './arrowSurface';
   import { taskHref } from './lib/taskPage';
   import { currentBrowser } from './lib/session';
-  import { filterFromHash } from './lib/timeline';
+  import FilterSelect from './FilterSelect.svelte';
+  import { InitiativesApi } from './lib/initiatives';
+  import { live } from './lib/live';
+  import {
+    CLOSED_WITHIN_OPTIONS,
+    DEFAULT_TIMELINE_FILTER,
+    affectsTimeline,
+    choiceOptions,
+    filterFromHash,
+    isFiltered,
+    tagChoices,
+    timelineHash,
+    withClosedWithin,
+    withInitiative,
+    withTag,
+    type TimelineFilter,
+    type TimelineModel,
+  } from './lib/timeline';
   import type { ArrowSurface } from './lib/timelineArrows';
   import {
     canZoomIn,
@@ -17,6 +34,7 @@
     TimelineViewStore,
     type Chart,
     type ChartLib,
+    type TimeWindow,
     type TimelineViewState,
   } from './lib/timelineView';
 
@@ -25,11 +43,15 @@
   // arrows are lib/timelineArrows.ts drawn on arrowSurface.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
+  const browser = currentBrowser();
+  const api = new TimelineApi(browser, () => csrf);
   const lib = { DataSet, Timeline } as unknown as ChartLib;
-  const store = new TimelineViewStore(new TimelineApi(currentBrowser(), () => csrf), (s) => (view = s), filterFromHash(window.location.hash));
-  let view: TimelineViewState = $state(store.state);
+  const store = new TimelineViewStore(api, (s) => (view = s), filterFromHash(window.location.hash));
+  let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
+  /** The model the chart holds; a state that changes only the loading flag or the error leaves the chart alone. */
+  let shown: TimelineModel | undefined;
   /** The visible range's length in milliseconds, 0 until the chart has drawn. */
   let span = $state(0);
 
@@ -39,10 +61,44 @@
     render: (paths) => domSurface(frame!)?.render(paths),
   };
 
+  /** What the filter selects offer: the board's initiatives, their tags and its actors. */
+  let slugs: string[] = $state([]);
+  let tags: string[] = $state([]);
+  let actors: string[] = $state([]);
+
   $effect(() => {
     void store.load();
-    return () => chart?.destroy();
+    void new InitiativesApi(browser, () => csrf)
+      .list('all')
+      .then((list) => {
+        slugs = list.map((i) => i.slug);
+        tags = tagChoices(list);
+      })
+      .catch(() => undefined); // the selects then offer only what the URL names; the chart shows the error
+    void api
+      .actors()
+      .then((handles) => (actors = handles))
+      .catch(() => undefined);
+    // A lease, task, ask or milestone event refetches in place: the window and the collapsed rows stay.
+    const unsubscribe = live().subscribe(affectsTimeline, () => store.load());
+    return () => {
+      unsubscribe();
+      store.cancelPan();
+      chart?.destroy();
+    };
   });
+
+  // The filter lives in the fragment: a choice rewrites it in place (no history entry per choice) and reads again.
+  function apply(filter: TimelineFilter) {
+    window.history.replaceState(null, '', timelineHash(filter));
+    void store.setFilter(filter);
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query.
+  function hashChanged() {
+    const filter = filterFromHash(window.location.hash);
+    if (timelineHash(filter) !== timelineHash(view.filter)) void store.setFilter(filter);
+  }
 
   // The chart is mounted once, then handed each new model. Only the frame and the model are dependencies: what the chart
   // does while it draws (the span, the arrows) must not run this again, or it would reset what the user collapsed.
@@ -51,17 +107,40 @@
     const model = view.model;
     if (target === undefined || !view.loaded) return;
     untrack(() => {
-      const hooks = { open: (ref: string) => (window.location.hash = taskHref(ref)), arrows, onSpan: (ms: number) => (span = ms) };
+      const hooks = {
+        open: (ref: string) => (window.location.hash = taskHref(ref)),
+        arrows,
+        onSpan: (ms: number) => (span = ms),
+        onRange: (range: TimeWindow) => store.panTo(range),
+      };
       if (chart === undefined) chart = mountChart(lib, target, model, view.window, hooks);
-      else chart.show(model);
+      else if (model !== shown) chart.show(model);
+      shown = model;
     });
   });
 
   const button = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text enabled:hover:bg-surface disabled:opacity-60';
 </script>
 
+<svelte:window onhashchange={hashChanged} />
+
 <section aria-labelledby="timeline-heading" class="pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
+  <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
+    <FilterSelect label="Initiative" options={choiceOptions(slugs, view.filter.initiatives[0] ?? '', 'Any initiative')} value={view.filter.initiatives[0] ?? ''} onchange={(v) => apply(withInitiative(view.filter, v))} testid="initiative-filter" />
+    <FilterSelect label="Tag" options={choiceOptions(tags, view.filter.tags[0] ?? '', 'Any tag')} value={view.filter.tags[0] ?? ''} onchange={(v) => apply(withTag(view.filter, v))} testid="tag-filter" />
+    <FilterSelect label="Actor" options={choiceOptions(actors, view.filter.actor, 'Any actor')} value={view.filter.actor} onchange={(v) => apply({ ...view.filter, actor: v })} testid="actor-filter" />
+    <FilterSelect
+      label="Closed within"
+      options={CLOSED_WITHIN_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+      value={String(view.filter.closedWithin)}
+      onchange={(v) => apply(withClosedWithin(view.filter, v))}
+      testid="closed-filter"
+    />
+    {#if isFiltered(view.filter)}
+      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={() => apply(DEFAULT_TIMELINE_FILTER)}>Clear filters</button>
+    {/if}
+  </div>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="timeline-error">{view.error}</p>
   {/if}

@@ -11,6 +11,8 @@ import {
   HOUR_MS,
   initialWindow,
   mountChart,
+  PAN_DEBOUNCE_MS,
+  sameRange,
   spanLabel,
   spanOf,
   TimelineApi,
@@ -22,6 +24,8 @@ import {
   type ChartHooks,
   type ChartLib,
   type TimelineViewState,
+  type Timers,
+  type TimeWindow,
 } from './timelineView';
 
 const NOW = new Date('2026-03-10T12:00:00Z');
@@ -61,6 +65,26 @@ describe('initialWindow', () => {
 });
 
 describe('TimelineApi', () => {
+  it('lists the actor handles from GET /actors, same origin', async () => {
+    const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json({ items: [{ handle: 'ada' }, { handle: 'bob' }] }));
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
+    expect(await new TimelineApi(browser, () => 't').actors()).toEqual(['ada', 'bob']);
+    expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/actors');
+    expect(fetchFn.mock.calls[0]![1]?.credentials).toBe('same-origin');
+    expect(fetchFn.mock.calls[0]![1]?.headers).toEqual({ Accept: 'application/json' });
+  });
+
+  it('names what it was doing when GET /actors is refused without a problem body', async () => {
+    const browser: Browser = { fetch: vi.fn(async () => new Response('', { status: 500 })), assign: vi.fn(), pathname: '/', setHash: vi.fn() };
+    await expect(new TimelineApi(browser, () => 't').actors()).rejects.toThrow(/Listing the actors/);
+  });
+
+  it('turns a refusal of GET /actors into its problem text', async () => {
+    const problem = new Response(JSON.stringify({ detail: 'unavailable' }), { status: 503, headers: { 'Content-Type': 'application/problem+json' } });
+    const browser: Browser = { fetch: vi.fn(async () => problem), assign: vi.fn(), pathname: '/', setHash: vi.fn() };
+    await expect(new TimelineApi(browser, () => 't').actors()).rejects.toThrow(/unavailable/);
+  });
+
   it('reads GET /timeline under the filter and window, same origin, under the mount prefix', async () => {
     const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json(answer()));
     const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
@@ -243,11 +267,20 @@ describe('mountChart', () => {
     constructor(rows: T[]) {
       this.rows = [...rows];
     }
-    clear() {
-      this.rows = [];
+    getIds() {
+      return this.rows.map((r) => (r as { id: string }).id);
     }
-    add(rows: T[]) {
-      this.rows.push(...rows);
+    remove(ids: (string | number)[]) {
+      this.rows = this.rows.filter((r) => !ids.includes((r as { id: string }).id));
+    }
+    updates: string[][] = [];
+    update(rows: T[]) {
+      this.updates.push(rows.map((r) => (r as { id: string }).id));
+      for (const row of rows) {
+        const at = this.rows.findIndex((r) => (r as { id: string }).id === (row as { id: string }).id);
+        if (at < 0) this.rows.push(row);
+        else this.rows[at] = { ...this.rows[at], ...row };
+      }
     }
   }
   type Listener = (props?: ChartClick) => void;
@@ -291,8 +324,9 @@ describe('mountChart', () => {
     const drawn: ArrowPath[][] = [];
     const boxes = new Map<string, Box>();
     const arrows: ArrowSurface = { boxOf: (id) => boxes.get(id), render: (paths) => drawn.push([...paths]) };
-    const h: ChartHooks = { open: (ref) => opened.push(ref), arrows, onSpan: (ms) => spans.push(ms) };
-    return { h, opened, spans, drawn, boxes };
+    const ranges: TimeWindow[] = [];
+    const h: ChartHooks = { open: (ref) => opened.push(ref), arrows, onSpan: (ms) => spans.push(ms), onRange: (r) => ranges.push(r) };
+    return { h, opened, spans, drawn, boxes, ranges };
   }
 
   it('hands the groups, items and options to vis-timeline in the container', () => {
@@ -368,5 +402,175 @@ describe('mountChart', () => {
     chart.show(model(['A1', 'A2'])); // the new model has no dependency: the next redraw draws no arrow
     made[0]!.emit('changed');
     expect(h.drawn[h.drawn.length - 1]).toEqual([]);
+  });
+
+  it('keeps what vis-timeline holds about a row that stays: a collapse is not undone by a refresh', () => {
+    const { lib, made } = fakeLib();
+    const withNested = (showNested: boolean, content = 'A'): TimelineModel => ({
+      groups: [{ id: 'i:a', ref: 'a', order: 0, content, nestedGroups: ['t:A1'], showNested } as unknown as TimelineModel['groups'][number]],
+      items: [],
+      dependencies: [],
+    });
+    const chart = mountChart(lib, {} as HTMLElement, withNested(true), initialWindow(NOW), hooks().h);
+    (made[0]!.groups.rows[0] as { showNested?: boolean }).showNested = false; // vis-timeline's own toggle
+    chart.show(withNested(true, 'renamed')); // changed: merged without the collapse flag
+    expect(made[0]!.groups.rows[0]).toMatchObject({ content: 'renamed', showNested: false });
+    chart.show({ groups: [...withNested(true, 'renamed').groups, { id: 'i:b', ref: 'b', order: 1, showNested: true } as unknown as TimelineModel['groups'][number]], items: [], dependencies: [] });
+    expect(made[0]!.groups.rows.map((g) => (g as { id: string; showNested?: boolean }).showNested)).toEqual([false, true]);
+  });
+
+  it('touches only the rows that changed, so an answer that changed nothing disturbs nothing', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1', 'A2']), initialWindow(NOW), hooks().h);
+    chart.show(model(['A1', 'A2']));
+    expect(made[0]!.items.updates.at(-1)).toEqual([]);
+    expect(made[0]!.groups.updates.at(-1)).toEqual([]);
+    const changed = model(['A1', 'A2']);
+    changed.items[1] = { ...changed.items[1]!, title: 'new title' };
+    chart.show(changed);
+    expect(made[0]!.items.updates.at(-1)).toEqual(['act:A2']);
+    expect(made[0]!.groups.updates.at(-1)).toEqual([]);
+    chart.show(model(['A1', 'A2', 'A3']));
+    expect(made[0]!.items.updates.at(-1)).toEqual(['act:A2', 'act:A3']); // A2 changed back, A3 is new
+  });
+
+  it('merges new data into the rows it holds and drops the ones that are gone', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1', 'A2']), initialWindow(NOW), hooks().h);
+    chart.show(model(['A2', 'A3']));
+    expect(made[0]!.groups.rows.map((g) => (g as { id: string }).id)).toEqual(['t:A2', 't:A3']);
+    expect(made[0]!.items.rows.map((i) => (i as { id: string }).id)).toEqual(['act:A2', 'act:A3']);
+  });
+
+  it('tells the view the visible range once it stops moving, not while it moves', () => {
+    const { lib, made } = fakeLib();
+    const h = hooks();
+    mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), h.h);
+    made[0]!.window = { start: new Date(DAY_MS), end: new Date(3 * DAY_MS) };
+    made[0]!.emit('rangechange');
+    made[0]!.emit('changed');
+    expect(h.ranges).toEqual([]);
+    made[0]!.emit('rangechanged');
+    expect(h.ranges).toEqual([{ from: new Date(DAY_MS), to: new Date(3 * DAY_MS) }]);
+  });
+});
+
+describe('sameRange', () => {
+  const w = initialWindow(NOW);
+  it('holds a range within 1% of its length at both ends', () => {
+    const slack = 21 * DAY_MS * 0.01;
+    expect(sameRange(w, { from: new Date(w.from.getTime() + slack), to: new Date(w.to.getTime() - slack) })).toBe(true);
+  });
+  it('is false once either end moves further', () => {
+    const over = 21 * DAY_MS * 0.01 + 1;
+    expect(sameRange(w, { from: new Date(w.from.getTime() + over), to: w.to })).toBe(false);
+    expect(sameRange(w, { from: w.from, to: new Date(w.to.getTime() + over) })).toBe(false);
+    expect(sameRange(w, { from: new Date(w.from.getTime() - over), to: w.to })).toBe(false);
+    expect(sameRange(w, { from: w.from, to: new Date(w.to.getTime() - over) })).toBe(false);
+  });
+});
+
+describe('TimelineViewStore panning', () => {
+  function timers() {
+    const pending = new Map<number, () => void>();
+    let next = 1;
+    const cleared: number[] = [];
+    const t: Timers = {
+      set: (fn, ms) => {
+        expect(ms).toBe(PAN_DEBOUNCE_MS);
+        pending.set(next, fn);
+        return next++;
+      },
+      clear: (h) => {
+        cleared.push(h as number);
+        pending.delete(h as number);
+      },
+    };
+    return { t, pending, cleared, fire: () => [...pending.values()].forEach((fn) => fn()) };
+  }
+  const moved = (days: number): TimeWindow => {
+    const w = initialWindow(NOW);
+    return { from: new Date(w.from.getTime() + days * DAY_MS), to: new Date(w.to.getTime() + days * DAY_MS) };
+  };
+
+  it('reads the new range once the pan has been still for the debounce, not before', async () => {
+    const tm = timers();
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, tm.t);
+    store.panTo(moved(5));
+    expect(api.read).not.toHaveBeenCalled();
+    expect(store.state.window).toEqual(initialWindow(NOW));
+    tm.fire();
+    await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(5));
+    expect(store.state.window).toEqual(moved(5));
+  });
+
+  it('reads only the last range of a burst', async () => {
+    const tm = timers();
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, tm.t);
+    store.panTo(moved(2));
+    store.panTo(moved(4));
+    store.panTo(moved(6));
+    expect(tm.cleared).toEqual([1, 2]);
+    expect(tm.pending.size).toBe(1);
+    tm.fire();
+    await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(6));
+  });
+
+  it('debounces on the browser timers when none are handed in, and cancels with them', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = { read: vi.fn(async () => answer()) };
+      const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW);
+      store.panTo(moved(5));
+      store.cancelPan();
+      vi.advanceTimersByTime(PAN_DEBOUNCE_MS * 2);
+      expect(api.read).not.toHaveBeenCalled();
+      store.panTo(moved(5));
+      vi.advanceTimersByTime(PAN_DEBOUNCE_MS - 1);
+      expect(api.read).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(api.read).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads nothing for the range it already holds, and a pan back drops the pending read', () => {
+    const tm = timers();
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, tm.t);
+    store.panTo(initialWindow(NOW));
+    expect(tm.pending.size).toBe(0);
+    store.panTo(moved(5));
+    store.panTo(initialWindow(NOW));
+    expect(tm.pending.size).toBe(0);
+    expect(api.read).not.toHaveBeenCalled();
+  });
+
+  it('drops the pending read when the view goes away', () => {
+    const tm = timers();
+    const store = new TimelineViewStore({ read: vi.fn(async () => answer()) }, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, tm.t);
+    store.cancelPan();
+    expect(tm.cleared).toEqual([]);
+    store.panTo(moved(5));
+    store.cancelPan();
+    expect(tm.cleared).toEqual([1]);
+    expect(tm.pending.size).toBe(0);
+  });
+
+  it('keeps the panned window when the filter changes or a live event refreshes', async () => {
+    const tm = timers();
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, tm.t);
+    store.panTo(moved(5));
+    tm.fire();
+    await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
+    await store.setFilter({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' });
+    await store.load();
+    expect(api.read).toHaveBeenLastCalledWith({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' }, moved(5));
   });
 });

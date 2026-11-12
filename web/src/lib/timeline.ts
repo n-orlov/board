@@ -366,3 +366,38 @@ export function apiQuery(filter: TimelineFilter, from: Date, to: Date): URLSearc
 export function isFiltered(filter: TimelineFilter): boolean {
   return filterToQuery(filter) !== '';
 }
+
+// --- the filter controls ---
+
+/** A select's options over a set of values: the "any" choice first, then the values sorted, the current one kept even when unknown. */
+export function choiceOptions(values: readonly string[], current: string, any: string): { value: string; label: string }[] {
+  const all = new Set(clean(values));
+  if (current !== '') all.add(current);
+  return [{ value: '', label: any }, ...[...all].sort().map((value) => ({ value, label: value }))];
+}
+
+/** The tags the initiatives carry, each once. */
+export function tagChoices(initiatives: readonly { tags: readonly string[] }[]): string[] {
+  return [...new Set(initiatives.flatMap((i) => i.tags))];
+}
+
+/** The filter with one initiative chosen (empty clears it). The server takes several; the select picks one. */
+export function withInitiative(filter: TimelineFilter, slug: string): TimelineFilter {
+  return { ...filter, initiatives: slug === '' ? [] : [slug] };
+}
+
+/** The filter with one tag chosen (empty clears it). */
+export function withTag(filter: TimelineFilter, tag: string): TimelineFilter {
+  return { ...filter, tags: tag === '' ? [] : [tag] };
+}
+
+/** The filter with a closed-within choice read from a select's value. */
+export function withClosedWithin(filter: TimelineFilter, raw: string): TimelineFilter {
+  return { ...filter, closedWithin: closedFrom(raw) };
+}
+
+/** Whether a live event can change the timeline: a lease, task, ask or milestone event, a check, or a dependency. */
+export function affectsTimeline(event: { type: string }): boolean {
+  const { type } = event;
+  return ['lease_', 'task_', 'ask_', 'milestone', 'dep_'].some((prefix) => type.startsWith(prefix)) || type === 'check_recorded';
+}

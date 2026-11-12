@@ -27,7 +27,24 @@ export function initialWindow(now: Date): TimeWindow {
   return { from: new Date(now.getTime() - DAYS_BEFORE * DAY_MS), to: new Date(now.getTime() + DAYS_AHEAD * DAY_MS) };
 }
 
+/** A pan or zoom that stays within this fraction of the window already read is not a new window. */
+export const SAME_RANGE = 0.01;
+/** How long the view waits after the range last moved before it reads the new one. */
+export const PAN_DEBOUNCE_MS = 300;
+
+/** Whether `a` and `b` are the same range, give or take `SAME_RANGE` of its length at either end. */
+export function sameRange(a: TimeWindow, b: TimeWindow): boolean {
+  const slack = (a.to.getTime() - a.from.getTime()) * SAME_RANGE;
+  return Math.abs(a.from.getTime() - b.from.getTime()) <= slack && Math.abs(a.to.getTime() - b.to.getTime()) <= slack;
+}
+
 export class TimelineApi extends ThreadApi {
+  /** The handles of every actor the board has recorded, for the actor filter. */
+  async actors(): Promise<string[]> {
+    const response = await this.call('/api/v1/actors', 'Listing the actors', { headers: { Accept: 'application/json' } });
+    return ((await response.json()) as { items: { handle: string }[] }).items.map((a) => a.handle);
+  }
+
   /** The timeline under the filter in the window. */
   async read(filter: TimelineFilter, window: TimeWindow): Promise<Timeline> {
     const query = apiQuery(filter, window.from, window.to);
@@ -49,19 +66,36 @@ export interface TimelineViewState {
   error: string;
 }
 
+/** The timers the store's debounce uses; tests hand in their own. */
+export interface Timers {
+  set(fn: () => void, ms: number): unknown;
+  clear(handle: unknown): void;
+}
+
+const BROWSER_TIMERS: Timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) };
+
 const EMPTY_MODEL: TimelineModel = { groups: [], items: [], dependencies: [] };
 
 export class TimelineViewStore {
   private readonly api: Pick<TimelineApi, 'read'>;
   private readonly publish: (state: TimelineViewState) => void;
   private readonly now: () => Date;
+  private readonly timers: Timers;
   private readonly fetches = new Fetches();
+  private panTimer: unknown;
   state: TimelineViewState;
 
-  constructor(api: Pick<TimelineApi, 'read'>, publish: (state: TimelineViewState) => void, filter: TimelineFilter, now: () => Date = () => new Date()) {
+  constructor(
+    api: Pick<TimelineApi, 'read'>,
+    publish: (state: TimelineViewState) => void,
+    filter: TimelineFilter,
+    now: () => Date = () => new Date(),
+    timers: Timers = BROWSER_TIMERS,
+  ) {
     this.api = api;
     this.publish = publish;
     this.now = now;
+    this.timers = timers;
     this.state = { filter, window: initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
   }
 
@@ -82,6 +116,26 @@ export class TimelineViewStore {
       if (this.fetches.end(ticket)) this.set({ error: errorText(e) });
     }
     this.set({ loading: this.fetches.busy });
+  }
+
+  /**
+   * The chart's visible range moved (a drag, a zoom): once it stops for `PAN_DEBOUNCE_MS` and differs from the window
+   * last read, the timeline is read again for it. Moving again inside the delay replaces the pending range.
+   */
+  panTo(range: TimeWindow): void {
+    this.cancelPan();
+    if (sameRange(this.state.window, range)) return;
+    this.panTimer = this.timers.set(() => {
+      this.panTimer = undefined;
+      this.set({ window: range });
+      void this.load();
+    }, PAN_DEBOUNCE_MS);
+  }
+
+  /** Drops a pending pan: the view is going away. */
+  cancelPan(): void {
+    if (this.panTimer !== undefined) this.timers.clear(this.panTimer);
+    this.panTimer = undefined;
   }
 
   /** Applies a new filter and reads again. */
@@ -125,8 +179,10 @@ export function spanLabel(spanMs: number): string {
 
 /** The slice of vis-data's DataSet the chart uses. */
 export interface ChartData<T> {
-  clear(): void;
-  add(rows: T[]): unknown;
+  getIds(): (string | number)[];
+  remove(ids: (string | number)[]): unknown;
+  /** Adds the rows it does not hold and merges the fields of the ones it does. */
+  update(rows: T[]): unknown;
 }
 
 /** What vis-timeline tells a `click` listener: what was hit, and the item or group under the pointer. */
@@ -193,6 +249,8 @@ export interface ChartHooks {
   arrows: ArrowSurface;
   /** The visible range's length, after every redraw. */
   onSpan(spanMs: number): void;
+  /** The visible range, once it stops moving (a drag or a zoom ended). */
+  onRange(range: TimeWindow): void;
 }
 
 /** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
@@ -204,12 +262,38 @@ export interface Chart {
 
 const NO_ANIMATION = { animation: false } as const;
 
+/** A group as it is when vis-timeline already holds it: without `showNested`, which is the user's to change (a collapse). */
+function withoutCollapse<T extends { id: string }>(group: T & { showNested?: boolean }): T {
+  const rest = { ...group };
+  delete rest.showNested;
+  return rest;
+}
+
+/** The rows a chart holds, by id, as the text they were last drawn from: what a refresh compares against. */
+type Held = Map<string, string>;
+
+/**
+ * Makes `data` hold exactly `rows`: rows that are gone are removed, rows that changed are merged in, new rows are added,
+ * and rows that are the same as last time are not touched at all. Nothing is cleared and re-added, so a row that stays
+ * keeps what vis-timeline holds about it (a collapse), a refresh does not flicker, and a drag or a click under way is not
+ * disturbed by an answer that changed nothing. `merged` shapes a changed row that `data` already holds.
+ */
+function replaceRows<T extends { id: string }>(data: ChartData<unknown>, rows: readonly T[], held: Held, merged: (row: T) => T) {
+  const next: Held = new Map(rows.map((row) => [row.id, JSON.stringify(row)]));
+  data.remove([...held.keys()].filter((id) => !next.has(id)));
+  data.update(rows.filter((row) => held.get(row.id) !== next.get(row.id)).map((row) => (held.has(row.id) ? merged(row) : row)));
+  held.clear();
+  next.forEach((text, id) => held.set(id, text));
+}
+
 /** Draws `model` with vis-timeline into `container`. */
 export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks): Chart {
   const items = new lib.DataSet<unknown>(model.items);
   const groups = new lib.DataSet<unknown>(model.groups);
   const timeline = new lib.Timeline(container, items, groups, chartOptions(window));
   let current = model;
+  const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
+  const heldItems: Held = new Map(model.items.map((i) => [i.id, JSON.stringify(i)]));
   const byId = (id: string) => current.items.find((item) => item.id === id);
   timeline.on('click', (click) => {
     const ref = clickedTask(click, byId);
@@ -228,14 +312,14 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   timeline.on('rangechanged', () => {
     timeline.redraw();
     sync();
+    const { start, end } = timeline.getWindow();
+    hooks.onRange({ from: start, to: end });
   });
   return {
     show(next: TimelineModel) {
       current = next;
-      items.clear();
-      groups.clear();
-      groups.add(next.groups);
-      items.add(next.items);
+      replaceRows(groups, next.groups, heldGroups, withoutCollapse);
+      replaceRows(items, next.items, heldItems, (row) => row);
     },
     zoom(direction) {
       if (direction === 'in') timeline.zoomIn(ZOOM_FACTOR, NO_ANIMATION);
