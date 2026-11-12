@@ -115,7 +115,13 @@
   const back = 'inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline';
 </script>
 
-<section aria-labelledby="initiative-heading" class="pb-16 md:pb-0" data-testid="initiative-page">
+<!-- From 1536 px (2xl) the page is a grid: the main column (header, Needs attention, Tasks) and a 420 px side column (Open asks, Notes). Below it the side column follows the main one, in flow. -->
+<section
+  aria-labelledby="initiative-heading"
+  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
+  data-testid="initiative-page"
+>
+  <div class="min-w-0 2xl:col-start-1" data-testid="initiative-main">
   <a class={back} href="#/initiatives" data-testid="back-link">← Initiatives</a>
 
   {#if view.error !== undefined}
@@ -176,7 +182,7 @@
     {/if}
     <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter)} showInitiative={false} />
 
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-testid="tasks-heading">
       <h3 class="text-lg font-bold">Tasks</h3>
       <FilterSelect label="Tasks" options={TASK_FILTERS} value={view.filter} onchange={(f: TaskFilter) => store.setFilter(f)} testid="task-filter" />
     </div>
@@ -222,27 +228,40 @@
         </tbody>
       </table>
     {/if}
+  {/if}
+  </div>
 
-    {#if thread.error !== undefined}
-      <p role="alert" class="mt-6 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="thread-error">{thread.error}</p>
-    {/if}
+  {#if !view.loading && view.initiative !== undefined}
+    <aside
+      aria-label="Open asks and notes"
+      class="mt-6 min-w-0 2xl:sticky 2xl:top-6 2xl:col-start-2 2xl:row-start-1 2xl:mt-0 2xl:max-h-[calc(100vh-3rem)] 2xl:self-start 2xl:overflow-y-auto"
+      data-testid="initiative-side"
+    >
+      {#if thread.error !== undefined}
+        <p role="alert" class="mb-6 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="thread-error">{thread.error}</p>
+      {/if}
 
-    <div class="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3"><h3 class="text-lg font-bold">Open asks</h3></div>
-    {#if asks.length === 0}
-      <p class="text-sm text-text-muted" data-testid="no-asks">No open asks.</p>
-    {:else}
-      <AskList {asks} testid="initiative-asks" showTask onanswer={(ask) => open({ answer: ask })} onwithdraw={(askRef) => open({ withdraw: askRef })} />
-    {/if}
+      <div data-testid="open-asks-section">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3"><h3 class="text-lg font-bold">Open asks</h3></div>
+        {#if asks.length === 0}
+          <p class="text-sm text-text-muted" data-testid="no-asks">No open asks.</p>
+        {:else}
+          <AskList {asks} testid="initiative-asks" showTask onanswer={(ask) => open({ answer: ask })} onwithdraw={(askRef) => open({ withdraw: askRef })} />
+        {/if}
+      </div>
 
-    <div class="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3">
-      <h3 class="text-lg font-bold">Notes</h3>
-      <button type="button" class={small} onclick={() => open('note')}>Post note</button>
-    </div>
-    {#if notes.length === 0}
-      <p class="text-sm text-text-muted" data-testid="no-notes">No notes.</p>
-    {:else}
-      <NoteList {notes} bodies={thread.bodies} testid="initiative-notes" showTask onexpand={(noteRef) => void threads.loadBody(noteRef)} />
-    {/if}
+      <div class="mt-6" data-testid="notes-section">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h3 class="text-lg font-bold">Notes</h3>
+          <button type="button" class={small} onclick={() => open('note')}>Post note</button>
+        </div>
+        {#if notes.length === 0}
+          <p class="text-sm text-text-muted" data-testid="no-notes">No notes.</p>
+        {:else}
+          <NoteList {notes} bodies={thread.bodies} testid="initiative-notes" showTask onexpand={(noteRef) => void threads.loadBody(noteRef)} />
+        {/if}
+      </div>
+    </aside>
   {/if}
 </section>
 
