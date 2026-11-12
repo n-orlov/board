@@ -1,12 +1,17 @@
 <script lang="ts">
   import Dialog from './Dialog.svelte';
   import KeyForm from './KeyForm.svelte';
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
   import { copyText } from './lib/clipboard';
   import { absoluteTime, relativeTime } from './lib/format';
   import { KeysApi, KeysStore, affectsKeys, type KeysState } from './lib/keys';
+  import { KEYS_VIEW, KEY_COLUMNS, KEY_SORT_LABELS, isKeysHash, keysHash, queryOfHash, sortOfQuery } from './lib/keysView';
   import { keyTone, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
+  import { sortRows, sortToQuery, type SortState } from './lib/tableSort';
+  import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string } = $props();
 
@@ -18,6 +23,25 @@
   let revoking: string | undefined = $state(undefined);
 
   const store = new KeysStore(new KeysApi(currentBrowser(), () => csrf), (s) => (view = s));
+
+  const viewEnv = currentViewEnv();
+  // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  let sort: SortState = $state(sortOfQuery(openView(viewEnv, KEYS_VIEW, '#/settings/keys', queryOfHash(window.location.hash))));
+  // The default order is the server's (oldest key first); a sort replaces it and ties keep it.
+  const rows = $derived(sortRows(view.keys, sort, KEY_COLUMNS));
+
+  // A sort only reorders the keys the view holds: the fragment and the saved query follow it, and no request is made.
+  function setSort(next: SortState) {
+    sort = next;
+    window.history.replaceState(null, '', keysHash(next));
+    saveViewQuery(viewEnv.storage, KEYS_VIEW, sortToQuery(next));
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare route restores the saved query.
+  function hashChanged() {
+    const hash = window.location.hash;
+    if (isKeysHash(hash)) sort = sortOfQuery(openView(viewEnv, KEYS_VIEW, '#/settings/keys', queryOfHash(hash)));
+  }
 
   $effect(() => {
     void store.load();
@@ -56,6 +80,8 @@
   const th = 'px-3 py-2 text-sm font-medium text-text-muted';
   const label = 'mr-1 text-xs text-text-muted md:hidden';
 </script>
+
+<svelte:window onhashchange={hashChanged} />
 
 <section aria-labelledby="keys-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
@@ -103,21 +129,22 @@
       <p class="text-sm text-text-muted">A key lets an agent call the API.</p>
     </div>
   {:else}
+    <div class="mb-3 flex"><SortSelect columns={KEY_SORT_LABELS} {sort} onsort={setSort} /></div>
     <!-- One table: from 768 px a dense table, below it each row is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <th scope="col" class={th}>Name</th>
-          <th scope="col" class={`${th} md:w-24`}>Prefix</th>
-          <th scope="col" class={`${th} md:w-24`}>Status</th>
-          <th scope="col" class={`${th} md:w-24`}>Created</th>
-          <th scope="col" class={`${th} md:w-24`}>Last used</th>
-          <th scope="col" class={`${th} md:w-28`}>Expires</th>
+          <SortHeader column="name" label="Name" {sort} onsort={setSort} class={th} />
+          <SortHeader column="prefix" label="Prefix" {sort} onsort={setSort} class="{th} md:w-24" />
+          <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{th} md:w-24" />
+          <SortHeader column="created" label="Created" {sort} onsort={setSort} class="{th} md:w-24" />
+          <SortHeader column="used" label="Last used" {sort} onsort={setSort} class="{th} md:w-28" />
+          <SortHeader column="expires" label="Expires" {sort} onsort={setSort} class="{th} md:w-28" />
           <th scope="col" class={`${th} md:w-28`}><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
-        {#each view.keys as key (key.id)}
+        {#each rows as key (key.id)}
           <tr
             data-testid="key-row"
             data-name={key.name}
