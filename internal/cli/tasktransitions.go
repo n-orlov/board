@@ -32,6 +32,18 @@ func transitionFlags(cmd string) []flagSpec {
 	}
 }
 
+// transitionBody is the request body of a transition and the --for actor of a
+// close: close and done carry flags, the other moves send no body.
+func transitionBody(cmd string, p parsedArgs) (any, string, error) {
+	switch cmd {
+	case "close":
+		return closeBody(p)
+	case "done":
+		return doneBody(p), "", nil
+	}
+	return nil, "", nil
+}
+
 // closeBody reads --resolution (default completed) and --for. A resolution
 // outside the four, or a --for other than operator, is an error worded for the
 // flag.
@@ -56,17 +68,9 @@ func taskTransition(cmd string, args []string, stdout, stderr io.Writer, env Env
 	if !ok || !transitionArity(cmd, len(p.pos)) {
 		return usageLine(stderr, TaskUsage)
 	}
-	var body any
-	who := ""
-	switch cmd {
-	case "close":
-		b, w, err := closeBody(p)
-		if err != nil {
-			return badFlagValue(stderr, err)
-		}
-		body, who = b, w
-	case "done":
-		body = doneBody(p)
+	body, who, err := transitionBody(cmd, p)
+	if err != nil {
+		return badFlagValue(stderr, err)
 	}
 	c, err := newClient(env)
 	if err != nil {

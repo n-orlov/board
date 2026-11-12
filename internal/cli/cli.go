@@ -195,16 +195,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 		return fail(stderr, err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := prepareSchema(ctx, st, migrate); err != nil {
-		return fail(stderr, err)
-	}
-	if err := configureNotify(st, env); err != nil {
-		return fail(stderr, err)
-	}
-	if err := reopenLeased(ctx, st); err != nil {
-		return fail(stderr, err)
-	}
-	if err := bootstrapInbox(ctx, st, env); err != nil {
+	if err := startupSteps(ctx, st, env, migrate); err != nil {
 		return fail(stderr, err)
 	}
 	login, err := loginFromEnv(env, st)
@@ -227,6 +218,22 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 		return fail(stderr, err)
 	}
 	return ExitOK
+}
+
+// startupSteps readies the store before serve listens: the schema, the alert
+// settings, the leases a crash left behind and the inbox, in that order, stopping
+// at the first error.
+func startupSteps(ctx context.Context, st *store.Store, env Env, migrate bool) error {
+	if err := prepareSchema(ctx, st, migrate); err != nil {
+		return err
+	}
+	if err := configureNotify(st, env); err != nil {
+		return err
+	}
+	if err := reopenLeased(ctx, st); err != nil {
+		return err
+	}
+	return bootstrapInbox(ctx, st, env)
 }
 
 // configureNotify turns on the alerts BOARD_NOTIFY_URL and BOARD_NOTIFY_ON ask for,

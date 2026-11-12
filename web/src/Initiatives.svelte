@@ -99,7 +99,7 @@
           >
             <td class="w-full min-w-0 md:table-cell md:w-auto md:px-3 md:py-3">
               <a
-                class="inline-flex min-h-11 items-center font-medium text-accent hover:underline"
+                class="inline-flex min-h-11 min-w-11 items-center font-medium text-accent hover:underline"
                 href="#/i/{initiative.slug}"
                 data-testid="initiative-link">{initiative.title}</a
               >
