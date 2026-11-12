@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError } from './initiatives';
-import { affectsTaskPage, depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
+import { ACK_BODY, affectsTaskPage, copyWayBackLabel, depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, strandedPanel, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
 import type { TaskListItem } from './initiatives';
 import type { Ask } from './asks';
 import type { Note } from './notes';
@@ -261,6 +261,54 @@ describe('expiredRows', () => {
       { ref: 'L3', holder: 'ann', intent: 'edit', resources: '', expired: 'expired 10m ago' },
     ]);
     expect(expiredRows([], NOW)).toEqual([]);
+  });
+
+  it('leaves out the stranded lease, which has its own panel', () => {
+    const rows = expiredRows([lease('L1'), lease('L3')], NOW, 'L3');
+    expect(rows.map((r) => r.ref)).toEqual(['L1']);
+    expect(expiredRows([lease('L3')], NOW, 'L3')).toEqual([]);
+  });
+});
+
+describe('strandedPanel', () => {
+  const stranded = (way?: string) =>
+    ({
+      stranded_lease: {
+        ref: 'L4',
+        holder: { handle: 'ann', ...(way === undefined ? {} : { way_back: way }) },
+        intent: 'long edit',
+        renewed_at: '2026-01-10T11:40:00Z',
+        expired_at: '2026-01-10T11:50:00Z',
+      },
+    }) as Pick<TaskDetail, 'stranded_lease'>;
+
+  it('has no panel for a task that is not stranded', () => {
+    expect(strandedPanel({}, NOW)).toBeUndefined();
+  });
+
+  it('names the holder, the intent, the last renewal, the expiry and the way back', () => {
+    expect(strandedPanel(stranded('ralphctl status x'), NOW)).toEqual({
+      lease: 'L4',
+      holder: 'ann',
+      wayBack: 'ralphctl status x',
+      intent: 'long edit',
+      renewed: 'renewed 20 minutes ago',
+      renewedAt: '2026-01-10T11:40:00Z',
+      renewedTitle: expect.stringMatching(/^2026-01-10 \d\d:40$/),
+      expired: 'expired 10m ago',
+      expiredAt: '2026-01-10T11:50:00Z',
+      expiredTitle: expect.stringMatching(/^2026-01-10 \d\d:50$/),
+    });
+  });
+
+  it('has no way back to copy when the board has none, or an empty one', () => {
+    expect(strandedPanel(stranded(), NOW)?.wayBack).toBeUndefined();
+    expect(strandedPanel(stranded(''), NOW)?.wayBack).toBeUndefined();
+  });
+
+  it('names the copy button after the holder and explains the confirmation', () => {
+    expect(copyWayBackLabel({ holder: 'ann' })).toBe('Copy way back of ann');
+    expect(ACK_BODY).toContain('Acknowledging it records');
   });
 });
 

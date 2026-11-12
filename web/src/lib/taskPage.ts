@@ -83,10 +83,10 @@ export interface ExpiredRow {
   expired: string;
 }
 
-/** The leases of the task that ran out and nobody acknowledged yet, in the order given (oldest first). */
-export function expiredRows(leases: readonly Lease[], now: Date): ExpiredRow[] {
+/** The leases of the task that ran out and nobody acknowledged yet, in the order given (oldest first); `except` is the stranded lease, which has its own panel. */
+export function expiredRows(leases: readonly Lease[], now: Date, except?: string): ExpiredRow[] {
   return leases
-    .filter((lease) => lease.acked_at === undefined)
+    .filter((lease) => lease.acked_at === undefined && lease.ref !== except)
     .map((lease) => ({
       ref: lease.ref,
       holder: lease.actor,
@@ -95,6 +95,50 @@ export function expiredRows(leases: readonly Lease[], now: Date): ExpiredRow[] {
       expired: expiresIn(lease.expires_at, now),
     }));
 }
+
+export interface StrandedPanel {
+  /** The lease's ref, what Acknowledge acts on. */
+  lease: string;
+  holder: string;
+  /** The holder's way back to copy; undefined when the board has none on record. */
+  wayBack: string | undefined;
+  intent: string;
+  /** "renewed 2 minutes ago". */
+  renewed: string;
+  renewedAt: string;
+  renewedTitle: string;
+  /** "expired 30s ago". */
+  expired: string;
+  expiredAt: string;
+  expiredTitle: string;
+}
+
+/** What the Stranded panel shows for a task: its stranded lease, or undefined when the task is not stranded. */
+export function strandedPanel(task: Pick<TaskDetail, 'stranded_lease'>, now: Date): StrandedPanel | undefined {
+  const lease = task.stranded_lease;
+  if (lease === undefined) return undefined;
+  const way = lease.holder.way_back;
+  return {
+    lease: lease.ref,
+    holder: lease.holder.handle,
+    wayBack: way === undefined || way === '' ? undefined : way,
+    intent: lease.intent,
+    renewed: `renewed ${relativeTime(lease.renewed_at, now)}`,
+    renewedAt: lease.renewed_at,
+    renewedTitle: absoluteTime(lease.renewed_at),
+    expired: expiresIn(lease.expired_at, now),
+    expiredAt: lease.expired_at,
+    expiredTitle: absoluteTime(lease.expired_at),
+  };
+}
+
+/** The accessible name of the panel's copy button. */
+export function copyWayBackLabel(panel: Pick<StrandedPanel, 'holder'>): string {
+  return `Copy way back of ${panel.holder}`;
+}
+
+/** The body of the Acknowledge confirmation. */
+export const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes the task off Needs attention.';
 
 export interface EventRow {
   id: string;

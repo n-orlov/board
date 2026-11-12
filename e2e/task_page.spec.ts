@@ -482,7 +482,7 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
-    test('Acknowledge clears an expired lease from the page and leaves its event', async ({ page, playwright, baseURL }) => {
+    test('Acknowledge clears a stranded lease from the page and leaves its event', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const ref = await seedTask(api, `e2e-tp-ack-${vp.name}`);
       const lease = (await post(api, '/api/v1/leases', { task: ref, intent: 'forgotten work' }, 201).then((l) => (l as unknown as { lease: { ref: string } }).lease)).ref;
@@ -490,15 +490,16 @@ for (const vp of viewports) {
       await page.goto(`/#/t/${ref}`);
 
       await expect(page.getByTestId('no-leases')).toBeVisible();
-      const expired = page.getByTestId('expired-lease');
-      await expect(expired).toHaveCount(1);
-      await expect(expired).toContainText('forgotten work');
-      await expect(expired.getByTestId('expired-when')).toHaveText(/^expired \d+s ago$/);
+      const stranded = page.getByTestId('stranded-panel');
+      await expect(stranded).toBeVisible();
+      await expect(stranded).toContainText('forgotten work');
+      await expect(stranded.getByTestId('stranded-expired')).toHaveText(/^expired \d+s ago$/);
       await expect(eventTypes(page)).resolves.toEqual(['lease_expired', 'lease_started', 'task_created']);
 
       await page.getByRole('button', { name: `Acknowledge lease ${lease}` }).click();
+      await page.getByRole('dialog', { name: `Acknowledge lease ${lease}` }).getByRole('button', { name: 'Acknowledge lease' }).click();
       await expect(page.getByTestId('toast')).toContainText(`Lease ${lease} acknowledged`);
-      await expect(page.getByTestId('expired-lease')).toHaveCount(0);
+      await expect(page.getByTestId('stranded-panel')).toHaveCount(0);
       await expect(eventTypes(page)).resolves.toEqual(['lease_acked', 'lease_expired', 'lease_started', 'task_created']);
       await api.dispose();
     });

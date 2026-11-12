@@ -2553,6 +2553,18 @@ under its title, "1 needs attention" or "N need attention" (the count in `data-t
 attention first and the others after them, each group in the order the server gave (creation order), so the Inbox moves down once
 another initiative needs a person. The chip and the order follow the live refresh of the list without a reload. `e2e/initiative_attention.spec.ts`
 checks both at phone and desktop.
+**Badges and the Stranded panel on the task page** (R2, `strandedPanel` in `web/src/lib/taskPage.ts`, `TaskPage.svelte`). The task
+header shows the task's `attention` badges (`attentionBadges`, `data-testid="attention-<reason>"`) beside its status and flags. A task
+with a `stranded_lease` (SPEC 5.3) also shows a **Stranded** panel (`stranded-panel`) above the description: the holder, the lease
+ref, the intent, the last renewal ("renewed 20 minutes ago") and the expiry ("expired 10m ago"), each time with its absolute time in
+the `title`, and the holder's way back. **Copy way back** (named "Copy way back of <holder>") puts exactly that way back on the
+clipboard and toasts "Copied the way back of <holder>"; a holder with no way back on record has no button and the panel says "no
+way back on record". **Acknowledge** (named "Acknowledge lease <ref>", 44 px) opens a confirmation in the one Dialog (bottom sheet on
+the phone) with **Cancel** and **Acknowledge lease**; confirming posts `POST /leases/<lease>/ack`, toasts "Lease L3 acknowledged"
+and, from the live refresh, the panel and the stranded badge go and the task leaves Needs attention on every open view within
+seconds, without a reload; Cancel acknowledges nothing, and a refusal stays inside the sheet. `e2e/stranded_panel.spec.ts` makes a task
+stranded through the API at phone and desktop and checks the panel, the copied way back, the confirmation and the removal from the
+Tasks view's Needs attention, plus axe in both themes.
 **Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
 the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
 `modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a
@@ -2677,7 +2689,8 @@ a check moves the task's next check to now plus its cadence, which the page prin
 (`nextCheckText`). Each live lease has an **End lease** button: a sheet with an optional Outcome (at most 200 characters)
 that posts `POST /leases/<lease>/end`; a lease that is not live any more (409) is refused in the sheet. An
 **Expired leases** section appears when a lease of the task ran out and nobody acknowledged it (`expiredRows`: holder,
-lease ref, intent, resources, "expired 2m ago"); its **Acknowledge** button posts `POST /leases/<lease>/ack` at once. Each
+lease ref, intent, resources, "expired 2m ago"), except the stranded lease, which has the Stranded panel below; its
+**Acknowledge** button opens the confirmation sheet described there. Each
 of the six actions toasts ("Task aa-1 is now blocked by bb-1", "Task aa-1 no longer waits for bb-1", "Milestone recorded
 on aa-1", "Check recorded on aa-1", "Lease L3 ended", "Lease L3 acknowledged") and reads the task, its events and its
 expired leases again, so `dep_added`, `dep_removed`, `milestone`, `check_recorded`, `lease_ended` and `lease_acked`

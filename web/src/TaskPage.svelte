@@ -2,6 +2,7 @@
   import AnswerForm from './AnswerForm.svelte';
   import AskList from './AskList.svelte';
   import Dialog from './Dialog.svelte';
+  import InitiativeConfirm from './InitiativeConfirm.svelte';
   import NoteForm from './NoteForm.svelte';
   import NoteList from './NoteList.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
@@ -12,6 +13,8 @@
   import { taskConflictText, taskConflicts } from './lib/conflicts';
   import { nextCheckText } from './lib/durations';
   import { blockedReasons, orderAsks, type Ask } from './lib/asks';
+  import { copyText } from './lib/clipboard';
+  import { attentionBadges } from './lib/attention';
   import { absoluteTime, relativeTime } from './lib/format';
   import { taskBadges } from './lib/initiativePage';
   import { isSafeUrl, renderMarkdown } from './lib/markdown';
@@ -20,14 +23,14 @@
   import { currentBrowser } from './lib/session';
   import { taskActions } from './lib/taskActions';
   import { toTaskEditForm, type TaskEditForm as EditForm } from './lib/taskEdit';
-  import { affectsTaskPage, eventRows, expiredRows, kindText, leaseRows, plannedText, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
+  import { ACK_BODY, affectsTaskPage, copyWayBackLabel, eventRows, expiredRows, kindText, leaseRows, plannedText, strandedPanel, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
   import { TasksApi, type Resolution } from './lib/tasks';
   import { live } from './lib/live';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
   let view: TaskPageState = $state({ task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [], asks: [], notes: [], bodies: {} });
-  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | undefined = $state(undefined);
+  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string } | undefined = $state(undefined);
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
 
@@ -59,7 +62,7 @@
     void store.loadCandidates();
   }
 
-  function openNote(kind: 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string }) {
+  function openNote(kind: 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string }) {
     store.clearActionError();
     dialog = kind;
   }
@@ -87,6 +90,11 @@
 
   const ack = (lease: string) => finish(store.ackLease(ref, lease), `Lease ${lease} acknowledged`);
 
+  async function copyWayBack(holder: string, wayBack: string) {
+    const ok = await copyText(navigator.clipboard, wayBack);
+    toast = ok ? `Copied the way back of ${holder}` : 'Copying failed. Select the way back and copy it by hand.';
+  }
+
   // The clock is read when the page's data changes, so a refresh restates "expires in" and "ago".
   const now = $derived.by(() => {
     void view;
@@ -94,7 +102,8 @@
   });
   const actions = $derived(view.task === undefined ? undefined : taskActions(view.task.status, view.task.kind));
   const leases = $derived(view.task === undefined ? [] : leaseRows(view.task, now));
-  const expired = $derived(expiredRows(view.expired, now));
+  const stranded = $derived(view.task === undefined ? undefined : strandedPanel(view.task, now));
+  const expired = $derived(expiredRows(view.expired, now, stranded?.lease));
   const conflicts = $derived(view.task === undefined ? [] : taskConflicts(view.task.ref, view.live, new Date()));
   const asks = $derived(orderAsks(view.asks));
   const reasons = $derived(blockedReasons(view.asks));
@@ -138,6 +147,9 @@
           <span class="{badge} border-border text-text-muted" data-testid="task-resolution">{task.resolution}</span>
         {/if}
         <span class="text-sm text-text-muted" data-testid="task-kind">{kindText(task)}</span>
+        {#each attentionBadges(task.attention) as badge_ (badge_.reason)}
+          <span class="{badge} {toneClasses(badge_.tone)}" role="img" aria-label={badge_.name} data-testid="attention-{badge_.reason}">{badge_.label}</span>
+        {/each}
         {#each taskBadges(task) as flag (flag.key)}
           <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
         {/each}
@@ -174,6 +186,40 @@
         {/if}
       </div>
     </header>
+
+    {#if stranded !== undefined}
+      <section class="mb-4 rounded-md border border-warning p-3 text-sm wrap-anywhere" aria-labelledby="stranded-heading" data-testid="stranded-panel" data-lease={stranded.lease}>
+        <h3 id="stranded-heading" class="text-lg font-bold">Stranded</h3>
+        <p class="text-text-muted">Its lease ran out and nobody acknowledged it.</p>
+        <dl class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
+          <dt class="text-text-muted">Holder</dt>
+          <dd class="font-medium" data-testid="stranded-holder">{stranded.holder}</dd>
+          <dt class="text-text-muted">Lease</dt>
+          <dd data-testid="stranded-lease">{stranded.lease}</dd>
+          <dt class="text-text-muted">Intent</dt>
+          <dd data-testid="stranded-intent">{stranded.intent}</dd>
+          <dt class="text-text-muted">Last renewal</dt>
+          <dd data-testid="stranded-renewed"><time datetime={stranded.renewedAt} title={stranded.renewedTitle}>{stranded.renewed}</time></dd>
+          <dt class="text-text-muted">Expiry</dt>
+          <dd data-testid="stranded-expired"><time datetime={stranded.expiredAt} title={stranded.expiredTitle}>{stranded.expired}</time></dd>
+          <dt class="text-text-muted">Way back</dt>
+          <dd>
+            {#if stranded.wayBack !== undefined}
+              <code class="font-mono" data-testid="stranded-way-back">{stranded.wayBack}</code>
+            {:else}
+              <span class="text-text-muted" data-testid="stranded-no-way-back">no way back on record</span>
+            {/if}
+          </dd>
+        </dl>
+        <div class="mt-3 flex flex-wrap gap-2">
+          {#if stranded.wayBack !== undefined}
+            {@const wayBack = stranded.wayBack}
+            <button type="button" class={small} aria-label={copyWayBackLabel(stranded)} data-testid="copy-way-back" onclick={() => void copyWayBack(stranded.holder, wayBack)}>Copy way back</button>
+          {/if}
+          <button type="button" class="{small} border-accent text-accent" aria-label="Acknowledge lease {stranded.lease}" data-testid="stranded-ack" onclick={() => openNote({ ack: stranded.lease })}>Acknowledge</button>
+        </div>
+      </section>
+    {/if}
 
     {#if task.description !== ''}
       <!-- renderMarkdown escapes the source first and writes only its own markup (lib/markdown.ts). -->
@@ -299,7 +345,7 @@
             <p>{lease.intent}</p>
             {#if lease.resources !== ''}<p class="font-mono text-text-muted">{lease.resources}</p>{/if}
             <p class="text-text-muted" data-testid="expired-when">{lease.expired}</p>
-            <button type="button" class="{small} mt-2" aria-label="Acknowledge lease {lease.ref}" onclick={() => ack(lease.ref)}>Acknowledge</button>
+            <button type="button" class="{small} mt-2" aria-label="Acknowledge lease {lease.ref}" onclick={() => openNote({ ack: lease.ref })}>Acknowledge</button>
           </li>
         {/each}
       </ul>
@@ -363,6 +409,11 @@
     {@const askRef = dialog.withdraw}
     <Dialog label="Withdraw ask" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
       <TaskNoteForm heading="Withdraw {askRef}" label="Reason (optional)" hint="Why the ask is no longer needed, in up to 200 characters." submitLabel="Withdraw" error={view.actionError} onsubmit={(text) => withdraw(askRef, text)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if typeof dialog === 'object' && 'ack' in dialog}
+    {@const lease = dialog.ack}
+    <Dialog label="Acknowledge lease {lease}" onclose={() => (dialog = undefined)}>
+      <InitiativeConfirm heading="Acknowledge {lease}" body={ACK_BODY} confirm="Acknowledge lease" error={view.actionError} onconfirm={() => ack(lease)} oncancel={() => (dialog = undefined)} />
     </Dialog>
   {:else if typeof dialog === 'object'}
     {@const lease = dialog.endLease}
