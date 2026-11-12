@@ -100,9 +100,10 @@ Feature: Milestones, checks and events from the command line
   Scenario: events lists everything and --since E<n> keeps the later events
     When I run the client 'board events' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout has 5 lines
-    And stdout line 1 matches "^E[0-9]+  (just now|[0-9]+m ago)  claude@laptop  "
-    When I run the client 'board events --since E1' as actor "claude@laptop"
+    And stdout has 6 lines
+    And stdout line 1 matches "^E1  (just now|[0-9]+m ago)  operator  initiative inbox created$"
+    And stdout line 2 matches "^E[0-9]+  (just now|[0-9]+m ago)  claude@laptop  "
+    When I run the client 'board events --since E2' as actor "claude@laptop"
     Then stdout has 4 lines
     When I run the client 'board milestone aa-1 "earlier"' as actor "claude@laptop"
     And I run the client 'board events --task aa-1' as actor "claude@laptop"
@@ -113,7 +114,7 @@ Feature: Milestones, checks and events from the command line
     Then stdout has 1 line
     And stdout line 1 matches "later"
     When I run the client 'board events --since 2000-01-01' as actor "claude@laptop"
-    Then stdout has 7 lines
+    Then stdout has 8 lines
     When I run the client 'board events --since 2999-01-01' as actor "claude@laptop"
     Then stdout has 0 lines
 

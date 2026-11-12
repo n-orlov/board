@@ -34,6 +34,7 @@ Feature: Initiatives from the command line
     Then the exit code is 0
     And stdout is:
       """
+      inbox  open  Inbox
       alpha  open  First one  [work]
       beta  open  Second one  [homelab,work]
       gamma  open  Third one
@@ -46,9 +47,9 @@ Feature: Initiatives from the command line
     When I run the client 'board init ls --limit 2' as actor "claude@laptop"
     Then stdout is:
       """
+      inbox  open  Inbox
       alpha  open  First one  [work]
-      beta  open  Second one  [homelab,work]
-      +1 more → board init ls --all
+      +2 more → board init ls --all
       """
     When I run the client 'board init ls --tag nothing' as actor "claude@laptop"
     Then the exit code is 0

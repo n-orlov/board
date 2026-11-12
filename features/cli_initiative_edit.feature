@@ -100,6 +100,7 @@ Feature: Editing, closing and reopening initiatives from the command line
     And I run the client 'board init ls' as actor "claude@laptop"
     Then stdout is:
       """
+      inbox  open  Inbox
       cc  open  Third one
       """
     When I run the client 'board init ls --status closed' as actor "claude@laptop"
@@ -116,6 +117,7 @@ Feature: Editing, closing and reopening initiatives from the command line
     When I run the client 'board init ls --status all --closed-within 7' as actor "claude@laptop"
     Then stdout is:
       """
+      inbox  open  Inbox
       aa  closed  First one  [work]
       cc  open  Third one
       """

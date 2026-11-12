@@ -22,8 +22,10 @@ Feature: Attention count on initiatives
     Then the response status is 200
     And the response path "attention_count" is "0"
     When I list the initiatives as actor "operator@laptop"
-    Then the response path "items.0.attention_count" is "0"
+    Then the response path "items.0.slug" is "inbox"
+    And the response path "items.0.attention_count" is "0"
     And the response path "items.1.attention_count" is "0"
+    And the response path "items.2.attention_count" is "0"
 
   Scenario: stranded, asking and done tasks count and a quiet task does not, on the list and on the initiative
     Given I start a lease with body "{'task':'aa-1','intent':'migrate'}" as actor "claude@laptop"
@@ -34,10 +36,12 @@ Feature: Attention count on initiatives
     Then the response status is 200
     And the response path "attention_count" is "3"
     When I list the initiatives as actor "operator@laptop"
-    Then the response path "items.0.slug" is "aa"
-    And the response path "items.0.attention_count" is "3"
-    And the response path "items.1.slug" is "bb"
-    And the response path "items.1.attention_count" is "0"
+    Then the response path "items.0.slug" is "inbox"
+    And the response path "items.0.attention_count" is "0"
+    And the response path "items.1.slug" is "aa"
+    And the response path "items.1.attention_count" is "3"
+    And the response path "items.2.slug" is "bb"
+    And the response path "items.2.attention_count" is "0"
 
   Scenario: closing the done task lowers the count to two
     Given I start a lease with body "{'task':'aa-1','intent':'migrate'}" as actor "claude@laptop"
@@ -48,7 +52,7 @@ Feature: Attention count on initiatives
     And I request the initiative "aa" as actor "operator@laptop"
     Then the response path "attention_count" is "2"
     When I list the initiatives as actor "operator@laptop"
-    Then the response path "items.0.attention_count" is "2"
+    Then the response path "items.1.attention_count" is "2"
 
   Scenario: a task with several reasons counts once
     Given I start a lease with body "{'task':'aa-1','intent':'migrate'}" as actor "claude@laptop"
@@ -60,7 +64,7 @@ Feature: Attention count on initiatives
     When I request the initiative "aa" as actor "operator@laptop"
     Then the response path "attention_count" is "1"
     When I list the initiatives as actor "operator@laptop"
-    Then the response path "items.0.attention_count" is "1"
+    Then the response path "items.1.attention_count" is "1"
 
   Scenario: the other initiative is counted on its own
     Given I mark the task "bb-1" done as actor "codex@laptop"
@@ -69,8 +73,8 @@ Feature: Attention count on initiatives
     When I request the initiative "aa" as actor "operator@laptop"
     Then the response path "attention_count" is "0"
     When I list the initiatives as actor "operator@laptop"
-    Then the response path "items.0.attention_count" is "0"
-    And the response path "items.1.attention_count" is "1"
+    Then the response path "items.1.attention_count" is "0"
+    And the response path "items.2.attention_count" is "1"
 
   Scenario: a closed initiative counts none
     Given I mark the task "aa-1" done as actor "codex@laptop"

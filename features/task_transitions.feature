@@ -177,7 +177,7 @@ Feature: Task transitions over HTTP
     And the latest task_closed event of "aa-1" is on behalf of nobody
 
   Scenario: a close refused for its resolution records no actor for the header
-    Given the next API request carries the header "Board-On-Behalf-Of" with value "operator"
+    Given the next API request carries the header "Board-On-Behalf-Of" with value "delegate"
     When I close the task "aa-1" with body "{'resolution':'wontfix'}" as actor "claude@laptop"
     Then the response status is 400
-    And the actor "operator" has no row in actors
+    And the actor "delegate" has no row in actors

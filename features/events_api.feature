@@ -23,30 +23,37 @@ Feature: Listing events over HTTP
   Scenario: with no filter every event is listed in the order it was written
     When I request the events list "" as actor "claude@laptop"
     Then the response status is 200
-    And the response items are the events "1,2,3,4,5,6,7,8"
-    And the response items have the types "initiative_created,initiative_created,task_created,task_created,task_created,task_done,milestone,task_done"
+    And the response items are the events "1,2,3,4,5,6,7,8,9"
+    And the response items have the types "initiative_created,initiative_created,initiative_created,task_created,task_created,task_created,task_done,milestone,task_done"
     And the response has no next_after
 
   Scenario: an item carries id, ref, at, type, actor, principal, summary and data
     When I request the events list "" as actor "claude@laptop"
     Then item 1 of the response is a complete event with "initiative"
     And item 1 of the response has no "task"
-    And item 3 of the response is a complete event with "initiative,task,ref_id"
-    And item 7 of the response is a complete event with "initiative,task,ref_id"
+    And item 4 of the response is a complete event with "initiative,task,ref_id"
+    And item 8 of the response is a complete event with "initiative,task,ref_id"
     And the response path "items.0.ref" is "E1"
     And the response path "items.0.type" is "initiative_created"
-    And the response path "items.0.initiative" is "aa"
-    And the response path "items.0.actor" is "claude@laptop"
-    And the response path "items.2.task" is "aa-1"
-    And the response path "items.2.summary" is "task aa-1 created"
-    And the response path "items.6.data.data.pct" is "50"
-    And the response path "items.6.summary" is "milestone on aa-2: halfway"
+    And the response path "items.0.initiative" is "inbox"
+    And the response path "items.0.actor" is "operator"
+    And the response path "items.0.principal" is "system:bootstrap"
+    And the response path "items.1.ref" is "E2"
+    And the response path "items.1.type" is "initiative_created"
+    And the response path "items.1.initiative" is "aa"
+    And the response path "items.1.actor" is "claude@laptop"
+    And the response path "items.3.task" is "aa-1"
+    And the response path "items.3.summary" is "task aa-1 created"
+    And the response path "items.7.data.data.pct" is "50"
+    And the response path "items.7.summary" is "milestone on aa-2: halfway"
 
   Scenario: the initiative filter keeps the events of one initiative
     When I request the events list "initiative=aa" as actor "claude@laptop"
-    Then the response items are the events "1,3,4,6,7"
+    Then the response items are the events "2,4,5,7,8"
     When I request the events list "initiative=bb" as actor "claude@laptop"
-    Then the response items are the events "2,5,8"
+    Then the response items are the events "3,6,9"
+    When I request the events list "initiative=inbox" as actor "claude@laptop"
+    Then the response items are the events "1"
 
   Scenario: an initiative that does not exist is 404
     When I request the events list "initiative=zz" as actor "claude@laptop"
@@ -55,9 +62,9 @@ Feature: Listing events over HTTP
 
   Scenario: the task filter keeps the events of one task
     When I request the events list "task=aa-1" as actor "claude@laptop"
-    Then the response items are the events "3,6"
-    When I request the events list "task=aa-2" as actor "claude@laptop"
     Then the response items are the events "4,7"
+    When I request the events list "task=aa-2" as actor "claude@laptop"
+    Then the response items are the events "5,8"
 
   Scenario: a task that does not exist is 404
     When I request the events list "task=aa-9" as actor "claude@laptop"
@@ -66,9 +73,9 @@ Feature: Listing events over HTTP
 
   Scenario: the type filter keeps one type, and repeated it keeps any of the types
     When I request the events list "type=milestone" as actor "claude@laptop"
-    Then the response items are the events "7"
+    Then the response items are the events "8"
     When I request the events list "type=task_done&type=milestone" as actor "claude@laptop"
-    Then the response items are the events "6,7,8"
+    Then the response items are the events "7,8,9"
     And the response items have the types "task_done,milestone,task_done"
     When I request the events list "type=no_such_type" as actor "claude@laptop"
     Then the response status is 200
@@ -81,43 +88,43 @@ Feature: Listing events over HTTP
 
   Scenario: the actor filter keeps the events of one actor handle
     When I request the events list "actor=codex@laptop" as actor "claude@laptop"
-    Then the response items are the events "4,5,6"
+    Then the response items are the events "5,6,7"
     And the response items have the actors "codex@laptop,codex@laptop,codex@laptop"
     When I request the events list "actor=nobody@laptop" as actor "claude@laptop"
     Then the response path "items" has 0 items
 
   Scenario: the filters combine
     When I request the events list "initiative=aa&type=task_created&actor=codex@laptop" as actor "claude@laptop"
-    Then the response items are the events "4"
-    When I request the events list "task=aa-1&type=task_done&since={ref:3}" as actor "claude@laptop"
-    Then the response items are the events "6"
+    Then the response items are the events "5"
+    When I request the events list "task=aa-1&type=task_done&since={ref:4}" as actor "claude@laptop"
+    Then the response items are the events "7"
     When I request the events list "type=task_done&type=task_created&actor=claude@laptop&limit=2" as actor "claude@laptop"
-    Then the response items are the events "3,8"
+    Then the response items are the events "4,9"
 
   Scenario: since an event ULID keeps the events after it
-    When I request the events list "since={id:5}" as actor "claude@laptop"
-    Then the response items are the events "6,7,8"
-    When I request the events list "since={id:8}" as actor "claude@laptop"
+    When I request the events list "since={id:6}" as actor "claude@laptop"
+    Then the response items are the events "7,8,9"
+    When I request the events list "since={id:9}" as actor "claude@laptop"
     Then the response path "items" has 0 items
 
   Scenario: since an E<n> ref keeps the events after it, in either letter case
-    When I request the events list "since=E5" as actor "claude@laptop"
-    Then the response items are the events "6,7,8"
-    When I request the events list "since=e5" as actor "claude@laptop"
-    Then the response items are the events "6,7,8"
+    When I request the events list "since=E6" as actor "claude@laptop"
+    Then the response items are the events "7,8,9"
+    When I request the events list "since=e6" as actor "claude@laptop"
+    Then the response items are the events "7,8,9"
     When I request the events list "since={ref:1}" as actor "claude@laptop"
-    Then the response items are the events "2,3,4,5,6,7,8"
+    Then the response items are the events "2,3,4,5,6,7,8,9"
 
   Scenario: since an RFC 3339 time keeps the events from that time on
-    Given the first 4 events are dated "2020-01-01T00:00:00Z"
+    Given the first 5 events are dated "2020-01-01T00:00:00Z"
     When I request the events list "since=2021-06-01T00:00:00Z" as actor "claude@laptop"
-    Then the response items are the events "5,6,7,8"
+    Then the response items are the events "6,7,8,9"
     When I request the events list "since=2021-06-01T02:00:00%2B02:00" as actor "claude@laptop"
-    Then the response items are the events "5,6,7,8"
+    Then the response items are the events "6,7,8,9"
     When I request the events list "since=2019-12-31T23:59:59Z" as actor "claude@laptop"
-    Then the response items are the events "1,2,3,4,5,6,7,8"
+    Then the response items are the events "1,2,3,4,5,6,7,8,9"
     When I request the events list "since=2020-01-01T00:00:00Z" as actor "claude@laptop"
-    Then the response items are the events "1,2,3,4,5,6,7,8"
+    Then the response items are the events "1,2,3,4,5,6,7,8,9"
     When I request the events list "since=2099-01-01T00:00:00Z" as actor "claude@laptop"
     Then the response path "items" has 0 items
 
@@ -141,29 +148,29 @@ Feature: Listing events over HTTP
     Then the response items are the events "4,5,6"
     And the response next_after is the id of the event 6
     When I request the next events page with "limit=3" as actor "claude@laptop"
-    Then the response items are the events "7,8"
+    Then the response items are the events "7,8,9"
     And the response has no next_after
 
   Scenario: a page that ends exactly at the last event has no next_after
-    When I request the events list "limit=8" as actor "claude@laptop"
-    Then the response items are the events "1,2,3,4,5,6,7,8"
+    When I request the events list "limit=9" as actor "claude@laptop"
+    Then the response items are the events "1,2,3,4,5,6,7,8,9"
     And the response has no next_after
 
   Scenario: after takes an event ULID or an E<n> ref
-    When I request the events list "after={id:2}&limit=2" as actor "claude@laptop"
-    Then the response items are the events "3,4"
-    When I request the events list "after={ref:6}" as actor "claude@laptop"
-    Then the response items are the events "7,8"
+    When I request the events list "after={id:3}&limit=2" as actor "claude@laptop"
+    Then the response items are the events "4,5"
+    When I request the events list "after={ref:7}" as actor "claude@laptop"
+    Then the response items are the events "8,9"
 
   Scenario: paging composes with the filters
     When I request the events list "type=task_created&limit=2" as actor "claude@laptop"
-    Then the response items are the events "3,4"
-    And the response next_after is the id of the event 4
-    When I request the next events page with "type=task_created&limit=2" as actor "claude@laptop"
-    Then the response items are the events "5"
-    And the response has no next_after
-    When I request the events list "since={ref:3}&limit=2" as actor "claude@laptop"
     Then the response items are the events "4,5"
+    And the response next_after is the id of the event 5
+    When I request the next events page with "type=task_created&limit=2" as actor "claude@laptop"
+    Then the response items are the events "6"
+    And the response has no next_after
+    When I request the events list "since={ref:4}&limit=2" as actor "claude@laptop"
+    Then the response items are the events "5,6"
 
   Scenario Outline: a limit or an after that cannot be used is 400
     When I request the events list "<query>" as actor "claude@laptop"
@@ -181,4 +188,4 @@ Feature: Listing events over HTTP
   Scenario: the largest limit is accepted
     When I request the events list "limit=1000" as actor "claude@laptop"
     Then the response status is 200
-    And the response items are the events "1,2,3,4,5,6,7,8"
+    And the response items are the events "1,2,3,4,5,6,7,8,9"

@@ -21,7 +21,7 @@ Feature: The command-line output rules and exit codes
     Then the exit code is 0
     And stdout is a JSON object with a ULID id
     When I run the client 'board init ls --json' as actor "claude@laptop"
-    Then stdout is a JSON array of 2 objects with ULID ids
+    Then stdout is a JSON array of 3 objects with ULID ids
 
   Scenario: exit 1, a server that cannot be reached is one error line with the next action
     When I run the client 'board init ls' as actor "claude@laptop" against the address "http://127.0.0.1:1"
@@ -53,14 +53,14 @@ Feature: The command-line output rules and exit codes
     And neither stdout nor stderr contains the remembered key
 
   Scenario: a list of exactly 20 items shows all of them and no more line
-    Given 20 initiatives exist as actor "claude@laptop"
+    Given 19 initiatives exist as actor "claude@laptop", which with the inbox make 20
     When I run the client 'board init ls' as actor "claude@laptop"
     Then the exit code is 0
     And stdout has 20 lines
     And stdout has no more line
 
   Scenario: a list of 21 items shows 20 and a +1 more line that names the command
-    Given 21 initiatives exist as actor "claude@laptop"
+    Given 20 initiatives exist as actor "claude@laptop", which with the inbox make 21
     When I run the client 'board init ls' as actor "claude@laptop"
     Then the exit code is 0
     And stdout has 21 lines

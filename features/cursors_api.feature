@@ -181,26 +181,26 @@ Feature: Read cursors over HTTP
     Scenario: with no cursor set since=cursor reads every event
       When I request the events list "since=cursor" as actor "reader@laptop"
       Then the response status is 200
-      And the response items are the events "1,2,3,4,5,6,7,8,9"
+      And the response items are the events "1,2,3,4,5,6,7,8,9,10"
 
     Scenario: since=cursor follows the events cursor
-      Given I put the "events" cursor with body "{'position':'E7'}" as actor "reader@laptop"
+      Given I put the "events" cursor with body "{'position':'E8'}" as actor "reader@laptop"
       When I request the events list "since=cursor" as actor "reader@laptop"
-      Then the response items are the events "8,9"
-      When I put the "events" cursor with body "{'position':'{id of E9}'}" as actor "reader@laptop"
+      Then the response items are the events "9,10"
+      When I put the "events" cursor with body "{'position':'{id of E10}'}" as actor "reader@laptop"
       And I request the events list "since=cursor" as actor "reader@laptop"
       Then the response items are the events ""
       When I post a note with body "{'summary':'five'}" as actor "claude@laptop"
       And I request the events list "since=cursor" as actor "reader@laptop"
-      Then the response items are the events "10"
+      Then the response items are the events "11"
 
     Scenario: reading the events moves no cursor and the notes cursor is not the events cursor
       Given I put the "notes" cursor with body "{'position':'N4'}" as actor "reader@laptop"
       When I request the events list "since=cursor" as actor "reader@laptop"
-      Then the response items are the events "1,2,3,4,5,6,7,8,9"
+      Then the response items are the events "1,2,3,4,5,6,7,8,9,10"
       And the "events" cursor of "reader@laptop" is not set
 
     Scenario: since=cursor combines with the other event filters
-      Given I put the "events" cursor with body "{'position':'E3'}" as actor "reader@laptop"
+      Given I put the "events" cursor with body "{'position':'E4'}" as actor "reader@laptop"
       When I request the events list "since=cursor&type=note_posted" as actor "reader@laptop"
-      Then the response items are the events "6,7,8,9"
+      Then the response items are the events "7,8,9,10"

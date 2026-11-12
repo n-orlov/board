@@ -19,9 +19,9 @@ Feature: Listing initiatives with filters, task counts and live leases
     Given I close the initiative "bb" without a body as actor "claude@laptop"
     When I list the initiatives as actor "claude@laptop"
     Then the response status is 200
-    And the response path "items" lists the refs "aa,cc,dd"
+    And the response path "items" lists the refs "inbox,aa,cc,dd"
     When I list the initiatives with "status=open" as actor "claude@laptop"
-    Then the response path "items" lists the refs "aa,cc,dd"
+    Then the response path "items" lists the refs "inbox,aa,cc,dd"
 
   Scenario: status closed keeps only the closed initiatives and all keeps both
     Given I close the initiative "bb" without a body as actor "claude@laptop"
@@ -30,9 +30,9 @@ Feature: Listing initiatives with filters, task counts and live leases
     Then the response path "items" lists the refs "bb,dd"
     And the response path "items.0.status" is "closed"
     When I list the initiatives with "status=all" as actor "claude@laptop"
-    Then the response path "items" lists the refs "aa,bb,cc,dd"
-    And the response path "items.0.status" is "open"
-    And the response path "items.1.status" is "closed"
+    Then the response path "items" lists the refs "inbox,aa,bb,cc,dd"
+    And the response path "items.1.status" is "open"
+    And the response path "items.2.status" is "closed"
 
   Scenario: the status filter combines with tag and paging
     Given I close the initiative "aa" without a body as actor "claude@laptop"
@@ -41,9 +41,9 @@ Feature: Listing initiatives with filters, task counts and live leases
     When I list the initiatives with "tag=home" as actor "claude@laptop"
     Then the response path "items" lists the refs "bb"
     When I list the initiatives with "status=all&limit=2" as actor "claude@laptop"
-    Then the response path "items" lists the refs "aa,bb"
+    Then the response path "items" lists the refs "inbox,aa"
     When I request the next initiatives page with "status=all&limit=2" as actor "claude@laptop"
-    Then the response path "items" lists the refs "cc,dd"
+    Then the response path "items" lists the refs "bb,cc"
 
   Scenario Outline: closed_within keeps the initiatives closed inside the window
     Given I close the initiative "aa" without a body as actor "claude@laptop"
@@ -57,12 +57,12 @@ Feature: Listing initiatives with filters, task counts and live leases
     Then the response path "items" lists the refs "<all>"
 
     Examples:
-      | within | closed      | all            |
-      | 7d     | aa          | aa,dd          |
-      | 30d    | aa,bb       | aa,bb,dd       |
-      | 90d    | aa,bb,cc    | aa,bb,cc,dd    |
-      | 25     | aa,bb       | aa,bb,dd       |
-      | 10     | aa          | aa,dd          |
+      | within | closed   | all               |
+      | 7d     | aa       | inbox,aa,dd       |
+      | 30d    | aa,bb    | inbox,aa,bb,dd    |
+      | 90d    | aa,bb,cc | inbox,aa,bb,cc,dd |
+      | 25     | aa,bb    | inbox,aa,bb,dd    |
+      | 10     | aa       | inbox,aa,dd       |
 
   Scenario Outline: a status or closed_within that cannot apply is 400
     When I list the initiatives with "<query>" as actor "claude@laptop"
@@ -88,16 +88,19 @@ Feature: Listing initiatives with filters, task counts and live leases
     And I mark the task "aa-2" done as actor "claude@laptop"
     And I close the task "aa-3" with body "{'resolution':'dropped'}" as actor "claude@laptop"
     When I list the initiatives as actor "claude@laptop"
-    Then the response path "items" lists the refs "aa,bb,cc,dd"
-    And the response path "items.0.counts.open" is "2"
-    And the response path "items.0.counts.done" is "1"
-    And the response path "items.0.counts.closed" is "1"
-    And the response path "items.1.counts.open" is "1"
-    And the response path "items.1.counts.done" is "0"
-    And the response path "items.1.counts.closed" is "0"
-    And the response path "items.2.counts.open" is "0"
+    Then the response path "items" lists the refs "inbox,aa,bb,cc,dd"
+    And the response path "items.0.counts.open" is "0"
+    And the response path "items.0.counts.done" is "0"
+    And the response path "items.0.counts.closed" is "0"
+    And the response path "items.1.counts.open" is "2"
+    And the response path "items.1.counts.done" is "1"
+    And the response path "items.1.counts.closed" is "1"
+    And the response path "items.2.counts.open" is "1"
     And the response path "items.2.counts.done" is "0"
     And the response path "items.2.counts.closed" is "0"
+    And the response path "items.3.counts.open" is "0"
+    And the response path "items.3.counts.done" is "0"
+    And the response path "items.3.counts.closed" is "0"
 
   Scenario: live_leases counts the live leases on the tasks of each initiative
     Given I create a task in "aa" titled "one" as actor "claude@laptop"
@@ -107,13 +110,14 @@ Feature: Listing initiatives with filters, task counts and live leases
     And I start a lease with body "{'task':'aa-2','intent':'second'}" as actor "claude@laptop"
     And I start a lease with body "{'task':'bb-1','intent':'third'}" as actor "claude@laptop"
     When I list the initiatives as actor "claude@laptop"
-    Then the response path "items.0.live_leases" is "2"
-    And the response path "items.1.live_leases" is "1"
-    And the response path "items.2.live_leases" is "0"
+    Then the response path "items.0.live_leases" is "0"
+    And the response path "items.1.live_leases" is "2"
+    And the response path "items.2.live_leases" is "1"
+    And the response path "items.3.live_leases" is "0"
     When I end the lease "L3" without a body as actor "claude@laptop"
     And I list the initiatives as actor "claude@laptop"
-    Then the response path "items.0.live_leases" is "2"
-    And the response path "items.1.live_leases" is "0"
+    Then the response path "items.1.live_leases" is "2"
+    And the response path "items.2.live_leases" is "0"
 
   Scenario: an initiative whose only lease ran out has no live lease and one lease_expired event
     Given I create a task in "aa" titled "leased" as actor "claude@laptop"
@@ -122,9 +126,9 @@ Feature: Listing initiatives with filters, task counts and live leases
     Then the lease "L1" is "live" in the database
     When I list the initiatives as actor "claude@laptop"
     Then the response status is 200
-    And the response path "items.0.live_leases" is "0"
+    And the response path "items.1.live_leases" is "0"
     And the lease "L1" is "expired" in the database
     And exactly 1 lease_expired event exists for the lease "L1"
     When I list the initiatives as actor "claude@laptop"
-    Then the response path "items.0.live_leases" is "0"
+    Then the response path "items.1.live_leases" is "0"
     And exactly 1 lease_expired event exists for the lease "L1"

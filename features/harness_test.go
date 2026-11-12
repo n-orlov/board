@@ -436,6 +436,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerCLIAskSteps(sc, h)
 	registerPhase2UpgradeSteps(sc, h)
 	registerServeUpgradeSteps(sc, h)
+	registerInitiativeInboxSteps(sc, h)
 	registerHelpAgentSteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)

@@ -166,7 +166,7 @@ Feature: Watch checks, milestones and a task's events over HTTP
     Then the response status is 200
     And the response items have the types "task_created,task_updated,task_done,task_reopened,task_closed"
     And the response items have the actors "claude@laptop,editor@laptop,finisher@laptop,reopener@laptop,closer@laptop"
-    And the response items are the events "2,5,6,7,8"
+    And the response items are the events "3,6,7,8,9"
     And the response has no next_after
     And item 1 of the response is a complete event with "initiative,task,ref_id"
 
@@ -182,7 +182,7 @@ Feature: Watch checks, milestones and a task's events over HTTP
     And I patch the task "aa-1" with body "{'title':'three'}" as actor "claude@laptop"
     When I request the events of the task "aa-1" with "limit=2" as actor "claude@laptop"
     Then the response items have the types "task_created,task_updated"
-    And the response next_after is the id of the event 5
+    And the response next_after is the id of the event 6
     When I request the next events page of the task "aa-1" with "limit=2" as actor "claude@laptop"
     Then the response items have the types "task_updated"
     And the response has no next_after

@@ -66,7 +66,7 @@ Feature: Initiatives over HTTP
     And I create the initiative "cc-three" titled "Three" with no tags as actor "claude@laptop"
     And I request the initiatives list "" as actor "claude@laptop"
     Then the response status is 200
-    And the response lists the initiatives "aa-one,bb-two,cc-three"
+    And the response lists the initiatives "inbox,aa-one,bb-two,cc-three"
     When I request the initiatives list "tag=work" as actor "claude@laptop"
     Then the response lists the initiatives "aa-one,bb-two"
     When I request the initiatives list "tag=work&tag=x" as actor "claude@laptop"
@@ -79,7 +79,7 @@ Feature: Initiatives over HTTP
     Then the response status is 400
     And the problem has a next field containing "slug"
     And the problem detail contains "slug"
-    And no initiative_created event exists
+    And no initiative_created event exists besides the inbox's
 
     Examples:
       | slug                                      |
@@ -100,7 +100,7 @@ Feature: Initiatives over HTTP
     And I create the initiative "phone-onboard" titled "Second" with no tags as actor "claude@laptop"
     Then the response status is 409
     And the problem has a next field containing "GET /api/v1/initiatives/phone-onboard"
-    And exactly 1 initiative_created event exists
+    And exactly 1 initiative_created event exists besides the inbox's
     When I request the initiative "phone-onboard" as actor "claude@laptop"
     Then the response field "title" is "First"
 
@@ -108,14 +108,14 @@ Feature: Initiatives over HTTP
     When I create the initiative "init-1" titled "One" with no tags as actor "claude@laptop"
     And I create the initiative "init-2" titled "Two" with no tags as actor "claude@laptop"
     And I create the initiative "init-3" titled "Three" with no tags as actor "claude@laptop"
-    And I request the initiatives list "limit=3" as actor "claude@laptop"
-    Then the response lists the initiatives "init-1,init-2,init-3"
+    And I request the initiatives list "limit=4" as actor "claude@laptop"
+    Then the response lists the initiatives "inbox,init-1,init-2,init-3"
     And the response has no next_after
     When I request the initiatives list "limit=2" as actor "claude@laptop"
-    Then the response lists the initiatives "init-1,init-2"
-    And the response next_after is the id of "init-2"
+    Then the response lists the initiatives "inbox,init-1"
+    And the response next_after is the id of "init-1"
     When I request the next page with "limit=2" as actor "claude@laptop"
-    Then the response lists the initiatives "init-3"
+    Then the response lists the initiatives "init-2,init-3"
     And the response has no next_after
     When I request the initiatives list "limit=1&after=init-1" as actor "claude@laptop"
     Then the response lists the initiatives "init-2"

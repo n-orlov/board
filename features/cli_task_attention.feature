@@ -102,9 +102,11 @@ Feature: Attention first in board task ls and board task show
     Then the exit code is 0
     And stdout is:
       """
+      inbox  open  Inbox
       aa  open  First one !6
       bb  open  Quiet one  [calm]
       """
     When I run the client 'board init ls --json' as actor "claude@laptop"
-    Then stdout JSON path "0.attention_count" is "6"
-    And stdout JSON path "1.attention_count" is "0"
+    Then stdout JSON path "0.attention_count" is "0"
+    And stdout JSON path "1.attention_count" is "6"
+    And stdout JSON path "2.attention_count" is "0"

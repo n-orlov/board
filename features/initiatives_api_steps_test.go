@@ -278,13 +278,16 @@ func (h *harness) actorHasOneRow(ctx context.Context, handle string) error {
 	return nil
 }
 
+// createdEventCount counts the initiative_created events besides the inbox's: serve writes that one
+// on start (SPEC 4.2), before any scenario step.
 func (h *harness) createdEventCount(ctx context.Context, want int) error {
-	got, err := h.scalar(ctx, `SELECT count(*) FROM events WHERE type = 'initiative_created'`)
+	got, err := h.scalar(ctx, `SELECT count(*) FROM events WHERE type = 'initiative_created'
+		AND initiative_id NOT IN (SELECT id FROM initiatives WHERE slug = 'inbox')`)
 	if err != nil {
 		return err
 	}
 	if got != fmt.Sprint(want) {
-		return fmt.Errorf("%s initiative_created events, want %d", got, want)
+		return fmt.Errorf("%s initiative_created events besides the inbox's, want %d", got, want)
 	}
 	return nil
 }
@@ -311,6 +314,6 @@ func registerInitiativeAPISteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the actor "([^"]*)" has exactly one row in actors$`, h.actorHasOneRow)
 	sc.Step(`^the next API request carries the header "([^"]*)" with value "([^"]*)"$`, h.nextRequestCarries)
 	sc.Step(`^the actor "([^"]*)" stores the way back "([^"]*)" and the meta "([^"]*)"$`, h.actorStores)
-	sc.Step(`^exactly (\d+) initiative_created event exists$`, h.createdEventCount)
-	sc.Step(`^no initiative_created event exists$`, func(ctx context.Context) error { return h.createdEventCount(ctx, 0) })
+	sc.Step(`^exactly (\d+) initiative_created event exists besides the inbox's$`, h.createdEventCount)
+	sc.Step(`^no initiative_created event exists besides the inbox's$`, func(ctx context.Context) error { return h.createdEventCount(ctx, 0) })
 }

@@ -33,7 +33,12 @@ func (h *harness) runClientWithoutKey(ctx context.Context, line, actor string) e
 }
 
 // initiativesExist creates n initiatives, item-01 to item-<n>.
-func (h *harness) initiativesExist(ctx context.Context, n int, actor string) error {
+// initiativesExist creates n initiatives; the scenario states the total it expects with the
+// inbox serve created on start (SPEC 4.2), which the step checks.
+func (h *harness) initiativesExist(ctx context.Context, n int, actor string, total int) error {
+	if n+1 != total {
+		return fmt.Errorf("%d initiatives and the inbox make %d, not %d", n, n+1, total)
+	}
 	for i := 1; i <= n; i++ {
 		slug := fmt.Sprintf("item-%02d", i)
 		if err := h.createInitiative(ctx, slug, "Item "+slug, "", actor); err != nil {
@@ -103,7 +108,7 @@ func (h *harness) stderrLineEndsWith(suffix string) error {
 func registerCLIOutputSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)" against the address "([^"]*)"$`, h.runClientAtAddress)
 	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)" with no BOARD_API_KEY$`, h.runClientWithoutKey)
-	sc.Step(`^(\d+) initiatives exist as actor "([^"]*)"$`, h.initiativesExist)
+	sc.Step(`^(\d+) initiatives exist as actor "([^"]*)", which with the inbox make (\d+)$`, h.initiativesExist)
 	sc.Step(`^stdout has (\d+) lines?$`, h.stdoutHasLines)
 	sc.Step(`^stdout has no more line$`, h.stdoutHasNoMoreLine)
 	sc.Step(`^stdout is a JSON array of (\d+) objects with ULID ids$`, h.stdoutIsJSONArrayOf)

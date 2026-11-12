@@ -180,6 +180,9 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	if err := reopenLeased(ctx, st); err != nil {
 		return fail(stderr, err)
 	}
+	if err := bootstrapInbox(ctx, st, env); err != nil {
+		return fail(stderr, err)
+	}
 	login, err := loginFromEnv(env, st)
 	if err != nil {
 		return fail(stderr, err)
@@ -236,6 +239,21 @@ func reopenLeased(ctx context.Context, st *store.Store) error {
 		return nil
 	}
 	_, err := (&tasks.Store{Store: st}).ReopenLeased(ctx)
+	return err
+}
+
+// bootstrapInbox creates the built-in inbox initiative when none exists (SPEC 4.2), made by
+// the operator actor. Like reopenLeased it waits for the next start on a database that is
+// not migrated.
+func bootstrapInbox(ctx context.Context, st *store.Store, env Env) error {
+	if st.Ready(ctx) != nil {
+		return nil
+	}
+	operator := env("BOARD_OPERATOR_HANDLE")
+	if operator == "" {
+		operator = DefaultOperatorHandle
+	}
+	_, err := (&initiatives.Store{Store: st}).EnsureInbox(ctx, operator)
 	return err
 }
 

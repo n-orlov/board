@@ -274,13 +274,24 @@ formed (§8.2):
 initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e.g.
 `phone-onboard-3`), lease `L<n>`, ask `A<n>`, note `N<n>`, event `E<n>`.
 
+**Start-up bootstrap.** When `board serve` starts on a migrated database it creates the built-in initiative `inbox`
+(title `Inbox`, description `Work that fits no other initiative yet.`, no tags, status `open`) when no initiative with
+that slug exists, in one transaction with its one `initiative_created` event: the actor is the operator actor
+(`BOARD_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
+`system:bootstrap`. An `inbox` that exists is left exactly as it is: another title or tags, a closed status and its
+events all stay, and no second event is written. Two servers started together on one database leave one `inbox` and
+one event: the unique slug makes the loser's transaction roll back, and the loser carries on. A database that is
+not migrated (`BOARD_MIGRATE=off`) waits for the next start. The inbox is an ordinary initiative afterwards: it
+lists first in a list in creation order (§6.3), can be edited, closed and reopened, and is never recreated while it
+exists.
+
 ### 4.1 `actors`
 
 | column | type | notes |
 |---|---|---|
 | id | ulid | |
 | handle | text, unique | stable identity string (§9) |
-| kind | `operator` \| `agent` | at most one `operator` row exists; the full product seeds it at start-up, Phase 0 creates it on the first write made by a session (below) |
+| kind | `operator` \| `agent` | at most one `operator` row exists; `serve` seeds it at start-up with the inbox bootstrap (§4), and a database that has not been served yet gets it on the first write made by a session (below) |
 | display_name | text | optional; never set in Phase 0 |
 | host | text | optional, from the handle; never set in Phase 0 |
 | way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
@@ -291,7 +302,7 @@ initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e
 An actor row is created on first use of a handle (upsert). In Phase 0 a use is a **write**: an operation that
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
 A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
-that has only read has no row, and the operator row does not exist until the first write made by a session (its
+that has only read has no row, and the operator row exists after the first start of `serve` (the inbox bootstrap writes it, §4), or else not until the first write made by a session (its
 actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `BOARD_OPERATOR_HANDLE`) makes
 that handle's row `operator`, promoting a row an earlier key write created as `agent` under the same handle, and an
 `operator` row is never demoted, so a key write that names the operator's handle after a session write leaves the
