@@ -65,7 +65,7 @@ export interface AttentionFilter {
 export const DEFAULT_ATTENTION_FILTER: AttentionFilter = { initiatives: [], tags: [] };
 
 /** A list without blanks (after trimming) or repeats, in first-seen order. */
-function clean(values: readonly string[]): string[] {
+export function clean(values: readonly string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter((v) => v !== ''))];
 }
 

@@ -1421,6 +1421,17 @@ their `lease_expired` events, then reads; it writes nothing else.
     check's summary, the ask's question, and for `done` and `closed` the event's one-line summary; an event whose data
     lacks the text falls back to its summary.
 
+**The Timeline view's mapping** (`web/src/lib/timeline.ts`, vis-timeline bundled with the app, no CDN) turns that answer
+into rows and items. Initiatives are collapsible groups holding their tasks as nested groups. A task row carries a light
+planned bar (`planned_start` to `planned_end`, one end alone standing for both), the actual span (`created_at` to
+`closed_at`, or to now while it is open), one bar per lease in the stacked lease subgroup coloured by its state (`live`,
+`ended`, `expired`, the bar of a live lease running to now) with the lease's ref, state, holder, intent and times in its
+tooltip, and one point per marker with a class and glyph of its type. A task that needs attention shows its R2 badge text
+on the row label. A dependency is a pair from the blocking task's actual span to the blocked task's, left out when the
+blocking task is not in the window. The view's filters live in the URL fragment's query as `initiative` and `tag`
+(repeated), `actor` and `closed` (`7`, `30` or `90`; absent is off), and `GET /timeline` gets them as `initiative`, `tag`,
+`actor` and `closed_within=<n>d` with the visible window as `from` and `to`.
+
 ### 6.11 Actors
 
 `GET /api/v1/actors` and `GET /api/v1/actors/{handle}` are in `api/openapi.yaml` and answer who is on the board and
