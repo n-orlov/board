@@ -375,7 +375,12 @@ Scripts, each run through `ci/run.sh` unless noted:
   `flaky-vitest.txt` into the results directory. A failed Vitest run is
   repeated once: a pass on the repeat is recorded in `flaky-vitest.txt`, a
   second failure fails the suite. `ci/suitecheck/vitest_test.go` pins this.
-  It then runs Playwright (`e2e/`, after `npm ci` there): the config starts the
+  It then starts Playwright (`e2e/`, after `npm ci` there) in the background, beside
+  the Go passes and the Godog passes, which share nothing with it (one worker, a free
+  port and a SQLite store of its own); the script waits for it before it merges the
+  JUnit files, replays its messages to stderr and fails the suite on its failure. The
+  overlap keeps the Suite stage inside its 45-minute budget, which is unchanged, and
+  shortens no spec or bound. The config starts the
   real binary on a free port against a freshly migrated SQLite store
   (`e2e/serve.sh`) and never retries (`retries: 0`). Only `GET /healthz` is open,
   so `e2e/global-setup.ts` mints a key with `board admin keys create` at test

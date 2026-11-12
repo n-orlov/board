@@ -129,7 +129,7 @@ if [ -f web/package.json ]; then
     fi
 fi
 
-# --- 0b. Playwright: the real binary on a free port, one smoke spec (task 010, R11) ---
+# --- 0b. Playwright: the real binary on a free port, the whole e2e suite (task 010, R11) ---
 # e2e/playwright.config.ts starts the binary built from this checkout (with the
 # UI step 0 just built embedded) against a seeded SQLite store, and writes every
 # reporter's output under $E2E_OUT. Playwright itself never retries (retries: 0);
@@ -139,14 +139,27 @@ fi
 # fails the suite. The JUnit file lands at <outdir>/junit-playwright.xml and the
 # HTML, Allure, JSON and trace output in <outdir>/playwright/. A checkout with
 # no e2e/ (the suitecheck fixtures) skips this step.
+#
+# Overlap (task 018): Playwright (one worker, a free port of its own, its own
+# SQLite store) shares nothing with the Go passes below, so it runs in the
+# background beside them and is waited for before step 3, which reads its
+# files. Its messages go to playwright-messages.log and are replayed to stderr
+# at the wait, where a failure sets overall_status. Nothing is shortened: the
+# same specs run with the same bounds, and the whole run still repeats once.
+# It exists because the sequential suite grew to the Suite stage's 45-minute
+# budget, which stays as it is.
 playwright_junit="$outdir/junit-playwright.xml"
 playwright_flaky="$outdir/flaky-playwright.txt"
 : > "$playwright_flaky"
-if [ -f e2e/package.json ]; then
+playwright_messages="$outdir/playwright-messages.log"
+playwright_pid=""
+# playwright_step is the whole step; it returns 1 when the suite must fail.
+playwright_step() {
+    playwright_failed=0
     playwright_log="$outdir/playwright.log"
     if ! (cd e2e && npm ci --no-audit --no-fund) > "$outdir/e2e-install.log" 2>&1; then
         echo "ci/suite.sh: e2e npm ci failed (see $outdir/e2e-install.log)" >&2
-        overall_status=1
+        playwright_failed=1
     fi
     run_playwright() {
         rm -rf "$outdir/playwright"
@@ -167,13 +180,19 @@ if [ -f e2e/package.json ]; then
             echo "playwright: failed once, then passed on the repeat (see playwright-run1.log)" >> "$playwright_flaky"
         else
             echo "ci/suite.sh: Playwright failed twice (see $playwright_log)" >&2
-            overall_status=1
+            playwright_failed=1
         fi
     fi
     if [ ! -s "$playwright_junit" ]; then
         echo "ci/suite.sh: Playwright wrote no JUnit file at $playwright_junit" >&2
-        overall_status=1
+        playwright_failed=1
     fi
+    return "$playwright_failed"
+}
+if [ -f e2e/package.json ]; then
+    : > "$playwright_messages"
+    playwright_step 2> "$playwright_messages" &
+    playwright_pid=$!
 fi
 
 # --- 1. every Go test except TestFeatures, via gotestsum ---
@@ -554,6 +573,16 @@ for leg in $db_legs; do
     fi
 done
 features_leg=sqlite
+
+# --- 2c. wait for the Playwright step started in 0b ---
+if [ -n "$playwright_pid" ]; then
+    playwright_rc=0
+    wait "$playwright_pid" || playwright_rc=$?
+    cat "$playwright_messages" >&2
+    if [ "$playwright_rc" -ne 0 ]; then
+        overall_status=1
+    fi
+fi
 
 # --- 3. one merged JUnit file per pass, retries folded (R146/task 019) ---
 # The raw files above keep every attempt as its own <testcase>, and

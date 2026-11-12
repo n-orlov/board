@@ -3026,7 +3026,8 @@ it with an API key, and serves on that port with the embedded UI. `E2E_OUT` move
 reporter's output (default `e2e/out/`). One spec runs: `smoke.spec.ts` loads `/` and asserts the
 shell rendered (the placeholder page fails it). Run one spec with
 `ci/run.sh sh -c 'cd e2e && npx playwright test smoke.spec.ts'` (after `npm ci` in `e2e/`).
-`ci/suite.sh` runs the whole Playwright suite after the web build under the suite-level policy:
+`ci/suite.sh` runs the whole Playwright suite after the web build, in the background beside the Go and Godog passes (it shares
+nothing with them, and the script waits for it before it merges the JUnit files, so a failure still fails the suite), under the suite-level policy:
 a failed run is repeated once as a whole (every spec runs again, not only the failed ones), a
 pass on the repeat is written to `flaky-playwright.txt`, a second failure fails the suite; the JUnit file is `junit-playwright.xml`.
 `ci/suitecheck` fails if the config's `retries` is not 0.

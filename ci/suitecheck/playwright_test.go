@@ -155,3 +155,43 @@ func TestPlaywrightRetryIsDescribedAsAWholeRun(t *testing.T) {
 		}
 	}
 }
+
+// TestSuiteOverlapsPlaywrightWithTheGoPassesAndWaitsBeforeMerging pins the
+// overlap that keeps the sequential suite inside the Suite stage's budget:
+// Playwright starts in the background before the Go passes, and the script waits
+// for it, replays its messages and lets its failure fail the suite before the
+// step that merges the JUnit files. The retry-once policy is unchanged (the test
+// above) and the repeat is still a whole run.
+func TestSuiteOverlapsPlaywrightWithTheGoPassesAndWaitsBeforeMerging(t *testing.T) {
+	root, err := repositoryRoot()
+	if err != nil {
+		t.Fatalf("repositoryRoot: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "ci", "suite.sh"))
+	if err != nil {
+		t.Fatalf("read ci/suite.sh: %v", err)
+	}
+	suite := stripCommentLines(string(raw))
+	at := func(s string) int { return strings.Index(suite, s) }
+	start := at(`playwright_step 2> "$playwright_messages" &`)
+	unit := at(`go run "$gotestsum_pkg"`)
+	wait := at(`wait "$playwright_pid"`)
+	merge := at(`merged_out`)
+	if start < 0 || unit < 0 || wait < 0 || merge < 0 {
+		t.Fatalf("ci/suite.sh: Playwright start %d, Go pass %d, wait %d, merge %d: each must be present", start, unit, wait, merge)
+	}
+	if start >= unit || unit >= wait {
+		t.Errorf("ci/suite.sh: Playwright must start (%d) before the Go passes (%d) and be waited for after them (%d)", start, unit, wait)
+	}
+	if lastFeatures := strings.LastIndex(suite, "run_test_features"); wait < lastFeatures {
+		t.Errorf("ci/suite.sh: the wait (%d) must follow every features/ pass (%d)", wait, lastFeatures)
+	}
+	if !strings.Contains(suite, `cat "$playwright_messages" >&2`) {
+		t.Errorf("ci/suite.sh: the Playwright messages must be replayed to stderr")
+	}
+	after := suite[wait:]
+	failure, mergeAfter := strings.Index(after, "overall_status=1"), strings.Index(after, "merged_out")
+	if failure < 0 || (mergeAfter >= 0 && failure > mergeAfter) {
+		t.Errorf("ci/suite.sh: a failed Playwright step must set overall_status at the wait, before the merge")
+	}
+}
