@@ -4,8 +4,9 @@
 // view imports its classes and passes them in as `ChartLib`, so this module stays testable without a DOM.
 import { errorText, Fetches } from './fetches';
 import { ThreadApi } from './threads';
-import { apiQuery, buildTimeline, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
+import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
+import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
 export const HOUR_MS = 3_600_000;
 export const DAY_MS = 24 * HOUR_MS;
@@ -329,4 +330,60 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
       timeline.destroy();
     },
   };
+}
+
+/** The name of the view's saved state (PRD R16): the key is `board.view.v1.timeline`. */
+export const TIMELINE_VIEW = 'timeline';
+
+/** The filter the view opens with, and whether it came from the saved query (a bare route) rather than a link's own query. */
+export interface OpenedTimeline {
+  filter: TimelineFilter;
+  restored: boolean;
+}
+
+/**
+ * Opens the view for the fragment it is on, before its first fetch. A fragment with a query wins and is saved; a bare one
+ * (`#/timeline`, or any fragment the router sends here) restores the saved query by rewriting the fragment in place, so
+ * the view reads `GET /timeline` once, under the restored filter.
+ */
+export function openTimeline(env: ViewEnv, hash: string): OpenedTimeline {
+  const at = hash.indexOf('?');
+  const own = at < 0 ? '' : hash.slice(at + 1);
+  const query = openView(env, TIMELINE_VIEW, '#/timeline', own);
+  return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+}
+
+/** Saves the filter's query after a change (the empty filter is the default and removes the key). */
+export function saveTimeline(storage: ViewStorage | undefined, filter: TimelineFilter): void {
+  saveViewQuery(storage, TIMELINE_VIEW, filterToQuery(filter));
+}
+
+/** Clear filters: forgets the saved query. */
+export function forgetTimeline(storage: ViewStorage | undefined): void {
+  clearViewQuery(storage, TIMELINE_VIEW);
+}
+
+/**
+ * A restored filter without the initiatives and tags the board no longer has: `known` is the list of initiatives with
+ * their tags. The actor and the closed-within choice are kept. A filter with nothing to drop is returned as it is (the
+ * same object).
+ */
+export function dropUnknown(filter: TimelineFilter, known: readonly { slug: string; tags: readonly string[] }[]): TimelineFilter {
+  const slugs = new Set(known.map((i) => i.slug));
+  const tags = new Set(known.flatMap((i) => i.tags));
+  const initiatives = filter.initiatives.filter((slug) => slugs.has(slug));
+  const kept = filter.tags.filter((tag) => tags.has(tag));
+  if (initiatives.length === filter.initiatives.length && kept.length === filter.tags.length) return filter;
+  return { ...filter, initiatives, tags: kept };
+}
+
+/**
+ * The filter the view starts from (or moves to on a hash change). Only a restored filter is checked, and only once the
+ * lookup answered: `known` is the board's initiatives with their tags, or `undefined` when the lookup failed. An empty
+ * list is an answer (the board has no initiatives), so every restored initiative and tag is dropped. A link's own query
+ * is kept as it is, and the chart shows the server's answer for it.
+ */
+export function startFilter(opened: OpenedTimeline, known: readonly { slug: string; tags: readonly string[] }[] | undefined): TimelineFilter {
+  if (!opened.restored || known === undefined) return opened.filter;
+  return dropUnknown(opened.filter, known);
 }

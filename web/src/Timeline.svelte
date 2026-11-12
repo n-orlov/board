@@ -6,6 +6,8 @@
   import { domSurface } from './arrowSurface';
   import { taskHref } from './lib/taskPage';
   import { currentBrowser } from './lib/session';
+  import { resolveRoute, ROUTES } from './lib/routes';
+  import { currentViewEnv } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
@@ -14,7 +16,6 @@
     DEFAULT_TIMELINE_FILTER,
     affectsTimeline,
     choiceOptions,
-    filterFromHash,
     isFiltered,
     tagChoices,
     timelineHash,
@@ -30,6 +31,10 @@
     canZoomOut,
     mountChart,
     spanLabel,
+    forgetTimeline,
+    openTimeline,
+    saveTimeline,
+    startFilter,
     TimelineApi,
     TimelineViewStore,
     type Chart,
@@ -46,7 +51,10 @@
   const browser = currentBrowser();
   const api = new TimelineApi(browser, () => csrf);
   const lib = { DataSet, Timeline } as unknown as ChartLib;
-  const store = new TimelineViewStore(api, (s) => (view = s), filterFromHash(window.location.hash));
+  const viewEnv = currentViewEnv();
+  // A fragment with a query wins and is saved; a bare one restores the saved filter (in place, before the first fetch).
+  const opened = openTimeline(viewEnv, window.location.hash);
+  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter);
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
@@ -66,11 +74,15 @@
   let tags: string[] = $state([]);
   let actors: string[] = $state([]);
 
-  $effect(() => {
-    void store.load();
-    void new InitiativesApi(browser, () => csrf)
+  // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
+  let looked: { slug: string; tags: string[] }[] | undefined;
+
+  // A restored filter may name an initiative or a tag the board no longer has: the first fetch waits for the list to drop them.
+  async function start() {
+    const listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => {
+        looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
         slugs = list.map((i) => i.slug);
         tags = tagChoices(list);
       })
@@ -79,6 +91,19 @@
       .actors()
       .then((handles) => (actors = handles))
       .catch(() => undefined);
+    if (opened.restored) await listed;
+    const kept = startFilter(opened, looked);
+    if (kept === opened.filter) {
+      void store.load();
+    } else {
+      persist(kept);
+      void store.setFilter(kept);
+    }
+  }
+
+  $effect(() => {
+    // Read nothing reactive here: a filter change must not run the first load again.
+    void untrack(start);
     // A lease, task, ask or milestone event refetches in place: the window and the collapsed rows stay.
     const unsubscribe = live().subscribe(affectsTimeline, () => store.load());
     return () => {
@@ -88,15 +113,30 @@
     };
   });
 
-  // The filter lives in the fragment: a choice rewrites it in place (no history entry per choice) and reads again.
-  function apply(filter: TimelineFilter) {
+  // The filter lives in the fragment and in the saved query: a choice rewrites both in place (no history entry per choice).
+  function persist(filter: TimelineFilter) {
     window.history.replaceState(null, '', timelineHash(filter));
+    saveTimeline(viewEnv.storage, filter);
+  }
+
+  function apply(filter: TimelineFilter) {
+    persist(filter);
     void store.setFilter(filter);
   }
 
-  // The fragment edited by hand, or the back button after a link with another query.
+  // Clear filters: the defaults, and nothing saved.
+  function clear() {
+    forgetTimeline(viewEnv.storage);
+    window.history.replaceState(null, '', '#/timeline');
+    void store.setFilter(DEFAULT_TIMELINE_FILTER);
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filter.
   function hashChanged() {
-    const filter = filterFromHash(window.location.hash);
+    if (resolveRoute(window.location.hash, ROUTES).id !== 'timeline') return;
+    const next = openTimeline(viewEnv, window.location.hash);
+    const filter = startFilter(next, looked);
+    if (filter !== next.filter) persist(filter);
     if (timelineHash(filter) !== timelineHash(view.filter)) void store.setFilter(filter);
   }
 
@@ -138,7 +178,7 @@
       testid="closed-filter"
     />
     {#if isFiltered(view.filter)}
-      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={() => apply(DEFAULT_TIMELINE_FILTER)}>Clear filters</button>
+      <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
   </div>
   {#if view.error !== ''}

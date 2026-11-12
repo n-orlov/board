@@ -1,20 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Browser } from './session';
 import type { ArrowPath, ArrowSurface, Box } from './timelineArrows';
-import { DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
+import { apiQuery, DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
+import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 import {
   canZoomIn,
   canZoomOut,
   chartOptions,
+  dropUnknown,
+  forgetTimeline,
   clickedTask,
   DAY_MS,
   HOUR_MS,
   initialWindow,
   mountChart,
+  openTimeline,
   PAN_DEBOUNCE_MS,
   sameRange,
+  saveTimeline,
   spanLabel,
   spanOf,
+  startFilter,
+  TIMELINE_VIEW,
   TimelineApi,
   TimelineViewStore,
   ZOOM_FACTOR,
@@ -572,5 +579,119 @@ describe('TimelineViewStore panning', () => {
     await store.setFilter({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' });
     await store.load();
     expect(api.read).toHaveBeenLastCalledWith({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' }, moved(5));
+  });
+});
+
+function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+    key: (i) => [...data.keys()][i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+}
+
+function viewEnv(storage: ViewStorage | undefined): ViewEnv & { hashes: string[] } {
+  const hashes: string[] = [];
+  return { storage, replaceHash: (h) => void hashes.push(h), hashes };
+}
+
+describe('saved Timeline filters', () => {
+  const KEY = 'board.view.v1.timeline';
+  const SAVED = 'initiative=ghost&tag=gone&tag=work&actor=bob&closed=30';
+
+  it('is saved under board.view.v1.timeline', () => {
+    expect(viewKey(TIMELINE_VIEW)).toBe(KEY);
+  });
+
+  it('saves the filter as the fragment query and removes the key for the empty filter', () => {
+    const storage = memory();
+    saveTimeline(storage, { initiatives: ['aa'], tags: ['work'], actor: 'bob', closedWithin: 7 });
+    expect(JSON.parse(storage.data.get(KEY)!)).toEqual({ v: 1, query: 'initiative=aa&tag=work&actor=bob&closed=7' });
+    saveTimeline(storage, DEFAULT_TIMELINE_FILTER);
+    expect(storage.data.has(KEY)).toBe(false);
+  });
+
+  it('restores a bare route in place, before any fetch, and reports it as restored', () => {
+    const e = viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work&actor=bob&closed=30' }) }));
+    expect(openTimeline(e, '#/timeline')).toEqual({ filter: { initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30 }, restored: true });
+    expect(e.hashes).toEqual(['#/timeline?tag=work&actor=bob&closed=30']);
+  });
+
+  it('lets a fragment with its own query win and saves it, without restoring', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=old' }) });
+    const e = viewEnv(storage);
+    expect(openTimeline(e, '#/timeline?tag=new')).toEqual({ filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['new'] }, restored: false });
+    expect(e.hashes).toEqual([]);
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=new');
+  });
+
+  it('starts at the defaults with nothing saved, a malformed value, another version or no storage', () => {
+    for (const raw of [undefined, 'nope', '{"v":2,"query":"tag=x"}', '{"v":1,"query":5}']) {
+      const e = viewEnv(memory(raw === undefined ? {} : { [KEY]: raw }));
+      expect(openTimeline(e, '#/timeline')).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false });
+      expect(e.hashes).toEqual([]);
+    }
+    expect(openTimeline(viewEnv(undefined), '#/timeline').restored).toBe(false);
+  });
+
+  it('forgets the saved filter', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=x' }) });
+    forgetTimeline(storage);
+    expect(storage.data.has(KEY)).toBe(false);
+    expect(openTimeline(viewEnv(storage), '#/timeline').restored).toBe(false);
+  });
+
+  const known = [
+    { slug: 'aa', tags: ['work'] },
+    { slug: 'bb', tags: ['home', 'work'] },
+  ];
+
+  it('restores through the module, drops the deleted initiative and the removed tag, and keeps the valid actor and closed_within', () => {
+    const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: SAVED }) })), '#/timeline');
+    expect(opened.filter).toEqual({ initiatives: ['ghost'], tags: ['gone', 'work'], actor: 'bob', closedWithin: 30 });
+    const kept = startFilter(opened, known);
+    expect(kept).toEqual({ initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30 });
+    const read = apiQuery(kept, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-08T00:00:00Z'));
+    expect(read.getAll('initiative')).toEqual([]);
+    expect(read.getAll('tag')).toEqual(['work']);
+    expect(read.get('actor')).toBe('bob');
+    expect(read.get('closed_within')).toBe('30d');
+  });
+
+  it('drops every restored initiative and tag when the lookup answered with no initiatives at all', () => {
+    const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: SAVED }) })), '#/timeline');
+    expect(startFilter(opened, [])).toEqual({ initiatives: [], tags: [], actor: 'bob', closedWithin: 30 });
+  });
+
+  it('keeps a restored filter as it is when the lookup failed', () => {
+    const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: SAVED }) })), '#/timeline');
+    expect(startFilter(opened, undefined)).toBe(opened.filter);
+  });
+
+  it('keeps the values a link names, even unknown ones', () => {
+    const opened = openTimeline(viewEnv(memory()), '#/timeline?initiative=ghost&tag=gone');
+    expect(opened.restored).toBe(false);
+    expect(startFilter(opened, known)).toBe(opened.filter);
+    expect(startFilter(opened, [])).toBe(opened.filter);
+  });
+
+  it('keeps a filter whose values are all known, as the same object', () => {
+    const filter = { initiatives: ['bb'], tags: ['home', 'work'], actor: 'bob', closedWithin: 7 as const };
+    expect(dropUnknown(filter, known)).toBe(filter);
+    expect(dropUnknown(DEFAULT_TIMELINE_FILTER, known)).toBe(DEFAULT_TIMELINE_FILTER);
+  });
+
+  it('drops an unknown initiative and keeps the known one and the tags', () => {
+    expect(dropUnknown({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['ghost', 'aa'], tags: ['work'] }, known)).toEqual({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['work'] });
+  });
+
+  it('drops an unknown tag and keeps the known one and the initiatives', () => {
+    expect(dropUnknown({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['gone', 'home'] }, known)).toEqual({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['home'] });
   });
 });
