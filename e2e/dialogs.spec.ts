@@ -430,6 +430,134 @@ test('the Phase 2 dialog list names the six dialogs', () => {
   ]);
 });
 
+// R12: the three dialogs Phase 3 adds (acknowledge on the task page's Stranded panel, the archive's Reopen confirmation and the
+// force-done confirm) held to the same bar as the nine and six above, at the phone and the desktop: each is the shared Dialog (the one
+// backdrop button and the role=dialog panel under one wrapper), a bottom sheet at the phone and centred on the desktop, focus moves inside
+// on open and Tab and Shift+Tab never leave and come round again, and Escape returns focus to the opener. Escape leaves every item as it
+// was, so both viewports find the same openers.
+const P3_SLUG = 'e2e-dlg-p3';
+const P3_ACTOR = 'dlg-p3';
+const P3_HOLDER = 'dlg-p3-holder';
+
+type P3Seed = { stranded: string; lease: string; forced: string; closed: string };
+let seededP3: Promise<P3Seed> | undefined;
+
+// One initiative with a stranded task (an expired lease nobody acknowledged), a task under another actor's live lease (so Done asks
+// first) and a task closed as superseded (so the Archive lists it with a Reopen button).
+async function seedPhase3(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<P3Seed> {
+  const asActor = (actor: string) =>
+    playwright.request.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor, 'Board-Actor-Way-Back': `ralphctl status ${actor}` },
+    });
+  const a = await asActor(P3_ACTOR);
+  const b = await asActor(P3_HOLDER);
+  const created = await a.post('/api/v1/initiatives', { data: { slug: P3_SLUG, title: 'Phase 3 dialog keyboard', tags: ['kbd'] } });
+  expect([201, 409], `seed ${P3_SLUG}: ${created.status()}`).toContain(created.status());
+  const task = async (title: string) => (await post(a, '/api/v1/tasks', { initiative: P3_SLUG, title }, 201)).ref as string;
+  const stranded = await task('Dlg p3 stranded');
+  const old = await post(a, '/api/v1/leases', { task: stranded, intent: 'will strand', resources: [`repo:dlg-p3-${Date.now()}`] }, 201);
+  await expireLease(a, old.lease.ref);
+  const forced = await task('Dlg p3 forced');
+  await post(b, '/api/v1/leases', { task: forced, intent: 'also holding', resources: [`repo:dlg-p3-b-${Date.now()}`] }, 201);
+  const closed = await task('Dlg p3 closed');
+  await post(a, `/api/v1/tasks/${closed}/close`, { resolution: 'superseded' }, 200);
+  await a.dispose();
+  await b.dispose();
+  return { stranded, lease: old.lease.ref as string, forced, closed };
+}
+
+type P3Dialog = {
+  name: string;
+  /** The dialog's accessible name, from the seed. */
+  dialog: (seed: P3Seed) => string;
+  go: (page: Page, seed: P3Seed) => Promise<Locator>;
+};
+
+// The finite list of Phase 3 dialogs this spec holds to the focus-trap bar.
+const PHASE3_DIALOGS: P3Dialog[] = [
+  {
+    name: 'acknowledge on the task page',
+    dialog: (seed) => `Acknowledge lease ${seed.lease}`,
+    go: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Dlg p3 stranded');
+      return page.getByTestId('stranded-panel').getByRole('button', { name: `Acknowledge lease ${seed.lease}` });
+    },
+  },
+  {
+    name: 'archive Reopen',
+    dialog: () => 'Reopen task',
+    go: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      const row = page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`).locator('visible=true').first();
+      await expect(row).toBeVisible();
+      return row.getByRole('button', { name: `Reopen task ${seed.closed}` });
+    },
+  },
+  {
+    name: 'force-done confirm',
+    dialog: (seed) => `Mark ${seed.forced} done`,
+    go: async (page, seed) => {
+      await page.goto(`/#/t/${seed.forced}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Dlg p3 forced');
+      return visibleButton(page, 'Done');
+    },
+  },
+];
+
+for (const vp of viewports) {
+  test.describe(`Phase 3 dialogs at ${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
+    test.use({ viewport: vp.size });
+
+    for (const d of PHASE3_DIALOGS) {
+      test(`the ${d.name} dialog: keyboard opens the shared Dialog as ${vp.size.width < 768 ? 'a bottom sheet' : 'a centred dialog'}, focus is trapped inside, Escape returns focus to the opener`, async ({ page, playwright, baseURL }) => {
+        seededP3 ??= seedPhase3(playwright, baseURL);
+        const seed = await seededP3;
+        const opener = await d.go(page, seed);
+        await expect(opener).toBeVisible();
+        const dialog = page.getByRole('dialog', { name: d.dialog(seed) });
+        await expect(dialog).toBeHidden();
+
+        // Reach the opener with Tab only, open it with Enter.
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await tabTo(page, opener);
+        await page.keyboard.press('Enter');
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toHaveAttribute('aria-modal', 'true');
+        expect(await focusIsInside(page), `focus is inside the dialog on open (on ${await focused(page)})`).toBe(true);
+        await expect(opener).not.toBeFocused();
+
+        // The shared Dialog: one backdrop button and the panel under the same wrapper, and no second dialog on the page.
+        await expect(page.getByTestId('dialog-backdrop')).toHaveCount(1);
+        await expect(page.getByTestId('dialog-backdrop').locator('..').getByRole('dialog', { name: d.dialog(seed) })).toHaveCount(1);
+        await expect(page.getByRole('dialog')).toHaveCount(1);
+
+        // A bottom sheet at the phone (the sheet slides up on open: wait for it to settle), centred on the desktop.
+        const bottom = async () => {
+          const box = await dialog.boundingBox();
+          return box === null ? -1 : Math.round(box.y + box.height);
+        };
+        if (vp.size.width < 768) await expect.poll(bottom, 'the dialog sits on the viewport\'s lower edge').toBe(vp.size.height);
+        else expect(await bottom(), 'the dialog is centred, clear of the lower edge').toBeLessThan(vp.size.height);
+
+        // Tab and Shift+Tab stay inside and wrap at both ends.
+        await wrapAround(page, 'Tab');
+        await wrapAround(page, 'Shift+Tab');
+
+        // Escape closes it, focus is back on the opener.
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(opener).toBeFocused();
+      });
+    }
+  });
+}
+
+test('the Phase 3 dialog list names the three dialogs', () => {
+  expect(PHASE3_DIALOGS.map((d) => d.name)).toEqual(['acknowledge on the task page', 'archive Reopen', 'force-done confirm']);
+});
+
 // Every interactive element has a visible :focus-visible ring: read from computed style after keyboard focus.
 async function expectRing(target: Locator) {
   const ring = () =>

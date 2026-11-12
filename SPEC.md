@@ -3018,6 +3018,11 @@ opened by keyboard from its opener on the Attention or Notes view. At both viewp
 checks above, and also sits on the viewport's lower edge at the phone (a bottom sheet) and clear of it at the desktop
 (centred).
 
+R12 extends the same spec to the three dialogs Phase 3 adds, a finite, named list: acknowledge on the task page's
+Stranded panel, the archive's Reopen confirmation and the force-done confirm. At both viewports each gets the checks
+above, sits on the viewport's lower edge at the phone and clear of it at the desktop, and is the shared Dialog: one
+backdrop and one `role=dialog` panel under the same wrapper, and no second dialog on the page.
+
 **Theme.** The account menu has a Theme control with three settings: **System** (the default),
 **Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
 it; the effective theme is `light` or `dark` and is the `data-theme` attribute of `<html>`, which
