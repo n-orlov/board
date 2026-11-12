@@ -7,7 +7,7 @@ import (
 	"github.com/n-orlov/board/internal/audit"
 )
 
-// The built-in inbox initiative serve creates on start (SPEC 4.2).
+// The built-in inbox initiative serve creates on start (SPEC 4).
 const (
 	InboxSlug        = "inbox"
 	InboxTitle       = "Inbox"

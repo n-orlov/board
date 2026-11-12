@@ -242,7 +242,7 @@ func reopenLeased(ctx context.Context, st *store.Store) error {
 	return err
 }
 
-// bootstrapInbox creates the built-in inbox initiative when none exists (SPEC 4.2), made by
+// bootstrapInbox creates the built-in inbox initiative when none exists (SPEC 4), made by
 // the operator actor. Like reopenLeased it waits for the next start on a database that is
 // not migrated.
 func bootstrapInbox(ctx context.Context, st *store.Store, env Env) error {

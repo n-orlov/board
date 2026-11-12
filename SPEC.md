@@ -291,7 +291,7 @@ exists.
 |---|---|---|
 | id | ulid | |
 | handle | text, unique | stable identity string (§9) |
-| kind | `operator` \| `agent` | at most one `operator` row exists; `serve` seeds it at start-up with the inbox bootstrap (§4), and a database that has not been served yet gets it on the first write made by a session (below) |
+| kind | `operator` \| `agent` | at most one `operator` row exists; `serve` seeds it at start-up when the inbox bootstrap creates `inbox` (§4); otherwise (a database not served yet, or one whose `inbox` already existed) it is created by the first write made by a session (below) |
 | display_name | text | optional; never set in Phase 0 |
 | host | text | optional, from the handle; never set in Phase 0 |
 | way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
@@ -302,7 +302,7 @@ exists.
 An actor row is created on first use of a handle (upsert). In Phase 0 a use is a **write**: an operation that
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
 A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
-that has only read has no row, and the operator row exists after the first start of `serve` (the inbox bootstrap writes it, §4), or else not until the first write made by a session (its
+that has only read has no row, and the operator row exists after the start of `serve` whose inbox bootstrap created `inbox` (it writes the row, §4), or else not until the first write made by a session (its
 actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `BOARD_OPERATOR_HANDLE`) makes
 that handle's row `operator`, promoting a row an earlier key write created as `agent` under the same handle, and an
 `operator` row is never demoted, so a key write that names the operator's handle after a session write leaves the
@@ -2804,7 +2804,7 @@ All configuration is by environment variable:
 | `BOARD_LISTEN` | `:8080` | listen address |
 | `BOARD_DB_URL` | `sqlite:///data/board.db` | §12.2 |
 | `BOARD_MIGRATE` | `auto` | `auto` \| `off` |
-| `BOARD_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. Phase 0 does not seed the row at start-up: it is created by the first write a session makes (§4.1) |
+| `BOARD_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
