@@ -5,6 +5,7 @@
 // login path instead of showing a broken screen.
 import { mountPrefix, problemDetail } from './apibase';
 import type { components } from './api/schema';
+import { clearAllViews, pageStorage, type ViewStorage, type ViewWindow } from './viewState';
 
 export type Session = components['schemas']['Session'];
 
@@ -26,6 +27,8 @@ export interface Browser {
   pathname: string;
   /** Replaces the page's fragment (location.hash = ...). */
   setHash: (hash: string) => void;
+  /** The page's localStorage, which holds the saved view state (undefined where it is blocked). */
+  storage?: ViewStorage;
 }
 
 /** The login page for the app mounted at `pathname`: "/auth/login" at the root. */
@@ -37,6 +40,7 @@ export function loginUrl(pathname: string): string {
 export interface PageWindow {
   fetch: Browser['fetch'];
   location: { assign: (url: string) => void; pathname: string; hash: string };
+  readonly localStorage?: ViewWindow['localStorage'];
 }
 
 /** The browser this page runs in. */
@@ -48,6 +52,7 @@ export function currentBrowser(win: PageWindow = window): Browser {
     setHash: (hash) => {
       win.location.hash = hash;
     },
+    storage: pageStorage(win),
   };
 }
 
@@ -140,10 +145,11 @@ export class SessionController {
     if (this.state.kind === 'error') await this.load();
   }
 
-  /** Sign out: the server clears the session, then the Signed out view shows. */
+  /** Sign out: the server clears the session, the saved view state goes (R16), then the Signed out view shows. */
   async signOut(): Promise<SignOutResult> {
     if (this.state.kind !== 'signed-in') return 'failed';
     if (!(await logout(this.browser, this.state.session.csrf_token))) return 'failed';
+    clearAllViews(this.browser.storage); // the next person on this browser starts at the defaults
     this.browser.setHash(SIGNED_OUT_HASH);
     this.set({ kind: 'signed-out' });
     return 'signed-out';

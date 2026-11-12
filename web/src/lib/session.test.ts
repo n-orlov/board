@@ -135,6 +135,20 @@ describe('currentBrowser', () => {
     b.setHash('#/signed-out');
     expect(location.hash).toBe('#/signed-out');
   });
+
+  it('hands the window storage over, and none where reading it throws', () => {
+    const location = { assign: vi.fn(), pathname: '/', hash: '' };
+    const storage = memoryStorage({});
+    expect(currentBrowser({ fetch: vi.fn(), location, localStorage: storage }).storage).toBe(storage);
+    const blocked = {
+      fetch: vi.fn(),
+      location,
+      get localStorage(): never {
+        throw new Error('blocked');
+      },
+    };
+    expect(currentBrowser(blocked).storage).toBeUndefined();
+  });
 });
 
 describe('initialState', () => {
@@ -145,6 +159,24 @@ describe('initialState', () => {
     expect(initialState('#/settings/keys')).toEqual({ kind: 'loading' });
   });
 });
+
+function memoryStorage(initial: Record<string, string>) {
+  const data = { ...initial };
+  return {
+    data,
+    getItem: (k: string) => data[k] ?? null,
+    setItem: (k: string, v: string) => {
+      data[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete data[k];
+    },
+    key: (i: number) => Object.keys(data)[i] ?? null,
+    get length() {
+      return Object.keys(data).length;
+    },
+  };
+}
 
 function controller(respond: () => Promise<Response>, hash = '#/', pathname = '/') {
   const made = browser(respond, pathname);
@@ -188,6 +220,31 @@ describe('SessionController', () => {
     expect(init?.method).toBe('POST');
     expect(init?.headers).toEqual({ 'X-CSRF-Token': 'tok' });
     expect(setHash).toHaveBeenCalledWith('#/signed-out');
+  });
+
+  it('clears every board.view.* key on Sign out and leaves the other keys (R16)', async () => {
+    const storage = memoryStorage({
+      'board.view.v1.tasks': '{"v":1,"query":"status=done"}',
+      'board.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
+      'board.view.v2.tasks': 'a later version',
+      'board.theme': 'dark',
+    });
+    const { c, fetchFn, b } = controller(async () => Response.json(session));
+    b.storage = storage;
+    await c.start();
+    fetchFn.mockImplementation(async () => new Response(null, { status: 204 }));
+    expect(await c.signOut()).toBe('signed-out');
+    expect(Object.keys(storage.data)).toEqual(['board.theme']);
+  });
+
+  it('keeps the saved view state when the logout fails', async () => {
+    const storage = memoryStorage({ 'board.view.v1.tasks': '{"v":1,"query":"status=done"}' });
+    const { c, fetchFn, b } = controller(async () => Response.json(session));
+    b.storage = storage;
+    await c.start();
+    fetchFn.mockImplementation(async () => new Response('{}', { status: 403 }));
+    expect(await c.signOut()).toBe('failed');
+    expect(Object.keys(storage.data)).toEqual(['board.view.v1.tasks']);
   });
 
   it('stays signed in when the logout fails', async () => {
