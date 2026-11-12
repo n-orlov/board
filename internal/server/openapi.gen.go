@@ -253,6 +253,48 @@ func (e LeaseState) Valid() bool {
 	}
 }
 
+// Defines values for NotificationKind.
+const (
+	NotificationKindAsking   NotificationKind = "asking"
+	NotificationKindDone     NotificationKind = "done"
+	NotificationKindStranded NotificationKind = "stranded"
+)
+
+// Valid indicates whether the value is a known member of the NotificationKind enum.
+func (e NotificationKind) Valid() bool {
+	switch e {
+	case NotificationKindAsking:
+		return true
+	case NotificationKindDone:
+		return true
+	case NotificationKindStranded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationState.
+const (
+	NotificationStateFailed  NotificationState = "failed"
+	NotificationStatePending NotificationState = "pending"
+	NotificationStateSent    NotificationState = "sent"
+)
+
+// Valid indicates whether the value is a known member of the NotificationState enum.
+func (e NotificationState) Valid() bool {
+	switch e {
+	case NotificationStateFailed:
+		return true
+	case NotificationStatePending:
+		return true
+	case NotificationStateSent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NowLeaseState.
 const (
 	NowLeaseStateEnded   NowLeaseState = "ended"
@@ -538,6 +580,27 @@ func (e ListInitiativesParamsStatus) Valid() bool {
 	case ListInitiativesParamsStatusClosed:
 		return true
 	case ListInitiativesParamsStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListNotificationsParamsState.
+const (
+	ListNotificationsParamsStateFailed  ListNotificationsParamsState = "failed"
+	ListNotificationsParamsStatePending ListNotificationsParamsState = "pending"
+	ListNotificationsParamsStateSent    ListNotificationsParamsState = "sent"
+)
+
+// Valid indicates whether the value is a known member of the ListNotificationsParamsState enum.
+func (e ListNotificationsParamsState) Valid() bool {
+	switch e {
+	case ListNotificationsParamsStateFailed:
+		return true
+	case ListNotificationsParamsStatePending:
+		return true
+	case ListNotificationsParamsStateSent:
 		return true
 	default:
 		return false
@@ -1404,6 +1467,51 @@ type NotePost struct {
 	Task *string `json:"task,omitempty"`
 }
 
+// Notification One row of the alert outbox.
+type Notification struct {
+	// Attempts How many POSTs were made.
+	Attempts  int       `json:"attempts"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Event The ref `E<n>` of the event that enqueued the row.
+	//
+	// Examples: E42
+	Event string `json:"event"`
+
+	// Id The row's ULID.
+	Id   string           `json:"id"`
+	Kind NotificationKind `json:"kind"`
+
+	// LastError `http <status>`, `timeout` or `network error`, from the last failed POST. Absent when none failed.
+	LastError *string `json:"last_error,omitempty"`
+
+	// NextAttemptAt When a `pending` row is next due. Absent for a `sent` or `failed` row.
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+
+	// Payload The JSON the receiver is sent (SPEC 5.4).
+	Payload map[string]interface{} `json:"payload"`
+
+	// SentAt When a 2xx was received. Absent until the row is `sent`.
+	SentAt *time.Time `json:"sent_at,omitempty"`
+
+	// State Where the row is in its delivery.
+	State NotificationState `json:"state"`
+}
+
+// NotificationKind defines model for Notification.Kind.
+type NotificationKind string
+
+// NotificationState Where the row is in its delivery.
+type NotificationState string
+
+// NotificationList A page of notifications.
+type NotificationList struct {
+	Items []Notification `json:"items"`
+
+	// NextAfter The `after` value that fetches the following page. Absent on the last page.
+	NextAfter *string `json:"next_after,omitempty"`
+}
+
 // Now The caller's check-in.
 type Now struct {
 	// Actor The handle of the caller's actor.
@@ -2078,6 +2186,21 @@ type ListNotesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// ListNotificationsParams defines parameters for ListNotifications.
+type ListNotificationsParams struct {
+	// State Keep the rows in this state.
+	State *ListNotificationsParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// Limit The page size, 1 to 1000. Default 100.
+	Limit *EventLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After A notification id. The page starts after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// ListNotificationsParamsState defines parameters for ListNotifications.
+type ListNotificationsParamsState string
+
 // GetNowParams defines parameters for GetNow.
 type GetNowParams struct {
 	// Resources Comma-separated resources to check for conflicts before starting.
@@ -2308,6 +2431,9 @@ type ServerInterface interface {
 	// GetNote Read a note
 	// (GET /api/v1/notes/{ref})
 	GetNote(w http.ResponseWriter, r *http.Request, ref NoteRef)
+	// ListNotifications List the alert outbox
+	// (GET /api/v1/notifications)
+	ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams)
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
@@ -3248,6 +3374,44 @@ func (siw *ServerInterfaceWrapper) GetNote(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// ListNotifications operation middleware
+func (siw *ServerInterfaceWrapper) ListNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotificationsParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "state" -------------
+
+	bind.check("state", runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "limit" -------------
+
+	bind.check("limit", runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""}))
+
+	// ------------- Optional query parameter "after" -------------
+
+	bind.check("after", runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNotifications(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNow operation middleware
 func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request) {
 
@@ -3948,6 +4112,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/milestones", wrapper.RecordTaskMilestone)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notifications", wrapper.ListNotifications)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/stream", wrapper.GetStream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases", wrapper.ListLeases)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases", wrapper.StartLease)
@@ -6719,6 +6884,76 @@ func (response GetNote503ApplicationProblemPlusJSONResponse) VisitGetNoteRespons
 	return err
 }
 
+type ListNotificationsRequestObject struct {
+	Params ListNotificationsParams
+}
+
+type ListNotificationsResponseObject interface {
+	VisitListNotificationsResponse(w http.ResponseWriter) error
+}
+
+type ListNotifications200JSONResponse NotificationList
+
+func (response ListNotifications200JSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotifications400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotifications400ApplicationProblemPlusJSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotifications401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotifications401ApplicationProblemPlusJSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotifications503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListNotifications503ApplicationProblemPlusJSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetNowRequestObject struct {
 	Params GetNowParams
 }
@@ -8520,6 +8755,9 @@ type StrictServerInterface interface {
 	// GetNote Read a note
 	// (GET /api/v1/notes/{ref})
 	GetNote(ctx context.Context, request GetNoteRequestObject) (GetNoteResponseObject, error)
+	// ListNotifications List the alert outbox
+	// (GET /api/v1/notifications)
+	ListNotifications(ctx context.Context, request ListNotificationsRequestObject) (ListNotificationsResponseObject, error)
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
@@ -9528,6 +9766,32 @@ func (sh *strictHandler) GetNote(w http.ResponseWriter, r *http.Request, ref Not
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetNoteResponseObject); ok {
 		if err := validResponse.VisitGetNoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListNotifications operation middleware
+func (sh *strictHandler) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	var request ListNotificationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNotifications(ctx, request.(ListNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListNotificationsResponseObject); ok {
+		if err := validResponse.VisitListNotificationsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

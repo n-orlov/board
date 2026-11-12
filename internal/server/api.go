@@ -46,6 +46,7 @@ type operations struct {
 	initiativeOps
 	taskOps
 	eventOps
+	notifyOps
 	leaseOps
 	nowOps
 	askOps

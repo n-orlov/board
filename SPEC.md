@@ -785,7 +785,7 @@ row is ever written. A renewal, an end, an answer, a withdrawal, a close and a n
 does a write that is refused, since its transaction writes no event. A row is not cancelled when its condition clears
 (the lease acknowledged, the ask answered): what was enqueued is what is delivered. `serve` turns the triggers on once at
 start-up, before it takes a request, and a word in `BOARD_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
-whether or not the URL is set. `GET /api/v1/notifications` follows in a later task of this wave.
+whether or not the URL is set. `GET /api/v1/notifications` lists the outbox (§6.9).
 
 #### Delivery
 
@@ -936,6 +936,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | GET | `/events` | global change log (filters: since, initiative, task, type, actor; paging: limit, after; below) |
 | PUT | `/cursors/{stream}` | ack read position |
 | GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
+| GET | `/notifications` | the alert outbox, newest first (filter: state; paging: limit, after; §6.9) |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
 | GET | `/stream` | SSE live feed (§7.1) |
 | POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
@@ -1355,6 +1356,31 @@ writes their `lease_expired` events, and judges all five sections at that one in
 - **Clearing.** Each section empties by the action that deals with it: an ask by answering or withdrawing it, a done task
   by closing it, an expired lease by acknowledging it or by any later lease on its task, an overdue watch by recording a
   check (which moves `next_check_at`) and a conflict by ending (or letting expire) one of its leases.
+
+### 6.9 Notifications
+
+`GET /api/v1/notifications` is in `api/openapi.yaml` and lists the outbox of §4.11, so the operator can see what was
+delivered, what is waiting and what failed. Any authenticated principal may use it (v1 has no ACL) and a server
+without a store answers **503**. It reads the table whether or not `BOARD_NOTIFY_URL` is set (with the URL unset no row
+is ever written, §5.4, so the list is empty). It writes nothing.
+
+- **Parameters.** `state` is `pending`, `sent` or `failed` and keeps the rows in that state; left out, every row is
+  listed. Any other value, letter case and the empty string included, is **400**. `limit` is 1 to 1000 (default 100; 0,
+  a value above 1000 and text that is not a whole number are **400**). `after` is the `id` of the last row of the
+  previous page, a ULID in either letter case: the page starts after that row in the list's order, and an `after` that
+  is not a ULID or names no row is **400**. Every **400** is a problem document with a `next` line.
+- **The answer** is `{items, next_after?}`, ordered newest first: by `created_at` descending, rows created in the same
+  millisecond by `id` descending. `next_after`, the id to send as `after`, is present exactly when more rows follow
+  the page, so a `limit` equal to the number left is the last page and has none. `after` and `state` combine, so a
+  page of a filtered list continues the filtered list. An empty outbox, or a `state` with no rows, answers `items: []`.
+- **An item** is `{id, kind, state, event, attempts, next_attempt_at?, last_error?, created_at, sent_at?, payload}`:
+  `id` the row's ULID, `kind` `stranded`, `asking` or `done`, `state` `pending`, `sent` or `failed`, `event` the
+  `E<n>` ref of the event that enqueued it, `attempts` the number of POSTs made (§5.4), `next_attempt_at` when a
+  `pending` row is next due (absent for a `sent` or `failed` row), `last_error` `http <status>`, `timeout` or
+  `network error` from the last failed POST (absent when none failed; a later 2xx leaves it in place), `created_at`,
+  `sent_at` the time of the 2xx (absent until the row is `sent`) and `payload` the JSON object of §5.4 the receiver is
+  sent. Times are RFC 3339, UTC. An item carries no `claimed_until`, header value, key or session: the payload is built
+  from event and entity rows only (§5.4).
 
 ---
 

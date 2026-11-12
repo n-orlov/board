@@ -19,6 +19,7 @@ import (
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
+	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/tasks"
 	"github.com/n-orlov/board/internal/webui"
 )
@@ -118,6 +119,11 @@ func WithTasks(st *tasks.Store, ls *leases.Store) Option {
 // st; without it they answer 503.
 func WithEvents(st *events.Store) Option {
 	return func(o *operations) { o.events = st }
+}
+
+// WithNotifications serves GET /api/v1/notifications from st; without it the operation answers 503.
+func WithNotifications(st *notify.Store) Option {
+	return func(o *operations) { o.notifyOps = notifyOps{notify: st} }
 }
 
 // WithLeases serves /api/v1/leases from st; without it the operations answer 503.

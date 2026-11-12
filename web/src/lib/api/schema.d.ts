@@ -468,6 +468,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the alert outbox
+         * @description A page of the notification outbox (the alerts of SPEC 5.4), newest first by creation time and then id, so an operator sees what was delivered and what failed. `state` keeps the rows `pending`, `sent` or `failed`; left out, every row is listed. `limit` is 1 to 1000, default 100. `after` is the id of the last row of the previous page; the response's `next_after` is the value to send, and is absent on the last page. An unknown `state`, a `limit` out of range or an `after` that names no row is 400. The rows carry no header value, key or session: the payload is what the receiver was sent.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stream": {
         parameters: {
             query?: never;
@@ -1678,6 +1698,49 @@ export interface components {
             /** @description The `after` value that fetches the following page. Absent on the last page. */
             next_after?: string;
         };
+        /** @description One row of the alert outbox. */
+        Notification: {
+            /** @description The row's ULID. */
+            id: string;
+            /** @enum {string} */
+            kind: "stranded" | "asking" | "done";
+            /**
+             * @description Where the row is in its delivery.
+             * @enum {string}
+             */
+            state: "pending" | "sent" | "failed";
+            /**
+             * @description The ref `E<n>` of the event that enqueued the row.
+             * @example E42
+             */
+            event: string;
+            /** @description How many POSTs were made. */
+            attempts: number;
+            /**
+             * Format: date-time
+             * @description When a `pending` row is next due. Absent for a `sent` or `failed` row.
+             */
+            next_attempt_at?: string;
+            /** @description `http <status>`, `timeout` or `network error`, from the last failed POST. Absent when none failed. */
+            last_error?: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When a 2xx was received. Absent until the row is `sent`.
+             */
+            sent_at?: string;
+            /** @description The JSON the receiver is sent (SPEC 5.4). */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description A page of notifications. */
+        NotificationList: {
+            items: components["schemas"]["Notification"][];
+            /** @description The `after` value that fetches the following page. Absent on the last page. */
+            next_after?: string;
+        };
         /** @description The fields to change. A field left out keeps its value. `null` clears `planned_start`, `planned_end` and `next_check_at`, and is 400 for the others, `cadence_seconds` included. */
         TaskPatch: {
             /** @description 1 to 200 characters. */
@@ -2678,6 +2741,36 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                /** @description Keep the rows in this state. */
+                state?: "pending" | "sent" | "failed";
+                /** @description The page size, 1 to 1000. Default 100. */
+                limit?: components["parameters"]["EventLimit"];
+                /** @description A notification id. The page starts after it. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };

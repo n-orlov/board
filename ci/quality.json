@@ -103,6 +103,7 @@
                 "initiativeops.go",
                 "metaops.go",
                 "noteops.go",
+                "notifyops.go",
                 "nowops.go",
                 "server.go",
                 "streamattention.go",
@@ -156,6 +157,7 @@
                     "initiativeops.go",
                     "metaops.go",
                     "noteops.go",
+                    "notifyops.go",
                     "nowops.go"
                 ],
                 "streams": [
