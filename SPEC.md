@@ -280,7 +280,8 @@ that slug exists, in one transaction with its one `initiative_created` event: th
 (`BOARD_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
 `system:bootstrap`. An `inbox` that exists is left exactly as it is: another title or tags, a closed status and its
 events all stay, and no second event is written. Two servers started together on one database leave one `inbox` and
-one event: the unique slug makes the loser's transaction roll back, and the loser carries on. A database that is
+one event: the unique slug, or on Postgres the one operator row the winner's transaction also wrote, makes the loser's
+transaction roll back, and the loser looks once more, finds that `inbox` and carries on. A database that is
 not migrated (`BOARD_MIGRATE=off`) waits for the next start. The inbox is an ordinary initiative afterwards: it
 lists first in a list in creation order (§6.3), can be edited, closed and reopened, and is never recreated while it
 exists.
