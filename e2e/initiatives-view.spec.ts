@@ -47,11 +47,12 @@ const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}
 const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 
-// The list requests a page sends.
+// The list fetches a page sends: the first page of each (a long list on the shared board is read in further pages, which are the same fetch).
 function listReads(page: Page) {
   const reads = { count: 0 };
   page.on('request', (request) => {
-    if (new URL(request.url()).pathname === '/api/v1/initiatives' && request.method() === 'GET') reads.count++;
+    const url = new URL(request.url());
+    if (url.pathname === '/api/v1/initiatives' && !url.searchParams.has('after') && request.method() === 'GET') reads.count++;
   });
   return reads;
 }

@@ -11,7 +11,8 @@ const viewports = [
 ] as const;
 
 // The list request, whatever its query (the status filter rides on it).
-const isList = (url: URL) => url.pathname === '/api/v1/initiatives';
+// A fetch of the list is its first page: the board is shared with every other spec, so a long list is read in further pages (`after`), which a held or counted fetch must not count again.
+const isList = (url: URL) => url.pathname === '/api/v1/initiatives' && !url.searchParams.has('after');
 
 const newInitiative = (page: Page) => page.getByRole('button', { name: 'New initiative' });
 
