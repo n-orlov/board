@@ -208,7 +208,7 @@
           <span class="wrap-anywhere rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted" data-testid="tag">{tag}</span>
         {/each}
       </div>
-      <p class="mt-2 text-sm text-text-muted">
+      <p class="mt-2 text-sm text-text-muted wrap-anywhere">
         {#if targetsText(initiative) !== ''}
           <span data-testid="initiative-targets">Targets: {targetsText(initiative)}</span> ·
         {/if}

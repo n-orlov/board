@@ -164,7 +164,7 @@
         {#each reasons as reason (reason)}
           <p class="mt-1 text-sm text-warning wrap-anywhere" data-testid="blocked-reason">{reason}</p>
         {/each}
-        <p class="mt-2 text-sm text-text-muted">
+        <p class="mt-2 text-sm text-text-muted wrap-anywhere">
           Created <time datetime={task.created_at} title={absoluteTime(task.created_at)}>{relativeTime(task.created_at, now)}</time> by {task.created_by}
         </p>
 

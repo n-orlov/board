@@ -2954,6 +2954,15 @@ back) and `#/notes` (with bodies open and the filters filled, and the broadcasts
 withdraw ask, post note, close from attention, acknowledge and record check from attention, and for acknowledge also
 the toast it raises once confirmed. The live indicator is held to the bar in each of `live`, `offline` and
 `reconnecting`. No state scrolls sideways or reaches past the viewport at the four widths.
+R12 extends it to Phase 3 in the same way, named in `PHASE3_STATES`: the views `#/timeline` (its filters and frame, the
+filters set to a 40-character slug and handle), `#/actors` and `#/archive`; the Needs attention sections on the Tasks view and on the
+initiative page; the Stranded panel on the task page; the attention chip on the Initiatives list, the attention badges in the task
+header and the attention badge in the navigation; the three dialogs acknowledge on the task page, archive Reopen and the
+force-done confirm; and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables (sorted
+through the fragment query, with the sorted header asserted). They are filled with the longest accepted values (a 40-character slug and
+handle, 200-character titles, intents and ways back, 20 resources of 100 characters) and a test names them. The Tasks view, the
+task page, the initiative page and Attention are also held to the bar at 2560x1080 and 3440x1440 (`WIDE_STATE_NAMES`). The
+"Created ... by" line of the task page and of the initiative page wraps anywhere, so a 40-character handle stays inside the column.
 
 **Wide layout caps (R13).** On a wide screen the views that are one table or one list do not stretch with the window. Initiatives, Notes, API keys (Settings), Actors and Archive keep their content (`<section>`) at most 1280 px wide and centred in the main column (`mx-auto max-w-[1280px]`), so on a 2560 px or 3440 px screen the table has an equal margin on each side; below 1280 px of main column they take the whole column as before. The Timeline takes the full width of the main column, since a chart gains from the room. Long running text is held to a measure of 75 characters a line: a rendered Markdown description (task descriptions, note bodies, ask details; the `.description` class) has `max-width: 75ch`, and so do an ask's question and answer. `e2e/wide.spec.ts` asserts it at 2560x1080 and 3440x1440 by bounding box and computed style: the Initiatives and Archive tables are at most 1280 px wide with left and right margins equal within 2 px (the same for Notes, API keys and Actors), the Timeline frame is as wide as the main column, and a seeded long task description has a computed `max-width` of at most 75 `ch` and is no wider.
 
