@@ -12,6 +12,9 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/attention` with its five sections
 // filled, `#/notes`, the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge and record check
 // from attention, and the live indicator in its three states.
+// R12 extends it to the Phase 3 views and dialogs (PHASE3_STATES below): `#/timeline`, `#/actors`, `#/archive`, the Needs attention
+// sections of the Tasks view and the initiative page, the Stranded panel, the attention chips, the dialogs acknowledge, archive Reopen
+// and force-done confirm, and the phone Sort select.
 const test = base;
 
 const SELECTOR = 'a, button, input, select, textarea, [role=button]';
@@ -403,6 +406,188 @@ const PHASE2_STATES: Phase2State[] = [
   },
 ];
 
+// ---- Phase 3 (R12) -------------------------------------------------------------------------------------------------
+
+const P3_SLUG = 'e2e-touch-p3';
+const P3_CLOSED_SLUG = 'e2e-touch-p3-closed';
+const P3_ACTOR = 'touch-p3-a';
+const P3_HOLDER = 'touch-p3-b';
+
+type Seed3 = { stranded: string; lease: string; done: string; held: string; forced: string; closed: string };
+let seeded3: Promise<Seed3> | undefined;
+
+// One initiative with a stranded task (an expired lease nobody acknowledged), a done task, a task with an open ask under a live lease,
+// a task under another actor's live lease (so Done asks first) and a task closed as superseded; a second initiative, closed, for the Archive.
+async function seedPhase3(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed3> {
+  const a = await actorApi(playwright, baseURL, P3_ACTOR);
+  const b = await actorApi(playwright, baseURL, P3_HOLDER);
+  // A 409 is a second seeding by a worker the runner restarted after a failure: the initiatives stay, their items are made again.
+  for (const slug of [P3_SLUG, P3_CLOSED_SLUG]) {
+    const created = await a.post('/api/v1/initiatives', { data: { slug, title: `Touch Phase 3 ${slug}`, tags: ['phone'] } });
+    expect([201, 409], `seed ${slug}: ${created.status()}`).toContain(created.status());
+  }
+  const task = async (title: string) => (await send(a, '/api/v1/tasks', { initiative: P3_SLUG, title }, 201)).ref as string;
+
+  const stranded = await task('Touch p3 stranded');
+  const old = await send(a, '/api/v1/leases', { task: stranded, intent: 'will strand', resources: ['repo:touch-p3-old'] }, 201);
+  await expireLease(a, old.lease.ref);
+  const done = await task('Touch p3 done');
+  await send(a, `/api/v1/tasks/${done}/done`, {}, 200);
+  const held = await task('Touch p3 held');
+  await send(a, '/api/v1/leases', { task: held, intent: 'holding', resources: ['repo:touch-p3'] }, 201);
+  await send(a, '/api/v1/asks', { question: 'Is this big enough?', task: held }, 201);
+  const forced = await task('Touch p3 forced');
+  await send(b, '/api/v1/leases', { task: forced, intent: 'also holding', resources: ['repo:touch-p3-b'] }, 201);
+  const closed = await task('Touch p3 closed');
+  await send(a, `/api/v1/tasks/${closed}/close`, { resolution: 'superseded' }, 200);
+  const closedInitiative = await a.post(`/api/v1/initiatives/${P3_CLOSED_SLUG}/close`, { data: {} });
+  expect([200, 409], `close ${P3_CLOSED_SLUG}: ${closedInitiative.status()}`).toContain(closedInitiative.status());
+  await a.dispose();
+  await b.dispose();
+  return { stranded, lease: old.lease.ref as string, done, held, forced, closed };
+}
+
+const needsRow = (page: Page, ref: string) => page.locator(`[data-testid=needs-row][data-ref="${ref}"]`);
+
+type Phase3State = { name: string; minimum: number; open: (page: Page, seed: Seed3) => Promise<void> };
+
+// The finite list of Phase 3 states this spec measures at the phone: 3 views, the Needs attention sections of the Tasks view and the
+// initiative page, the Stranded panel, the 3 attention chips and badges, 3 dialogs and the Sort select of 2 views.
+const PHASE3_STATES: Phase3State[] = [
+  {
+    name: 'view #/timeline',
+    minimum: 4,
+    open: async (page) => {
+      await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
+      await expect(page.getByTestId('timeline-chart')).toBeVisible();
+      await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
+      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+    },
+  },
+  {
+    name: 'view #/actors',
+    minimum: 3,
+    open: async (page) => {
+      await page.goto('/#/actors');
+      await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`).getByTestId('actor-lease').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'view #/archive',
+    minimum: 4,
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await expect(page.locator(`[data-testid=archive-row][data-kind=task][data-ref="${seed.closed}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=archive-row][data-kind=initiative][data-ref="${P3_CLOSED_SLUG}"]`)).toBeVisible();
+    },
+  },
+  {
+    name: 'Needs attention on #/tasks',
+    minimum: 6,
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Needs attention on #/i/<slug>',
+    minimum: 6,
+    open: async (page, seed) => {
+      await page.goto(`/#/i/${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Stranded panel on #/t/<ref>',
+    minimum: 5,
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      const panel = page.getByTestId('stranded-panel');
+      await expect(panel).toBeVisible();
+      await expect(panel.getByTestId('stranded-holder')).toHaveText(P3_ACTOR);
+      await expect(panel.getByRole('button', { name: `Acknowledge lease ${seed.lease}` })).toBeVisible();
+    },
+  },
+  {
+    name: 'attention chip on #/initiatives',
+    minimum: 4,
+    open: async (page) => {
+      await page.goto('/#/initiatives');
+      const row = page.locator(`[data-testid=initiative-row][data-slug=${P3_SLUG}]`);
+      await expect(row.getByTestId('initiative-attention')).toContainText(/need(s)? attention/);
+    },
+  },
+  {
+    name: 'attention badges on #/t/<ref>',
+    minimum: 5,
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Touch p3 stranded');
+      await expect(page.getByTestId('task-page').getByTestId('attention-stranded')).toBeVisible();
+    },
+  },
+  {
+    name: 'attention badge in the navigation',
+    minimum: 4,
+    open: async (page) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      await expect(page.locator('[data-testid=attention-badge]').locator('visible=true').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog acknowledge on #/t/<ref>',
+    minimum: 3,
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await page.getByTestId('stranded-panel').getByRole('button', { name: `Acknowledge lease ${seed.lease}` }).click();
+      await openDialog(page, `Acknowledge lease ${seed.lease}`);
+    },
+  },
+  {
+    name: 'dialog archive Reopen',
+    minimum: 3,
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`).getByRole('button', { name: `Reopen task ${seed.closed}` }).click();
+      await openDialog(page, 'Reopen task');
+    },
+  },
+  {
+    name: 'dialog force-done confirm',
+    minimum: 3,
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.forced}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Touch p3 forced');
+      await button(page, 'Done', true).click();
+      const dialog = await openDialog(page, `Mark ${seed.forced} done`);
+      await expect(dialog.getByTestId('dialog-body')).toContainText(P3_HOLDER);
+    },
+  },
+  {
+    name: 'phone Sort select on #/tasks',
+    minimum: 6,
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}&sort=holder&dir=desc`);
+      await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
+      await expect(page.getByTestId('sort-select')).toBeVisible();
+      await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
+    },
+  },
+  {
+    name: 'phone Sort select on #/archive',
+    minimum: 4,
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7&sort=item&dir=desc');
+      await expect(page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`)).toBeVisible();
+      await expect(page.getByTestId('sort-select')).toBeVisible();
+      await expect(page.getByTestId('sort-select')).toHaveValue('item:desc');
+    },
+  },
+];
+
 const LIVE_STATES = ['live', 'offline', 'reconnecting'] as const;
 
 test.describe('phone 390x844', () => {
@@ -574,6 +759,15 @@ test.describe('phone 390x844', () => {
     });
   }
 
+  for (const state of PHASE3_STATES) {
+    test(`${state.name} has 44 px hit areas and 16 px inputs`, async ({ page, playwright, baseURL }) => {
+      seeded3 ??= seedPhase3(playwright, baseURL);
+      const seed = await seeded3;
+      await state.open(page, seed);
+      await expectTouchFriendly(page, state.minimum);
+    });
+  }
+
   for (const word of LIVE_STATES) {
     test(`the live indicator reading ${word} sits on a page of 44 px hit areas`, async ({ page, context }) => {
       if (word === 'reconnecting') {
@@ -600,6 +794,25 @@ test.describe('phone 390x844', () => {
       await context.setOffline(false);
     });
   }
+
+  test('the Phase 3 list names the 3 views, the Needs attention sections, the Stranded panel, the chips, the 3 dialogs and the Sort select', () => {
+    expect(PHASE3_STATES.map((s) => s.name)).toEqual([
+      'view #/timeline',
+      'view #/actors',
+      'view #/archive',
+      'Needs attention on #/tasks',
+      'Needs attention on #/i/<slug>',
+      'Stranded panel on #/t/<ref>',
+      'attention chip on #/initiatives',
+      'attention badges on #/t/<ref>',
+      'attention badge in the navigation',
+      'dialog acknowledge on #/t/<ref>',
+      'dialog archive Reopen',
+      'dialog force-done confirm',
+      'phone Sort select on #/tasks',
+      'phone Sort select on #/archive',
+    ]);
+  });
 
   test('the Phase 2 list names the views, the six dialogs and the three live indicator states', () => {
     const names = PHASE2_STATES.map((s) => s.name);
