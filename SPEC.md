@@ -2320,7 +2320,7 @@ operator. Live via SSE (§7.1).
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
 | **Actors** (shipped, `#/actors`) | who is alive now: actors with a live lease first (each lease links to its task), then the rest by last seen, a copy way back button on each. |
-| **Archive** | closed tasks/initiatives, adjustable window (7/30/90 days/all), reopen. |
+| **Archive** (shipped, `#/archive`) | closed tasks and closed initiatives together, newest closed first, in an adjustable window (7/30/90 days/all, default 30, held in the fragment query), each with its resolution and a Reopen button that confirms in the dialog. |
 | **Settings → API keys** | create (key shown once), list (name, prefix, created, last used, expiry), revoke (§3.3). Login / logout via OIDC (§3.2). |
 
 **Live refresh** is the module `web/src/lib/live.ts`: one `EventSource` per tab on `GET /api/v1/stream` (§7.1), opened
@@ -2716,6 +2716,29 @@ every live view, on any board event but an API key event (any write moves an act
 `e2e/actors.spec.ts` covers, at phone and desktop, an actor with a live lease started through the API listed before an actor
 that acted later but holds nothing, its lease linking to its task, the way back of each copied, and a lease started through the
 API putting its actor first within 5 s without a reload.
+
+**Archive view** (`#/archive`, `web/src/Archive.svelte`, R7). The route table holds it as the entry `archive`, a page inside the Tasks
+entry as far as the navigation goes (it has no entry of its own yet). It lists the **closed tasks** (`GET /tasks?status=closed`) and the
+**closed initiatives** (`GET /initiatives?status=closed`) in one table, in the order of `archiveRows` (`web/src/lib/archive.ts`):
+`closed_at` newest first, equal times by key, an item with no `closed_at` last. The **window** is 7, 30 or 90 days or all, chosen in
+a "Closed within" select and held in the fragment query as `#/archive?window=7|90|all`; the default, 30 days, leaves the query
+empty (`#/archive`), and a missing or unknown value is the default. The window is sent as `closed_within=<n>d` (none for all). A choice
+rewrites the fragment in place (no history entry per choice) and reads again; a fragment edited by hand or reached by the back button
+is read the same way (`windowFromHash`, `archiveHash`). A row shows the title as a link to the task or initiative page, its ref or
+slug, the kind (`task` or `initiative`), the **resolution** (a task's `completed`, `dropped`, `superseded` or `duplicate`; an
+initiative has none of its own and says `initiative closed`), when and by whom it was closed (the absolute time in the `title`), and a
+**Reopen** button (44 px, named "Reopen task E1-3" or "Reopen initiative <slug>"). Reopen opens the shared `Dialog` (bottom sheet at
+phone) with the confirmation; confirming calls `POST /tasks/<ref>/reopen` or `POST /initiatives/<slug>/reopen`, closes the dialog,
+toasts "Task E1-3 reopened" or "Initiative <slug> reopened", and reads the archive again, so the item is gone from it and is back in
+the Tasks view or the Initiatives list (a reopened initiative's closed tasks stay closed). A refusal (409, such as reopening a task of
+a closed initiative) shows inside the dialog, which stays open. From 768 px it is one table (Item, Kind, Resolution, Closed, action),
+below it each item is a card. The view subscribes to the stream (§7.1) and reads again, in place and debounced, on
+`task_closed`, `task_reopened`, `initiative_closed` and `initiative_reopened`; nothing polls on a timer. Sorting by column and the
+saved window are R16 work of their own. `e2e/archive.spec.ts` covers, at phone and desktop: a task closed through the API in the 7 day
+window and a task whose `closed_at` the e2e store (`e2e/store.ts`, a direct write to the SQLite file) moves 30 days back absent from it
+and present in `all`, newest first; the same for two closed initiatives; the default window and the window read from a link; Reopen on
+a task and on an initiative (Cancel changes nothing; confirming brings the task back to `#/tasks` and the initiative back to
+`#/initiatives`); and the refusal shown in the dialog. `web/src/lib/archive.test.ts` covers the window <-> URL encoding.
 
 **Notes view** (`#/notes`, `web/src/Notes.svelte`, R10). The route table holds it as the entry `notes` (nav label Notes), a view
 of every note on the board, **newest first**. `GET /notes` lists oldest first and has no reverse order, so `NotesApi.filtered`

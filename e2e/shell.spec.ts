@@ -198,7 +198,7 @@ async function sendTotal(page: Page, total: number) {
 
 test.describe('the route table and the navigation order', () => {
   test('the table holds Attention first and Notes, and the default route is Attention', async ({ page }) => {
-    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'notes', 'keys']);
+    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'archive', 'notes', 'keys']);
     expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Notes', 'Settings']);
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const hash of ['/', '/#/', '/#/nowhere']) {
