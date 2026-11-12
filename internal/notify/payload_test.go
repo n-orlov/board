@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/store"
