@@ -488,6 +488,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the timeline of a window
+         * @description The tasks, leases and markers that fall in a window of time, with the initiatives that hold the tasks, for the Timeline view. `from` and `to` are RFC 3339 instants; `to` must be after `from` and at most 400 days after it; left out they default to 14 days before now and 7 days after now. A task is in the window when its actual span (`created_at` to `closed_at`, or to now while it is not closed) or its planned span overlaps it; a lease when its span (`started_at` to its end, open while it is live) overlaps it, so a window that cuts a lease keeps it; a marker when its `at` is inside it. Closed tasks are left out unless `closed_within` (`7d`, `30d`, `90d` or an integer of days) keeps those closed that recently; the leases and markers of a task that is left out are left out with it. `initiative` (by slug or ULID, repeatable) and `tag` (repeatable; the initiative must carry every tag given) keep tasks as they do for `GET /api/v1/tasks`; `actor` (a handle) keeps the tasks on which that actor held a lease in the window. Each task's `attention` list is the one of `GET /api/v1/tasks`. Leases that ran out are expired before the read. Everything is in stable order: initiatives in board order, tasks by initiative then number, leases by number, markers by time then event. An unreadable time, `to` not after `from`, a window over 400 days, a bad `closed_within` or tag is 400; an initiative that names nothing is 404.
+         */
+        get: operations["getTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stream": {
         parameters: {
             query?: never;
@@ -1735,6 +1755,74 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description What falls in a window of time. */
+        Timeline: {
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+            initiatives: components["schemas"]["TimelineInitiative"][];
+            tasks: components["schemas"]["TimelineTask"][];
+            leases: components["schemas"]["TimelineLease"][];
+            markers: components["schemas"]["TimelineMarker"][];
+        };
+        /** @description An initiative that holds a task of the window. */
+        TimelineInitiative: {
+            slug: string;
+            title: string;
+            tags: string[];
+            closed: boolean;
+        };
+        /** @description A task of the window. */
+        TimelineTask: {
+            ref: string;
+            /** @description The slug of the task's initiative. */
+            initiative: string;
+            title: string;
+            /** @enum {string} */
+            status: "open" | "done" | "closed";
+            /** @enum {string} */
+            kind: "work" | "watch";
+            /** Format: date-time */
+            planned_start?: string;
+            /** Format: date-time */
+            planned_end?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            closed_at?: string;
+            /** @description Why the task needs a person, as for `GET /api/v1/tasks`. Empty for a task that needs nothing. */
+            attention: components["schemas"]["TaskAttention"][];
+            /** @description The refs of the tasks this one is blocked by. */
+            deps: string[];
+        };
+        /** @description A lease that overlaps the window. */
+        TimelineLease: {
+            ref: string;
+            task: string;
+            /** @description The handle of the actor that holds or held the lease. */
+            holder: string;
+            /** @enum {string} */
+            state: "live" | "ended" | "expired";
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description When an ended lease was ended, or when an expired lease expired. Absent while it is live.
+             */
+            ended_at?: string;
+            intent: string;
+        };
+        /** @description A point in time on a task. */
+        TimelineMarker: {
+            task: string;
+            /** @enum {string} */
+            type: "milestone" | "ask" | "check" | "done" | "closed";
+            /** Format: date-time */
+            at: string;
+            /** @description The milestone's or check's summary, the ask's question, or the event's one-line summary for done and closed. */
+            label: string;
+        };
         /** @description A page of notifications. */
         NotificationList: {
             items: components["schemas"]["Notification"][];
@@ -2771,6 +2859,43 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getTimeline: {
+        parameters: {
+            query?: {
+                /** @description The start of the window, RFC 3339. Default 14 days before now. */
+                from?: string;
+                /** @description The end of the window, RFC 3339. Default 7 days after now. */
+                to?: string;
+                /** @description Keep tasks of this initiative, by slug or ULID. Repeatable. */
+                initiative?: string[];
+                /** @description Keep tasks whose initiative carries this tag. Repeatable; every tag given must match. */
+                tag?: string[];
+                /** @description A handle. Keeps the tasks on which this actor held a lease in the window. */
+                actor?: string;
+                /** @description `7d`, `30d`, `90d` or an integer of days. Adds the tasks closed that recently. */
+                closed_within?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeline"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

@@ -52,6 +52,7 @@
             "internal/tasks",
             "internal/leases",
             "internal/version",
+            "internal/timeline",
             "internal/server",
             "internal/cli"
         ],
@@ -73,6 +74,7 @@
                 "internal/initiatives",
                 "internal/tasks",
                 "internal/leases",
+                "internal/timeline",
                 "internal/version"
             ],
             "server-ops": [
@@ -110,7 +112,8 @@
                 "streamops.go",
                 "taskattention.go",
                 "tasklist.go",
-                "taskops.go"
+                "taskops.go",
+                "timelineops.go"
             ],
             "internal/cli": [
                 "args.go",
@@ -158,7 +161,8 @@
                     "metaops.go",
                     "noteops.go",
                     "notifyops.go",
-                    "nowops.go"
+                    "nowops.go",
+                    "timelineops.go"
                 ],
                 "streams": [
                     "askwait.go",

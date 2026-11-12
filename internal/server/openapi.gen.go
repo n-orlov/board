@@ -565,6 +565,93 @@ func (e TaskListItemStatus) Valid() bool {
 	}
 }
 
+// Defines values for TimelineLeaseState.
+const (
+	TimelineLeaseStateEnded   TimelineLeaseState = "ended"
+	TimelineLeaseStateExpired TimelineLeaseState = "expired"
+	TimelineLeaseStateLive    TimelineLeaseState = "live"
+)
+
+// Valid indicates whether the value is a known member of the TimelineLeaseState enum.
+func (e TimelineLeaseState) Valid() bool {
+	switch e {
+	case TimelineLeaseStateEnded:
+		return true
+	case TimelineLeaseStateExpired:
+		return true
+	case TimelineLeaseStateLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineMarkerType.
+const (
+	TimelineMarkerTypeAsk       TimelineMarkerType = "ask"
+	TimelineMarkerTypeCheck     TimelineMarkerType = "check"
+	TimelineMarkerTypeClosed    TimelineMarkerType = "closed"
+	TimelineMarkerTypeDone      TimelineMarkerType = "done"
+	TimelineMarkerTypeMilestone TimelineMarkerType = "milestone"
+)
+
+// Valid indicates whether the value is a known member of the TimelineMarkerType enum.
+func (e TimelineMarkerType) Valid() bool {
+	switch e {
+	case TimelineMarkerTypeAsk:
+		return true
+	case TimelineMarkerTypeCheck:
+		return true
+	case TimelineMarkerTypeClosed:
+		return true
+	case TimelineMarkerTypeDone:
+		return true
+	case TimelineMarkerTypeMilestone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineTaskKind.
+const (
+	TimelineTaskKindWatch TimelineTaskKind = "watch"
+	TimelineTaskKindWork  TimelineTaskKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the TimelineTaskKind enum.
+func (e TimelineTaskKind) Valid() bool {
+	switch e {
+	case TimelineTaskKindWatch:
+		return true
+	case TimelineTaskKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineTaskStatus.
+const (
+	TimelineTaskStatusClosed TimelineTaskStatus = "closed"
+	TimelineTaskStatusDone   TimelineTaskStatus = "done"
+	TimelineTaskStatusOpen   TimelineTaskStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the TimelineTaskStatus enum.
+func (e TimelineTaskStatus) Valid() bool {
+	switch e {
+	case TimelineTaskStatusClosed:
+		return true
+	case TimelineTaskStatusDone:
+		return true
+	case TimelineTaskStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListInitiativesParamsStatus.
 const (
 	ListInitiativesParamsStatusAll    ListInitiativesParamsStatus = "all"
@@ -1997,6 +2084,80 @@ type TaskStrandedLease struct {
 	RenewedAt time.Time `json:"renewed_at"`
 }
 
+// Timeline What falls in a window of time.
+type Timeline struct {
+	From        time.Time            `json:"from"`
+	Initiatives []TimelineInitiative `json:"initiatives"`
+	Leases      []TimelineLease      `json:"leases"`
+	Markers     []TimelineMarker     `json:"markers"`
+	Tasks       []TimelineTask       `json:"tasks"`
+	To          time.Time            `json:"to"`
+}
+
+// TimelineInitiative An initiative that holds a task of the window.
+type TimelineInitiative struct {
+	Closed bool     `json:"closed"`
+	Slug   string   `json:"slug"`
+	Tags   []string `json:"tags"`
+	Title  string   `json:"title"`
+}
+
+// TimelineLease A lease that overlaps the window.
+type TimelineLease struct {
+	// EndedAt When an ended lease was ended, or when an expired lease expired. Absent while it is live.
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+
+	// Holder The handle of the actor that holds or held the lease.
+	Holder    string             `json:"holder"`
+	Intent    string             `json:"intent"`
+	Ref       string             `json:"ref"`
+	StartedAt time.Time          `json:"started_at"`
+	State     TimelineLeaseState `json:"state"`
+	Task      string             `json:"task"`
+}
+
+// TimelineLeaseState defines model for TimelineLease.State.
+type TimelineLeaseState string
+
+// TimelineMarker A point in time on a task.
+type TimelineMarker struct {
+	At time.Time `json:"at"`
+
+	// Label The milestone's or check's summary, the ask's question, or the event's one-line summary for done and closed.
+	Label string             `json:"label"`
+	Task  string             `json:"task"`
+	Type  TimelineMarkerType `json:"type"`
+}
+
+// TimelineMarkerType defines model for TimelineMarker.Type.
+type TimelineMarkerType string
+
+// TimelineTask A task of the window.
+type TimelineTask struct {
+	// Attention Why the task needs a person, as for `GET /api/v1/tasks`. Empty for a task that needs nothing.
+	Attention []TaskAttention `json:"attention"`
+	ClosedAt  *time.Time      `json:"closed_at,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+
+	// Deps The refs of the tasks this one is blocked by.
+	Deps []string `json:"deps"`
+
+	// Initiative The slug of the task's initiative.
+	Initiative   string             `json:"initiative"`
+	Kind         TimelineTaskKind   `json:"kind"`
+	PlannedEnd   *time.Time         `json:"planned_end,omitempty"`
+	PlannedStart *time.Time         `json:"planned_start,omitempty"`
+	Ref          string             `json:"ref"`
+	Status       TimelineTaskStatus `json:"status"`
+	Title        string             `json:"title"`
+}
+
+// TimelineTaskKind defines model for TimelineTask.Kind.
+type TimelineTaskKind string
+
+// TimelineTaskStatus defines model for TimelineTask.Status.
+type TimelineTaskStatus string
+
 // AskRef defines model for AskRef.
 type AskRef = string
 
@@ -2276,6 +2437,27 @@ type ListTaskEventsParams struct {
 	After *EventAfter `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// GetTimelineParams defines parameters for GetTimeline.
+type GetTimelineParams struct {
+	// From The start of the window, RFC 3339. Default 14 days before now.
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+
+	// To The end of the window, RFC 3339. Default 7 days after now.
+	To *string `form:"to,omitempty" json:"to,omitempty"`
+
+	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
+	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Tag Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Actor A handle. Keeps the tasks on which this actor held a lease in the window.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Adds the tasks closed that recently.
+	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
+}
+
 // PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
 type PutProtocolSeenJSONRequestBody = ProtocolSeenRequest
 
@@ -2476,6 +2658,9 @@ type ServerInterface interface {
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	// GetTimeline Read the timeline of a window
+	// (GET /api/v1/timeline)
+	GetTimeline(w http.ResponseWriter, r *http.Request, params GetTimelineParams)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(w http.ResponseWriter, r *http.Request)
@@ -3880,6 +4065,56 @@ func (siw *ServerInterfaceWrapper) ReopenTask(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTimelineParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "from" -------------
+
+	bind.check("from", runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "to" -------------
+
+	bind.check("to", runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "tag" -------------
+
+	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "actor" -------------
+
+	bind.check("actor", runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "closed_within" -------------
+
+	bind.check("closed_within", runtime.BindQueryParameterWithOptions("form", true, false, "closed_within", r.URL.Query(), &params.ClosedWithin, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTimeline(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAuthLogin operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthLogin(w http.ResponseWriter, r *http.Request) {
 
@@ -4113,6 +4348,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notifications", wrapper.ListNotifications)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/timeline", wrapper.GetTimeline)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/stream", wrapper.GetStream)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/leases", wrapper.ListLeases)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/leases", wrapper.StartLease)
@@ -8240,6 +8476,92 @@ func (response ReopenTask503ApplicationProblemPlusJSONResponse) VisitReopenTaskR
 	return err
 }
 
+type GetTimelineRequestObject struct {
+	Params GetTimelineParams
+}
+
+type GetTimelineResponseObject interface {
+	VisitGetTimelineResponse(w http.ResponseWriter) error
+}
+
+type GetTimeline200JSONResponse Timeline
+
+func (response GetTimeline200JSONResponse) VisitGetTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimeline400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetTimeline400ApplicationProblemPlusJSONResponse) VisitGetTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimeline401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetTimeline401ApplicationProblemPlusJSONResponse) VisitGetTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimeline404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetTimeline404ApplicationProblemPlusJSONResponse) VisitGetTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTimeline503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetTimeline503ApplicationProblemPlusJSONResponse) VisitGetTimelineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAuthLoginRequestObject struct {
 }
 
@@ -8800,6 +9122,9 @@ type StrictServerInterface interface {
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(ctx context.Context, request ReopenTaskRequestObject) (ReopenTaskResponseObject, error)
+	// GetTimeline Read the timeline of a window
+	// (GET /api/v1/timeline)
+	GetTimeline(ctx context.Context, request GetTimelineRequestObject) (GetTimelineResponseObject, error)
 	// GetAuthLogin Start the browser login
 	// (GET /auth/login)
 	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
@@ -10205,6 +10530,32 @@ func (sh *strictHandler) ReopenTask(w http.ResponseWriter, r *http.Request, ref 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReopenTaskResponseObject); ok {
 		if err := validResponse.VisitReopenTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTimeline operation middleware
+func (sh *strictHandler) GetTimeline(w http.ResponseWriter, r *http.Request, params GetTimelineParams) {
+	var request GetTimelineRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTimeline(ctx, request.(GetTimelineRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTimeline")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTimelineResponseObject); ok {
+		if err := validResponse.VisitGetTimelineResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

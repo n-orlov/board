@@ -22,6 +22,7 @@ import (
 	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/board/internal/timeline"
 )
 
 // keyServer is a handler over a real migrated store, with a real verifier and
@@ -54,7 +55,7 @@ func newKeyServer(t *testing.T) *keyServer {
 	}
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
 		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
-		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithNotifications(&notify.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithCursors(&cursors.Store{Store: st}),
+		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithNotifications(&notify.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), WithCursors(&cursors.Store{Store: st}),
 		WithMeta(keyServerBuild, &actors.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }

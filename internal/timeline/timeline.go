@@ -1,0 +1,224 @@
+package timeline
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/board/internal/store"
+)
+
+// ErrNoInitiative is an initiative filter that names nothing.
+var ErrNoInitiative = errors.New("initiative not found")
+
+// Marker types.
+const (
+	MarkerMilestone = "milestone"
+	MarkerAsk       = "ask"
+	MarkerCheck     = "check"
+	MarkerDone      = "done"
+	MarkerClosed    = "closed"
+)
+
+// Query selects a window. From and To are RFC 3339 texts, empty for the default
+// end. Initiatives are slugs or ULIDs; Tags are initiative tags that all must be
+// carried; Actor is a handle that must have held a lease on the task in the
+// window; ClosedWithin (7d, 30d, 90d or days) adds the tasks closed that
+// recently, and without it closed tasks are left out.
+type Query struct {
+	From, To     string
+	Initiatives  []string
+	Tags         []string
+	Actor        string
+	ClosedWithin string
+}
+
+// Initiative is an initiative that holds a task of the window.
+type Initiative struct {
+	Slug, Title string
+	Tags        []string
+	Closed      bool
+}
+
+// Task is a task of the window. Deps are the refs of the tasks it is blocked by.
+type Task struct {
+	ID, Ref, Initiative, Title, Status, Kind string
+	PlannedStart, PlannedEnd, ClosedAt       *time.Time
+	CreatedAt                                time.Time
+	Deps                                     []string
+}
+
+// Lease is a lease that overlaps the window. EndedAt is nil while it is live; for
+// an expired lease it is the expiry.
+type Lease struct {
+	Ref, Task, Holder, State, Intent string
+	StartedAt                        time.Time
+	EndedAt                          *time.Time
+}
+
+// Marker is a point in time on a task.
+type Marker struct {
+	Task, Type, Label string
+	At                time.Time
+}
+
+// Result is the window and what falls in it, in stable order: initiatives in
+// board order, tasks by initiative then number, leases by number, markers by
+// time then event.
+type Result struct {
+	From, To    time.Time
+	Initiatives []Initiative
+	Tasks       []Task
+	Leases      []Lease
+	Markers     []Marker
+}
+
+// Store reads the timeline of one database.
+type Store struct {
+	Store *store.Store
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
+}
+
+func (s Store) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// Read answers the window q selects. It returns ErrInvalid for a time that does
+// not read, a window that is empty or over 400 days, a bad closed_within or a
+// bad tag, and ErrNoInitiative for an initiative that names nothing. It reads
+// the leases as they are: the caller expires those that ran out first
+// (leases.Store.ExpireDue).
+func (s Store) Read(ctx context.Context, q Query) (Result, error) {
+	now := s.now()
+	from, to, err := window(q, now)
+	if err != nil {
+		return Result{}, err
+	}
+	f, err := s.scope(ctx, q, now, from, to)
+	if err != nil {
+		return Result{}, err
+	}
+	out := Result{From: from, To: to}
+	if out.Tasks, err = s.tasks(ctx, f); err != nil {
+		return Result{}, err
+	}
+	if out.Initiatives, err = s.initiatives(ctx, f); err != nil {
+		return Result{}, err
+	}
+	if out.Leases, err = s.leases(ctx, f, from, to); err != nil {
+		return Result{}, err
+	}
+	if out.Markers, err = s.markers(ctx, f, from, to); err != nil {
+		return Result{}, err
+	}
+	return out, nil
+}
+
+// filter is the WHERE conditions that pick the tasks of a window, over the
+// aliases t (tasks) and i (initiatives), and their arguments.
+type filter struct {
+	conds []string
+	args  []any
+}
+
+func (f *filter) add(cond string, args ...any) {
+	f.conds = append(f.conds, cond)
+	f.args = append(f.args, args...)
+}
+
+func (f *filter) where() string { return ` WHERE ` + strings.Join(f.conds, ` AND `) }
+
+// leaseOverlap holds when lease l overlaps [from, to]: it started by to and is
+// live or ended (or expired) at from or later. Its arguments are to and from.
+const leaseOverlap = `l.started_at <= ? AND (l.state = 'live' OR COALESCE(l.ended_at, l.expires_at) >= ?)`
+
+// scope builds the conditions of the tasks in the window: the status and span,
+// then the initiative, tag and actor filters.
+func (s Store) scope(ctx context.Context, q Query, now, from, to time.Time) (*filter, error) {
+	f := &filter{}
+	f.span(from, to)
+	if err := f.closed(q, now); err != nil {
+		return nil, err
+	}
+	if err := s.initiativeFilter(ctx, f, q.Initiatives); err != nil {
+		return nil, err
+	}
+	if err := f.tagFilter(q.Tags); err != nil {
+		return nil, err
+	}
+	if q.Actor != "" {
+		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ? AND `+leaseOverlap+`)`,
+			q.Actor, store.EncodeTime(to), store.EncodeTime(from))
+	}
+	return f, nil
+}
+
+// span keeps the tasks whose actual span (created to closed, open while it is not
+// closed) or planned span overlaps [from, to].
+func (f *filter) span(from, to time.Time) {
+	lo, hi := store.EncodeTime(from), store.EncodeTime(to)
+	f.add(`((t.created_at <= ? AND (t.closed_at IS NULL OR t.closed_at >= ?))`+
+		` OR ((t.planned_start IS NOT NULL OR t.planned_end IS NOT NULL)`+
+		` AND COALESCE(t.planned_start, t.planned_end) <= ? AND COALESCE(t.planned_end, t.planned_start) >= ?))`,
+		hi, lo, hi, lo)
+}
+
+// closed leaves closed tasks out, or keeps those closed within closed_within.
+func (f *filter) closed(q Query, now time.Time) error {
+	at, on, err := since(q, now)
+	if err != nil {
+		return err
+	}
+	if on {
+		f.add(`(t.status <> 'closed' OR t.closed_at >= ?)`, store.EncodeTime(at))
+		return nil
+	}
+	f.add(`t.status <> 'closed'`)
+	return nil
+}
+
+func (s Store) initiativeFilter(ctx context.Context, f *filter, refs []string) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		ini, err := initiatives.Store{Store: s.Store, Now: s.Now}.Get(ctx, ref)
+		if errors.Is(err, initiatives.ErrNotFound) {
+			return fmt.Errorf("%w: %s", ErrNoInitiative, ref)
+		}
+		if err != nil {
+			return err
+		}
+		ids = append(ids, ini.ID)
+	}
+	f.add(`t.initiative_id IN (`+marks(len(ids))+`)`, ids...)
+	return nil
+}
+
+func (f *filter) tagFilter(raw []string) error {
+	tags, err := domain.NormalizeTags(raw)
+	if err != nil {
+		return InvalidError{Msg: err.Error(), Next: initiatives.NextTags}
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(tags)+1)
+	for _, tag := range tags {
+		args = append(args, tag)
+	}
+	f.add(`(SELECT COUNT(*) FROM initiative_tags it WHERE it.initiative_id = t.initiative_id AND it.tag IN (`+marks(len(tags))+`)) = ?`,
+		append(args, len(tags))...)
+	return nil
+}
+
+func marks(n int) string { return strings.TrimSuffix(strings.Repeat("?, ", n), ", ") }

@@ -17,6 +17,9 @@ func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 		NotificationStatePending, NotificationStateSent, NotificationStateFailed,
 		ListNotificationsParamsStatePending, ListNotificationsParamsStateSent, ListNotificationsParamsStateFailed,
 		NotificationKindStranded, NotificationKindAsking, NotificationKindDone,
+		TimelineTaskStatusOpen, TimelineTaskStatusDone, TimelineTaskStatusClosed, TimelineTaskKindWork, TimelineTaskKindWatch,
+		TimelineLeaseStateLive, TimelineLeaseStateEnded, TimelineLeaseStateExpired,
+		TimelineMarkerTypeMilestone, TimelineMarkerTypeAsk, TimelineMarkerTypeCheck, TimelineMarkerTypeDone, TimelineMarkerTypeClosed,
 	}
 	for _, v := range valid {
 		if !v.Valid() {
@@ -25,6 +28,7 @@ func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 	}
 	for _, v := range []interface{ Valid() bool }{
 		AskChannel("x"), AskMode("x"), AskState("x"), AskAnswerChannel("x"), AskRaiseMode("x"), NotificationState("x"), NotificationKind("x"), ListNotificationsParamsState("x"),
+		TimelineTaskStatus("x"), TimelineTaskKind("x"), TimelineLeaseState("x"), TimelineMarkerType("x"),
 	} {
 		if v.Valid() {
 			t.Errorf("%T: an undeclared value is valid", v)

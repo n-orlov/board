@@ -21,6 +21,7 @@ import (
 	"github.com/n-orlov/board/internal/notes"
 	"github.com/n-orlov/board/internal/notify"
 	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/board/internal/timeline"
 	"github.com/n-orlov/board/internal/webui"
 )
 
@@ -124,6 +125,13 @@ func WithEvents(st *events.Store) Option {
 // WithNotifications serves GET /api/v1/notifications from st; without it the operation answers 503.
 func WithNotifications(st *notify.Store) Option {
 	return func(o *operations) { o.notifyOps = notifyOps{notify: st} }
+}
+
+// WithTimeline serves GET /api/v1/timeline from st, expiring leases through ls
+// and reading each task's attention from at (nil: none needs a person); without
+// st and ls the operation answers 503.
+func WithTimeline(st *timeline.Store, ls *leases.Store, at *attention.Store) Option {
+	return func(o *operations) { o.timelineOps = timelineOps{timeline: st, leases: ls, derived: at} }
 }
 
 // WithLeases serves /api/v1/leases from st; without it the operations answer 503.

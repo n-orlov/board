@@ -937,7 +937,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | PUT | `/cursors/{stream}` | ack read position |
 | GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
 | GET | `/notifications` | the alert outbox, newest first (filter: state; paging: limit, after; §6.9) |
-| GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` |
+| GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` (filters: initiative, tag, actor, closed_within; §6.10) |
 | GET | `/stream` | SSE live feed (§7.1) |
 | POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
 | GET | `/meta` | server version, agent protocol version (§8.6), the caller's principal and actor |
@@ -1381,6 +1381,45 @@ is ever written, §5.4, so the list is empty). It writes nothing.
   `sent_at` the time of the 2xx (absent until the row is `sent`) and `payload` the JSON object of §5.4 the receiver is
   sent. Times are RFC 3339, UTC. An item carries no `claimed_until`, header value, key or session: the payload is built
   from event and entity rows only (§5.4).
+
+### 6.10 Timeline
+
+`GET /api/v1/timeline` is in `api/openapi.yaml` and answers what the Timeline view draws: the tasks, leases and markers
+that fall in a window of time, with the initiatives that hold the tasks. Any authenticated principal may use it (v1 has
+no ACL) and a server without a store answers **503**. It first expires the leases that ran out (§5.1), which writes
+their `lease_expired` events, then reads; it writes nothing else.
+
+- **The window** is `from` and `to`, RFC 3339 instants (any offset; the answer is in UTC). `from` defaults to 14 days
+  before now and `to` to 7 days after now, each default applying on its own. `to` must be after `from` (equal is not
+  after) and at most 400 days after it (400 days exactly is answered); a time that is not RFC 3339 (a date without a
+  time included) is **400**, and so is `to` not after `from` and a window over 400 days, each with a `next` line.
+- **Filters.** `initiative` (a slug or ULID, repeatable: a task of any of them is kept; one that names nothing is
+  **404**) and `tag` (repeatable: the initiative carries every one given; a `tag` that is not a valid tag is **400**)
+  keep tasks as `GET /api/v1/tasks` does. `actor` is a handle and keeps the tasks on which that actor held a lease in the
+  window (a lease overlapping it, below); a handle that holds none keeps nothing, and the other leases of a kept task
+  are still listed. `closed_within` (`7d`, `30d`, `90d` or a number of days, as for tasks; anything else is **400**)
+  adds the tasks closed within that many days of now. Without it closed tasks are left out, and with it open and done
+  tasks are still kept: it adds, it does not narrow.
+- **In the window.** A task is in it when its actual span, `created_at` to `closed_at` (open-ended while it is not
+  closed), or its planned span, `planned_start` to `planned_end` (either end alone stands for both), overlaps
+  `[from, to]`, the ends included; a lease when it started by `to` and is live or ended (or expired) at `from` or
+  later, so a window that cuts a lease keeps it; a marker when its `at` is in `[from, to]`. The leases and markers of
+  a task that is left out are left out with it, and an initiative is listed only when it holds a task that is in.
+- **The answer** is `{from, to, initiatives, tasks, leases, markers}`, each list `[]` and never null when empty, in
+  stable order: initiatives in board order (creation order), tasks by initiative then number, leases by lease
+  number and markers by time then event order.
+  - **Initiative**: `{slug, title, tags, closed}` with `tags` sorted and `closed` true for a closed initiative.
+  - **Task**: `{ref, initiative, title, status, kind, planned_start?, planned_end?, created_at, closed_at?, attention,
+    deps}` with `initiative` the slug, `attention` the same list `GET /api/v1/tasks` gives (§5.3; derived by
+    `internal/attention`, empty when the task needs nothing) and `deps` the refs of the tasks it is blocked by, in
+    initiative then number order, whether or not those tasks are in the window.
+  - **Lease**: `{ref, task, holder, state, started_at, ended_at?, intent}` with `holder` the handle, `state` `live`,
+    `ended` or `expired`, and `ended_at` the time an ended lease ended or the time an expired one expired, absent while it
+    is live.
+  - **Marker**: `{task, type, at, label}` with `type` `milestone`, `ask`, `check`, `done` or `closed`, taken from the
+    `milestone`, `ask_raised`, `check_recorded`, `task_done` and `task_closed` events. `label` is the milestone's or
+    check's summary, the ask's question, and for `done` and `closed` the event's one-line summary; an event whose data
+    lacks the text falls back to its summary.
 
 ---
 

@@ -217,6 +217,7 @@ func (brokenResponse) VisitListTaskEventsResponse(http.ResponseWriter) error    
 func (brokenResponse) VisitListTasksResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListNotificationsResponse(http.ResponseWriter) error   { return errBroken }
+func (brokenResponse) VisitGetTimelineResponse(http.ResponseWriter) error         { return errBroken }
 func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitGetNowResponse(http.ResponseWriter) error              { return errBroken }
@@ -438,6 +439,12 @@ func (s stubOperations) ListEvents(context.Context, ListEventsRequestObject) (Li
 func (s stubOperations) ListNotifications(context.Context, ListNotificationsRequestObject) (ListNotificationsResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(ListNotificationsResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetTimeline(context.Context, GetTimelineRequestObject) (GetTimelineResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetTimelineResponseObject)
 	return resp, err
 }
 
@@ -782,6 +789,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"list notifications 400", 400, ListNotifications400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListNotificationsResponse},
 		{"list notifications 401", 401, ListNotifications401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListNotificationsResponse},
 		{"list notifications 503", 503, ListNotifications503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListNotificationsResponse},
+		{"get timeline 400", 400, GetTimeline400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
+		{"get timeline 401", 401, GetTimeline401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
+		{"get timeline 404", 404, GetTimeline404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
+		{"get timeline 503", 503, GetTimeline503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
 		{"start lease 400", 400, StartLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
 		{"start lease 401", 401, StartLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
 		{"start lease 404", 404, StartLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
