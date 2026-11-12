@@ -210,7 +210,8 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 	return ExitOK
 }
 
-// configureNotify turns on the alerts BOARD_NOTIFY_URL and BOARD_NOTIFY_ON ask for
+// configureNotify turns on the alerts BOARD_NOTIFY_URL and BOARD_NOTIFY_ON ask for,
+// linking them to BOARD_PUBLIC_URL, which must then be an absolute http(s) URL when set
 // (SPEC 13): with no URL no write enqueues a notification.
 func configureNotify(st *store.Store, env Env) error {
 	kinds, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON"))
@@ -218,6 +219,10 @@ func configureNotify(st *store.Store, env Env) error {
 		return err
 	}
 	if env("BOARD_NOTIFY_URL") != "" {
+		if err := validPublicURL(env("BOARD_PUBLIC_URL")); err != nil {
+			return err
+		}
+		st.SetPublicURL(env("BOARD_PUBLIC_URL"))
 		st.SetNotify(kinds)
 	}
 	return nil

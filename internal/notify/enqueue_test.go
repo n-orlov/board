@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/n-orlov/board/internal/asks"
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/initiatives"
 	"github.com/n-orlov/board/internal/leases"
@@ -26,7 +28,13 @@ var (
 type env struct {
 	st     *store.Store
 	leases leases.Store
+	tasks  tasks.Store
+	asks   asks.Store
+	clock  *time.Time
 }
+
+// tick moves the clock every store of the env reads.
+func (e env) tick(d time.Duration) { *e.clock = e.clock.Add(d) }
 
 func newEnv(t *testing.T, kinds []string) env {
 	t.Helper()
@@ -41,7 +49,9 @@ func newEnv(t *testing.T, kinds []string) env {
 	if kinds != nil {
 		st.SetNotify(kinds)
 	}
-	now := func() time.Time { return t0 }
+	clock := new(time.Time)
+	*clock = t0
+	now := func() time.Time { return *clock }
 	if _, err := (initiatives.Store{Store: st, Now: now}).Create(ctx, agent, "key:x", initiatives.New{Slug: "aa", Title: "I"}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +60,26 @@ func newEnv(t *testing.T, kinds []string) env {
 			t.Fatal(err)
 		}
 	}
-	return env{st: st, leases: leases.Store{Store: st, Now: now}}
+	return env{st: st, clock: clock, leases: leases.Store{Store: st, Now: now}, tasks: tasks.Store{Store: st, Now: now}, asks: asks.Store{Store: st, Now: now}}
 }
 
-// event appends an event and returns its id.
-func (e env) event(t *testing.T, typ string) string {
+// taskID is the id of task aa-<seq>.
+func (e env) taskID(t *testing.T, ref string) string {
 	t.Helper()
+	var id string
+	if err := e.st.Reader().QueryRowContext(ctx, e.st.Dialect().Rebind(`SELECT id FROM tasks WHERE seq = ?`), leaseN(t, ref[2:])).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// event appends an event of typ about the task ref (empty for none) and the row refID, and returns its id.
+func (e env) event(t *testing.T, typ, taskRef, refID string) string {
+	t.Helper()
+	ev := audit.Event{Principal: "key:x", Type: typ, Summary: typ, RefID: refID}
+	if taskRef != "" {
+		ev.TaskID = e.taskID(t, taskRef)
+	}
 	var id string
 	e.tx(t, func(tx *sql.Tx) error {
 		var err error
@@ -63,7 +87,7 @@ func (e env) event(t *testing.T, typ string) string {
 		if err != nil {
 			return err
 		}
-		id, err = audit.AppendAsID(ctx, tx, e.st.Dialect(), actorID, t0, audit.Event{Principal: "key:x", Type: typ, Summary: typ})
+		id, err = audit.AppendAsID(ctx, tx, e.st.Dialect(), actorID, t0, ev)
 		return err
 	})
 	return id
@@ -100,7 +124,7 @@ func (e env) count(t *testing.T) int {
 
 func TestEnqueueWritesAPendingRowForAKindThatIsOn(t *testing.T) {
 	e := newEnv(t, []string{store.NotifyDone})
-	id := e.event(t, "task_done")
+	id := e.event(t, "task_done", "aa-1", "")
 	e.enqueue(t, id, store.NotifyDone)
 	var kind, eventID, payload, state string
 	var attempts int
@@ -113,7 +137,7 @@ func TestEnqueueWritesAPendingRowForAKindThatIsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := t0.Add(time.Minute).UnixMilli()
-	if kind != "done" || eventID != id || payload != `{"kind":"done"}` || state != "pending" || attempts != 0 ||
+	if kind != "done" || eventID != id || !strings.HasPrefix(payload, `{"text":"done: aa-1 t (claude@host)","kind":"done"`) || state != "pending" || attempts != 0 ||
 		next != at || created != at || claimed.Valid || lastErr.Valid || sent.Valid {
 		t.Fatalf("row = %s %s %s %s %d %d %d %v %v %v", kind, eventID, payload, state, attempts, next, created, claimed, lastErr, sent)
 	}
@@ -123,7 +147,7 @@ func TestEnqueueWritesNothingForAKindThatIsOffOrWhenAlertsAreOff(t *testing.T) {
 	for name, kinds := range map[string][]string{"kind not listed": {store.NotifyAsking}, "alerts off": nil} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, kinds)
-			e.enqueue(t, e.event(t, "task_done"), store.NotifyDone)
+			e.enqueue(t, e.event(t, "task_done", "aa-1", ""), store.NotifyDone)
 			if n := e.count(t); n != 0 {
 				t.Fatalf("%d rows", n)
 			}
@@ -132,17 +156,36 @@ func TestEnqueueWritesNothingForAKindThatIsOffOrWhenAlertsAreOff(t *testing.T) {
 }
 
 func TestEnqueueRefusesASecondRowForOneEventAndKind(t *testing.T) {
-	e := newEnv(t, []string{store.NotifyDone, store.NotifyAsking})
-	id := e.event(t, "task_done")
-	e.enqueue(t, id, store.NotifyDone)
-	e.enqueue(t, id, store.NotifyAsking)
+	e := newEnv(t, []string{store.NotifyAsking})
+	if _, err := e.asks.Raise(ctx, agent, "key:x", asks.New{Task: "aa-1", Question: "which?"}); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := e.st.Reader().QueryRowContext(ctx, `SELECT event_id FROM notifications`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
 	tx, err := e.st.Writer().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := notify.Enqueue(ctx, tx, e.st, id, store.NotifyDone, t0); err == nil {
-		t.Fatal("a second done row for the event was written")
+	if err := notify.Enqueue(ctx, tx, e.st, id, store.NotifyAsking, t0); err == nil {
+		t.Fatal("a second asking row for the event was written")
+	}
+}
+
+func TestEnqueueWritesOneRowPerKindForOneEvent(t *testing.T) {
+	e := newEnv(t, []string{store.NotifyDone, store.NotifyAsking})
+	if _, err := e.asks.Raise(ctx, agent, "key:x", asks.New{Task: "aa-1", Question: "which?"}); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := e.st.Reader().QueryRowContext(ctx, `SELECT event_id FROM notifications`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	e.enqueue(t, id, store.NotifyDone)
+	if n := e.count(t); n != 2 {
+		t.Fatalf("%d rows, want one per kind", n)
 	}
 }
 
@@ -169,9 +212,23 @@ func leaseN(t *testing.T, ref string) int {
 	return n
 }
 
+// taskRefOf is the ref of the task with the id.
+func (e env) taskRefOf(t *testing.T, id string) string {
+	t.Helper()
+	var seq int
+	if err := e.st.Reader().QueryRowContext(ctx, e.st.Dialect().Rebind(`SELECT seq FROM tasks WHERE id = ?`), id).Scan(&seq); err != nil {
+		t.Fatal(err)
+	}
+	return "aa-" + strconv.Itoa(seq)
+}
+
 func (e env) stranded(t *testing.T, leaseID string) {
 	t.Helper()
-	ev := e.event(t, "lease_expired")
+	var taskID string
+	if err := e.st.Reader().QueryRowContext(ctx, e.st.Dialect().Rebind(`SELECT task_id FROM leases WHERE id = ?`), leaseID).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	ev := e.event(t, "lease_expired", e.taskRefOf(t, taskID), leaseID)
 	e.tx(t, func(tx *sql.Tx) error { return notify.EnqueueStranded(ctx, tx, e.st, ev, leaseID, t0) })
 }
 

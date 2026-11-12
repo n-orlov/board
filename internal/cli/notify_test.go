@@ -69,3 +69,25 @@ func TestConfigureNotifyRefusesABadWord(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestConfigureNotifyLinksAlertsToThePublicURL(t *testing.T) {
+	st := notifyStore(t)
+	env := envWith(map[string]string{"BOARD_NOTIFY_URL": "http://receiver.invalid/hook", "BOARD_PUBLIC_URL": "https://board.example"})
+	if err := configureNotify(st, env); err != nil {
+		t.Fatal(err)
+	}
+	if st.PublicURL() != "https://board.example" {
+		t.Fatalf("PublicURL = %q", st.PublicURL())
+	}
+}
+
+func TestConfigureNotifyRefusesAPublicURLThatIsNotAbsolute(t *testing.T) {
+	st := notifyStore(t)
+	env := envWith(map[string]string{"BOARD_NOTIFY_URL": "http://receiver.invalid/hook", "BOARD_PUBLIC_URL": "board.example"})
+	if err := configureNotify(st, env); err == nil || !strings.Contains(err.Error(), "BOARD_PUBLIC_URL") {
+		t.Fatalf("err = %v", err)
+	}
+	if st.Notifies("done") {
+		t.Fatal("alerts were turned on with a bad BOARD_PUBLIC_URL")
+	}
+}

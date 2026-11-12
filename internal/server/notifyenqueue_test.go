@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,5 +365,58 @@ func TestTheNotificationsTableHasTheColumnsOfThePRD(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = rs.Close()
+	})
+}
+
+// TestEachTriggerEnqueuesTheDocumentedPayload reads the payload of the five cases (stranded, done, and asking on a
+// task, an initiative and the board) on both databases.
+func TestEachTriggerEnqueuesTheDocumentedPayload(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		ctx := context.Background()
+		w := newOutboxWorld(t, dbs, allKinds())
+		w.st.SetPublicURL("https://board.example/")
+		holder := audit.Actor{Handle: "claude@host", WayBack: "tmux attach -t work"}
+		ttl := int64(60)
+		w.tick(time.Second)
+		if _, err := w.leases.Start(ctx, holder, "key:x", leases.Start{Task: "aa-1", Intent: "write the parser", TTL: &ttl}); err != nil {
+			t.Fatal(err)
+		}
+		w.tick(2 * time.Minute)
+		if n, err := w.leases.ExpireDue(ctx); err != nil || n != 1 {
+			t.Fatalf("ExpireDue = %d, %v", n, err)
+		}
+		for _, in := range []asks.New{{Task: "aa-2", Question: "which parser?", Blocking: true}, {Initiative: "aa", Question: "which scope?"}, {Question: "which board?"}} {
+			w.tick(time.Second)
+			if _, err := w.asks.Raise(ctx, holder, "key:x", in); err != nil {
+				t.Fatal(err)
+			}
+		}
+		w.tick(time.Second)
+		if _, err := w.tasks.Done(ctx, holder, "key:x", "aa-3", tasks.DoneOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{
+			`{"text":"stranded: aa-1 t lease L1 expired (claude@host)\nintent: write the parser; way back: tmux attach -t work","kind":"stranded","task":{"ref":"aa-1","title":"t","url":"https://board.example/#/t/aa-1"},"actor":{"handle":"claude@host","way_back":"tmux attach -t work"},"lease":{"ref":"L1","intent":"write the parser","expired_at":"2026-11-05T12:01:04Z"},"board_url":"https://board.example/"}`,
+			`{"text":"asking on aa-2 t: which parser? (claude@host, blocking)","kind":"asking","task":{"ref":"aa-2","title":"t","url":"https://board.example/#/t/aa-2"},"actor":{"handle":"claude@host","way_back":"tmux attach -t work"},"ask":{"ref":"A1","question":"which parser?","blocking":true},"board_url":"https://board.example/"}`,
+			`{"text":"asking on initiative aa: which scope? (claude@host)","kind":"asking","initiative":{"slug":"aa"},"actor":{"handle":"claude@host","way_back":"tmux attach -t work"},"ask":{"ref":"A2","question":"which scope?","blocking":false},"board_url":"https://board.example/"}`,
+			`{"text":"asking on board: which board? (claude@host)","kind":"asking","actor":{"handle":"claude@host","way_back":"tmux attach -t work"},"ask":{"ref":"A3","question":"which board?","blocking":false},"board_url":"https://board.example/"}`,
+			`{"text":"done: aa-3 t (claude@host)","kind":"done","task":{"ref":"aa-3","title":"t","url":"https://board.example/#/t/aa-3"},"actor":{"handle":"claude@host","way_back":"tmux attach -t work"},"board_url":"https://board.example/"}`,
+		}
+		rs, err := w.st.Reader().QueryContext(ctx, `SELECT n.payload FROM notifications n JOIN events e ON e.id = n.event_id ORDER BY e.n`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rs.Close() }()
+		var got []string
+		for rs.Next() {
+			var p string
+			if err := rs.Scan(&p); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, p)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("payloads =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
 	})
 }

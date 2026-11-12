@@ -51,6 +51,8 @@ type Store struct {
 	migrations fs.FS
 	// notify holds the kinds of alert a write enqueues; nil means alerts are off.
 	notify atomic.Pointer[map[string]bool]
+	// publicURL is BOARD_PUBLIC_URL as alerts link to it; empty when unset.
+	publicURL atomic.Pointer[string]
 }
 
 // Open opens the database named by a BOARD_DB_URL value. It does not migrate.

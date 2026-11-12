@@ -59,3 +59,15 @@ func (s *Store) Notifies(kind string) bool {
 	set := s.notify.Load()
 	return set != nil && (*set)[kind]
 }
+
+// SetPublicURL records BOARD_PUBLIC_URL, the base the links in an alert are built
+// from. serve calls it once, before it takes a request.
+func (s *Store) SetPublicURL(u string) { s.publicURL.Store(&u) }
+
+// PublicURL returns what SetPublicURL recorded, or "" when it was never called.
+func (s *Store) PublicURL() string {
+	if u := s.publicURL.Load(); u != nil {
+		return *u
+	}
+	return ""
+}

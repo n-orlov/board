@@ -53,3 +53,14 @@ func TestNotifiesIsOffUntilSetNotify(t *testing.T) {
 		t.Fatal("SetNotify(nil) left asking on")
 	}
 }
+
+func TestPublicURLIsEmptyUntilSet(t *testing.T) {
+	var s Store
+	if s.PublicURL() != "" {
+		t.Fatalf("PublicURL = %q before SetPublicURL", s.PublicURL())
+	}
+	s.SetPublicURL("https://board.example")
+	if s.PublicURL() != "https://board.example" {
+		t.Fatalf("PublicURL = %q", s.PublicURL())
+	}
+}

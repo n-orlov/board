@@ -785,8 +785,36 @@ row is ever written. A renewal, an end, an answer, a withdrawal, a close and a n
 does a write that is refused, since its transaction writes no event. A row is not cancelled when its condition clears
 (the lease acknowledged, the ask answered): what was enqueued is what is delivered. `serve` turns the triggers on once at
 start-up, before it takes a request, and a word in `BOARD_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
-whether or not the URL is set. The row's `payload` starts as `{"kind": "<kind>"}`; the readable text and the fields
-around it, the delivery with its retries and claims, and `GET /api/v1/notifications` follow in later tasks of this wave.
+whether or not the URL is set. The delivery with its retries and claims, and `GET /api/v1/notifications`, follow in later
+tasks of this wave.
+
+#### Payload
+
+`internal/notify.BuildPayload` writes the row's `payload` in the transaction that enqueues it, from the event and the
+rows it points at:
+
+```json
+{"text": "stranded: aa-1 Write the parser lease L7 expired (claude@host)\nintent: write the parser; way back: tmux attach -t work",
+ "kind": "stranded",
+ "task": {"ref": "aa-1", "title": "Write the parser", "url": "https://board.example/#/t/aa-1"},
+ "actor": {"handle": "claude@host", "way_back": "tmux attach -t work"},
+ "lease": {"ref": "L7", "intent": "write the parser", "expired_at": "2026-11-05T12:01:04Z"},
+ "board_url": "https://board.example/"}
+```
+
+| field | present | value |
+|---|---|---|
+| `text` | always | plain text for a phone: one line, two for `stranded`; names the kind, the task ref and title (for an ask on an initiative `on initiative <slug>`, for a board ask `on board`) and the actor; `stranded` adds the lease, the intent and `way back: <way_back>` (`way back: none recorded` when the actor has none). Each title, question, intent and way back is put on one line and cut to 120 runes with `…`; the fields below are never cut |
+| `kind` | always | `stranded`, `asking` or `done` |
+| `task` | the event is about a task (`stranded`, `done`, an ask on a task) | `ref`, `title`, and `url` (`<BOARD_PUBLIC_URL>/#/t/<ref>`, absent when it is unset) |
+| `initiative` | an ask on an initiative, which names no task | `slug` |
+| `actor` | always | `handle` of the event's actor (the lease holder, the asker, whoever marked the task done) and `way_back` (their last recorded one, absent when none) |
+| `ask` | `asking` | `ref` (`A<n>`), the full `question`, `blocking` |
+| `lease` | `stranded` | `ref` (`L<n>`), `intent`, `expired_at` (RFC 3339, UTC) |
+| `board_url` | `BOARD_PUBLIC_URL` is set | the base URL with one trailing `/`, absent when unset |
+
+The payload never carries an API key, a session id or the `BOARD_NOTIFY_HEADER` value: it is built only from the
+event, the task, initiative, ask, lease and actor rows named above.
 
 ---
 
@@ -2857,7 +2885,7 @@ All configuration is by environment variable:
 | `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
 | `BOARD_LOG_LEVEL` | `info` | |
-| `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check |
+| `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check, and as the base of the links in an alert (§5.4). With `BOARD_NOTIFY_URL` set, a value that is not an absolute http(s) URL exits 1 |
 | `BOARD_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
 | `BOARD_OIDC_CLIENT_ID` | (required with the issuer) | |
 | `BOARD_OIDC_CLIENT_SECRET` | (required with the issuer) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
