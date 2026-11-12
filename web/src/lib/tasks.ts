@@ -115,8 +115,9 @@ export class TasksApi {
     return this.write('PATCH', `/api/v1/tasks/${encodeURIComponent(ref)}`, 'Saving the task', body);
   }
 
-  done(ref: string): Promise<TaskDetail> {
-    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/done`, 'Marking the task done');
+  /** Marks the task done; with `force` every live lease on it is ended first (what the operator confirms over another actor's lease). */
+  done(ref: string, force = false): Promise<TaskDetail> {
+    return this.write('POST', `/api/v1/tasks/${encodeURIComponent(ref)}/done`, 'Marking the task done', force ? { force: true } : undefined);
   }
 
   reopen(ref: string): Promise<TaskDetail> {

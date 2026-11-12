@@ -54,6 +54,22 @@ export function leaseRows(task: Pick<TaskDetail, 'live_leases'>, now: Date): Lea
   }));
 }
 
+/** The handle the page acts as: a cookie session is the operator's. */
+export const OPERATOR = 'operator';
+
+/** The other actors that hold a live lease on the task, each once in the order of their leases; empty when Done needs no confirm. */
+export function leaseHolders(task: Pick<TaskDetail, 'live_leases'>, me: string = OPERATOR): string[] {
+  const others = task.live_leases.map((lease) => lease.actor).filter((actor) => actor !== me);
+  return [...new Set(others)];
+}
+
+/** What the Done confirm says: who holds the task, and that their leases end. */
+export function forceDoneBody(holders: readonly string[]): string {
+  const names = holders.join(', ');
+  if (holders.length === 1) return `${names} holds a live lease on this task. Marking it done ends that lease and the work in progress.`;
+  return `${names} hold live leases on this task. Marking it done ends those leases and the work in progress.`;
+}
+
 /** The longest summary or outcome the API takes. */
 export const NOTE_LIMIT = 200;
 
@@ -268,8 +284,9 @@ export class TaskPageStore {
     return this.write(ref, () => this.api.patch(ref, patch.body));
   }
 
-  done(ref: string): Promise<boolean> {
-    return this.write(ref, () => this.api.done(ref));
+  /** Marks the task done; `force` ends the leases of other actors with it. */
+  done(ref: string, force = false): Promise<boolean> {
+    return this.write(ref, () => this.api.done(ref, force));
   }
 
   reopen(ref: string): Promise<boolean> {

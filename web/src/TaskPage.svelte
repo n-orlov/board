@@ -23,14 +23,14 @@
   import { currentBrowser } from './lib/session';
   import { taskActions } from './lib/taskActions';
   import { toTaskEditForm, type TaskEditForm as EditForm } from './lib/taskEdit';
-  import { ACK_BODY, affectsTaskPage, copyWayBackLabel, eventRows, expiredRows, kindText, leaseRows, plannedText, strandedPanel, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
+  import { ACK_BODY, affectsTaskPage, copyWayBackLabel, eventRows, expiredRows, forceDoneBody, kindText, leaseHolders, leaseRows, plannedText, strandedPanel, taskHref, TaskPageStore, type TaskPageState } from './lib/taskPage';
   import { TasksApi, type Resolution } from './lib/tasks';
   import { live } from './lib/live';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
 
   let view: TaskPageState = $state({ task: undefined, events: [], expired: [], live: [], loading: true, error: undefined, actionError: undefined, candidates: [], asks: [], notes: [], bodies: {} });
-  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string } | undefined = $state(undefined);
+  let dialog: 'edit' | 'close' | 'dep' | 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string } | 'force-done' | undefined = $state(undefined);
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
 
@@ -62,7 +62,7 @@
     void store.loadCandidates();
   }
 
-  function openNote(kind: 'milestone' | 'check' | 'note' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string }) {
+  function openNote(kind: 'milestone' | 'check' | 'note' | 'force-done' | { endLease: string } | { answer: Ask } | { withdraw: string } | { ack: string }) {
     store.clearActionError();
     dialog = kind;
   }
@@ -74,7 +74,9 @@
     }
   }
 
-  const done = () => finish(store.done(ref), `Task ${ref} marked done`);
+  const done = (force = false) => finish(store.done(ref, force), `Task ${ref} marked done`);
+  // Done over another actor's live lease asks first and then sends `force`; a task nobody else holds is marked done at once.
+  const pressDone = () => (leaseHolders(view.task ?? { live_leases: [] }).length > 0 ? openNote('force-done') : done());
   const reopen = () => finish(store.reopen(ref), `Task ${ref} reopened`);
   const save = (form: EditForm, kind: string) => finish(store.edit(ref, form, editInitial ?? form, kind), `Task ${ref} saved`);
   const closeIt = (resolution: Resolution) => finish(store.close(ref, resolution), `Task ${ref} closed as ${resolution}`);
@@ -176,7 +178,7 @@
           <button type="button" class={action} onclick={() => openEdit(toTaskEditForm(task))}>Edit</button>
         {/if}
         {#if actions.done}
-          <button type="button" class="{action} border-accent text-accent" onclick={done}>Done</button>
+          <button type="button" class="{action} border-accent text-accent" onclick={pressDone}>Done</button>
         {/if}
         {#if actions.reopen}
           <button type="button" class={action} onclick={reopen}>Reopen</button>
@@ -409,6 +411,11 @@
     {@const askRef = dialog.withdraw}
     <Dialog label="Withdraw ask" onclose={() => (dialog = undefined)} initialFocus="input[name=text]">
       <TaskNoteForm heading="Withdraw {askRef}" label="Reason (optional)" hint="Why the ask is no longer needed, in up to 200 characters." submitLabel="Withdraw" error={view.actionError} onsubmit={(text) => withdraw(askRef, text)} oncancel={() => (dialog = undefined)} />
+    </Dialog>
+  {:else if dialog === 'force-done'}
+    {@const holders = leaseHolders(view.task ?? { live_leases: [] })}
+    <Dialog label="Mark {ref} done" onclose={() => (dialog = undefined)}>
+      <InitiativeConfirm heading="Mark {ref} done" body={forceDoneBody(holders)} confirm="Mark done anyway" danger error={view.actionError} onconfirm={() => done(true)} oncancel={() => (dialog = undefined)} />
     </Dialog>
   {:else if typeof dialog === 'object' && 'ack' in dialog}
     {@const lease = dialog.ack}

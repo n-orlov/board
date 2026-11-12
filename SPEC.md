@@ -2565,6 +2565,14 @@ and, from the live refresh, the panel and the stranded badge go and the task lea
 seconds, without a reload; Cancel acknowledges nothing, and a refusal stays inside the sheet. `e2e/stranded_panel.spec.ts` makes a task
 stranded through the API at phone and desktop and checks the panel, the copied way back, the confirmation and the removal from the
 Tasks view's Needs attention, plus axe in both themes.
+**Done over another actor's lease** (R14 UI, `leaseHolders` and `forceDoneBody` in `web/src/lib/taskPage.ts`). **Done** on a task that
+another actor holds a live lease on (any holder other than `operator`, the actor a cookie session acts as) does not post at once: it
+opens a confirmation in the one Dialog (bottom sheet on the phone) headed "Mark <ref> done" that names the holders ("ann holds a live
+lease on this task. Marking it done ends that lease and the work in progress.") with **Cancel** and **Mark done anyway**. Confirming
+posts `POST /tasks/<ref>/done` with `{"force": true}`, which ends every live lease on the task (SPEC 4.3); Cancel changes nothing, and a
+refusal stays inside the sheet. A task nobody else holds is marked done at once, with no body. `e2e/force_done.spec.ts` starts a lease
+as another actor through the API at desktop, presses Done, checks the confirm names the holder, confirms, and checks the task is done
+with no live lease.
 **Ask and notes libraries** (R10). `web/src/lib/asks.ts` presents an ask: `orderAsks` puts the open asks first, then the answered, then
 the withdrawn (the order given is kept within a state; `openAsks` keeps only the open ones for the initiative page), `stateLabel` and
 `modeLabel` name the state and the mode, `blockingLabel` says "blocks its task" (an open blocking ask) or "blocked its task" (a

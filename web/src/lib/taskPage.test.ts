@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { InitiativesError } from './initiatives';
-import { ACK_BODY, affectsTaskPage, copyWayBackLabel, depOptions, eventRows, expiredRows, kindText, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, strandedPanel, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
+import { ACK_BODY, affectsTaskPage, copyWayBackLabel, depOptions, eventRows, expiredRows, forceDoneBody, kindText, leaseHolders, leaseRows, outcomeProblem, plannedText, RESOLUTIONS, strandedPanel, summaryProblem, TaskPageStore, taskHref, type TaskPageState } from './taskPage';
 import type { TaskListItem } from './initiatives';
 import type { Ask } from './asks';
 import type { Note } from './notes';
@@ -32,6 +32,26 @@ describe('RESOLUTIONS', () => {
   it('offers the four resolutions, completed first', () => {
     expect(RESOLUTIONS.map((r) => r.value)).toEqual(['completed', 'dropped', 'superseded', 'duplicate']);
     expect(RESOLUTIONS.map((r) => r.label)).toEqual(['Completed', 'Dropped', 'Superseded', 'Duplicate']);
+  });
+});
+
+describe('leaseHolders and forceDoneBody (the Done confirm)', () => {
+  const held = (...actors: string[]) => ({ live_leases: actors.map((actor) => ({ actor })) }) as unknown as TaskDetail;
+
+  it('lists the other actors that hold a live lease, each once, in lease order', () => {
+    expect(leaseHolders(held('ann', 'bob', 'ann'))).toEqual(['ann', 'bob']);
+  });
+
+  it('needs no confirm when nobody holds the task or only the operator does', () => {
+    expect(leaseHolders(held())).toEqual([]);
+    expect(leaseHolders(held('operator'))).toEqual([]);
+    expect(leaseHolders(held('operator', 'ann'))).toEqual(['ann']);
+    expect(leaseHolders(held('me'), 'me')).toEqual([]);
+  });
+
+  it('names the holders and says their leases end', () => {
+    expect(forceDoneBody(['ann'])).toBe('ann holds a live lease on this task. Marking it done ends that lease and the work in progress.');
+    expect(forceDoneBody(['ann', 'bob'])).toBe('ann, bob hold live leases on this task. Marking it done ends those leases and the work in progress.');
   });
 });
 
@@ -130,6 +150,13 @@ describe('TaskPageStore', () => {
     expect(store.state.actionError).toBeUndefined();
   });
 
+  it('sends force when Done is confirmed over another actor\'s lease', async () => {
+    const { api, store } = harness();
+    await store.load('aa-1');
+    expect(await store.done('aa-1', true)).toBe(true);
+    expect(api.done).toHaveBeenCalledWith('aa-1', true);
+  });
+
   it('runs done, reopen and close, then reads the page again without the skeleton', async () => {
     const { api, store, states } = harness();
     await store.load('aa-1');
@@ -137,7 +164,7 @@ describe('TaskPageStore', () => {
     expect(await store.done('aa-1')).toBe(true);
     expect(await store.reopen('aa-1')).toBe(true);
     expect(await store.close('aa-1', 'duplicate')).toBe(true);
-    expect(api.done).toHaveBeenCalledWith('aa-1');
+    expect(api.done).toHaveBeenCalledWith('aa-1', false);
     expect(api.reopen).toHaveBeenCalledWith('aa-1');
     expect(api.close).toHaveBeenCalledWith('aa-1', 'duplicate');
     expect(api.get).toHaveBeenCalledTimes(4);

@@ -311,6 +311,15 @@ describe('TasksApi task page calls', () => {
     expect(fetchFn.mock.calls[2]![1]!.headers).toMatchObject({ 'Content-Type': 'application/json' });
   });
 
+  it('posts done with force true when asked to force it', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.done('aa-1', true);
+    const init = fetchFn.mock.calls[0]![1] as RequestInit;
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks/aa-1/done');
+    expect(init).toMatchObject({ method: 'POST', body: '{"force":true}' });
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
   it('names the failed action when a write is refused without a detail', async () => {
     const { api: a } = api(async () => new Response('', { status: 500 }));
     await expect(a.done('aa-1')).rejects.toMatchObject({ status: 500, message: 'Marking the task done failed (HTTP 500).' });
