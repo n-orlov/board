@@ -1976,7 +1976,7 @@ v0 it covers:
   `board task close <ref> --for operator`;
 - the exit codes 6 (state conflict) and 7 (conflict) next to those of v0.
 
-**Protocol v2** is the current text. It is headed `board protocol v2`, replaces v1's wording
+**Protocol v2** was the text of Phase 2. It was headed `board protocol v2`, replaces v1's wording
 rather than adding to it so as to keep the same budget (45 lines of 100 columns, held by a test),
 and names no command or flag the build lacks (the `help_agent.feature` scenario checks each
 `` `board …` `` span against the command tree, which lists `ask`, `ask show|ls|withdraw`,
@@ -1992,6 +1992,24 @@ and names no command or flag the build lacks (the `help_agent.feature` scenario 
   `board notes --since last --ack` at check-in (`--ack` moves the cursor past the notes shown, a
   `+` marks a body, `board note show N<n>` prints it) and `board attention` for what needs a human;
 - exit code 3 (an ask still open) next to the others.
+
+**Protocol v3** is the current text. It is headed `board protocol v3`, replaces wording rather than
+adding to it so as to keep the same budget (45 lines of 100 columns, held by a test), and names no
+command or flag the build lacks (`board lease ack` and `board task done --force` are in the command
+tree). On top of v2 it carries exactly four changes, each one something an agent would otherwise
+do wrong:
+
+- `board task done <ref> ["outcome"]` ends your own live lease on the task, with the outcome as the
+  lease's closing text (§3.4);
+- `board lease start` on a done task is refused: reopen it first with `board task reopen <ref>`;
+- `board lease ack L<n>` acknowledges a lease that ran out, so the task stops needing attention
+  for it (§8.1);
+- `board task done --force` only when the operator says so: it is the way past another actor's
+  live lease and ends that lease.
+
+`features/help_agent.feature` asserts the version line `board protocol v3`, the version number 3
+and each of those four commands in the printed text; `internal/cli/helpagent_test.go` and the
+golden file hold the same version.
 
 The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) arrive with their
 commands, each bumping the version.

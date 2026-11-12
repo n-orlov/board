@@ -34,6 +34,7 @@ var commandTree = map[string][]flagSpec{
 	"lease start":       leaseStartFlags,
 	"lease renew":       leaseRenewFlags,
 	"lease end":         leaseEndFlags,
+	"lease ack":         leaseEndFlags,
 	"lease ls":          leaseLsFlags,
 	"now":               nowFlags,
 	"milestone":         milestoneFlags,

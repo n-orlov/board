@@ -14,12 +14,21 @@ Feature: The agent protocol, board help agent
     When I run the client 'board help agent' as actor "claude@laptop"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v2$"
+    And stdout line 1 matches "^board protocol v3$"
     And the stdout text names at least 5 commands
     And every board command and flag the stdout text names exists in the command tree
     When I run the client 'board help agent --version' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout is exactly "2"
+    And stdout is exactly "3"
+
+  Scenario: protocol v3 teaches the four lease and done changes
+    When I run the client 'board help agent' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout line 1 matches "^board protocol v3$"
+    And the stdout text names the command 'board task done <ref> ["outcome"]'
+    And the stdout text names the command 'board task reopen <ref>'
+    And the stdout text names the command 'board lease ack L5'
+    And the stdout text names the command 'board task done --force'
 
   Scenario: reading the text records protocol_seen through the actors endpoint
     Then there is no actor row for "claude@laptop"
@@ -27,13 +36,13 @@ Feature: The agent protocol, board help agent
     Then there is no actor row for "claude@laptop"
     When I run the client 'board help agent' as actor "claude@laptop"
     Then the exit code is 0
-    And the protocol_seen of the actor "claude@laptop" is 2
-    When I record protocol version 3 as read as actor "claude@laptop" through the API
+    And the protocol_seen of the actor "claude@laptop" is 3
+    When I record protocol version 4 as read as actor "claude@laptop" through the API
     Then the response status is 200
     And the response field "actor" is "claude@laptop"
-    And the response field "protocol_seen" is "3"
+    And the response field "protocol_seen" is "4"
     When I run the client 'board help agent' as actor "claude@laptop"
-    Then the protocol_seen of the actor "claude@laptop" is 3
+    Then the protocol_seen of the actor "claude@laptop" is 4
     When I record protocol version -1 as read as actor "claude@laptop" through the API
     Then the response status is 400
     And the problem has a next field containing "version"
@@ -42,5 +51,5 @@ Feature: The agent protocol, board help agent
     When I run the client 'board help agent' as actor "claude@laptop" against the address "http://127.0.0.1:1"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v2$"
+    And stdout line 1 matches "^board protocol v3$"
     And every board command and flag the stdout text names exists in the command tree

@@ -79,9 +79,19 @@ func (h *harness) responseVersionIsStdout() error {
 	return nil
 }
 
+// stdoutNamesSpan checks stdout carries the exact backticked span, so a command
+// the protocol must teach cannot be dropped or reworded unnoticed.
+func (h *harness) stdoutNamesSpan(span string) error {
+	if !strings.Contains(h.stdout, "`"+span+"`") {
+		return fmt.Errorf("stdout does not name `%s`", span)
+	}
+	return nil
+}
+
 func registerHelpAgentSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^every board command and flag the stdout text names exists in the command tree$`, h.stdoutNamesOnlyKnownCommands)
 	sc.Step(`^the stdout text names at least (\d+) commands$`, h.stdoutNamesCommands)
+	sc.Step(`^the stdout text names the command '([^']*)'$`, h.stdoutNamesSpan)
 	sc.Step(`^I request GET "([^"]*)" with the remembered key as actor "([^"]*)"$`, h.getKeyedAs)
 	sc.Step(`^I record protocol version (-?\d+) as read as actor "([^"]*)" through the API$`, h.putProtocolSeen)
 	sc.Step(`^the response version is the version the last command printed$`, h.responseVersionIsStdout)
