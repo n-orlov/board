@@ -151,5 +151,33 @@ for (const vp of viewports) {
       await fresh.close();
       await api.dispose();
     });
+
+    test('a restored filter is emptied when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const query = 'tag=av-empty-gone&initiative=e2e-av-empty-ghost';
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, query] as const);
+
+      const fresh = await page.context().newPage();
+      // The lookup succeeds with an empty list: an answer, not a failure, so nothing restored is known.
+      let lookups = 0;
+      await fresh.route(
+        (url) => url.pathname === '/api/v1/initiatives',
+        (route) => {
+          if (route.request().method() !== 'GET') return route.continue();
+          lookups++;
+          return route.fulfill({ json: { items: [] } });
+        },
+      );
+      const reads = attentionReads(fresh);
+      await fresh.goto('/#/attention');
+      await expect(fresh.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh).toHaveURL(/#\/attention$/);
+      expect(lookups).toBeGreaterThan(0);
+      // The unknown values never reached the server, and the saved query is gone (the empty filter is the default).
+      expect(reads.queries).toEqual(['']);
+      expect(await fresh.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
+      await fresh.close();
+    });
   });
 }

@@ -12,6 +12,7 @@ import {
   openAttention,
   rowsFor,
   saveAttention,
+  startFilter,
   type Attention,
   type AttentionState,
 } from './attentionView';
@@ -399,5 +400,39 @@ describe('dropUnknown', () => {
 
   it('drops everything when the board knows nothing the filter names', () => {
     expect(dropUnknown({ initiatives: ['ghost'], tags: ['gone'] }, known)).toEqual({ initiatives: [], tags: [] });
+  });
+});
+
+describe('startFilter', () => {
+  const known = [{ slug: 'aa', tags: ['work'] }];
+  const named = { initiatives: ['ghost', 'aa'], tags: ['gone', 'work'] };
+
+  it('drops the unknown values of a restored filter', () => {
+    expect(startFilter({ filter: named, restored: true }, known)).toEqual({ initiatives: ['aa'], tags: ['work'] });
+  });
+
+  it('drops every restored value when the lookup answered with no initiatives at all', () => {
+    expect(startFilter({ filter: named, restored: true }, [])).toEqual({ initiatives: [], tags: [] });
+  });
+
+  it('keeps a restored filter as it is when the lookup failed', () => {
+    expect(startFilter({ filter: named, restored: true }, undefined)).toBe(named);
+  });
+
+  it('keeps a restored filter whose values are all known, as the same object', () => {
+    const filter = { initiatives: ['aa'], tags: ['work'] };
+    expect(startFilter({ filter, restored: true }, known)).toBe(filter);
+  });
+
+  it('keeps the values a link names, even unknown ones and an empty answer', () => {
+    expect(startFilter({ filter: named, restored: false }, known)).toBe(named);
+    expect(startFilter({ filter: named, restored: false }, [])).toBe(named);
+  });
+
+  it('restores from storage and drops through the same module, the empty answer included', () => {
+    const e = env(memory({ ['board.view.v1.attention']: JSON.stringify({ v: 1, query: 'tag=gone&initiative=ghost' }) }));
+    const opened = openAttention(e, '#/attention');
+    expect(opened.restored).toBe(true);
+    expect(startFilter(opened, [])).toEqual(DEFAULT_ATTENTION_FILTER);
   });
 });

@@ -260,3 +260,17 @@ export function dropUnknown(filter: AttentionFilter, known: readonly { slug: str
   if (initiatives.length === filter.initiatives.length && kept.length === filter.tags.length) return filter;
   return { initiatives, tags: kept };
 }
+
+/**
+ * The filter the view starts from (or moves to on a hash change). Only a restored filter is checked, and only once the
+ * lookup answered: `known` is the board's initiatives with their tags, or `undefined` when the lookup failed. An empty
+ * list is an answer (the board has no initiatives), so every restored initiative and tag is dropped. A link's own query
+ * is kept as it is, and the sections show the server's answer for it.
+ */
+export function startFilter(
+  opened: OpenedAttention,
+  known: readonly { slug: string; tags: readonly string[] }[] | undefined,
+): AttentionFilter {
+  if (!opened.restored || known === undefined) return opened.filter;
+  return dropUnknown(opened.filter, known);
+}

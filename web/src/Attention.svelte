@@ -23,12 +23,12 @@
     AttentionStore,
     affectsAttention,
     copyLabel,
-    dropUnknown,
     filterChoices,
     forgetAttention,
     openAttention,
     rowsFor,
     saveAttention,
+    startFilter,
     type AttentionState,
     type ItemActor,
   } from './lib/attentionView';
@@ -49,6 +49,8 @@
   const initial = opened.filter;
   let view: AttentionState = $state({ attention: undefined, filter: initial, loading: true, error: undefined });
   let known: { slug: string; tags: string[] }[] = $state([]);
+  // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
+  let looked: { slug: string; tags: string[] }[] | undefined;
   let toast = $state('');
 
   const store = new AttentionStore(new AttentionApi(browser), (s) => (view = s), initial);
@@ -59,11 +61,13 @@
   async function start() {
     const listed = new InitiativesApi(browser, () => csrf)
       .list('all')
-      .then((list) => (known = list.map((i) => ({ slug: i.slug, tags: i.tags }))))
+      .then((list) => {
+        looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
+        known = looked;
+      })
       .catch(() => undefined); // the chips then offer only what the URL names; the sections show the error
     if (opened.restored) await listed;
-    // Only a restored filter is checked: values a link names stay, and the sections show the server's answer for them.
-    const kept = opened.restored && known.length > 0 ? dropUnknown(initial, known) : initial;
+    const kept = startFilter(opened, looked);
     if (kept === initial) {
       void store.load();
     } else {
@@ -100,11 +104,8 @@
   function hashChanged() {
     if (resolveRoute(window.location.hash, ROUTES).id !== 'attention') return;
     const next = openAttention(viewEnv, window.location.hash);
-    let filter = next.filter;
-    if (next.restored && known.length > 0) {
-      filter = dropUnknown(filter, known);
-      if (filter !== next.filter) persist(filter);
-    }
+    const filter = startFilter(next, looked);
+    if (filter !== next.filter) persist(filter);
     if (attentionHash(filter) !== attentionHash(view.filter)) void store.setFilter(filter);
   }
 
