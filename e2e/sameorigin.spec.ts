@@ -11,7 +11,10 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // new task, edit task, add dependency, end lease): 8 states x 2 viewports = 16 more visits. Every recorded http(s)/ws(s) URL must have the board
 // server's origin. R13 adds PHASE2_STATES, the 2 views `#/attention` and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close
 // from attention, acknowledge and record check from attention: 8 states x 2 viewports = 16 more visits, each of which must also
-// record the `/api/v1/stream` request, so the EventSource is held to the same bar as every fetch. data: and blob: URLs never touch the network and are not origins; they are left out.
+// record the `/api/v1/stream` request, so the EventSource is held to the same bar as every fetch. R12 adds PHASE3_STATES, the finite list of the 3 views
+// `#/timeline`, `#/actors` and `#/archive`, the Needs attention sections of `#/tasks` and `#/i/<slug>`, the Stranded panel, the 3 attention chips and badges and the 3 new dialogs
+// (acknowledge on the task page, archive Reopen, force-done confirm): 12 states x 2 viewports = 24 more visits, each recording the stream request too, with vis-timeline's
+// own script, stylesheet and DOM loading nothing outside the board server's origin. data: and blob: URLs never touch the network and are not origins; they are left out.
 const test = base;
 
 const viewports = [
@@ -311,6 +314,158 @@ const PHASE2_STATES: Phase2State[] = [
   },
 ];
 
+// ---- Phase 3 (R12) -------------------------------------------------------------------------------------------------
+
+const P3_SLUG = 'e2e-sameorigin-p3';
+const P3_CLOSED_SLUG = 'e2e-sameorigin-p3-closed';
+const P3_ACTOR = 'sameorigin-p3-a';
+const P3_HOLDER = 'sameorigin-p3-b';
+
+type Seed3 = { stranded: string; lease: string; done: string; held: string; forced: string; closed: string };
+let seeded3: Promise<Seed3> | undefined;
+
+// One initiative with a stranded task (an expired lease nobody acknowledged), a done task, a task with an open ask under a live lease,
+// a task under another actor's live lease (so Done asks first) and a task closed as superseded; a second initiative, closed, for the Archive.
+async function seedPhase3(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined): Promise<Seed3> {
+  const a = await apiContext(playwright, baseURL, P3_ACTOR);
+  const b = await apiContext(playwright, baseURL, P3_HOLDER);
+  // A 409 is a second seeding by a worker the runner restarted after a failure: the initiatives stay, their items are made again.
+  for (const slug of [P3_SLUG, P3_CLOSED_SLUG]) {
+    const created = await a.post('/api/v1/initiatives', { data: { slug, title: `Same origin Phase 3 ${slug}`, tags: ['origin'] } });
+    expect([201, 409], `seed ${slug}: ${created.status()}`).toContain(created.status());
+  }
+  const task = async (title: string) => (await send(a, '/api/v1/tasks', { initiative: P3_SLUG, title }, 201)).ref as string;
+
+  const stranded = await task('Origin p3 stranded');
+  const old = await send(a, '/api/v1/leases', { task: stranded, intent: 'will strand', resources: ['repo:origin-p3-old'] }, 201);
+  await expireLease(a, old.lease.ref);
+  const done = await task('Origin p3 done');
+  await send(a, `/api/v1/tasks/${done}/done`, {}, 200);
+  const held = await task('Origin p3 held');
+  await send(a, '/api/v1/leases', { task: held, intent: 'holding', resources: ['repo:origin-p3'] }, 201);
+  await send(a, '/api/v1/asks', { question: 'Is this same-origin too?', task: held }, 201);
+  const forced = await task('Origin p3 forced');
+  await send(b, '/api/v1/leases', { task: forced, intent: 'also holding', resources: ['repo:origin-p3-b'] }, 201);
+  const closed = await task('Origin p3 closed');
+  await send(a, `/api/v1/tasks/${closed}/close`, { resolution: 'superseded' }, 200);
+  const closedInitiative = await a.post(`/api/v1/initiatives/${P3_CLOSED_SLUG}/close`, { data: {} });
+  expect([200, 409], `close ${P3_CLOSED_SLUG}: ${closedInitiative.status()}`).toContain(closedInitiative.status());
+  await a.dispose();
+  await b.dispose();
+  return { stranded, lease: old.lease.ref as string, done, held, forced, closed };
+}
+
+const needsRow = (page: Page, ref: string) => page.locator(`[data-testid=needs-row][data-ref="${ref}"]`);
+
+type Phase3State = { name: string; open: (page: Page, seed: Seed3) => Promise<void> };
+
+// The finite list of Phase 3 states this spec records: 3 views, the Needs attention sections of the Tasks view and the initiative page,
+// the Stranded panel, the 3 attention chips and badges and the 3 new dialogs.
+const PHASE3_STATES: Phase3State[] = [
+  {
+    name: 'view #/timeline',
+    open: async (page) => {
+      await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
+      await expect(page.getByTestId('timeline-chart')).toBeVisible();
+      // vis-timeline drew its labels from the bundled script and stylesheet.
+      await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
+      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+    },
+  },
+  {
+    name: 'view #/actors',
+    open: async (page) => {
+      await page.goto('/#/actors');
+      const row = page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`);
+      await expect(row).toBeVisible();
+      await expect(row.getByTestId('actor-lease').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'view #/archive',
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await expect(page.locator(`[data-testid=archive-row][data-kind=task][data-ref="${seed.closed}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid=archive-row][data-kind=initiative][data-ref="${P3_CLOSED_SLUG}"]`)).toBeVisible();
+    },
+  },
+  {
+    name: 'Needs attention on #/tasks',
+    open: async (page, seed) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Needs attention on #/i/<slug>',
+    open: async (page, seed) => {
+      await page.goto(`/#/i/${P3_SLUG}`);
+      for (const ref of [seed.stranded, seed.done, seed.held]) await expect(needsRow(page, ref)).toBeVisible();
+      await expect(needsRow(page, seed.held).getByTestId('needs-holder')).toContainText(P3_ACTOR);
+    },
+  },
+  {
+    name: 'Stranded panel on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      const panel = page.getByTestId('stranded-panel');
+      await expect(panel).toBeVisible();
+      await expect(panel.getByTestId('stranded-holder')).toHaveText(P3_ACTOR);
+      await expect(panel.getByRole('button', { name: `Acknowledge lease ${seed.lease}` })).toBeVisible();
+    },
+  },
+  {
+    name: 'attention chip on #/initiatives',
+    open: async (page) => {
+      await page.goto('/#/initiatives');
+      const row = page.locator(`[data-testid=initiative-row][data-slug=${P3_SLUG}]`);
+      await expect(row.getByTestId('initiative-attention')).toContainText(/need(s)? attention/);
+    },
+  },
+  {
+    name: 'attention badges on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Origin p3 stranded');
+      await expect(page.getByTestId('task-page').getByTestId('attention-stranded')).toBeVisible();
+    },
+  },
+  {
+    name: 'attention badge in the navigation',
+    open: async (page) => {
+      await page.goto(`/#/tasks?initiative=${P3_SLUG}`);
+      await expect(page.locator('[data-testid=attention-badge]').locator('visible=true').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'dialog acknowledge on #/t/<ref>',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.stranded}`);
+      await page.getByTestId('stranded-panel').getByRole('button', { name: `Acknowledge lease ${seed.lease}` }).click();
+      await openDialog(page, `Acknowledge lease ${seed.lease}`);
+    },
+  },
+  {
+    name: 'dialog archive Reopen',
+    open: async (page, seed) => {
+      await page.goto('/#/archive?window=7');
+      await page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`).getByRole('button', { name: `Reopen task ${seed.closed}` }).click();
+      await openDialog(page, 'Reopen task');
+    },
+  },
+  {
+    name: 'dialog force-done confirm',
+    open: async (page, seed) => {
+      await page.goto(`/#/t/${seed.forced}`);
+      await expect(page.getByTestId('task-title')).toHaveText('Origin p3 forced');
+      await button(page, 'Done', true).click();
+      const dialog = await openDialog(page, `Mark ${seed.forced} done`);
+      await expect(dialog.getByTestId('dialog-body')).toContainText(P3_HOLDER);
+    },
+  },
+];
+
 const networkSchemes = new Set(['http:', 'https:', 'ws:', 'wss:']);
 
 /** The recorded URLs that go over the network to an origin other than `origin`. */
@@ -407,8 +562,44 @@ for (const vp of viewports) {
         for (const u of network) expect(new URL(u).origin).toBe(origin);
       });
     }
+    for (const state of PHASE3_STATES) {
+      test(`${state.name} requests only the board server's origin, the stream included`, async ({ page, playwright, baseURL }) => {
+        seeded3 ??= seedPhase3(playwright, baseURL);
+        const seed = await seeded3;
+        const origin = new URL(baseURL as string).origin;
+        const urls = record(page);
+
+        // A full page load of the view (the document is requested afresh), then the dialog opened on the loaded page.
+        await page.goto('about:blank');
+        await state.open(page, seed);
+        await page.waitForLoadState('networkidle');
+
+        const network = urls.filter((u) => networkSchemes.has(new URL(u).protocol));
+        expect(network.some((u) => new URL(u).pathname === '/'), 'the document itself was recorded').toBe(true);
+        expect(network.some((u) => new URL(u).pathname === '/api/v1/stream'), 'the live stream request was recorded').toBe(true);
+        expect(foreignURLs(urls, origin), 'requests to another origin').toEqual([]);
+        for (const u of network) expect(new URL(u).origin).toBe(origin);
+      });
+    }
   });
 }
+
+test('the Phase 3 list names the 3 views, the Needs attention sections, the Stranded panel, the chips and the 3 dialogs', () => {
+  expect(PHASE3_STATES.map((s) => s.name)).toEqual([
+    'view #/timeline',
+    'view #/actors',
+    'view #/archive',
+    'Needs attention on #/tasks',
+    'Needs attention on #/i/<slug>',
+    'Stranded panel on #/t/<ref>',
+    'attention chip on #/initiatives',
+    'attention badges on #/t/<ref>',
+    'attention badge in the navigation',
+    'dialog acknowledge on #/t/<ref>',
+    'dialog archive Reopen',
+    'dialog force-done confirm',
+  ]);
+});
 
 test('the Phase 2 list names the 2 views and the six dialogs', () => {
   const names = PHASE2_STATES.map((s) => s.name);

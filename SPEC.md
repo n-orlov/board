@@ -3060,7 +3060,11 @@ task, edit initiative, edit task, add dependency, end lease): 8 states at both v
 visits). R13 adds `PHASE2_STATES`: `#/attention` and `#/notes` and the six Phase 2 dialogs (answer ask, withdraw
 ask, post note, close from attention, acknowledge, record check from attention), 8 states at both viewports
 (16 more visits), each of which must also record the `/api/v1/stream` request, so the live stream is held to
-the same same-origin bar as every fetch. A planted remote image turns the check red.
+the same same-origin bar as every fetch. R12 adds `PHASE3_STATES`: `#/timeline`, `#/actors` and `#/archive`, the Needs
+attention sections of `#/tasks` and `#/i/<slug>`, the Stranded panel, the three attention chips and badges and the three new
+dialogs (acknowledge on the task page, archive Reopen, force-done confirm), 12 states at both viewports (24 more visits),
+each also recording the stream request; the Timeline visit shows vis-timeline drawn from the bundled script and
+stylesheet, so vis-timeline loads nothing external. A planted remote image turns the check red.
 
 **Touch and phone ergonomics.** At the phone width (390x844) every visible interactive element
 (`a, button, input, select, textarea, [role=button]`) in the shell, the forms, the lists and the
