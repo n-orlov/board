@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ACTORS_VIEW,
+  ACTOR_COLUMNS,
+  ACTOR_SORT_COLUMNS,
+  ACTOR_SORT_LABELS,
   actorRows,
+  actorsHash,
+  sortOfQuery,
   ActorsApi,
   ActorsStore,
   affectsActors,
@@ -11,6 +17,8 @@ import {
   type ActorView,
 } from './actorsView';
 import type { Browser } from './session';
+import { sortRows } from './tableSort';
+import { openView, saveViewQuery, viewKey, type ViewStorage } from './viewState';
 
 const NOW = new Date('2026-03-10T12:00:00Z');
 const json = (body: object, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -146,5 +154,106 @@ describe('ActorsStore', () => {
     await first;
     expect(store.state.actors.map((a) => a.handle)).toEqual(['new']);
     expect(store.state.loading).toBe(false);
+  });
+});
+
+function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+    key: (i) => [...data.keys()][i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+}
+
+describe('sort <-> query encoding', () => {
+  it('writes the sort as sort= and dir=, and nothing for the default order', () => {
+    expect(actorsHash({ column: 'seen', dir: 'desc' })).toBe('#/actors?sort=seen&dir=desc');
+    expect(actorsHash({ column: 'actor', dir: 'asc' })).toBe('#/actors?sort=actor&dir=asc');
+    expect(actorsHash(null)).toBe('#/actors');
+  });
+
+  it('reads the sort back, with dir defaulting to ascending', () => {
+    expect(sortOfQuery('sort=leases&dir=desc')).toEqual({ column: 'leases', dir: 'desc' });
+    expect(sortOfQuery('sort=seen')).toEqual({ column: 'seen', dir: 'asc' });
+    expect(sortOfQuery('')).toBeNull();
+  });
+
+  it('takes the default order for an unknown column and a bad direction', () => {
+    expect(sortOfQuery('sort=way_back&dir=asc')).toBeNull();
+    expect(sortOfQuery('sort=actor&dir=sideways')).toBeNull();
+    expect(sortOfQuery('dir=desc')).toBeNull();
+  });
+
+  it('round-trips every sortable column in both directions', () => {
+    for (const column of ACTOR_SORT_COLUMNS) {
+      for (const dir of ['asc', 'desc'] as const) {
+        expect(sortOfQuery(actorsHash({ column, dir }).split('?')[1] ?? '')).toEqual({ column, dir });
+      }
+    }
+  });
+});
+
+describe('columns', () => {
+  it('names a label for every sortable column, in the table order', () => {
+    expect(ACTOR_SORT_COLUMNS).toEqual(['actor', 'leases', 'seen']);
+    expect(ACTOR_SORT_LABELS.map((l) => l.column)).toEqual(ACTOR_SORT_COLUMNS);
+    expect(ACTOR_SORT_LABELS.map((l) => l.label)).toEqual(['Actor', 'Live leases', 'Last seen']);
+    expect(ACTORS_VIEW).toBe('actors');
+  });
+
+  it('sorts handles ignoring case, first lease refs by number and last seen chronologically, the empty last', () => {
+    const rows = actorRows(
+      [
+        actor('Bob', '2026-03-01T00:00:00Z', { leases: [{ ...LEASE, ref: 'L10' }] }),
+        actor('alice', '2026-03-05T00:00:00Z', { leases: [{ ...LEASE, ref: 'L9' }] }),
+        actor('carol', '2026-03-03T00:00:00Z'),
+      ],
+      NOW,
+    );
+    const handles = (column: string, dir: 'asc' | 'desc') => sortRows(rows, { column, dir }, ACTOR_COLUMNS).map((r) => r.handle);
+    expect(handles('actor', 'asc')).toEqual(['alice', 'Bob', 'carol']);
+    expect(handles('actor', 'desc')).toEqual(['carol', 'Bob', 'alice']);
+    expect(handles('leases', 'asc')).toEqual(['alice', 'Bob', 'carol']);
+    expect(handles('leases', 'desc')).toEqual(['Bob', 'alice', 'carol']);
+    expect(handles('seen', 'asc')).toEqual(['Bob', 'carol', 'alice']);
+    expect(handles('seen', 'desc')).toEqual(['alice', 'carol', 'Bob']);
+  });
+
+  it('compares each column by its own type: text, ref and time', () => {
+    expect(Object.fromEntries(Object.entries(ACTOR_COLUMNS).map(([name, column]) => [name, column.type]))).toEqual({ actor: 'text', leases: 'ref', seen: 'time' });
+    // 23:00Z is later than 00:00+02:00 of the same date, though it sorts first as text.
+    const rows = actorRows([actor('a', '2026-03-05T00:00:00+02:00'), actor('b', '2026-03-04T23:00:00Z')], NOW);
+    expect(sortRows(rows, { column: 'seen', dir: 'asc' }, ACTOR_COLUMNS).map((r) => r.handle)).toEqual(['a', 'b']);
+  });
+
+  it('keeps the default order when nothing is sorted', () => {
+    const rows = actorRows([actor('b', '2026-03-01T00:00:00Z'), actor('a', '2026-03-09T00:00:00Z')], NOW);
+    expect(sortRows(rows, null, ACTOR_COLUMNS).map((r) => r.handle)).toEqual(['a', 'b']);
+  });
+});
+
+describe('saved state', () => {
+  it('opens a bare route with the saved query, in place', () => {
+    const storage = memory();
+    saveViewQuery(storage, ACTORS_VIEW, 'sort=seen&dir=desc');
+    expect(viewKey(ACTORS_VIEW)).toBe('board.view.v1.actors');
+    const replaced: string[] = [];
+    const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, ACTORS_VIEW, '#/actors', '');
+    expect(replaced).toEqual(['#/actors?sort=seen&dir=desc']);
+    expect(sortOfQuery(query)).toEqual({ column: 'seen', dir: 'desc' });
+  });
+
+  it('lets a fragment with a query win and saves it', () => {
+    const storage = memory();
+    saveViewQuery(storage, ACTORS_VIEW, 'sort=actor&dir=asc');
+    const query = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', 'sort=leases&dir=desc');
+    expect(sortOfQuery(query)).toEqual({ column: 'leases', dir: 'desc' });
+    expect(JSON.parse(storage.data.get('board.view.v1.actors')!)).toEqual({ v: 1, query: 'sort=leases&dir=desc' });
   });
 });

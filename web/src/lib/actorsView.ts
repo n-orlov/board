@@ -8,6 +8,7 @@ import { errorText, Fetches } from './fetches';
 import { absoluteTime, relativeTime } from './format';
 import { taskHref } from './taskPage';
 import { ThreadApi } from './threads';
+import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 import type { BoardEvent } from './live';
 
 export type ActorView = components['schemas']['ActorView'];
@@ -35,6 +36,8 @@ export interface ActorRow {
   /** "3 minutes ago", and the absolute time for its title. */
   lastSeen: string;
   lastSeenTitle: string;
+  /** The instant of `last_seen`, which the Last seen column sorts by. */
+  lastSeenAt: string;
   leases: LeaseLine[];
   /** How many asks the actor has open. */
   openAsks: number;
@@ -70,6 +73,7 @@ function actorRow(actor: ActorView, now: Date): ActorRow {
     wayBack: actor.way_back === undefined || actor.way_back === '' ? undefined : actor.way_back,
     lastSeen: relativeTime(actor.last_seen, now),
     lastSeenTitle: absoluteTime(actor.last_seen),
+    lastSeenAt: actor.last_seen,
     leases: actor.leases.map((l) => leaseLine(l, now)),
     openAsks: actor.asks.length,
   };
@@ -78,6 +82,40 @@ function actorRow(actor: ActorView, now: Date): ActorRow {
 /** The rows of the view, in its order; `now` phrases the ages. */
 export function actorRows(actors: readonly ActorView[], now: Date): ActorRow[] {
   return orderActors(actors).map((a) => actorRow(a, now));
+}
+
+/** The name of the view's saved state: the key is `board.view.v1.actors`. */
+export const ACTORS_VIEW = 'actors';
+
+/**
+ * The sortable columns of the table, by the name the `sort` query uses. A lease column sorts by the ref of the actor's first
+ * (oldest) live lease, so an actor without one is empty and sits last; Way back is not a sortable value.
+ */
+export const ACTOR_COLUMNS: Columns<ActorRow> = {
+  actor: { type: 'text', value: (row) => row.handle },
+  leases: { type: 'ref', value: (row) => row.leases[0]?.ref },
+  seen: { type: 'time', value: (row) => row.lastSeenAt },
+};
+
+/** The column names, in the order of the table. */
+export const ACTOR_SORT_COLUMNS: readonly string[] = Object.keys(ACTOR_COLUMNS);
+
+/** The choices of the phone's Sort select: a label for each column. */
+export const ACTOR_SORT_LABELS: readonly { column: string; label: string }[] = [
+  { column: 'actor', label: 'Actor' },
+  { column: 'leases', label: 'Live leases' },
+  { column: 'seen', label: 'Last seen' },
+];
+
+/** The sort a query names: an unknown column or a bad `dir` is the default order (live leases first, then last seen). */
+export function sortOfQuery(query: string): SortState {
+  return sortFromQuery(query, ACTOR_SORT_COLUMNS);
+}
+
+/** The fragment of the view for a sort: `#/actors`, or `#/actors?sort=<column>&dir=<dir>`. */
+export function actorsHash(sort: SortState): string {
+  const query = sortToQuery(sort);
+  return query === '' ? '#/actors' : `#/actors?${query}`;
 }
 
 /** The accessible name of an actor's copy button. */

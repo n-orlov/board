@@ -1,20 +1,44 @@
 <script lang="ts">
+  import SortHeader from './SortHeader.svelte';
+  import SortSelect from './SortSelect.svelte';
   import Toast from './Toast.svelte';
-  import { ActorsApi, ActorsStore, actorRows, affectsActors, copyToast, copyWayBackLabel, type ActorRow, type ActorsState } from './lib/actorsView';
+  import { ACTORS_VIEW, ACTOR_COLUMNS, ACTOR_SORT_LABELS, ActorsApi, ActorsStore, actorRows, actorsHash, affectsActors, copyToast, copyWayBackLabel, sortOfQuery, type ActorRow, type ActorsState } from './lib/actorsView';
   import { copyText } from './lib/clipboard';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
+  import { sortRows, sortToQuery, type SortState } from './lib/tableSort';
+  import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   // The Actors view (PRD R7, SPEC 11): who is on the board. Actors with a live lease come first, each lease linking to
-  // its task, then the rest by last seen; every actor with a way back has a button that copies it. The data layer is
-  // lib/actorsView.ts.
+  // its task, then the rest by last seen; every actor with a way back has a button that copies it. The table sorts by Actor,
+  // Live leases and Last seen (headers from 768 px, the Sort select on the phone), and the sort rides in the fragment query and
+  // is saved under board.view.v1.actors. The data layer is lib/actorsView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const store = new ActorsStore(new ActorsApi(currentBrowser(), () => csrf), (s) => (view = s));
   let view: ActorsState = $state.raw(store.state);
   let toast = $state('');
-  // Ages are phrased at the moment of each draw; a refetch redraws them.
-  const rows = $derived(actorRows(view.actors, new Date()));
+
+  const viewEnv = currentViewEnv();
+  const queryOf = (hash: string) => (hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
+  // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  let sort: SortState = $state(sortOfQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(window.location.hash))));
+  // Ages are phrased at the moment of each draw; a refetch redraws them. The default order (live leases first) is the one a sort replaces.
+  const rows = $derived(sortRows(actorRows(view.actors, new Date()), sort, ACTOR_COLUMNS));
+
+  // A sort only reorders the rows the view holds: the fragment and the saved query follow it, and no request is made.
+  function setSort(next: SortState) {
+    sort = next;
+    window.history.replaceState(null, '', actorsHash(next));
+    saveViewQuery(viewEnv.storage, ACTORS_VIEW, sortToQuery(next));
+  }
+
+  // The fragment edited by hand, or the back button after a link with another query. A bare '#/actors' restores the saved query.
+  function hashChanged() {
+    const hash = window.location.hash;
+    if (hash !== '#/actors' && !hash.startsWith('#/actors?')) return;
+    sort = sortOfQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(hash)));
+  }
 
   $effect(() => {
     void store.load();
@@ -31,6 +55,8 @@
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
 </script>
 
+<svelte:window onhashchange={hashChanged} />
+
 <section aria-labelledby="actors-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="actors-view">
   <h2 id="actors-heading" class="mb-4 text-xl font-bold">Actors</h2>
   {#if view.error !== ''}
@@ -41,13 +67,14 @@
   {:else if view.loaded && rows.length === 0}
     <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="actors-empty">No actor has acted on the board yet.</p>
   {:else if rows.length > 0}
+    <div class="mb-3 flex"><SortSelect columns={ACTOR_SORT_LABELS} {sort} onsort={setSort} /></div>
     <!-- One table: from 768 px a dense table, below it each actor is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <th scope="col" class="{head} md:w-1/5">Actor</th>
-          <th scope="col" class={head}>Live leases</th>
-          <th scope="col" class="{head} md:w-32">Last seen</th>
+          <SortHeader column="actor" label="Actor" {sort} onsort={setSort} class="{head} md:w-1/5" />
+          <SortHeader column="leases" label="Live leases" {sort} onsort={setSort} class={head} />
+          <SortHeader column="seen" label="Last seen" {sort} onsort={setSort} class="{head} md:w-32" />
           <th scope="col" class="{head} md:w-1/4">Way back</th>
         </tr>
       </thead>
