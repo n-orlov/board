@@ -52,6 +52,7 @@
             "internal/tasks",
             "internal/leases",
             "internal/version",
+            "internal/roster",
             "internal/timeline",
             "internal/server",
             "internal/cli"
@@ -74,6 +75,7 @@
                 "internal/initiatives",
                 "internal/tasks",
                 "internal/leases",
+                "internal/roster",
                 "internal/timeline",
                 "internal/version"
             ],
@@ -113,7 +115,8 @@
                 "taskattention.go",
                 "tasklist.go",
                 "taskops.go",
-                "timelineops.go"
+                "timelineops.go",
+                "actorops.go"
             ],
             "internal/cli": [
                 "args.go",
@@ -162,7 +165,8 @@
                     "noteops.go",
                     "notifyops.go",
                     "nowops.go",
-                    "timelineops.go"
+                    "timelineops.go",
+                    "actorops.go"
                 ],
                 "streams": [
                     "askwait.go",

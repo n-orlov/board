@@ -935,7 +935,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | GET | `/notes/{id}` | full body |
 | GET | `/events` | global change log (filters: since, initiative, task, type, actor; paging: limit, after; below) |
 | PUT | `/cursors/{stream}` | ack read position |
-| GET | `/actors`, `/actors/{handle}` | with live leases and last_seen |
+| GET | `/actors`, `/actors/{handle}` | the actors with `way_back`, `last_seen`, live leases and open asks (filter: alive; §6.11) |
 | GET | `/notifications` | the alert outbox, newest first (filter: state; paging: limit, after; §6.9) |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` (filters: initiative, tag, actor, closed_within; §6.10) |
 | GET | `/stream` | SSE live feed (§7.1) |
@@ -1420,6 +1420,29 @@ their `lease_expired` events, then reads; it writes nothing else.
     `milestone`, `ask_raised`, `check_recorded`, `task_done` and `task_closed` events. `label` is the milestone's or
     check's summary, the ask's question, and for `done` and `closed` the event's one-line summary; an event whose data
     lacks the text falls back to its summary.
+
+### 6.11 Actors
+
+`GET /api/v1/actors` and `GET /api/v1/actors/{handle}` are in `api/openapi.yaml` and answer who is on the board and
+what each is doing now. Any authenticated principal may use them (v1 has no ACL) and a server without a store answers
+**503**. A read expires the leases that ran out first (§5.1), which writes their `lease_expired` events, so no lease is
+shown live past its expiry; it writes nothing else.
+
+- **An actor** is `{handle, kind, way_back?, last_seen, leases, asks}`: `kind` is `operator` or `agent`, `way_back` is
+  what the board has on record for the handle (§4.1) and is absent when it has none, and `last_seen` is its
+  `last_seen_at`.
+  - **`leases`** are the actor's live leases, oldest first, each `{ref, task, intent, expires_at, resources}` with
+    `task` the task ref and `resources` sorted. An ended or expired lease is not listed. The list is `[]` when the actor
+    holds none.
+  - **`asks`** are the open asks the actor raised, in the order they were raised, each `{ref, task?, initiative?,
+    question, mode, blocking, created_at}`; an answered or withdrawn ask is not listed. The list is `[]` when none is
+    open.
+- **`GET /api/v1/actors`** answers `{items}` with every actor the board has a row for (§4.1: the operator included),
+  the one with the newest `last_seen` first and, for equal times, by handle. `alive=true` keeps only the actors that
+  hold at least one live lease and leaves the order as it is; `alive=false` or no `alive` lists every actor, and an
+  `alive` that is not a boolean is **400**.
+- **`GET /api/v1/actors/{handle}`** answers that actor as above. A handle that names no row (one that has only read
+  has none, §4.1) is **404** with a `next` line that names `GET /api/v1/actors`.
 
 ---
 

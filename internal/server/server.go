@@ -20,6 +20,7 @@ import (
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
 	"github.com/n-orlov/board/internal/notify"
+	"github.com/n-orlov/board/internal/roster"
 	"github.com/n-orlov/board/internal/tasks"
 	"github.com/n-orlov/board/internal/timeline"
 	"github.com/n-orlov/board/internal/webui"
@@ -132,6 +133,11 @@ func WithNotifications(st *notify.Store) Option {
 // st and ls the operation answers 503.
 func WithTimeline(st *timeline.Store, ls *leases.Store, at *attention.Store) Option {
 	return func(o *operations) { o.timelineOps = timelineOps{timeline: st, leases: ls, derived: at} }
+}
+
+// WithActors serves GET /api/v1/actors and GET /api/v1/actors/{handle} from st; without it the operations answer 503.
+func WithActors(st *roster.Store) Option {
+	return func(o *operations) { o.actorOps = actorOps{roster: st} }
 }
 
 // WithLeases serves /api/v1/leases from st; without it the operations answer 503.

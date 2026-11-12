@@ -20,6 +20,7 @@ import (
 	"github.com/n-orlov/board/internal/leases"
 	"github.com/n-orlov/board/internal/notes"
 	"github.com/n-orlov/board/internal/notify"
+	"github.com/n-orlov/board/internal/roster"
 	"github.com/n-orlov/board/internal/server"
 	"github.com/n-orlov/board/internal/store"
 	"github.com/n-orlov/board/internal/sweep"
@@ -215,7 +216,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 		return fail(stderr, err)
 	}
 	defer stopFeed()
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithNotifications(&notify.Store{Store: st}), server.WithAttention(&attention.Store{Store: st}), server.WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), server.WithCursors(&cursors.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Revision: version.Revision(), Protocol: ProtocolVersion()}, &actors.Store{Store: st}), stream); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithNotifications(&notify.Store{Store: st}), server.WithAttention(&attention.Store{Store: st}), server.WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), server.WithActors(&roster.Store{Store: st, Leases: &leases.Store{Store: st}, Asks: &asks.Store{Store: st}}), server.WithCursors(&cursors.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Revision: version.Revision(), Protocol: ProtocolVersion()}, &actors.Store{Store: st}), stream); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK

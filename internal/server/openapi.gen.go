@@ -19,6 +19,42 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for ActorAskMode.
+const (
+	ActorAskModePoll ActorAskMode = "poll"
+	ActorAskModeStop ActorAskMode = "stop"
+)
+
+// Valid indicates whether the value is a known member of the ActorAskMode enum.
+func (e ActorAskMode) Valid() bool {
+	switch e {
+	case ActorAskModePoll:
+		return true
+	case ActorAskModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ActorViewKind.
+const (
+	Agent    ActorViewKind = "agent"
+	Operator ActorViewKind = "operator"
+)
+
+// Valid indicates whether the value is a known member of the ActorViewKind enum.
+func (e ActorViewKind) Valid() bool {
+	switch e {
+	case Agent:
+		return true
+	case Operator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AskChannel.
 const (
 	AskChannelApi   AskChannel = "api"
@@ -756,6 +792,64 @@ func (e ListTasksParamsKind) Valid() bool {
 		return false
 	}
 }
+
+// ActorAsk An open ask of an actor.
+type ActorAsk struct {
+	Blocking  bool      `json:"blocking"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Initiative The slug of the initiative. Absent for a board-wide ask.
+	Initiative *string      `json:"initiative,omitempty"`
+	Mode       ActorAskMode `json:"mode"`
+	Question   string       `json:"question"`
+
+	// Ref The short ref, `A<n>`.
+	Ref string `json:"ref"`
+
+	// Task The ref of the task it is on. Absent for an ask on an initiative or board-wide.
+	Task *string `json:"task,omitempty"`
+}
+
+// ActorAskMode defines model for ActorAsk.Mode.
+type ActorAskMode string
+
+// ActorLease A live lease of an actor.
+type ActorLease struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Intent    string    `json:"intent"`
+
+	// Ref The short ref, `L<n>`.
+	Ref string `json:"ref"`
+
+	// Resources The resources it holds, sorted.
+	Resources []string `json:"resources"`
+
+	// Task The ref of the task it is on.
+	Task string `json:"task"`
+}
+
+// ActorList The actors, the one seen last first.
+type ActorList struct {
+	Items []ActorView `json:"items"`
+}
+
+// ActorView An actor with what it holds and has asked now.
+type ActorView struct {
+	// Asks The actor's open asks, in the order they were raised.
+	Asks     []ActorAsk    `json:"asks"`
+	Handle   string        `json:"handle"`
+	Kind     ActorViewKind `json:"kind"`
+	LastSeen time.Time     `json:"last_seen"`
+
+	// Leases The actor's live leases, oldest first.
+	Leases []ActorLease `json:"leases"`
+
+	// WayBack How to reach the actor again. Absent when the board has none.
+	WayBack *string `json:"way_back,omitempty"`
+}
+
+// ActorViewKind defines model for ActorView.Kind.
+type ActorViewKind string
 
 // Ask An ask. `asker_waiting` is derived.
 type Ask struct {
@@ -2203,6 +2297,12 @@ type Unauthorized = Problem
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
 
+// ListActorsParams defines parameters for ListActors.
+type ListActorsParams struct {
+	// Alive When true, keep only the actors that hold a live lease.
+	Alive *bool `form:"alive,omitempty" json:"alive,omitempty"`
+}
+
 // ListAsksParams defines parameters for ListAsks.
 type ListAsksParams struct {
 	// State open (default), answered, withdrawn or all.
@@ -2529,9 +2629,15 @@ type ServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(w http.ResponseWriter, r *http.Request)
+	// ListActors List the actors
+	// (GET /api/v1/actors)
+	ListActors(w http.ResponseWriter, r *http.Request, params ListActorsParams)
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(w http.ResponseWriter, r *http.Request)
+	// GetActor Read one actor
+	// (GET /api/v1/actors/{handle})
+	GetActor(w http.ResponseWriter, r *http.Request, handle string)
 	// ListAsks List asks
 	// (GET /api/v1/asks)
 	ListAsks(w http.ResponseWriter, r *http.Request, params ListAsksParams)
@@ -2758,11 +2864,67 @@ func (siw *ServerInterfaceWrapper) GetOpenapiYAML(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListActors operation middleware
+func (siw *ServerInterfaceWrapper) ListActors(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListActorsParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "alive" -------------
+
+	bind.check("alive", runtime.BindQueryParameterWithOptions("form", true, false, "alive", r.URL.Query(), &params.Alive, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListActors(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PutProtocolSeen operation middleware
 func (siw *ServerInterfaceWrapper) PutProtocolSeen(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutProtocolSeen(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetActor operation middleware
+func (siw *ServerInterfaceWrapper) GetActor(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "handle" -------------
+	var handle string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "handle", r.PathValue("handle"), &handle, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "handle", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetActor(w, r, handle)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4369,6 +4531,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/actors", wrapper.ListActors)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/actors/{handle}", wrapper.GetActor)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/oidc/callback", wrapper.GetAuthOidcCallback)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetAuthSession)
@@ -4660,6 +4824,76 @@ func (response GetOpenapiYAML401ApplicationProblemPlusJSONResponse) VisitGetOpen
 	return err
 }
 
+type ListActorsRequestObject struct {
+	Params ListActorsParams
+}
+
+type ListActorsResponseObject interface {
+	VisitListActorsResponse(w http.ResponseWriter) error
+}
+
+type ListActors200JSONResponse ActorList
+
+func (response ListActors200JSONResponse) VisitListActorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActors400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListActors400ApplicationProblemPlusJSONResponse) VisitListActorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActors401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListActors401ApplicationProblemPlusJSONResponse) VisitListActorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListActors503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response ListActors503ApplicationProblemPlusJSONResponse) VisitListActorsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PutProtocolSeenRequestObject struct {
 	Body *PutProtocolSeenJSONRequestBody
 }
@@ -4719,6 +4953,76 @@ type PutProtocolSeen503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response PutProtocolSeen503ApplicationProblemPlusJSONResponse) VisitPutProtocolSeenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActorRequestObject struct {
+	Handle string `json:"handle"`
+}
+
+type GetActorResponseObject interface {
+	VisitGetActorResponse(w http.ResponseWriter) error
+}
+
+type GetActor200JSONResponse ActorView
+
+func (response GetActor200JSONResponse) VisitGetActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActor401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetActor401ApplicationProblemPlusJSONResponse) VisitGetActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActor404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetActor404ApplicationProblemPlusJSONResponse) VisitGetActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActor503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetActor503ApplicationProblemPlusJSONResponse) VisitGetActorResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -8993,9 +9297,15 @@ type StrictServerInterface interface {
 	// GetOpenapiYAML This document as YAML
 	// (GET /api/openapi.yaml)
 	GetOpenapiYAML(ctx context.Context, request GetOpenapiYAMLRequestObject) (GetOpenapiYAMLResponseObject, error)
+	// ListActors List the actors
+	// (GET /api/v1/actors)
+	ListActors(ctx context.Context, request ListActorsRequestObject) (ListActorsResponseObject, error)
 	// PutProtocolSeen Record that the calling actor has read an agent protocol version
 	// (PUT /api/v1/actors/me/protocol-seen)
 	PutProtocolSeen(ctx context.Context, request PutProtocolSeenRequestObject) (PutProtocolSeenResponseObject, error)
+	// GetActor Read one actor
+	// (GET /api/v1/actors/{handle})
+	GetActor(ctx context.Context, request GetActorRequestObject) (GetActorResponseObject, error)
 	// ListAsks List asks
 	// (GET /api/v1/asks)
 	ListAsks(ctx context.Context, request ListAsksRequestObject) (ListAsksResponseObject, error)
@@ -9282,6 +9592,32 @@ func (sh *strictHandler) GetOpenapiYAML(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// ListActors operation middleware
+func (sh *strictHandler) ListActors(w http.ResponseWriter, r *http.Request, params ListActorsParams) {
+	var request ListActorsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListActors(ctx, request.(ListActorsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListActors")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListActorsResponseObject); ok {
+		if err := validResponse.VisitListActorsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // PutProtocolSeen operation middleware
 func (sh *strictHandler) PutProtocolSeen(w http.ResponseWriter, r *http.Request) {
 	var request PutProtocolSeenRequestObject
@@ -9306,6 +9642,32 @@ func (sh *strictHandler) PutProtocolSeen(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutProtocolSeenResponseObject); ok {
 		if err := validResponse.VisitPutProtocolSeenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetActor operation middleware
+func (sh *strictHandler) GetActor(w http.ResponseWriter, r *http.Request, handle string) {
+	var request GetActorRequestObject
+
+	request.Handle = handle
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetActor(ctx, request.(GetActorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetActor")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetActorResponseObject); ok {
+		if err := validResponse.VisitGetActorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

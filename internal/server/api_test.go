@@ -218,6 +218,8 @@ func (brokenResponse) VisitListTasksResponse(http.ResponseWriter) error         
 func (brokenResponse) VisitListEventsResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListNotificationsResponse(http.ResponseWriter) error   { return errBroken }
 func (brokenResponse) VisitGetTimelineResponse(http.ResponseWriter) error         { return errBroken }
+func (brokenResponse) VisitListActorsResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitGetActorResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitGetNowResponse(http.ResponseWriter) error              { return errBroken }
@@ -445,6 +447,18 @@ func (s stubOperations) ListNotifications(context.Context, ListNotificationsRequ
 func (s stubOperations) GetTimeline(context.Context, GetTimelineRequestObject) (GetTimelineResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetTimelineResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) ListActors(context.Context, ListActorsRequestObject) (ListActorsResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(ListActorsResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetActor(context.Context, GetActorRequestObject) (GetActorResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetActorResponseObject)
 	return resp, err
 }
 
@@ -793,6 +807,12 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get timeline 401", 401, GetTimeline401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
 		{"get timeline 404", 404, GetTimeline404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
 		{"get timeline 503", 503, GetTimeline503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetTimelineResponse},
+		{"list actors 400", 400, ListActors400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitListActorsResponse},
+		{"list actors 401", 401, ListActors401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitListActorsResponse},
+		{"list actors 503", 503, ListActors503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListActorsResponse},
+		{"get actor 401", 401, GetActor401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetActorResponse},
+		{"get actor 404", 404, GetActor404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetActorResponse},
+		{"get actor 503", 503, GetActor503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetActorResponse},
 		{"start lease 400", 400, StartLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
 		{"start lease 401", 401, StartLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},
 		{"start lease 404", 404, StartLease404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitStartLeaseResponse},

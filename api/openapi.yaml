@@ -37,6 +37,8 @@ tags:
     description: The audit trail, listed with filters and paging.
   - name: notifications
     description: The alert outbox, listed by delivery state with paging.
+  - name: actors
+    description: The actors with their live leases, open asks and when each was last seen.
   - name: timeline
     description: The tasks, leases and markers of a window of time, for the Timeline view.
   - name: stream
@@ -2105,6 +2107,70 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/actors:
+    get:
+      operationId: listActors
+      tags: [actors]
+      summary: List the actors
+      description: >-
+        Every actor the board has recorded, the one seen last first (`last_seen`, newest first; ties by handle), each with
+        its live leases (`ref`, `task`, `intent`, `expires_at`, `resources`) and its open asks. A lease whose time has run
+        out is expired before the read and is not listed. `alive=true` keeps only the actors that hold a live lease; left
+        out or false, every actor is listed. A `alive` that is not a boolean is 400.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: alive
+          in: query
+          required: false
+          description: When true, keep only the actors that hold a live lease.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: The actors.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActorList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/actors/{handle}:
+    get:
+      operationId: getActor
+      tags: [actors]
+      summary: Read one actor
+      description: >-
+        The actor with this handle, with its `way_back`, `last_seen`, live leases and open asks, as `GET /api/v1/actors`
+        lists it. A handle that names no actor is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          description: The actor's handle.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The actor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActorView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /auth/login:
     get:
       operationId: getAuthLogin
@@ -3747,6 +3813,86 @@ components:
         label:
           type: string
           description: The milestone's or check's summary, the ask's question, or the event's one-line summary for done and closed.
+    ActorList:
+      type: object
+      description: The actors, the one seen last first.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActorView"
+    ActorView:
+      type: object
+      description: An actor with what it holds and has asked now.
+      required: [handle, kind, last_seen, leases, asks]
+      properties:
+        handle:
+          type: string
+        kind:
+          type: string
+          enum: [operator, agent]
+        way_back:
+          type: string
+          description: How to reach the actor again. Absent when the board has none.
+        last_seen:
+          type: string
+          format: date-time
+        leases:
+          type: array
+          description: The actor's live leases, oldest first.
+          items:
+            $ref: "#/components/schemas/ActorLease"
+        asks:
+          type: array
+          description: The actor's open asks, in the order they were raised.
+          items:
+            $ref: "#/components/schemas/ActorAsk"
+    ActorLease:
+      type: object
+      description: A live lease of an actor.
+      required: [ref, task, intent, expires_at, resources]
+      properties:
+        ref:
+          type: string
+          description: The short ref, `L<n>`.
+        task:
+          type: string
+          description: The ref of the task it is on.
+        intent:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        resources:
+          type: array
+          description: The resources it holds, sorted.
+          items:
+            type: string
+    ActorAsk:
+      type: object
+      description: An open ask of an actor.
+      required: [ref, question, mode, blocking, created_at]
+      properties:
+        ref:
+          type: string
+          description: The short ref, `A<n>`.
+        task:
+          type: string
+          description: The ref of the task it is on. Absent for an ask on an initiative or board-wide.
+        initiative:
+          type: string
+          description: The slug of the initiative. Absent for a board-wide ask.
+        question:
+          type: string
+        mode:
+          type: string
+          enum: [stop, poll]
+        blocking:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
     NotificationList:
       type: object
       description: A page of notifications.

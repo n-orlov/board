@@ -860,6 +860,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/actors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the actors
+         * @description Every actor the board has recorded, the one seen last first (`last_seen`, newest first; ties by handle), each with its live leases (`ref`, `task`, `intent`, `expires_at`, `resources`) and its open asks. A lease whose time has run out is expired before the read and is not listed. `alive=true` keeps only the actors that hold a live lease; left out or false, every actor is listed. A `alive` that is not a boolean is 400.
+         */
+        get: operations["listActors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/actors/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one actor
+         * @description The actor with this handle, with its `way_back`, `last_seen`, live leases and open asks, as `GET /api/v1/actors` lists it. A handle that names no actor is 404.
+         */
+        get: operations["getActor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -1822,6 +1862,51 @@ export interface components {
             at: string;
             /** @description The milestone's or check's summary, the ask's question, or the event's one-line summary for done and closed. */
             label: string;
+        };
+        /** @description The actors, the one seen last first. */
+        ActorList: {
+            items: components["schemas"]["ActorView"][];
+        };
+        /** @description An actor with what it holds and has asked now. */
+        ActorView: {
+            handle: string;
+            /** @enum {string} */
+            kind: "operator" | "agent";
+            /** @description How to reach the actor again. Absent when the board has none. */
+            way_back?: string;
+            /** Format: date-time */
+            last_seen: string;
+            /** @description The actor's live leases, oldest first. */
+            leases: components["schemas"]["ActorLease"][];
+            /** @description The actor's open asks, in the order they were raised. */
+            asks: components["schemas"]["ActorAsk"][];
+        };
+        /** @description A live lease of an actor. */
+        ActorLease: {
+            /** @description The short ref, `L<n>`. */
+            ref: string;
+            /** @description The ref of the task it is on. */
+            task: string;
+            intent: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description The resources it holds, sorted. */
+            resources: string[];
+        };
+        /** @description An open ask of an actor. */
+        ActorAsk: {
+            /** @description The short ref, `A<n>`. */
+            ref: string;
+            /** @description The ref of the task it is on. Absent for an ask on an initiative or board-wide. */
+            task?: string;
+            /** @description The slug of the initiative. Absent for a board-wide ask. */
+            initiative?: string;
+            question: string;
+            /** @enum {string} */
+            mode: "stop" | "poll";
+            blocking: boolean;
+            /** Format: date-time */
+            created_at: string;
         };
         /** @description A page of notifications. */
         NotificationList: {
@@ -3519,6 +3604,58 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listActors: {
+        parameters: {
+            query?: {
+                /** @description When true, keep only the actors that hold a live lease. */
+                alive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The actors. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActorList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getActor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The actor's handle. */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The actor. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActorView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

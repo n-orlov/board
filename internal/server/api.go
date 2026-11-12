@@ -48,6 +48,7 @@ type operations struct {
 	eventOps
 	notifyOps
 	timelineOps
+	actorOps
 	leaseOps
 	nowOps
 	askOps
