@@ -179,7 +179,60 @@ func TestAWaitReachingTheServerAfterUntilCountsAnEndWhoseTimelyMarkIsPersistedLa
 	})
 }
 
+// timelyAttempts is how many times a case whose end is to be timely runs
+// before it gives up: see testTimelyMarkPersistedLate.
+const timelyAttempts = 5
+
+// testTimelyMarkPersistedLate runs c. An end meant to be timely is started a
+// fixed time before until on the real clock, but whether its COMMIT returns and
+// its mark is sampled by until is up to the scheduler: on a loaded host the end
+// can run late, and then it is not the case under test (it is a late end, which
+// the other cases cover). The persisted mark says which it was, since the mark
+// is the real clock read after the COMMIT returned: a mark after until means
+// the end was late, and the attempt is run again on a fresh database rather
+// than judged. Every attempt whose mark is at or before until is judged in
+// full, so an end that is timely and not counted still fails.
 func testTimelyMarkPersistedLate(t *testing.T, leg string, dbs databases, c markCase) {
+	for attempt := 1; ; attempt++ {
+		res, k, until, err := runTimelyMark(t, leg, dbs, c)
+		late := err == nil && k.EndCommitAt != nil && k.EndCommitAt.After(until)
+		if c.counts && late {
+			if attempt < timelyAttempts {
+				t.Logf("attempt %d: the end's mark %v came after until %v (the host ran it late), so it was not timely; again", attempt, *k.EndCommitAt, until)
+				continue
+			}
+			t.Fatalf("in %d attempts the end's mark never came by until (last %v, until %v): the host is too loaded to run a timely end", attempt, *k.EndCommitAt, until)
+		}
+		want := "open"
+		if c.counts {
+			want = "answered"
+			if c.withdraw {
+				want = "withdrawn"
+			}
+		}
+		if res.status != http.StatusOK || res.doc["state"] != want {
+			t.Errorf("got %d %v, want 200 and state %q", res.status, res.doc, want)
+		}
+		if endFields(res.doc) != c.counts {
+			t.Errorf("end fields present = %v in %v, want %v", endFields(res.doc), res.doc, c.counts)
+		}
+		if err != nil || k.EndCommitAt == nil || k.EndCommitAt.After(until) == c.counts {
+			t.Errorf("persisted mark %v (%v), want one at or before until: %v", k.EndCommitAt, err, c.counts)
+		}
+		return
+	}
+}
+
+// markResult is what a wait returned.
+type markResult struct {
+	status int
+	doc    map[string]any
+}
+
+// runTimelyMark runs c once on a fresh database, and returns what the wait
+// returned, the ask as persisted once the end's mark was written, and until.
+func runTimelyMark(t *testing.T, leg string, dbs databases, c markCase) (markResult, asks.Ask, time.Time, error) {
+	t.Helper()
 	registerMarkFunc(t)
 	url := dbs.New(t)
 	st := openStore(t, url)
@@ -195,17 +248,13 @@ func testTimelyMarkPersistedLate(t *testing.T, leg string, dbs databases, c mark
 	ref := r.raiseAsk()
 	hold.arm()
 	until := time.Now().Add(time.Second)
-	type result struct {
-		status int
-		doc    map[string]any
-	}
-	got := make(chan result, 1)
+	got := make(chan markResult, 1)
 	go func() {
 		if c.readAt != 0 {
 			time.Sleep(time.Until(until.Add(c.readAt)))
 		}
 		status, doc := r.getUntil(ref, until)
-		got <- result{status, doc}
+		got <- markResult{status, doc}
 	}()
 	ended := make(chan error, 1)
 	go func() {
@@ -221,21 +270,6 @@ func testTimelyMarkPersistedLate(t *testing.T, leg string, dbs databases, c mark
 		t.Fatal(err)
 	}
 	res := <-got
-	want := "open"
-	if c.counts {
-		want = "answered"
-		if c.withdraw {
-			want = "withdrawn"
-		}
-	}
-	if res.status != http.StatusOK || res.doc["state"] != want {
-		t.Errorf("got %d %v, want 200 and state %q", res.status, res.doc, want)
-	}
-	if endFields(res.doc) != c.counts {
-		t.Errorf("end fields present = %v in %v, want %v", endFields(res.doc), res.doc, c.counts)
-	}
 	k, err := as.Get(context.Background(), ref)
-	if err != nil || k.EndCommitAt == nil || k.EndCommitAt.After(until) == c.counts {
-		t.Errorf("persisted mark %v (%v), want one at or before until: %v", k.EndCommitAt, err, c.counts)
-	}
+	return res, k, until, err
 }
