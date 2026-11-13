@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"io"
+	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -58,6 +60,9 @@ func envWith(kv map[string]string) Env { return func(k string) string { return k
 // A refusal returns in milliseconds; the bound only turns a serve that started
 // serving instead into a failure.
 const serveRefusalBound = 10 * time.Second
+
+// serveReadyBound is how long serveReady waits for the listener to answer.
+const serveReadyBound = 30 * time.Second
 
 // runServe runs `board serve` with env and returns its exit code and stderr.
 // Each caller expects serve to refuse and return at once. A serve that starts
@@ -113,19 +118,66 @@ func sqliteURL(t *testing.T) string {
 	return "sqlite://" + filepath.Join(t.TempDir(), "b.db")
 }
 
-// serveFor runs serveUntil against url and addr, cancelling it after d.
-func serveFor(t *testing.T, url, addr string, migrate bool, d time.Duration) (int, string) {
+// serveRefused runs serveUntil against url and addr for a start that must
+// refuse and return on its own. The context is only a hang guard, generous
+// because a loaded machine can spend seconds opening and migrating the store.
+func serveRefused(t *testing.T, url, addr string, migrate bool) (int, string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), d)
+	ctx, cancel := context.WithTimeout(context.Background(), serveRefusalBound)
 	defer cancel()
 	var errb bytes.Buffer
 	code := serveUntil(ctx, &errb, func(string) string { return "" }, url, addr, migrate)
 	return code, errb.String()
 }
 
+// serveReady runs serveUntil against url on a free port, waits until /healthz
+// answers 200 (it does even on an unmigrated store), then cancels it and
+// returns its exit code and stderr. Startup time does not count against the
+// server's lifetime, so a loaded machine cannot turn a slow start into a
+// deadline error.
+func serveReady(t *testing.T, url string, migrate bool) (int, string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var errb bytes.Buffer
+	exit := make(chan int, 1)
+	go func() { exit <- serveUntil(ctx, &errb, func(string) string { return "" }, url, addr, migrate) }()
+	ready := false
+	for deadline := time.Now().Add(serveReadyBound); !ready && time.Now().Before(deadline); {
+		select {
+		case code := <-exit:
+			return code, errb.String()
+		case <-time.After(20 * time.Millisecond):
+		}
+		if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+			ready = resp.StatusCode == http.StatusOK
+			_ = resp.Body.Close()
+		}
+	}
+	if !ready {
+		cancel()
+		<-exit
+		t.Fatalf("serve was not ready within %v; stderr %q", serveReadyBound, errb.String())
+	}
+	cancel()
+	select {
+	case code := <-exit:
+		return code, errb.String()
+	case <-time.After(serveRefusalBound):
+		t.Fatal("serve did not stop after its context ended")
+		return 0, ""
+	}
+}
+
 func TestServeUntilServesAndStopsCleanlyWhenTheContextEnds(t *testing.T) {
 	for _, migrate := range []bool{true, false} {
-		if code, errs := serveFor(t, sqliteURL(t), "127.0.0.1:0", migrate, 300*time.Millisecond); code != ExitOK || errs != "" {
+		if code, errs := serveReady(t, sqliteURL(t), migrate); code != ExitOK || errs != "" {
 			t.Errorf("migrate=%v: code=%d err=%q", migrate, code, errs)
 		}
 	}
@@ -136,7 +188,7 @@ func TestServeUntilFailsWithOneLineOnABadDatabaseOrAddress(t *testing.T) {
 		"unsupported database": {"mysql://x/y", "127.0.0.1:0"},
 		"unusable address":     {sqliteURL(t), "not-an-address"},
 	} {
-		code, errs := serveFor(t, tc.url, tc.addr, true, time.Second)
+		code, errs := serveRefused(t, tc.url, tc.addr, true)
 		if code != ExitError || !strings.HasPrefix(errs, "board: ") || strings.Count(errs, "\n") != 1 {
 			t.Errorf("%s: code=%d err=%q", name, code, errs)
 		}
@@ -157,7 +209,7 @@ func TestServeUntilRefusesADatabaseNewerThanTheBinary(t *testing.T) {
 	}
 	_ = db.Close()
 	for _, migrate := range []bool{true, false} {
-		code, errs := serveFor(t, url, "127.0.0.1:0", migrate, time.Second)
+		code, errs := serveRefused(t, url, "127.0.0.1:0", migrate)
 		if code != ExitError || !strings.Contains(errs, "9999") {
 			t.Errorf("migrate=%v: code=%d err=%q, want a refusal naming version 9999", migrate, code, errs)
 		}

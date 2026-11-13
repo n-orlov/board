@@ -92,7 +92,7 @@ func TestLoginRefusesAnIncompleteOrMalformedConfiguration(t *testing.T) {
 }
 
 func TestServeRefusesToStartWithAnIncompleteLoginConfiguration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), serveRefusalBound)
 	defer cancel()
 	var errb bytes.Buffer
 	env := envOf(map[string]string{"BOARD_OIDC_ISSUER": "https://idp.test"})

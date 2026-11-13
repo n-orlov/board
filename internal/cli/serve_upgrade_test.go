@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/n-orlov/board/internal/audit"
 	"github.com/n-orlov/board/internal/initiatives"
@@ -41,7 +40,7 @@ func TestServeReopensADoneTaskHoldingALiveLeaseOnStart(t *testing.T) {
 	}
 	_ = st.Close()
 	for start := 1; start <= 2; start++ {
-		if code, errs := serveFor(t, url, "127.0.0.1:0", true, 300*time.Millisecond); code != ExitOK || errs != "" {
+		if code, errs := serveReady(t, url, true); code != ExitOK || errs != "" {
 			t.Fatalf("start %d: code=%d err=%q", start, code, errs)
 		}
 		st, err := store.Open(url)
