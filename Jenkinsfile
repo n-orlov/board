@@ -77,7 +77,9 @@ String classify(Throwable e, Map a) {
 // Runs one unit. u: name, labels (most preferred first; retries widen to the
 // last), minutes (budget on amd64; arm64 gets u.armFactor x, default 3),
 // body (closure on the node, returns the command's exit status), needs
-// (stash names to unstash first), extraStash (closure on the node, after a run).
+// (stash names to unstash first), extraStash (closure on the node, after a run),
+// silentMinutes (how long the command may print nothing, default 45: gremlins
+// and the suite's later passes print only when they finish).
 def runUnit(Map u) {
   def tried = []
   def attempts = []
@@ -103,9 +105,10 @@ def runUnit(Map u) {
           a.arch = arm ? 'arm64' : 'amd64'
           echo "unit ${u.name}: attempt ${a.n} on ${env.NODE_NAME} (${a.arch}), label ${expr}"
           try {
-            // A silent attempt (agent gone, hung container) ends after 20 min.
+            // A silent attempt (agent gone, hung container) ends after
+            // silentMinutes.
             timeout(time: u.minutes * (arm ? armFactor : 1), unit: 'MINUTES') {
-              timeout(time: 20, unit: 'MINUTES', activity: true) {
+              timeout(time: u.silentMinutes ?: 45, unit: 'MINUTES', activity: true) {
                 if (sh(returnStatus: true, script: 'docker info >/dev/null 2>&1') != 0) {
                   a.outcome = 'infra:docker'
                   return
@@ -267,7 +270,7 @@ pipeline {
           def units = []
           // gofmt, go vet, tidy drift, golangci-lint.
           units << [name: 'Lint', labels: [any], minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
-          units << [name: 'Suite', labels: [amd, any], minutes: nightly ? 120 : 45, armFactor: 2, signal: 'Suite',
+          units << [name: 'Suite', labels: [amd, any], minutes: nightly ? 120 : 45, armFactor: 2, silentMinutes: 60, signal: 'Suite',
                     body: { sh(returnStatus: true, script: 'ci/run.sh ci/suite.sh') }]
           // Both platforms cross-built and never pushed; the amd64 image is run
           // and probed, so amd64 only.
@@ -289,7 +292,8 @@ pipeline {
           if (nightly) {
             // A list, not 1..3: an IntRange is not serializable in CPS.
             [1, 2, 3].each { i ->
-              units << [name: "Stability ${i}", labels: [any], minutes: 40,
+              // stability.sh prints only at the end (14 min on kilo, 22+ on golf).
+              units << [name: "Stability ${i}", labels: [any], minutes: 40, silentMinutes: 60,
                         body: {
                           sh(returnStatus: true, script: '''
                             set -e
