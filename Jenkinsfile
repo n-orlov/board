@@ -84,7 +84,8 @@ String classify(Throwable e, Map a) {
 // Runs one unit. u: name, labels (most preferred first; retries widen to the
 // last), minutes (budget on amd64; arm64 gets u.armFactor x, default 3),
 // body (closure on the node, returns the command's exit status), needs
-// (stash names to unstash first), extraStash (closure on the node, after a run).
+// (stash names to unstash first), extraStash (closure on the node, after a run),
+// pinned (retries may reuse a node: the label matches one node only).
 def runUnit(Map u) {
   def tried = []
   def attempts = []
@@ -95,7 +96,7 @@ def runUnit(Map u) {
   int armFactor = u.armFactor ?: 3
   while (true) {
     String want = attempts.isEmpty() ? u.labels[0] : u.labels[-1]
-    String expr = '(' + want + ')' + tried.collect { ' && !' + it }.join('')
+    String expr = '(' + want + ')' + (u.pinned ? '' : tried.collect { ' && !' + it }.join(''))
     def a = [n: attempts.size() + 1, label: expr, node: null, queued: nowMs(), start: 0L, end: 0L, outcome: null]
     attempts << a
     String runId = "jenkins-${env.BUILD_NUMBER}-${slug(u.name)}-${a.n}"
@@ -182,7 +183,7 @@ def runUnit(Map u) {
       if (!rerun && attempts.size() < 4) {
         rerun = true
         firstFail = a.node
-        echo "unit ${u.name}: failed on ${a.node}; one rerun on another node"
+        echo "unit ${u.name}: failed on ${a.node}; one rerun on " + (u.pinned ? 'the same label' : 'another node')
         continue
       }
       results[u.name] = 'fail'
@@ -357,12 +358,16 @@ pipeline {
         script {
           def branches = [:]
           // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
-          // also runs Stryker over web/src/lib. server-core gets 50 min: 35
-          // ran out on a busy int21h-ws (#12).
+          // also runs Stryker over web/src/lib. int21h-ws only: on the 8-core
+          // phones gremlins drove the load to 16-53, server-ops and cli-core
+          // ran out of 105 minutes and foxtrot's agent dropped (#16). Its 4
+          // executors run 4 lanes at once, so each gremlins gets a quarter of
+          // the cores instead of all of them.
           ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
-            int minutes = lane == 'server-core' ? 50 : 35
-            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: minutes,
-                     body: { sh(returnStatus: true, script: "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
+            int minutes = lane == 'server-core' ? 80 : 60
+            def u = [name: "Mutation ${lane}", labels: [AMD], pinned: true, minutes: minutes,
+                     body: { sh(returnStatus: true, script: 'BOARD_MUTATION_WORKERS=$(( ($(nproc) + 3) / 4 )) ' +
+                                                            "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
             branches[u.name] = unitBranch(u)
           }
           parallel branches

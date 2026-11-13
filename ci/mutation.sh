@@ -34,6 +34,10 @@ outdir=${1:-ci-results/mutation}
 config=${2:-ci/quality.json}
 lane=${3:-all}
 
+# gremlins' worker count (default: one per CPU). The Jenkinsfile sets it when
+# several lanes share one host. Read before the scrub below.
+workers=${BOARD_MUTATION_WORKERS:-}
+
 # Same scrub as ci/suite.sh and ci/quality.sh: a stray BOARD_* variable must
 # never reach the tests gremlins runs.
 for board_var in $(env | sed -n 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
@@ -73,7 +77,7 @@ for pkg in $packages; do
         set -- "$@" -E "$pattern"
     done
     echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags)"
-    gremlins unleash "./$dir" --timeout-coefficient "$timeout_coefficient" "$@" -o "$outdir/$name.json"
+    gremlins unleash "./$dir" --timeout-coefficient "$timeout_coefficient" ${workers:+--workers "$workers"} "$@" -o "$outdir/$name.json"
 done
 
 status=0
