@@ -22,10 +22,31 @@ import (
 // released: the mark is then sampled in time but persisted late. On SQLite a
 // trigger calls a scalar function that waits on the hold; on Postgres it waits
 // for an advisory lock the test takes.
+//
+// queued says a write of the server (the poll mark a settling wait makes)
+// waits behind the held one: the wait has read the ask as until passed, found
+// the end without its mark, and is about to take the mark from a read made
+// once the hold is released.
 type markHold struct {
 	arm     func()
 	reached func() bool
+	queued  func() bool
 	release func()
+}
+
+// holdWait bounds how long the test waits for a held write to be reached or
+// for a write to queue behind it. It is a deadline for a hang, not a margin:
+// each wait ends as soon as what it waits for happens.
+const holdWait = 30 * time.Second
+
+// waitFor polls cond every 5 ms until it holds or holdWait passes.
+func waitFor(cond func() bool) bool {
+	for deadline := time.Now().Add(holdWait); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if cond() {
+			return true
+		}
+	}
+	return false
 }
 
 const pgMarkKey = 424243
@@ -80,7 +101,19 @@ func newMarkHold(t *testing.T, leg string, st *store.Store, rawURL string) *mark
 	if _, err := st.Writer().ExecContext(ctx, trigger); err != nil {
 		t.Fatal(err)
 	}
-	return &markHold{arm: func() {}, reached: func() bool { return waitClosed(reached) }, release: func() { close(release) }}
+	// SQLite has one writer connection, which the held write keeps: a later
+	// write of the server waits for it in the pool.
+	var waits int64
+	return &markHold{
+		arm: func() {},
+		reached: func() bool {
+			ok := waitClosed(reached)
+			waits = st.Writer().Stats().WaitCount
+			return ok
+		},
+		queued:  func() bool { return waitFor(func() bool { return st.Writer().Stats().WaitCount > waits }) },
+		release: func() { close(release) },
+	}
 }
 
 func newPostgresMarkHold(t *testing.T, st *store.Store, rawURL string) *markHold {
@@ -122,6 +155,16 @@ func newPostgresMarkHold(t *testing.T, st *store.Store, rawURL string) *markHold
 				time.Sleep(5 * time.Millisecond)
 			}
 			return false
+		},
+		// the held UPDATE has the ask's row locked, so the poll mark's UPDATE
+		// of that row waits for its transaction
+		queued: func() bool {
+			return waitFor(func() bool {
+				var n int
+				_ = db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+					AND wait_event_type = 'Lock' AND wait_event <> 'advisory' AND query LIKE '%poll_seen_at%'`).Scan(&n)
+				return n > 0
+			})
 		},
 		release: func() {
 			_, _ = lock.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", pgMarkKey)
@@ -165,18 +208,91 @@ func TestAWaitCountsAnEndWhoseTimelyMarkIsPersistedAfterUntil(t *testing.T) {
 // finds the end already committed and its mark still being written: that read
 // is no proof (it came back after until), so the wait takes the mark once the
 // write lands, and counts the end only if the mark is at or before until.
+//
+// The timely cases set until from the end's mark (testMarkBeforeUntil), so
+// no scheduler has to run the end by a set instant; the late ones start the
+// end after until, which a loaded host only makes later.
 func TestAWaitReachingTheServerAfterUntilCountsAnEndWhoseTimelyMarkIsPersistedLate(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
 		for _, c := range []markCase{
 			{"answer, mark 400ms early", false, 600 * time.Millisecond, true, 100 * time.Millisecond},
 			{"withdrawal, mark 400ms early", true, 600 * time.Millisecond, true, 100 * time.Millisecond},
 			{"answer, mark 150ms early", false, 850 * time.Millisecond, true, 100 * time.Millisecond},
+			{"withdrawal, mark 150ms early", true, 850 * time.Millisecond, true, 100 * time.Millisecond},
 			{"withdrawal committed 100ms late", true, 1100 * time.Millisecond, false, 150 * time.Millisecond},
 			{"answer committed 100ms late", false, 1100 * time.Millisecond, false, 150 * time.Millisecond},
 		} {
-			t.Run(c.name, func(t *testing.T) { testTimelyMarkPersistedLate(t, leg, dbs, c) })
+			t.Run(c.name, func(t *testing.T) {
+				if c.counts {
+					testMarkBeforeUntil(t, leg, dbs, c)
+					return
+				}
+				testTimelyMarkPersistedLate(t, leg, dbs, c)
+			})
 		}
 	})
+}
+
+// testMarkBeforeUntil runs c, a timely end whose wait reaches the server
+// after until, in an order set by events rather than by the clock. The end
+// runs first; once its COMMIT has returned and its mark has been read off the
+// real clock (and its write is held), until is set to the mark plus the
+// case's lead (1s - endAt), so the mark is before until by exactly that much
+// however late the host ran the end. The wait is sent at until plus readAt,
+// so it reaches the server after until, and the hold is released only once
+// the wait's own poll write queues behind it: the wait has read the ask as
+// until passed and found the end without its mark. The wait must then take the
+// mark from a read made after the write lands and count the end.
+func testMarkBeforeUntil(t *testing.T, leg string, dbs databases, c markCase) {
+	registerMarkFunc(t)
+	url := dbs.New(t)
+	st := openStore(t, url)
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	hold := newMarkHold(t, leg, st, url)
+	as := &asks.Store{Store: st}
+	r := startRig(t, st, newToken(t, st), streamSettings{poll: time.Hour, heartbeat: time.Minute, extra: func(*store.Store) []Option {
+		return []Option{WithAsks(as), WithAskTouch(time.Hour)}
+	}})
+	ref := r.raiseAsk()
+	hold.arm()
+	marks := make(chan time.Time, 1)
+	ender := &asks.Store{Store: st, MarkClock: func() time.Time {
+		m := time.Now()
+		marks <- m
+		return m
+	}}
+	ended := make(chan error, 1)
+	go func() { ended <- endAsk(ender, c.withdraw, ref) }()
+	if !hold.reached() {
+		t.Fatal("the end's mark write never started")
+	}
+	until := (<-marks).Add(time.Second - c.endAt)
+	time.Sleep(time.Until(until.Add(c.readAt)))
+	got := make(chan markResult, 1)
+	go func() {
+		status, doc := r.getUntil(ref, until)
+		got <- markResult{status, doc}
+	}()
+	if !hold.queued() {
+		t.Fatal("the wait's poll write never queued behind the end's mark write")
+	}
+	hold.release()
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	res := <-got
+	want := "answered"
+	if c.withdraw {
+		want = "withdrawn"
+	}
+	if res.status != http.StatusOK || res.doc["state"] != want || !endFields(res.doc) {
+		t.Errorf("got %d %v, want 200, state %q and the end's fields", res.status, res.doc, want)
+	}
+	if k, err := as.Get(context.Background(), ref); err != nil || k.EndCommitAt == nil || k.EndCommitAt.After(until) {
+		t.Errorf("persisted mark %v (%v), want one at or before until %v", k.EndCommitAt, err, until)
+	}
 }
 
 // timelyAttempts is how many times a case whose end is to be timely runs
