@@ -28,13 +28,14 @@
 // (nightly on main, or EXTENDED=true): -race, fresh vulnerability databases,
 // three stability runs (one unit each) and the seven mutation lanes.
 @Library('homelab') _
+import groovy.transform.Field
 
 // Units' results and attempts, shared by the parallel branches.
-results = [:]        // unit -> 'pass' | 'flaky' | 'fail'
-attemptLog = [:]     // unit -> [attempt maps]
-signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
-commitSha = ''
-imageVersion = ''
+@Field def results = [:]        // unit -> 'pass' | 'flaky' | 'fail'
+@Field def attemptLog = [:]     // unit -> [attempt maps]
+@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
+@Field String commitSha = ''
+@Field String imageVersion = ''
 
 long nowMs() { System.currentTimeMillis() }
 
@@ -61,6 +62,14 @@ String classify(Throwable e, Map a) {
       return null
     }
     return 'infra:interrupted'
+  }
+  // A pipeline-code error (serialization, sandbox) fails the same on any
+  // node: never worth another node.
+  if (e instanceof java.io.NotSerializableException ||
+      e.toString().contains('RejectedAccessException') ||
+      e instanceof groovy.lang.MissingPropertyException ||
+      e instanceof groovy.lang.MissingMethodException) {
+    return null
   }
   return 'infra:' + e.toString().take(80)
 }
@@ -196,6 +205,7 @@ def unitBranch(Map u) {
   }
 }
 
+@NonCPS
 String timingReport() {
   def lines = ['| unit | result | attempt | node | arch | queue (min) | run (min) | outcome |',
                '|------|--------|---------|------|------|-------------|-----------|---------|']
@@ -275,7 +285,8 @@ pipeline {
                       ''')
                     }]
           if (nightly) {
-            (1..3).each { i ->
+            // A list, not 1..3: an IntRange is not serializable in CPS.
+            [1, 2, 3].each { i ->
               units << [name: "Stability ${i}", labels: [any], minutes: 40,
                         body: {
                           sh(returnStatus: true, script: '''
@@ -325,7 +336,8 @@ pipeline {
           timeout(time: 30, unit: 'MINUTES') {
             node('board-test && docker && amd64 || board-test && docker') {
               sh 'rm -rf ci-results ci-summary allure-report previous'
-              attemptLog.keySet().each { name ->
+              // Plain lists: a map's key view is not serializable across steps.
+              for (String name : attemptLog.collect { it.key }) {
                 try {
                   unstash 'res-' + slug(name)
                 } catch (Throwable e) {
@@ -379,7 +391,7 @@ pipeline {
                                    '<a href="' + env.BUILD_URL + 'CI_20summary/">CI summary</a>)')
                 }
               }
-              def flaky = results.findAll { it.value == 'flaky' }.keySet()
+              def flaky = results.findAll { it.value == 'flaky' }.collect { it.key }
               addSummary(icon: 'symbol-time-outline plugin-ionicons-api',
                          text: 'Distributed: ' + attemptLog.size() + ' units on ' +
                                attemptLog.values().flatten().collect { it.node }.findAll { it }.unique().sort().join(', ') +
@@ -404,8 +416,17 @@ pipeline {
     cleanup {
       script {
         def watched = env.BRANCH_NAME == 'main' || env.CI_NIGHTLY == 'true'
-        notifyTelegram(notifyOn: 'ALL', silent: watched ? null : true,
-                       extra: 'distributed' + (env.CI_NIGHTLY == 'true' ? ', extended lane' : ''))
+        // agent none: notifyTelegram's sh needs a workspace.
+        try {
+          timeout(time: 10, unit: 'MINUTES') {
+            node('board-test') {
+              notifyTelegram(notifyOn: 'ALL', silent: watched ? null : true,
+                             extra: 'distributed' + (env.CI_NIGHTLY == 'true' ? ', extended lane' : ''))
+            }
+          }
+        } catch (Throwable e) {
+          echo "notifyTelegram: no node: ${e}"
+        }
       }
     }
   }
