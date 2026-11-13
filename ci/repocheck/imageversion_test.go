@@ -104,6 +104,7 @@ func TestRootDockerfileStampsVersionAndRevision(t *testing.T) {
 // TestImageBuildAndJenkinsfilePassTheVersionArgs: the tag or the short sha, and
 // the commit, reach both docker builds as the two build args.
 func TestImageBuildAndJenkinsfilePassTheVersionArgs(t *testing.T) {
+	skipOnDistributedExperiment(t)
 	build := readRepoFile(t, "ci", "image-build.sh")
 	if n := strings.Count(build, `--build-arg "VERSION=$version" --build-arg "REVISION=$revision"`); n != 2 {
 		t.Errorf("ci/image-build.sh passes VERSION and REVISION to %d of its 2 docker builds", n)

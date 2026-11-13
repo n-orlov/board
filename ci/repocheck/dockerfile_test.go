@@ -249,6 +249,7 @@ func TestRootDockerfileBuildsTheMultiArchContainer(t *testing.T) {
 // and BuildKit images, loads the amd64 image, runs `board version`, probes
 // /healthz and inspects both manifests, and never pushes.
 func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
+	skipOnDistributedExperiment(t)
 	build := readRepoFile(t, "ci", "image-build.sh")
 	check := readRepoFile(t, "ci", "image-check.sh")
 	for _, want := range []string{

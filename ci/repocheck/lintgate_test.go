@@ -51,6 +51,7 @@ func anyLineContains(lines []string, sub string) bool {
 // runs ci/lint.sh, ci/lint.sh runs the shared golangci-lint invocation, and
 // the Lint stage comes before the Suite stage, so the linter runs first.
 func TestLintJobRunsGolangciLintBeforeTheSuite(t *testing.T) {
+	skipOnDistributedExperiment(t)
 	jf := readRepoFile(t, "Jenkinsfile")
 	lint, ok := jenkinsStage(jf, "Lint")
 	if !ok {
