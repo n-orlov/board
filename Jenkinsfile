@@ -124,7 +124,9 @@ def runUnit(Map u) {
                 withEnv(["RALPHD_RUN_ID=${runId}", "BOARD_CI_SHA=${commitSha}",
                          "BOARD_IMAGE_REVISION=${commitSha}", "BOARD_IMAGE_VERSION=${imageVersion}"]) {
                   int rc = u.body()
-                  a.outcome = rc == 0 ? 'pass' : "fail:${rc}"
+                  // -1: the durable-task wrapper died (agent restart killed its
+                  // process group), so the command never finished.
+                  a.outcome = rc == 0 ? 'pass' : rc == -1 ? 'infra:process-lost' : "fail:${rc}"
                 }
                 stash name: 'res-' + slug(u.name), includes: 'ci-results/**',
                       excludes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true
