@@ -84,9 +84,7 @@ String classify(Throwable e, Map a) {
 // Runs one unit. u: name, labels (most preferred first; retries widen to the
 // last), minutes (budget on amd64; arm64 gets u.armFactor x, default 3),
 // body (closure on the node, returns the command's exit status), needs
-// (stash names to unstash first), extraStash (closure on the node, after a run),
-// silentMinutes (how long the command may print nothing, default 45: gremlins
-// and the suite's later passes print only when they finish).
+// (stash names to unstash first), extraStash (closure on the node, after a run).
 def runUnit(Map u) {
   def tried = []
   def attempts = []
@@ -112,37 +110,36 @@ def runUnit(Map u) {
           a.arch = arm ? 'arm64' : 'amd64'
           echo "unit ${u.name}: attempt ${a.n} on ${env.NODE_NAME} (${a.arch}), label ${expr}"
           try {
-            // A silent attempt (agent gone, hung container) ends after
-            // silentMinutes.
+            // One hard limit per attempt, no inner activity timeout: when the
+            // hard limit fired first, the orphaned activity timer later found
+            // no thread and Jenkins force-killed the whole build (#12).
             timeout(time: u.minutes * (arm ? armFactor : 1), unit: 'MINUTES') {
-              timeout(time: u.silentMinutes ?: 45, unit: 'MINUTES', activity: true) {
-                if (sh(returnStatus: true, script: 'docker info >/dev/null 2>&1') != 0) {
-                  a.outcome = 'infra:docker'
-                  return
-                }
-                checkout scm
-                sh 'git clean -ffdxq'
-                if (!commitSha) {
-                  commitSha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
-                  imageVersion = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short=7 HEAD').trim()
-                }
-                if (sh(returnStatus: true, script: 'ci/jenkins-image.sh') != 0) {
-                  a.outcome = 'infra:ci-image'
-                  return
-                }
-                (u.needs ?: []).each { unstash it }
-                withEnv(["RALPHD_RUN_ID=${runId}", "BOARD_CI_SHA=${commitSha}",
-                         "BOARD_IMAGE_REVISION=${commitSha}", "BOARD_IMAGE_VERSION=${imageVersion}"]) {
-                  int rc = u.body()
-                  // -1: the durable-task wrapper died (agent restart killed its
-                  // process group), so the command never finished.
-                  a.outcome = rc == 0 ? 'pass' : rc == -1 ? 'infra:process-lost' : "fail:${rc}"
-                }
-                stash name: 'res-' + slug(u.name), includes: 'ci-results/**',
-                      excludes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true
-                if (u.extraStash) {
-                  u.extraStash()
-                }
+              if (sh(returnStatus: true, script: 'docker info >/dev/null 2>&1') != 0) {
+                a.outcome = 'infra:docker'
+                return
+              }
+              checkout scm
+              sh 'git clean -ffdxq'
+              if (!commitSha) {
+                commitSha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                imageVersion = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short=7 HEAD').trim()
+              }
+              if (sh(returnStatus: true, script: 'ci/jenkins-image.sh') != 0) {
+                a.outcome = 'infra:ci-image'
+                return
+              }
+              (u.needs ?: []).each { unstash it }
+              withEnv(["RALPHD_RUN_ID=${runId}", "BOARD_CI_SHA=${commitSha}",
+                       "BOARD_IMAGE_REVISION=${commitSha}", "BOARD_IMAGE_VERSION=${imageVersion}"]) {
+                int rc = u.body()
+                // -1: the durable-task wrapper died (agent restart killed its
+                // process group), so the command never finished.
+                a.outcome = rc == 0 ? 'pass' : rc == -1 ? 'infra:process-lost' : "fail:${rc}"
+              }
+              stash name: 'res-' + slug(u.name), includes: 'ci-results/**',
+                    excludes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true
+              if (u.extraStash) {
+                u.extraStash()
               }
             }
           } finally {
@@ -276,7 +273,7 @@ pipeline {
           def units = []
           // gofmt, go vet, tidy drift, golangci-lint.
           units << [name: 'Lint', labels: [ANY], minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
-          units << [name: 'Suite', labels: [AMD, ANY], minutes: nightly ? 120 : 45, armFactor: 2, silentMinutes: 60, signal: 'Suite',
+          units << [name: 'Suite', labels: [AMD, ANY], minutes: nightly ? 120 : 45, armFactor: 2, signal: 'Suite',
                     body: { sh(returnStatus: true, script: 'ci/run.sh ci/suite.sh') }]
           // Both platforms cross-built and never pushed; the amd64 image is run
           // and probed, so amd64 only.
@@ -336,7 +333,7 @@ pipeline {
           // A list, not 1..3: an IntRange is not serializable in CPS.
           [1, 2, 3].each { i ->
             // stability.sh prints only at the end (14 min on kilo, 22+ on golf).
-            def u = [name: "Stability ${i}", labels: [ANY], minutes: 40, silentMinutes: 60,
+            def u = [name: "Stability ${i}", labels: [ANY], minutes: 40,
                      body: {
                        sh(returnStatus: true, script: '''
                          set -e
@@ -361,12 +358,10 @@ pipeline {
           def branches = [:]
           // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
           // also runs Stryker over web/src/lib. server-core gets 50 min: 35
-          // ran out on a busy int21h-ws (#12). gremlins prints nothing until a
-          // lane ends (server-streams went 50 min silent on bravo in #12), so
-          // the silence limit covers the whole arm64 budget.
+          // ran out on a busy int21h-ws (#12).
           ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
             int minutes = lane == 'server-core' ? 50 : 35
-            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: minutes, silentMinutes: minutes * 3,
+            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: minutes,
                      body: { sh(returnStatus: true, script: "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
             branches[u.name] = unitBranch(u)
           }
