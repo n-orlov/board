@@ -384,9 +384,19 @@ func TestAnIdleStreamSendsAPingAtTheConfiguredHeartbeat(t *testing.T) {
 	})
 }
 
+// The event the stream is to carry past the write timeout is written to the
+// store and the feed woken, as the server's own write path does, rather than
+// through a request to this server: a request is itself cut by the 300 ms
+// write timeout when it takes longer than that to serve (a slow commit on a
+// loaded host), and the client then reads EOF. The stream, not that request,
+// is under test.
 func TestAStreamOutlivesTheServersWriteTimeout(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
-		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: 100 * time.Millisecond, writeTimeout: 300 * time.Millisecond})
+		st := openStore(t, dbs.New(t))
+		if err := st.Migrate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		r := startRig(t, st, newToken(t, st), streamSettings{poll: time.Hour, heartbeat: 100 * time.Millisecond, writeTimeout: 300 * time.Millisecond})
 		s := r.openStream("/api/v1/stream?topics=events")
 		start := time.Now()
 		for time.Since(start) < 1500*time.Millisecond {
@@ -394,7 +404,10 @@ func TestAStreamOutlivesTheServersWriteTimeout(t *testing.T) {
 				t.Fatalf("block = %q, want \": ping\"", got)
 			}
 		}
-		r.createInitiative("aa")
+		if _, err := (initiatives.Store{Store: st}).Create(context.Background(), audit.Actor{Handle: "tester@host"}, "key:x", initiatives.New{Slug: "aa", Title: "Title of aa"}); err != nil {
+			t.Fatal(err)
+		}
+		r.feed.Notify()
 		if msg := s.nextMessage(); !strings.HasPrefix(msg, "event: board") {
 			t.Errorf("message after the write timeout = %q", msg)
 		}
