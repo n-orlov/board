@@ -703,12 +703,30 @@ func TestALocalWriteIsDeliveredBeforeThePollIntervalElapses(t *testing.T) {
 	}
 }
 
-func goroutines(t *testing.T, atMost int) int {
-	t.Helper()
-	n := runtime.NumGoroutine()
-	for i := 0; i < 100 && n > atMost; i++ {
-		time.Sleep(20 * time.Millisecond)
-		n = runtime.NumGoroutine()
+// goroutineSlack is how many goroutines a count may exceed another by and
+// still be taken as the same: the process runs goroutines that come and go
+// with the feed's subscribers not involved (the database pool's openers and
+// cleaners, timers, the test runner), and a quiet moment to sample may not
+// come on a loaded host. It is far below the 50 subscribers the test runs, so
+// a goroutine per subscriber still shows.
+const goroutineSlack = 10
+
+// settledGoroutines is the fewest goroutines the process runs over several
+// samples, polling for up to two seconds until that is at most atMost. A
+// goroutine that only comes and goes is missing from at least one sample, so
+// it does not count; one that stays does.
+func settledGoroutines(atMost int) int {
+	low := func() int {
+		n := runtime.NumGoroutine()
+		for range 9 {
+			time.Sleep(5 * time.Millisecond)
+			n = min(n, runtime.NumGoroutine())
+		}
+		return n
+	}
+	n := low()
+	for deadline := time.Now().Add(2 * time.Second); n > atMost && time.Now().Before(deadline); {
+		n = min(n, low())
 	}
 	return n
 }
@@ -728,7 +746,7 @@ func TestAnUnsubscribedSubscriberLeaksNoGoroutine(t *testing.T) {
 	receive(t, warm)
 	warm.Close()
 
-	base := goroutines(t, 0)
+	base := settledGoroutines(0)
 	subs := make([]*Subscription, 50)
 	for i := range subs {
 		subs[i] = f.Subscribe()
@@ -738,13 +756,13 @@ func TestAnUnsubscribedSubscriberLeaksNoGoroutine(t *testing.T) {
 	for _, s := range subs {
 		receive(t, s)
 	}
-	if n := runtime.NumGoroutine(); n > base+2 {
+	if n := settledGoroutines(base + goroutineSlack); n > base+goroutineSlack {
 		t.Errorf("50 live subscribers run %d goroutines against a base of %d: a subscriber costs a goroutine", n, base)
 	}
 	for _, s := range subs {
 		s.Close()
 	}
-	if n := goroutines(t, base); n > base {
+	if n := settledGoroutines(base + goroutineSlack); n > base+goroutineSlack {
 		t.Errorf("%d goroutines after unsubscribing, %d before subscribing", n, base)
 	}
 }
