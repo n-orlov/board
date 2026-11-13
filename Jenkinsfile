@@ -322,6 +322,12 @@ pipeline {
                            if (env.CI_NIGHTLY == 'true') {
                              sh "ci/run.sh sh -c 'rm -rf /go-cache/trivy/db /go-cache/trivy/java-db /go-cache/xdg-cache/govulncheck'"
                            }
+                           // crap-ts and the openapi gates read web/node_modules, which
+                           // Suite installed on its own node, not this one.
+                           int rc = sh(returnStatus: true, script: "ci/run.sh sh -c '[ -d web/node_modules ] || (cd web && npm ci --no-audit --no-fund)'")
+                           if (rc != 0) {
+                             return rc
+                           }
                            sh(returnStatus: true, script: 'ci/run.sh ci/quality.sh "$BOARD_CI_OUT" ci/quality.json --mutation-deferred')
                          }])
                 env.QUALITY_RESULT = results['Quality'] == 'fail' ? 'failing' : 'passing'
