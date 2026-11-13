@@ -361,9 +361,12 @@ pipeline {
           def branches = [:]
           // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
           // also runs Stryker over web/src/lib. server-core gets 50 min: 35
-          // ran out on a busy int21h-ws (#12).
+          // ran out on a busy int21h-ws (#12). gremlins prints nothing until a
+          // lane ends (server-streams went 50 min silent on bravo in #12), so
+          // the silence limit covers the whole arm64 budget.
           ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
-            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: lane == 'server-core' ? 50 : 35,
+            int minutes = lane == 'server-core' ? 50 : 35
+            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: minutes, silentMinutes: minutes * 3,
                      body: { sh(returnStatus: true, script: "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
             branches[u.name] = unitBranch(u)
           }
