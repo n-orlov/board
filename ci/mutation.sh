@@ -52,8 +52,9 @@ timeout_coefficient=60
 # costs: a package whose tests take 30 s then gets a bound of seconds and every
 # mutant of it times out unjudged. -count=1 makes the covered run a real run,
 # so the coefficient multiplies the suite's real duration. The coefficient
-# itself is unchanged.
-GOFLAGS="${GOFLAGS:+$GOFLAGS }-count=1"
+# itself is unchanged. -timeout=30m: go test's default 10 min kills the covered
+# run of internal/server on an arm64 phone (about 5 min on amd64, over 10 there).
+GOFLAGS="${GOFLAGS:+$GOFLAGS }-count=1 -timeout=30m"
 export GOFLAGS
 
 mkdir -p "$outdir"
