@@ -24,9 +24,14 @@
 // image tar). The report runs once at the end, on any pool node, over every
 // unit's stash.
 //
-// Every branch: Lint, Suite, Image, Quality, Allure smoke. Extended lane
-// (nightly on main, or EXTENDED=true): -race, fresh vulnerability databases,
-// three stability runs (one unit each) and the seven mutation lanes.
+// Three phases, one after another, so the pool never runs all three test
+// kinds at once; each phase's units run in parallel:
+//   1. Core (every build): Lint, Suite, Image, Allure smoke, Quality.
+//   2. Stability (EXTENDED=true, or nightly on main): three stability runs,
+//      one unit each; EXTENDED also adds -race and fresh vulnerability
+//      databases to Core.
+//   3. Mutation (MUTATION=true, or nightly on main): the seven mutation lanes.
+// A phase runs only if every earlier one passed (UNSTABLE counts as passed).
 @Library('homelab') _
 import groovy.transform.Field
 
@@ -36,6 +41,8 @@ import groovy.transform.Field
 @Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
 @Field String commitSha = ''
 @Field String imageVersion = ''
+@Field final String AMD = 'board-test && amd64 && docker'
+@Field final String ANY = 'board-test && docker'
 
 long nowMs() { System.currentTimeMillis() }
 
@@ -232,13 +239,15 @@ pipeline {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
-    timeout(time: 200, unit: 'MINUTES')
+    timeout(time: 300, unit: 'MINUTES')
     copyArtifactPermission('/board/release,/board/ci/*')
   }
 
   parameters {
     booleanParam(name: 'EXTENDED', defaultValue: false,
-                 description: 'Extended CI: -race, fresh vulnerability databases, stability runs, mutation')
+                 description: 'Extended CI: -race, fresh vulnerability databases, then the stability runs')
+    booleanParam(name: 'MUTATION', defaultValue: false,
+                 description: 'Mutation testing: the seven mutation lanes, after Core (and Stability if extended)')
   }
 
   triggers {
@@ -254,32 +263,29 @@ pipeline {
   }
 
   stages {
-    stage('Units') {
+    stage('Core') {
       steps {
         script {
-          boolean nightly = params.EXTENDED || !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
+          boolean timer = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
+          boolean nightly = params.EXTENDED || timer
           env.CI_NIGHTLY = nightly ? 'true' : 'false'
+          env.CI_MUTATION = (params.MUTATION || timer) ? 'true' : 'false'
           env.BOARD_CI_GO_EXTRA_FLAGS = nightly ? '-race' : ''
-          if (nightly) {
-            currentBuild.description = 'distributed, extended (-race, stability, mutation)'
-          } else {
-            currentBuild.description = 'distributed'
-          }
-          String amd = 'board-test && amd64 && docker'
-          String any = 'board-test && docker'
+          def lanes = ['core'] + (nightly ? ['stability'] : []) + (env.CI_MUTATION == 'true' ? ['mutation'] : [])
+          currentBuild.description = 'distributed: ' + lanes.join(' + ') + (nightly ? ' (-race)' : '')
           def units = []
           // gofmt, go vet, tidy drift, golangci-lint.
-          units << [name: 'Lint', labels: [any], minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
-          units << [name: 'Suite', labels: [amd, any], minutes: nightly ? 120 : 45, armFactor: 2, silentMinutes: 60, signal: 'Suite',
+          units << [name: 'Lint', labels: [ANY], minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
+          units << [name: 'Suite', labels: [AMD, ANY], minutes: nightly ? 120 : 45, armFactor: 2, silentMinutes: 60, signal: 'Suite',
                     body: { sh(returnStatus: true, script: 'ci/run.sh ci/suite.sh') }]
           // Both platforms cross-built and never pushed; the amd64 image is run
           // and probed, so amd64 only.
-          units << [name: 'Image', labels: [amd], minutes: 30, signal: 'Image',
+          units << [name: 'Image', labels: [AMD], minutes: 30, signal: 'Image',
                     body: {
                       sh(returnStatus: true, script: 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"')
                     },
                     extraStash: { stash name: 'image', includes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true }]
-          units << [name: 'Allure smoke', labels: [any], minutes: 15,
+          units << [name: 'Allure smoke', labels: [ANY], minutes: 15,
                     body: {
                       sh(returnStatus: true, script: '''
                         set -e
@@ -289,26 +295,6 @@ pipeline {
                         ALLURE_CACHE_DIR="$HOME/.cache/board-allure" ci/allure-smoke.sh allure-smoke/fixture allure-smoke/report
                       ''')
                     }]
-          if (nightly) {
-            // A list, not 1..3: an IntRange is not serializable in CPS.
-            [1, 2, 3].each { i ->
-              // stability.sh prints only at the end (14 min on kilo, 22+ on golf).
-              units << [name: "Stability ${i}", labels: [any], minutes: 40, silentMinutes: 60,
-                        body: {
-                          sh(returnStatus: true, script: '''
-                            set -e
-                            mkdir -p "$BOARD_CI_OUT/stability"
-                            TMPDIR="$PWD/$BOARD_CI_OUT/stability" ci/stability.sh 1
-                          ''')
-                        }]
-            }
-            // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
-            // also runs Stryker over web/src/lib.
-            ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
-              units << [name: "Mutation ${lane}", labels: [any], minutes: 35,
-                        body: { sh(returnStatus: true, script: "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
-            }
-          }
           def branches = [:]
           units.each { u -> branches[u.name] = unitBranch(u) }
           // The quality gates read Suite's coverage and Image's tar: wait for both.
@@ -317,7 +303,7 @@ pipeline {
               waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['Image'] == true }
               catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 env.QUALITY_RESULT = 'failing'
-                runUnit([name: 'Quality', labels: [amd, any], minutes: 30, needs: ['res-suite', 'res-image', 'image'],
+                runUnit([name: 'Quality', labels: [AMD, ANY], minutes: 30, needs: ['res-suite', 'res-image', 'image'],
                          body: {
                            if (env.CI_NIGHTLY == 'true') {
                              sh "ci/run.sh sh -c 'rm -rf /go-cache/trivy/db /go-cache/trivy/java-db /go-cache/xdg-cache/govulncheck'"
@@ -333,6 +319,53 @@ pipeline {
                 env.QUALITY_RESULT = results['Quality'] == 'fail' ? 'failing' : 'passing'
               }
             }
+          }
+          parallel branches
+        }
+      }
+    }
+
+    stage('Stability') {
+      when {
+        beforeAgent true
+        expression { env.CI_NIGHTLY == 'true' && currentBuild.currentResult != 'FAILURE' }
+      }
+      steps {
+        script {
+          def branches = [:]
+          // A list, not 1..3: an IntRange is not serializable in CPS.
+          [1, 2, 3].each { i ->
+            // stability.sh prints only at the end (14 min on kilo, 22+ on golf).
+            def u = [name: "Stability ${i}", labels: [ANY], minutes: 40, silentMinutes: 60,
+                     body: {
+                       sh(returnStatus: true, script: '''
+                         set -e
+                         mkdir -p "$BOARD_CI_OUT/stability"
+                         TMPDIR="$PWD/$BOARD_CI_OUT/stability" ci/stability.sh 1
+                       ''')
+                     }]
+            branches[u.name] = unitBranch(u)
+          }
+          parallel branches
+        }
+      }
+    }
+
+    stage('Mutation') {
+      when {
+        beforeAgent true
+        expression { env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE' }
+      }
+      steps {
+        script {
+          def branches = [:]
+          // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
+          // also runs Stryker over web/src/lib. server-core gets 50 min: 35
+          // ran out on a busy int21h-ws (#12).
+          ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
+            def u = [name: "Mutation ${lane}", labels: [ANY], minutes: lane == 'server-core' ? 50 : 35,
+                     body: { sh(returnStatus: true, script: "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
+            branches[u.name] = unitBranch(u)
           }
           parallel branches
         }
@@ -427,13 +460,14 @@ pipeline {
     }
     cleanup {
       script {
-        def watched = env.BRANCH_NAME == 'main' || env.CI_NIGHTLY == 'true'
+        def watched = env.BRANCH_NAME == 'main' || env.CI_NIGHTLY == 'true' || env.CI_MUTATION == 'true'
         // agent none: notifyTelegram's sh needs a workspace.
         try {
           timeout(time: 10, unit: 'MINUTES') {
             node('board-test') {
               notifyTelegram(notifyOn: 'ALL', silent: watched ? null : true,
-                             extra: 'distributed' + (env.CI_NIGHTLY == 'true' ? ', extended lane' : ''))
+                             extra: 'distributed' + (env.CI_NIGHTLY == 'true' ? ', extended lane' : '') +
+                                    (env.CI_MUTATION == 'true' ? ', mutation' : ''))
             }
           }
         } catch (Throwable e) {
