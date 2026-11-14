@@ -597,6 +597,77 @@ func TestStartOnADoneTaskIsRefusedAndWritesNothing(t *testing.T) {
 	}
 }
 
+// liveLeasesOnSettledTasks counts the live leases whose task is done or closed:
+// the invariant a lease write and a done or close must never leave broken.
+func (e env) liveLeasesOnSettledTasks(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := e.S.Store.Reader().QueryRow(`SELECT COUNT(*) FROM leases l JOIN tasks t ON t.id = l.task_id
+		WHERE l.state = 'live' AND t.status IN ('done', 'closed')`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestRenewAfterTheTaskIsDoneIsRefusedAndLeavesNoLiveLease(t *testing.T) {
+	e := newEnv(t)
+	l := e.start(t, me, "aa-1", nil).Lease
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	e.Clock.add(time.Second)
+	if _, err := e.S.Renew(ctx, me, "key:r", l.Ref, leases.Renew{}); !errors.Is(err, leases.ErrConflict) {
+		t.Errorf("renew after done: %v, want a conflict", err)
+	}
+	if got, _ := e.S.Get(ctx, l.Ref); got.State != "ended" {
+		t.Errorf("lease = %+v, want ended", got)
+	}
+	if n := e.liveLeasesOnSettledTasks(t); n != 0 {
+		t.Errorf("%d live leases on a done task", n)
+	}
+}
+
+func TestEveryOrderOfStartDoneAndCloseLeavesNoLiveLeaseOnASettledTask(t *testing.T) {
+	e := newEnv(t)
+	// aa-1: another actor's lease, forced done, then a start by each actor
+	e.start(t, bob, "aa-1", nil)
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []audit.Actor{me, bob} {
+		if _, err := e.S.Start(ctx, a, "key:"+a.Handle, leases.Start{Task: "aa-1", Intent: "again"}); !errors.Is(err, leases.ErrConflict) {
+			t.Errorf("%s start on a done task: %v, want a conflict", a.Handle, err)
+		}
+	}
+	// aa-2: the same two starts after a close
+	e.start(t, me, "aa-2", nil)
+	if _, err := e.Tasks.Close(ctx, me, "key:y", "aa-2", "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []audit.Actor{me, bob} {
+		if _, err := e.S.Start(ctx, a, "key:z"+a.Handle, leases.Start{Task: "aa-2", Intent: "again"}); !errors.Is(err, leases.ErrConflict) {
+			t.Errorf("%s start on a closed task: %v, want a conflict", a.Handle, err)
+		}
+	}
+	if n := e.liveLeasesOnSettledTasks(t); n != 0 {
+		t.Errorf("%d live leases on done or closed tasks", n)
+	}
+}
+
+func TestReopeningADoneTaskLetsALeaseStartAgain(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Tasks.Reopen(ctx, me, "key:y", "aa-1"); err != nil {
+		t.Fatal(err)
+	}
+	l := e.start(t, bob, "aa-1", nil).Lease
+	if l.State != "live" || e.liveLeasesOnSettledTasks(t) != 0 {
+		t.Errorf("lease = %+v", l)
+	}
+}
+
 func TestGetReadsByRefAndUlidInEitherCase(t *testing.T) {
 	e := newEnv(t)
 	l := e.start(t, me, "aa-1", nil).Lease
