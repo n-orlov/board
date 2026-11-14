@@ -182,19 +182,18 @@ quality_report="$outdir/quality-report.txt"
 mutation_dir="$outdir/mutation"
 artifact_base=""
 [ -n "${BUILD_URL:-}" ] && artifact_base="$BUILD_URL"
-# The tile agrees with ci/quality.sh's exit status: failed when any gate
-# failed (or has no verdict line), passed when there is at least one gate and
-# none failed. A deferred gate is neither.
-quality=""
-if [ -s "$quality_report" ]; then
-    verdicts=$(gate_sections verdicts "" "" < "$quality_report")
-    gates=$(printf '%s\n' "$verdicts" | grep -c . || true)
-    failed_gates=$(printf '%s\n' "$verdicts" | grep -c '^failed$' || true)
-    if [ "${gates:-0}" -gt 0 ] && [ "${failed_gates:-0}" -eq 0 ]; then
-        quality="passed"
-    else
-        quality="failed"
-    fi
+# The tile agrees with ci/quality.sh's exit status: passed only when the
+# report has at least one gate and none failed (a deferred gate is not a
+# failure); failed otherwise -- a gate with no verdict line, an empty report
+# and a missing report all read failed, never passed and never blank.
+verdicts=""
+[ -f "$quality_report" ] && verdicts=$(gate_sections verdicts "" "" < "$quality_report")
+gates=$(printf '%s\n' "$verdicts" | grep -c . || true)
+failed_gates=$(printf '%s\n' "$verdicts" | grep -c '^failed$' || true)
+if [ "${gates:-0}" -gt 0 ] && [ "${failed_gates:-0}" -eq 0 ]; then
+    quality="passed"
+else
+    quality="failed"
 fi
 
 fail=$(count fail)

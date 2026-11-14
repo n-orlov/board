@@ -24,6 +24,10 @@ func section(name, body, verdict string) string {
 // renderSummary runs the real ci/jenkins-report.sh over an output directory
 // holding the given quality report (and any extra files, keyed by path under
 // that directory), with no suite results, and returns ci-summary/index.html.
+// noQualityReport, passed as renderSummary's report, leaves ci-results without
+// a quality-report.txt at all (the Quality stage never ran).
+const noQualityReport = "\x00no quality report\x00"
+
 func renderSummary(t *testing.T, qualityReport string, extra map[string]string, env ...string) string {
 	t.Helper()
 	root, err := repositoryRoot()
@@ -32,7 +36,13 @@ func renderSummary(t *testing.T, qualityReport string, extra map[string]string, 
 	}
 	work := t.TempDir()
 	out := filepath.Join(work, "ci-results")
-	files := map[string]string{"quality-report.txt": qualityReport}
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	if qualityReport != noQualityReport {
+		files["quality-report.txt"] = qualityReport
+	}
 	for k, v := range extra {
 		files[k] = v
 	}
@@ -210,10 +220,27 @@ func TestSummaryMutationResultsWithoutAVerdictFileLinkToTheReports(t *testing.T)
 	}
 }
 
-func TestSummaryWithNoQualityReportHasNoQualityVerdict(t *testing.T) {
+// Criterion (4): the tile reads passed only when the report holds at least
+// one gate and none failed; anything else -- an empty report, a missing one,
+// sections with no verdict line -- reads failed, never blank and never passed.
+func TestSummaryWithAnEmptyQualityReportReadsFailed(t *testing.T) {
 	html := renderSummary(t, "", nil)
-	if _, value := qualityTile(t, html); value != "" && value != "-" {
-		t.Errorf("tile %q, want none", value)
+	if class, value := qualityTile(t, html); value != "failed" || class != "bad" {
+		t.Errorf("tile %q (class %q), want failed (bad)", value, class)
+	}
+}
+
+func TestSummaryWithNoQualityReportReadsFailed(t *testing.T) {
+	html := renderSummary(t, noQualityReport, nil)
+	if class, value := qualityTile(t, html); value != "failed" || class != "bad" {
+		t.Errorf("tile %q (class %q), want failed (bad)", value, class)
+	}
+}
+
+func TestSummaryWithSectionsButNoVerdictLinesReadsFailed(t *testing.T) {
+	html := renderSummary(t, "=== crap gate ===\ncrap gate: ok\nwhat to do: nothing\n", nil)
+	if class, value := qualityTile(t, html); value != "failed" || class != "bad" {
+		t.Errorf("tile %q (class %q), want failed (bad)", value, class)
 	}
 }
 

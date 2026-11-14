@@ -179,8 +179,9 @@ unchanged, but it is never reported as passed. The CI summary page
 wording: `passed` is a green badge, `failed` a red one with the section open,
 `deferred` a neutral grey one, and a section with no verdict line reads
 `failed`. The quality tile reads `passed` when the report has at least one gate
-and none failed (a deferred gate is not a failure), `failed` otherwise, so it
-agrees with `ci/quality.sh`'s exit status. A deferred `mutation-go` or `stryker`
+and none failed (a deferred gate is not a failure), `failed` otherwise (an
+empty or missing report included), so it agrees with `ci/quality.sh`'s exit
+status. A deferred `mutation-go` or `stryker`
 section says "not run in this build" when the build has no Mutation unit
 results. When it has them (`ci-results/mutation/`, unstashed by the report step)
 the section shows that unit's verdict for the gate, from
