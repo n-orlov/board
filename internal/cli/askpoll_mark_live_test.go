@@ -33,6 +33,16 @@ var (
 // board's store opens.
 func registerMarkHold(t *testing.T) {
 	t.Helper()
+	if err := installMarkHold(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// installMarkHold registers the scalar function once. TestMain runs it before
+// any test opens a database: the driver reads its functions unlocked as it
+// opens a connection, so registering one while a parallel test opens its
+// store would be a data race.
+func installMarkHold() error {
 	markFuncOnce.Do(func() {
 		markFuncErr = sqlite.RegisterScalarFunction("hold_end_commit_mark", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 			path, _ := args[0].(string)
@@ -44,9 +54,7 @@ func registerMarkHold(t *testing.T) {
 			return int64(0), nil
 		})
 	})
-	if markFuncErr != nil {
-		t.Fatal(markFuncErr)
-	}
+	return markFuncErr
 }
 
 // holdMarkWrites makes the write of the end's commit mark wait until the
@@ -82,12 +90,14 @@ const timelyAttempts = 5
 // under test, and is run again on a fresh board instead of being judged. Every
 // poll whose end was timely is judged in full.
 func TestAskPollLiveCountsAnEndWhoseTimelyMarkIsPersistedAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		offset time.Duration // the end's last statement, from the deadline
 		counts bool
 	}{{-400 * time.Millisecond, true}, {-150 * time.Millisecond, true}, {100 * time.Millisecond, false}} {
 		for _, e := range endCases {
 			t.Run(fmt.Sprintf("withdraw=%v offset=%s", e.withdraw, c.offset), func(t *testing.T) {
+				t.Parallel()
 				for attempt := 1; ; attempt++ {
 					code, out, mark, deadline := liveMarkPoll(t, c.offset, e.withdraw)
 					if c.counts && mark != nil && mark.After(deadline) {

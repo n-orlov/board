@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -130,13 +131,17 @@ func pollCommitHeldEnd(t *testing.T, withdraw bool, endAt, release time.Duration
 // the poll's first read reaches the server's handler only after that COMMIT:
 // the ask is committed by then, but not by the deadline.
 func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenForAFirstReadAfterIt(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
-		code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, 1300*time.Millisecond, func(b *liveAskBoard, _ time.Time) {
-			b.early = 1600 * time.Millisecond
+		t.Run(fmt.Sprintf("withdraw=%v", e.withdraw), func(t *testing.T) {
+			t.Parallel()
+			code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, 1300*time.Millisecond, func(b *liveAskBoard, _ time.Time) {
+				b.early = 1600 * time.Millisecond
+			})
+			if code != ExitTimeout || out != stillOpen || took < 1600*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the queued read is answered", e.withdraw, code, out, took)
+			}
 		})
-		if code != ExitTimeout || out != stillOpen || took < 1600*time.Millisecond {
-			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the queued read is answered", e.withdraw, code, out, took)
-		}
 	}
 }
 
@@ -144,14 +149,18 @@ func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenForAFirstReadAfte
 // are all taken across the deadline, until after the COMMIT returned, so the
 // read the server makes at the deadline runs only then and finds the end.
 func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhileTheReadersAreTaken(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
-		code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, 1300*time.Millisecond, func(b *liveAskBoard, start time.Time) {
-			b.early = 200 * time.Millisecond
-			b.hogReaders(start, 900*time.Millisecond, 1450*time.Millisecond)
+		t.Run(fmt.Sprintf("withdraw=%v", e.withdraw), func(t *testing.T) {
+			t.Parallel()
+			code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, 1300*time.Millisecond, func(b *liveAskBoard, start time.Time) {
+				b.early = 200 * time.Millisecond
+				b.hogReaders(start, 900*time.Millisecond, 1450*time.Millisecond)
+			})
+			if code != ExitTimeout || out != stillOpen || took < 1400*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the readers are free", e.withdraw, code, out, took)
+			}
 		})
-		if code != ExitTimeout || out != stillOpen || took < 1400*time.Millisecond {
-			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the readers are free", e.withdraw, code, out, took)
-		}
 	}
 }
 
@@ -160,20 +169,24 @@ func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhileTheReadersAr
 // mark is sampled after that COMMIT, so it is after the deadline, and taking a
 // mark persisted late must not turn it into proof.
 func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhenItsMarkWriteIsHeldToo(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
 		for _, release := range []time.Duration{1100 * time.Millisecond, 1300 * time.Millisecond} {
-			registerMarkHold(t)
-			code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, release, func(b *liveAskBoard, start time.Time) {
-				b.early = 200 * time.Millisecond
-				mark := b.holdMarkWrites()
-				go func() {
-					time.Sleep(time.Until(start.Add(1500 * time.Millisecond)))
-					close(mark.release)
-				}()
+			t.Run(fmt.Sprintf("withdraw=%v release=%s", e.withdraw, release), func(t *testing.T) {
+				t.Parallel()
+				registerMarkHold(t)
+				code, out, took := pollCommitHeldEnd(t, e.withdraw, 300*time.Millisecond, release, func(b *liveAskBoard, start time.Time) {
+					b.early = 200 * time.Millisecond
+					mark := b.holdMarkWrites()
+					go func() {
+						time.Sleep(time.Until(start.Add(1500 * time.Millisecond)))
+						close(mark.release)
+					}()
+				})
+				if code != ExitTimeout || out != stillOpen {
+					t.Errorf("withdraw=%v release=%s: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, release, code, out, took)
+				}
 			})
-			if code != ExitTimeout || out != stillOpen {
-				t.Errorf("withdraw=%v release=%s: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, release, code, out, took)
-			}
 		}
 	}
 }
@@ -182,13 +195,17 @@ func TestAskPollLiveEndWhoseCommitReturnsAfterTheDeadlineIsOpenWhenItsMarkWriteI
 // and the readers are taken across it, however briefly after: no tolerance
 // is given to a COMMIT that returned after the deadline.
 func TestAskPollLiveEndWhoseCommitReturnsJustAfterTheDeadlineIsOpenWhileTheReadersAreTaken(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
-		code, out, took := pollCommitHeldEnd(t, e.withdraw, 700*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
-			b.early = 200 * time.Millisecond
-			b.hogReaders(start, 900*time.Millisecond, 1450*time.Millisecond)
+		t.Run(fmt.Sprintf("withdraw=%v", e.withdraw), func(t *testing.T) {
+			t.Parallel()
+			code, out, took := pollCommitHeldEnd(t, e.withdraw, 700*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
+				b.early = 200 * time.Millisecond
+				b.hogReaders(start, 900*time.Millisecond, 1450*time.Millisecond)
+			})
+			if code != ExitTimeout || out != stillOpen {
+				t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, code, out, took)
+			}
 		})
-		if code != ExitTimeout || out != stillOpen {
-			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 with the still-open line", e.withdraw, code, out, took)
-		}
 	}
 }

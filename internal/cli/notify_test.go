@@ -119,6 +119,7 @@ func TestServeRejectsABadNotifyTimeoutOrHeaderWithoutRepeatingTheValue(t *testin
 // receiver and an outbox row, and checks BOARD_NOTIFY_HEADER reached the
 // receiver and appears in no log line, no event and no outbox row.
 func TestServeDeliversTheOutboxWithTheHeaderAndLogsNoSecret(t *testing.T) {
+	t.Parallel()
 	const secret = "hunter2-receiver-token"
 	url := sqliteURL(t)
 	st, err := store.Open(url)

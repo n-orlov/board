@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,30 @@ type liveAskBoard struct {
 	onGet func(r *http.Request)
 }
 
+// liveSlots caps how many live boards run at once. The live tests run in
+// parallel, but each judges what happened by margins of 50 ms or so on the
+// real clock, so only a few share the host at a time: enough to overlap their
+// sleeps, too few to starve one another's timers (under -race especially).
+var (
+	liveSlots = make(chan struct{}, 4)
+	liveHeld  sync.Map // *testing.T -> its slot is taken
+)
+
+// takeLiveSlot waits for a free slot for t, held until t ends. A test that
+// opens several boards (a retried poll) takes one slot for all of them.
+func takeLiveSlot(t *testing.T) {
+	if _, held := liveHeld.LoadOrStore(t, true); held {
+		return
+	}
+	liveSlots <- struct{}{}
+	t.Cleanup(func() {
+		liveHeld.Delete(t)
+		<-liveSlots
+	})
+}
+
 func newLiveAskBoard(t *testing.T) *liveAskBoard {
+	takeLiveSlot(t)
 	path := filepath.Join(t.TempDir(), "b.db")
 	st, err := store.Open("sqlite://" + path)
 	if err != nil {
@@ -234,17 +258,21 @@ const stillOpen = "A1 still open → board ask show A1\n"
 // An answer or withdrawal committed before the deadline ends `board ask --poll
 // 1s` with exit 0 or 6, on the real clock against the real server and store.
 func TestAskPollLiveCountsAnEndCommittedBeforeTheDeadline(t *testing.T) {
+	t.Parallel()
 	for _, c := range endCases {
-		b := newLiveAskBoard(t)
-		start := time.Now()
-		done := b.endAt(start, 300*time.Millisecond, c.withdraw)
-		code, out, took := b.runLivePoll()
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		if code != c.code || out != c.out {
-			t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", c.withdraw, code, out, took, c.code, c.out)
-		}
+		t.Run(fmt.Sprintf("withdraw=%v", c.withdraw), func(t *testing.T) {
+			t.Parallel()
+			b := newLiveAskBoard(t)
+			start := time.Now()
+			done := b.endAt(start, 300*time.Millisecond, c.withdraw)
+			code, out, took := b.runLivePoll()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if code != c.code || out != c.out {
+				t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", c.withdraw, code, out, took, c.code, c.out)
+			}
+		})
 	}
 }
 
@@ -252,23 +280,27 @@ func TestAskPollLiveCountsAnEndCommittedBeforeTheDeadline(t *testing.T) {
 // server's answer reaches the CLI: every response is held back past the
 // deadline, so the CLI observes the end only after it.
 func TestAskPollLiveCountsAnEndCommittedInTimeButObservedLate(t *testing.T) {
+	t.Parallel()
 	for _, at := range []time.Duration{300 * time.Millisecond, 950 * time.Millisecond} {
 		for _, c := range endCases {
-			b := newLiveAskBoard(t)
-			b.delay = 1100 * time.Millisecond
-			start := time.Now()
-			done := b.endAt(start, at, c.withdraw)
-			committed := b.stateAt(start, time.Second) // before the deadline
-			code, out, took := b.runLivePoll()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			if s := <-committed; s == "open" {
-				t.Fatalf("withdraw=%v at %s: the end had not committed before the deadline", c.withdraw, at)
-			}
-			if code != c.code || out != c.out || took < 2*time.Second {
-				t.Errorf("withdraw=%v at %s: got %d %q after %s, want %d %q once the delayed answer is back", c.withdraw, at, code, out, took, c.code, c.out)
-			}
+			t.Run(fmt.Sprintf("withdraw=%v at=%s", c.withdraw, at), func(t *testing.T) {
+				t.Parallel()
+				b := newLiveAskBoard(t)
+				b.delay = 1100 * time.Millisecond
+				start := time.Now()
+				done := b.endAt(start, at, c.withdraw)
+				committed := b.stateAt(start, time.Second) // before the deadline
+				code, out, took := b.runLivePoll()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if s := <-committed; s == "open" {
+					t.Fatalf("withdraw=%v at %s: the end had not committed before the deadline", c.withdraw, at)
+				}
+				if code != c.code || out != c.out || took < 2*time.Second {
+					t.Errorf("withdraw=%v at %s: got %d %q after %s, want %d %q once the delayed answer is back", c.withdraw, at, code, out, took, c.code, c.out)
+				}
+			})
 		}
 	}
 }
@@ -279,27 +311,31 @@ func TestAskPollLiveCountsAnEndCommittedInTimeButObservedLate(t *testing.T) {
 // counts is the commit, before the deadline, not when anything later about it
 // was stamped or observed. With and without delayed responses.
 func TestAskPollLiveCountsAnEndWhosePostCommitClockReadIsDelayed(t *testing.T) {
+	t.Parallel()
 	for _, delay := range []time.Duration{0, 400 * time.Millisecond} {
 		for _, c := range endCases {
-			b := newLiveAskBoard(t)
-			b.delay, b.postDelay = delay, 1200*time.Millisecond
-			start := time.Now()
-			done := b.endAt(start, 880*time.Millisecond, c.withdraw)
-			committed := b.stateAt(start, time.Second)
-			code, out, took := b.runLivePoll()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			if s := <-committed; s == "open" {
-				t.Fatalf("withdraw=%v delay %s: the end had not committed before the deadline", c.withdraw, delay)
-			}
-			k, err := b.reads.Get(context.Background(), "A1")
-			if err != nil || k.EndedAt == nil || !k.EndedAt.After(start.Add(time.Second+delay)) {
-				t.Fatalf("withdraw=%v delay %s: ended_at %v (%v), want after the deadline", c.withdraw, delay, k.EndedAt, err)
-			}
-			if code != c.code || out != c.out {
-				t.Errorf("withdraw=%v delay %s: got %d %q after %s, want %d %q", c.withdraw, delay, code, out, took, c.code, c.out)
-			}
+			t.Run(fmt.Sprintf("withdraw=%v delay=%s", c.withdraw, delay), func(t *testing.T) {
+				t.Parallel()
+				b := newLiveAskBoard(t)
+				b.delay, b.postDelay = delay, 1200*time.Millisecond
+				start := time.Now()
+				done := b.endAt(start, 880*time.Millisecond, c.withdraw)
+				committed := b.stateAt(start, time.Second)
+				code, out, took := b.runLivePoll()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if s := <-committed; s == "open" {
+					t.Fatalf("withdraw=%v delay %s: the end had not committed before the deadline", c.withdraw, delay)
+				}
+				k, err := b.reads.Get(context.Background(), "A1")
+				if err != nil || k.EndedAt == nil || !k.EndedAt.After(start.Add(time.Second+delay)) {
+					t.Fatalf("withdraw=%v delay %s: ended_at %v (%v), want after the deadline", c.withdraw, delay, k.EndedAt, err)
+				}
+				if code != c.code || out != c.out {
+					t.Errorf("withdraw=%v delay %s: got %d %q after %s, want %d %q", c.withdraw, delay, code, out, took, c.code, c.out)
+				}
+			})
 		}
 	}
 }
@@ -309,37 +345,41 @@ func TestAskPollLiveCountsAnEndWhosePostCommitClockReadIsDelayed(t *testing.T) {
 // though the end is committed, stamped before the deadline, by the time the
 // server's answer reaches the CLI. With and without delayed responses.
 func TestAskPollLiveEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
+	t.Parallel()
 	for _, delay := range []time.Duration{0, 400 * time.Millisecond} {
 		for _, c := range endCases {
-			b := newLiveAskBoard(t)
-			b.delay = delay
-			release := make(chan struct{})
-			b.holdTx = release
-			start := time.Now()
-			done := b.endAt(start, 500*time.Millisecond, c.withdraw)
-			atDeadline := b.stateAt(start, 1050*time.Millisecond)
-			go func() {
-				time.Sleep(time.Until(start.Add(1150 * time.Millisecond)))
-				close(release)
-			}()
-			code, out, took := b.runLivePoll()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			if s := <-atDeadline; s != "open" {
-				t.Fatalf("withdraw=%v delay %s: the ask was %q at the deadline, want still open", c.withdraw, delay, s)
-			}
-			k, err := b.reads.Get(context.Background(), "A1")
-			stamp := k.AnsweredAt
-			if c.withdraw {
-				stamp = k.WithdrawnAt
-			}
-			if err != nil || k.State == "open" || stamp == nil || !stamp.Before(start.Add(time.Second)) {
-				t.Fatalf("withdraw=%v delay %s: the end is %q stamped %v (%v), want committed and stamped before the deadline", c.withdraw, delay, k.State, stamp, err)
-			}
-			if code != ExitTimeout || out != stillOpen || took < time.Second {
-				t.Errorf("withdraw=%v delay %s: got %d %q after %s, want exit 3 at the deadline", c.withdraw, delay, code, out, took)
-			}
+			t.Run(fmt.Sprintf("withdraw=%v delay=%s", c.withdraw, delay), func(t *testing.T) {
+				t.Parallel()
+				b := newLiveAskBoard(t)
+				b.delay = delay
+				release := make(chan struct{})
+				b.holdTx = release
+				start := time.Now()
+				done := b.endAt(start, 500*time.Millisecond, c.withdraw)
+				atDeadline := b.stateAt(start, 1050*time.Millisecond)
+				go func() {
+					time.Sleep(time.Until(start.Add(1150 * time.Millisecond)))
+					close(release)
+				}()
+				code, out, took := b.runLivePoll()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if s := <-atDeadline; s != "open" {
+					t.Fatalf("withdraw=%v delay %s: the ask was %q at the deadline, want still open", c.withdraw, delay, s)
+				}
+				k, err := b.reads.Get(context.Background(), "A1")
+				stamp := k.AnsweredAt
+				if c.withdraw {
+					stamp = k.WithdrawnAt
+				}
+				if err != nil || k.State == "open" || stamp == nil || !stamp.Before(start.Add(time.Second)) {
+					t.Fatalf("withdraw=%v delay %s: the end is %q stamped %v (%v), want committed and stamped before the deadline", c.withdraw, delay, k.State, stamp, err)
+				}
+				if code != ExitTimeout || out != stillOpen || took < time.Second {
+					t.Errorf("withdraw=%v delay %s: got %d %q after %s, want exit 3 at the deadline", c.withdraw, delay, code, out, took)
+				}
+			})
 		}
 	}
 }
@@ -351,36 +391,40 @@ func TestAskPollLiveEndCommittedAfterTheDeadlineExitsThree(t *testing.T) {
 // timer and not once that first write is let through. With the responses held
 // back too, and with the end taking the writer before the poll even starts.
 func TestAskPollLiveEndHoldingTheWriterBeforeThePollReachesTheServerExitsThree(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ early, delay, endAt time.Duration }{
 		{300 * time.Millisecond, 0, 100 * time.Millisecond},
 		{300 * time.Millisecond, 400 * time.Millisecond, 100 * time.Millisecond},
 		{100 * time.Millisecond, 0, 20 * time.Millisecond},
 	} {
 		for _, e := range endCases {
-			b := newLiveAskBoard(t)
-			b.early, b.delay = c.early, c.delay
-			release := make(chan struct{})
-			b.holdTx = release
-			start := time.Now()
-			done := b.endAt(start, c.endAt, e.withdraw)
-			atDeadline := b.stateAt(start, 1050*time.Millisecond)
-			go func() {
-				time.Sleep(time.Until(start.Add(1300 * time.Millisecond)))
-				close(release)
-			}()
-			code, out, took := b.runLivePoll()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			if s := <-atDeadline; s != "open" {
-				t.Fatalf("%+v withdraw=%v: the ask was %q at the deadline, want still open", c, e.withdraw, s)
-			}
-			if k, err := b.reads.Get(context.Background(), "A1"); err != nil || k.State == "open" {
-				t.Fatalf("%+v withdraw=%v: the end did not commit (%v)", c, e.withdraw, err)
-			}
-			if code != ExitTimeout || out != stillOpen || took < time.Second {
-				t.Errorf("%+v withdraw=%v: got %d %q after %s, want exit 3 at the deadline", c, e.withdraw, code, out, took)
-			}
+			t.Run(fmt.Sprintf("early=%s delay=%s end=%s withdraw=%v", c.early, c.delay, c.endAt, e.withdraw), func(t *testing.T) {
+				t.Parallel()
+				b := newLiveAskBoard(t)
+				b.early, b.delay = c.early, c.delay
+				release := make(chan struct{})
+				b.holdTx = release
+				start := time.Now()
+				done := b.endAt(start, c.endAt, e.withdraw)
+				atDeadline := b.stateAt(start, 1050*time.Millisecond)
+				go func() {
+					time.Sleep(time.Until(start.Add(1300 * time.Millisecond)))
+					close(release)
+				}()
+				code, out, took := b.runLivePoll()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if s := <-atDeadline; s != "open" {
+					t.Fatalf("%+v withdraw=%v: the ask was %q at the deadline, want still open", c, e.withdraw, s)
+				}
+				if k, err := b.reads.Get(context.Background(), "A1"); err != nil || k.State == "open" {
+					t.Fatalf("%+v withdraw=%v: the end did not commit (%v)", c, e.withdraw, err)
+				}
+				if code != ExitTimeout || out != stillOpen || took < time.Second {
+					t.Errorf("%+v withdraw=%v: got %d %q after %s, want exit 3 at the deadline", c, e.withdraw, code, out, took)
+				}
+			})
 		}
 	}
 }
@@ -390,46 +434,51 @@ func TestAskPollLiveEndHoldingTheWriterBeforeThePollReachesTheServerExitsThree(t
 // passes does not wait for the writer, and a write committed after the deadline
 // does not decide it either way.
 func TestAskPollLiveCountsAnEndWhileAWriteHoldsTheWriterAcrossTheDeadline(t *testing.T) {
+	t.Parallel()
 	for _, c := range endCases {
-		b := newLiveAskBoard(t)
-		b.delay = 300 * time.Millisecond
-		start := time.Now()
-		done := b.endAt(start, 800*time.Millisecond, c.withdraw)
-		// a second ask, raised after the poll's, is answered at 900 ms in a
-		// transaction held to 1300 ms
-		holder := &asks.Store{Store: b.st, Now: func() time.Time {
-			now := time.Now()
-			if now.Before(start.Add(time.Second)) {
-				time.Sleep(time.Until(start.Add(1300 * time.Millisecond)))
+		t.Run(fmt.Sprintf("withdraw=%v", c.withdraw), func(t *testing.T) {
+			t.Parallel()
+			b := newLiveAskBoard(t)
+			b.delay = 300 * time.Millisecond
+			start := time.Now()
+			done := b.endAt(start, 800*time.Millisecond, c.withdraw)
+			// a second ask, raised after the poll's, is answered at 900 ms in a
+			// transaction held to 1300 ms
+			holder := &asks.Store{Store: b.st, Now: func() time.Time {
+				now := time.Now()
+				if now.Before(start.Add(time.Second)) {
+					time.Sleep(time.Until(start.Add(1300 * time.Millisecond)))
+				}
+				return now
+			}}
+			held := make(chan error, 1)
+			go func() {
+				time.Sleep(time.Until(start.Add(600 * time.Millisecond)))
+				other, err := b.reads.Raise(context.Background(), audit.Actor{Handle: "claude@host"}, "key:x", asks.New{Question: "Other?"})
+				if err == nil {
+					time.Sleep(time.Until(start.Add(900 * time.Millisecond)))
+					_, err = holder.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", other.Ref, asks.Reply{Answer: "x"})
+				}
+				held <- err
+			}()
+			code, out, took := b.runLivePoll()
+			if err := <-done; err != nil {
+				t.Fatal(err)
 			}
-			return now
-		}}
-		held := make(chan error, 1)
-		go func() {
-			time.Sleep(time.Until(start.Add(600 * time.Millisecond)))
-			other, err := b.reads.Raise(context.Background(), audit.Actor{Handle: "claude@host"}, "key:x", asks.New{Question: "Other?"})
-			if err == nil {
-				time.Sleep(time.Until(start.Add(900 * time.Millisecond)))
-				_, err = holder.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", other.Ref, asks.Reply{Answer: "x"})
+			if err := <-held; err != nil {
+				t.Fatal(err)
 			}
-			held <- err
-		}()
-		code, out, took := b.runLivePoll()
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		if err := <-held; err != nil {
-			t.Fatal(err)
-		}
-		if code != c.code || out != c.out || took < 1300*time.Millisecond {
-			t.Errorf("withdraw=%v: got %d %q after %s, want %d %q once the writer is free", c.withdraw, code, out, took, c.code, c.out)
-		}
+			if code != c.code || out != c.out || took < 1300*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want %d %q once the writer is free", c.withdraw, code, out, took, c.code, c.out)
+			}
+		})
 	}
 }
 
 // An ask nobody ends is exit 3 once the whole second has passed, with no answer
 // read before the deadline.
 func TestAskPollLiveOpenAtTheDeadlineExitsThree(t *testing.T) {
+	t.Parallel()
 	b := newLiveAskBoard(t)
 	code, out, took := b.runLivePoll()
 	if code != ExitTimeout || out != stillOpen || took < time.Second || took > 3*time.Second {
@@ -446,7 +495,14 @@ func (b *liveAskBoard) watcher() *asks.Store {
 		b.t.Fatal(err)
 	}
 	b.t.Cleanup(func() { _ = st.Close() })
-	return &asks.Store{Store: st}
+	k := &asks.Store{Store: st}
+	// Read once now, so the read the test times later reuses an open
+	// connection rather than opening one in its window: opening one takes
+	// longer under -race with the other live tests running alongside.
+	if _, err := k.Get(context.Background(), "A1"); err != nil && !errors.Is(err, asks.ErrNotFound) {
+		b.t.Fatal(err)
+	}
+	return k
 }
 
 // stateBy reports the committed state of the ask at after from start, read
@@ -524,13 +580,17 @@ func livePollEnd(t *testing.T, withdraw bool, endAt, release time.Duration, prep
 // by which time the end is committed: the server answers with the ask as it
 // stood at the deadline, not as its first read finds it.
 func TestAskPollLiveQueuedFirstReadDoesNotCountAnEndCommittedAfterTheDeadline(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
-		code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, _ time.Time) {
-			b.early = 1600 * time.Millisecond
+		t.Run(fmt.Sprintf("withdraw=%v", e.withdraw), func(t *testing.T) {
+			t.Parallel()
+			code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, _ time.Time) {
+				b.early = 1600 * time.Millisecond
+			})
+			if code != ExitTimeout || out != stillOpen || took < 1600*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the queued read is answered", e.withdraw, code, out, took)
+			}
 		})
-		if code != ExitTimeout || out != stillOpen || took < 1600*time.Millisecond {
-			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the queued read is answered", e.withdraw, code, out, took)
-		}
 	}
 }
 
@@ -539,14 +599,18 @@ func TestAskPollLiveQueuedFirstReadDoesNotCountAnEndCommittedAfterTheDeadline(t 
 // to well after the end commits, so the server's read at the deadline runs
 // only then and finds the end: when it is read does not decide the answer.
 func TestAskPollLiveLateReadAtTheDeadlineDoesNotCountAnEndCommittedAfterIt(t *testing.T) {
+	t.Parallel()
 	for _, e := range endCases {
-		code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
-			b.early = 200 * time.Millisecond
-			b.hogReaders(start, 900*time.Millisecond, 1250*time.Millisecond)
+		t.Run(fmt.Sprintf("withdraw=%v", e.withdraw), func(t *testing.T) {
+			t.Parallel()
+			code, out, took := livePollEnd(t, e.withdraw, 100*time.Millisecond, 1100*time.Millisecond, func(b *liveAskBoard, start time.Time) {
+				b.early = 200 * time.Millisecond
+				b.hogReaders(start, 900*time.Millisecond, 1250*time.Millisecond)
+			})
+			if code != ExitTimeout || out != stillOpen || took < 1250*time.Millisecond {
+				t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the readers are free", e.withdraw, code, out, took)
+			}
 		})
-		if code != ExitTimeout || out != stillOpen || took < 1250*time.Millisecond {
-			t.Errorf("withdraw=%v: got %d %q after %s, want exit 3 once the readers are free", e.withdraw, code, out, took)
-		}
 	}
 }
 
@@ -555,7 +619,8 @@ func TestAskPollLiveLateReadAtTheDeadlineDoesNotCountAnEndCommittedAfterIt(t *te
 // the server's readers are all taken across the deadline, so the server reads
 // it late either way.
 func TestAskPollLiveCountsAnEndCommittedInTimeThoughEveryServerReadIsLate(t *testing.T) {
-	for _, late := range []func(b *liveAskBoard, start time.Time){
+	t.Parallel()
+	for i, late := range []func(b *liveAskBoard, start time.Time){
 		func(b *liveAskBoard, _ time.Time) { b.early = 1600 * time.Millisecond },
 		func(b *liveAskBoard, start time.Time) {
 			b.early = 200 * time.Millisecond
@@ -563,17 +628,20 @@ func TestAskPollLiveCountsAnEndCommittedInTimeThoughEveryServerReadIsLate(t *tes
 		},
 	} {
 		for _, e := range endCases {
-			b := newLiveAskBoard(t)
-			start := time.Now()
-			late(b, start)
-			done := b.endAt(start, 700*time.Millisecond, e.withdraw)
-			code, out, took := b.runLivePoll()
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			if code != e.code || out != e.out || took < 1200*time.Millisecond {
-				t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", e.withdraw, code, out, took, e.code, e.out)
-			}
+			t.Run(fmt.Sprintf("late=%d withdraw=%v", i, e.withdraw), func(t *testing.T) {
+				t.Parallel()
+				b := newLiveAskBoard(t)
+				start := time.Now()
+				late(b, start)
+				done := b.endAt(start, 700*time.Millisecond, e.withdraw)
+				code, out, took := b.runLivePoll()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if code != e.code || out != e.out || took < 1200*time.Millisecond {
+					t.Errorf("withdraw=%v: got %d %q after %s, want %d %q", e.withdraw, code, out, took, e.code, e.out)
+				}
+			})
 		}
 	}
 }
@@ -585,6 +653,7 @@ func TestAskPollLiveCountsAnEndCommittedInTimeThoughEveryServerReadIsLate(t *tes
 // and an end committed after the deadline is exit 3 under the same delays: the
 // mark's lateness never moves an end across the deadline in either direction.
 func TestAskPollLiveMarkWriteHeldPastTheDeadlineDecidesByWhenTheEndCommitted(t *testing.T) {
+	t.Parallel()
 	delays := []struct {
 		name    string
 		release time.Duration // when the held mark write is let go
@@ -605,6 +674,7 @@ func TestAskPollLiveMarkWriteHeldPastTheDeadlineDecidesByWhenTheEndCommitted(t *
 		}{{600 * time.Millisecond, true}, {1100 * time.Millisecond, false}} {
 			for _, e := range endCases {
 				t.Run(fmt.Sprintf("%s withdraw=%v end=%s", d.name, e.withdraw, c.endAt), func(t *testing.T) {
+					t.Parallel()
 					registerMarkHold(t)
 					b := newLiveAskBoard(t)
 					hold := b.holdMarkWrites()
