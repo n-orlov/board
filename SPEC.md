@@ -3361,7 +3361,9 @@ databases, three clean-state stability runs and benchmarks; the nightly timer al
 mutation (`MUTATION_FULL=true` does so on demand, `MUTATION=true` runs the diff mode). SBOM: CycloneDX for the
 module, the frontend and the image (`syft`/Trivy), generated on every build and archived;
 attached to releases. Reports exactly as deck:
-JUnit, Allure with per-branch history, CI summary, build summary line, README badges (`build`,
+JUnit, Allure with per-branch history, CI summary (each quality gate's badge and the quality tile
+come from the one `gate verdict: passed|failed|deferred` line `ci/qualitycheck` ends every gate section
+with, never from a gate's wording; a gate deferred to the Mutation unit is its own neutral state), build summary line, README badges (`build`,
 `tests`, `coverage`, `quality`), one Telegram message per build (sound only on red `main` or
 nightly). A fully green `main` build archives `ci-results/release-candidate.json`.
 

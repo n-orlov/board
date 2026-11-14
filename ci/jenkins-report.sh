@@ -119,22 +119,57 @@ markdown_html() {
     '
 }
 
-# gates_html renders ci/quality.sh's report: one collapsible section per
-# "=== <name> gate ===", open when the gate failed. A gate passed when its
-# "what to do:" line says "nothing" (each gate's own pass wording).
-gates_html() {
-    awk '
+# gate_sections reads ci/quality.sh's report and, per "=== <name> gate ===",
+# prints a section's verdict (mode "verdicts": one word per line) or its
+# collapsible HTML (mode "html"). The verdict is the section's last
+# "gate verdict: passed|failed|deferred" line, which ci/qualitycheck writes
+# from each gate's own result: a gate's wording is never read. A section
+# without one is "failed" (it never reads passed). A deferred mutation gate
+# says "not run in this build", or shows the Mutation unit's verdict for it
+# (<mutation results dir>/unit-verdict.txt, written by ci/mutation.sh) and
+# links to its reports, when this build ran that unit and its stash is there.
+gate_sections() { # gate_sections <verdicts|html> <mutation results dir> <artifact base url>
+    awk -v mode="$1" -v mutdir="$2" -v base="$3" '
     function esc(s) { gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s); gsub(/>/, "\\&gt;", s); return s }
-    function flush(   ok) {
-        if (name == "" && body == "") return
-        if (name == "") { printf "<pre>%s</pre>\n", body; body = ""; return }
-        ok = (body ~ /(^|\n)what to do: nothing/)
-        printf "<details%s><summary><span class=\"badge %s\">%s</span> %s</summary><pre>%s</pre></details>\n", \
-            ok ? "" : " open", ok ? "ok" : "bad", ok ? "passed" : "failed", esc(name), body
-        name = ""; body = ""
+    function unit_note(   key, v, link, t) {
+        key = name; sub(/ gate$/, "", key)
+        if (key != "mutation-go" && key != "stryker") return ""
+        if (!has_mutation) return "<p class=\"muted\">not run in this build (no Mutation unit results here)</p>"
+        link = (base == "") ? "ci-results/mutation/" : base "artifact/ci-results/mutation/"
+        v = unit[key]
+        if (v == "") return "<p>Mutation unit results: <a href=\"" esc(link) "\">" esc(link) "</a></p>"
+        t = (v == "passed") ? "ok" : (v == "failed") ? "bad" : "deferred"
+        return "<p>Mutation unit verdict: <span class=\"badge " t "\">" esc(v) "</span> (<a href=\"" esc(link) "\">reports</a>)</p>"
     }
-    /^=== .* gate ===$/ { flush(); name = $0; sub(/^=== /, "", name); sub(/ ===$/, "", name); next }
-    { body = body esc($0) "\n" }
+    function flush(   v, cls) {
+        if (name == "" && body == "") return
+        if (name == "") { if (mode == "html") printf "<pre>%s</pre>\n", body; body = ""; return }
+        v = (verdict == "passed" || verdict == "deferred") ? verdict : "failed"
+        if (mode == "verdicts") print v
+        else {
+            cls = (v == "passed") ? "ok" : (v == "failed") ? "bad" : "deferred"
+            printf "<details%s><summary><span class=\"badge %s\">%s</span> %s</summary><pre>%s</pre>%s</details>\n", \
+                (v == "failed") ? " open" : "", cls, v, esc(name), body, (v == "deferred") ? unit_note() : ""
+        }
+        name = ""; body = ""; verdict = ""
+    }
+    BEGIN {
+        has_mutation = (mutdir != "" && (system("test -d \"" mutdir "\"") == 0))
+        if (has_mutation) {
+            f = mutdir "/unit-verdict.txt"
+            while ((getline line < f) > 0) {
+                if (match(line, /^[a-z-]+: /)) {
+                    k = substr(line, 1, RLENGTH - 2); unit[k] = substr(line, RLENGTH + 1)
+                }
+            }
+            close(f)
+        }
+    }
+    /^=== .* gate ===$/ { flush(); name = $0; sub(/^=== /, "", name); sub(/ ===$/, "", name); verdict = ""; next }
+    {
+        if (name != "" && $0 ~ /^gate verdict: (passed|failed|deferred)$/) { verdict = substr($0, 15); next }
+        body = body esc($0) "\n"
+    }
     END { flush() }
     '
 }
@@ -144,11 +179,18 @@ tile() { # tile <label> <value> <ok|bad|warn|"">
 }
 
 quality_report="$outdir/quality-report.txt"
+mutation_dir="$outdir/mutation"
+artifact_base=""
+[ -n "${BUILD_URL:-}" ] && artifact_base="$BUILD_URL"
+# The tile agrees with ci/quality.sh's exit status: failed when any gate
+# failed (or has no verdict line), passed when there is at least one gate and
+# none failed. A deferred gate is neither.
 quality=""
 if [ -s "$quality_report" ]; then
-    gates=$(grep -c '^=== .* gate ===$' "$quality_report" || true)
-    passed=$(grep -c '^what to do: nothing' "$quality_report" || true)
-    if [ "${gates:-0}" -gt 0 ] && [ "$gates" = "$passed" ]; then
+    verdicts=$(gate_sections verdicts "" "" < "$quality_report")
+    gates=$(printf '%s\n' "$verdicts" | grep -c . || true)
+    failed_gates=$(printf '%s\n' "$verdicts" | grep -c '^failed$' || true)
+    if [ "${gates:-0}" -gt 0 ] && [ "${failed_gates:-0}" -eq 0 ]; then
         quality="passed"
     else
         quality="failed"
@@ -174,7 +216,7 @@ table{border-collapse:collapse;margin:.4em 0 1em}th,td{border:1px solid var(--li
 pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:.8em 1em;overflow-x:auto;font-size:12.5px;line-height:1.4}
 details{border:1px solid var(--line);border-radius:6px;margin:.5em 0;padding:.3em .8em}details pre{margin:.5em 0}
 summary{cursor:pointer;font-weight:600}
-.badge{display:inline-block;border-radius:2em;padding:0 .6em;font-size:.8em;font-weight:600;color:#fff}.badge.ok{background:var(--ok)}.badge.bad{background:var(--bad)}
+.badge{display:inline-block;border-radius:2em;padding:0 .6em;font-size:.8em;font-weight:600;color:#fff}.badge.ok{background:var(--ok)}.badge.bad{background:var(--bad)}.badge.deferred{background:var(--muted)}
 .muted{color:var(--muted)}
 </style></head><body>
 <h1>board CI summary</h1>
@@ -201,7 +243,7 @@ EOF
     done
     echo '<h2>Quality gates</h2>'
     if [ -s "$quality_report" ]; then
-        gates_html < "$quality_report"
+        gate_sections html "$mutation_dir" "$artifact_base" < "$quality_report"
     else
         echo '<p class="muted">(no quality report: the quality stage did not run)</p>'
     fi

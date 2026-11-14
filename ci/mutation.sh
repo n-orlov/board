@@ -79,6 +79,7 @@ GOFLAGS="${GOFLAGS:+$GOFLAGS }-count=1 -timeout=30m"
 export GOFLAGS
 
 mkdir -p "$outdir"
+rm -f "$outdir/unit-verdict.txt" "$outdir/mutationgate.txt"
 
 # Every report of the lane goes, so a diff-mode run never leaves an older
 # full run's report of an unchanged unit behind.
@@ -130,13 +131,23 @@ for pkg in $packages; do
 done
 
 status=0
-go run ./ci/mutationgate -config "$config" -dir "$outdir" -lane "$lane" ${diff_ref:+-diff "$diff_ref"} || status=1
+# The unit's own verdicts go to "$outdir/unit-verdict.txt" (one "<gate>:
+# passed|failed|not run" line per gate, the names of ci/quality.json's gates),
+# which the build's CI summary page (ci/jenkins-report.sh) shows for the
+# mutation-go and stryker rows that a Core quality run defers. It only records
+# what this script already judged: the exit status is unchanged.
+go_verdict=passed
+go run ./ci/mutationgate -config "$config" -dir "$outdir" -lane "$lane" ${diff_ref:+-diff "$diff_ref"} \
+    > "$outdir/mutationgate.txt" 2>&1 || go_verdict=failed
+cat "$outdir/mutationgate.txt"
+[ "$go_verdict" = passed ] || status=1
 
 # The frontend: Stryker over web/src/lib (web/stryker.config.mjs), then the
 # per-module break from ci/quality.json (web/scripts/mutation/mutation.ts).
 # Its JSON report is copied to "$outdir/stryker/mutation.json", where
 # ci/quality.sh's stryker row reads it.
 stryker=no
+stryker_verdict="not run"
 if [ -f web/stryker.config.mjs ] && { [ "$lane" = all ] || [ "$lane" = base ]; }; then
     stryker=yes
     if [ -n "$diff_ref" ] && git diff --quiet --merge-base "$diff_ref" -- web/src/lib; then
@@ -146,12 +157,14 @@ if [ -f web/stryker.config.mjs ] && { [ "$lane" = all ] || [ "$lane" = base ]; }
 fi
 if [ "$stryker" = yes ]; then
     echo "ci/mutation.sh: stryker over web/src/lib"
+    stryker_verdict=passed
     mkdir -p "$outdir/stryker"
     rm -f "$outdir/stryker/mutation.json"
     if [ ! -x web/node_modules/.bin/stryker ]; then
-        (cd web && npm ci --no-audit --no-fund) || status=1
+        (cd web && npm ci --no-audit --no-fund) || { status=1; stryker_verdict=failed; }
     fi
-    (cd web && rm -f reports/mutation/mutation.json && npm run mutation) || status=1
+    (cd web && rm -f reports/mutation/mutation.json && npm run mutation) || { status=1; stryker_verdict=failed; }
     [ -f web/reports/mutation/mutation.json ] && cp web/reports/mutation/mutation.json "$outdir/stryker/mutation.json"
 fi
+printf 'mutation-go: %s\nstryker: %s\n' "$go_verdict" "$stryker_verdict" > "$outdir/unit-verdict.txt"
 exit "$status"

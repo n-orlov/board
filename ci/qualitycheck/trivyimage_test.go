@@ -100,8 +100,8 @@ func TestMutationGatesDeferredToTheMutationStage(t *testing.T) {
 		return lines
 	}
 	for _, l := range run(true) {
-		if !strings.Contains(l, "ok=true") || !strings.Contains(l, "deferred to the Mutation stage") {
-			t.Errorf("deferred: %q, want a pass naming the Mutation stage", l)
+		if !strings.Contains(l, "ok=true") || !strings.Contains(l, "deferred to the Mutation unit") {
+			t.Errorf("deferred: %q, want a pass naming the Mutation unit", l)
 		}
 	}
 	for _, l := range run(false) {

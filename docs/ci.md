@@ -161,13 +161,32 @@ fails unless the report carries the fixture's steps and its `@gh-61` link.
 and `stryker` read, in the Mutation phase, which comes after Core (Quality
 included) and runs only when `MUTATION`, `MUTATION_FULL` or the timer asks for
 it. So the Quality unit passes `--mutation-deferred` as `ci/quality.sh`'s third
-argument: those two rows print "deferred to the Mutation phase" instead of
+argument: those two rows print "deferred to the Mutation unit" instead of
 reading reports that cannot exist yet. The Mutation unit's `ci/mutation.sh`
 judges the same reports against the same `ci/quality.json` thresholds (efficacy,
 break, per-module break, no mutant fails) and fails the build below them.
 Without the flag (`ci/run.sh ci/quality.sh`, the local recipe) the rows read
 `ci-results/mutation/` and fail when it is missing. Every other gate runs in the
 Quality unit on every build.
+
+**The quality report format.** Every gate prints a section `=== <name> gate ===`
+(its own human-readable body) that ends in exactly one machine-readable line,
+`gate verdict: passed`, `gate verdict: failed` or `gate verdict: deferred`.
+`ci/qualitycheck` derives it from the gate's result alone: a deferred gate (the
+two mutation rows under `--mutation-deferred`) stays ok, so the exit status is
+unchanged, but it is never reported as passed. The CI summary page
+(`ci/jenkins-report.sh`) reads that line and nothing else, never a gate's
+wording: `passed` is a green badge, `failed` a red one with the section open,
+`deferred` a neutral grey one, and a section with no verdict line reads
+`failed`. The quality tile reads `passed` when the report has at least one gate
+and none failed (a deferred gate is not a failure), `failed` otherwise, so it
+agrees with `ci/quality.sh`'s exit status. A deferred `mutation-go` or `stryker`
+section says "not run in this build" when the build has no Mutation unit
+results. When it has them (`ci-results/mutation/`, unstashed by the report step)
+the section shows that unit's verdict for the gate, from
+`ci-results/mutation/unit-verdict.txt` (`mutation-go: passed|failed`,
+`stryker: passed|failed|not run`, written by `ci/mutation.sh` next to its
+reports), and links to the archived reports.
 
 **The image.** The root `Dockerfile` is multi-stage (the Svelte build, a static
 `CGO_ENABLED=0` Go build, then `FROM scratch` with the binary, the CA

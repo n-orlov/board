@@ -125,9 +125,14 @@ func main() {
 // gateResult is one gate's outcome: its report section and whether it
 // passed.
 type gateResult struct {
-	name   string
-	ok     bool
-	output string
+	name string
+	ok   bool
+	// deferred marks a gate this run did not judge because another unit
+	// does (the mutation gates under -mutation-deferred). A deferred gate
+	// stays ok, so the exit status is unchanged, but its verdict line says
+	// deferred, never passed.
+	deferred bool
+	output   string
 }
 
 // run is main's testable core: it never touches flag/os.Exit directly.
@@ -162,23 +167,25 @@ func run(configPath, profilePath string) (report string, exitCode int, err error
 type gateRunner struct {
 	name string
 	run  func() (ok bool, output string, err error)
+	// deferred is set for a gate whose run is deferredToMutationStage.
+	deferred bool
 }
 
 // enabledGates lists, in report order, the gates cfg switches on.
 func enabledGates(cfg config, configPath, profilePath string) []gateRunner {
 	var gates []gateRunner
 	if cfg.Crap.Enabled {
-		gates = append(gates, gateRunner{"crap", func() (bool, string, error) {
+		gates = append(gates, gateRunner{name: "crap", run: func() (bool, string, error) {
 			return runCrapGate(profilePath, cfg.Crap.Ceiling)
 		}})
 	}
 	if cfg.Coverage.Enabled {
-		gates = append(gates, gateRunner{"coverage", func() (bool, string, error) {
+		gates = append(gates, gateRunner{name: "coverage", run: func() (bool, string, error) {
 			return runCoverageGate(configPath, profilePath)
 		}})
 	}
 	if cfg.Trivy.Enabled {
-		gates = append(gates, gateRunner{"trivy", func() (bool, string, error) {
+		gates = append(gates, gateRunner{name: "trivy", run: func() (bool, string, error) {
 			opts := trivyBase
 			opts.Severity = cfg.Trivy.Severity
 			opts.Now = time.Now()
@@ -186,12 +193,12 @@ func enabledGates(cfg config, configPath, profilePath string) []gateRunner {
 		}})
 	}
 	if cfg.Govulncheck.Enabled {
-		gates = append(gates, gateRunner{"govulncheck", func() (bool, string, error) {
+		gates = append(gates, gateRunner{name: "govulncheck", run: func() (bool, string, error) {
 			return runGovulncheckGate(govulncheckBase)
 		}})
 	}
 	if cfg.Golangci.Enabled {
-		gates = append(gates, gateRunner{"golangci", func() (bool, string, error) {
+		gates = append(gates, gateRunner{name: "golangci", run: func() (bool, string, error) {
 			return runGolangciGate(golangciBase)
 		}})
 	}
@@ -203,7 +210,7 @@ func newGates(cfg config, configPath string) []gateRunner {
 	var gates []gateRunner
 	add := func(on bool, name string, run func() (bool, string, error)) {
 		if on {
-			gates = append(gates, gateRunner{name, run})
+			gates = append(gates, gateRunner{name: name, run: run})
 		}
 	}
 	add(cfg.CrapTS.Enabled, "crap-ts", func() (bool, string, error) {
@@ -218,16 +225,17 @@ func newGates(cfg config, configPath string) []gateRunner {
 		opts.Severity, opts.Now, opts.Image = cfg.TrivyImage.Severity, time.Now(), imageTarInput
 		return runTrivyImageGate(opts)
 	})
-	add(cfg.MutationGo.Enabled, "mutation-go", func() (bool, string, error) {
-		if mutationDeferred {
-			return deferredToMutationStage("mutation-go")
+	addMutation := func(on bool, name string, run func() (bool, string, error)) {
+		if on && mutationDeferred {
+			gates = append(gates, deferredGate(name))
+			return
 		}
+		add(on, name, run)
+	}
+	addMutation(cfg.MutationGo.Enabled, "mutation-go", func() (bool, string, error) {
 		return runMutationGate(configPath, mutationReportDir(sbomBase.OutDir))
 	})
-	add(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
-		if mutationDeferred {
-			return deferredToMutationStage("stryker")
-		}
+	addMutation(cfg.Stryker.Enabled, "stryker", func() (bool, string, error) {
 		return runStrykerGate(configPath, sbomBase.OutDir)
 	})
 	add(cfg.SBOMModule.Enabled, "sbom-module", func() (bool, string, error) {
@@ -251,13 +259,32 @@ func runEnabledGates(gates []gateRunner) (results []gateResult, anyEnabled bool,
 		if rerr != nil {
 			return nil, true, rerr
 		}
-		results = append(results, gateResult{name: g.name, ok: ok, output: out})
+		results = append(results, gateResult{name: g.name, ok: ok, deferred: g.deferred, output: out})
 	}
 	return results, len(gates) > 0, nil
 }
 
-// renderGateReport writes one "=== name gate ===" section per result and
-// reports whether every gate passed.
+// verdictPrefix starts the one machine-readable line that ends every gate
+// section. ci/jenkins-report.sh reads that line and nothing else of a section.
+const verdictPrefix = "gate verdict: "
+
+// verdict is the gate's state, derived only from ok and deferred: a failed
+// gate is failed whatever it says, a deferred one is deferred (and stays ok),
+// anything else passed.
+func (r gateResult) verdict() string {
+	switch {
+	case !r.ok:
+		return "failed"
+	case r.deferred:
+		return "deferred"
+	default:
+		return "passed"
+	}
+}
+
+// renderGateReport writes one "=== name gate ===" section per result, each
+// ending in exactly one `gate verdict: passed|failed|deferred` line, and
+// reports whether every gate was ok (a deferred gate is).
 func renderGateReport(results []gateResult) (text string, overallOK bool) {
 	var b strings.Builder
 	overallOK = true
@@ -267,6 +294,7 @@ func renderGateReport(results []gateResult) (text string, overallOK bool) {
 		if !strings.HasSuffix(r.output, "\n") {
 			b.WriteString("\n")
 		}
+		b.WriteString(verdictPrefix + r.verdict() + "\n")
 		if !r.ok {
 			overallOK = false
 		}
