@@ -387,14 +387,21 @@ for (const vp of viewports) {
       await expect(page.getByTestId('flag-blocked')).toHaveCount(0);
       await expect(eventTypes(page)).resolves.toEqual(['dep_removed', 'dep_added', 'task_created']);
 
-      // A removal that is stale (the dependency went already) is refused inline.
+      // A removal that is stale (the dependency went already) is refused inline. The other removal goes through the API
+      // as the page's own DELETE leaves, not before the click: the live refresh it sets off would otherwise take the
+      // Remove button away whenever the click comes later than the stream's debounce (a loaded CI host).
       await page.getByRole('button', { name: 'Add dependency' }).click();
       const again = dialog(page, 'Add dependency');
       await again.getByLabel('Find an open task').fill(blocker);
       await again.locator(`[data-ref=${blocker}]`).click();
       await expect(again).toHaveCount(0);
-      expect((await api.delete(`/api/v1/tasks/${task}/deps/${blocker}`)).status()).toBe(200);
+      let removedFirst = 0;
+      await page.route(`**/api/v1/tasks/${task}/deps/${blocker}`, async (route) => {
+        if (route.request().method() === 'DELETE') removedFirst = (await api.delete(`/api/v1/tasks/${task}/deps/${blocker}`)).status();
+        await route.continue();
+      });
       await page.getByRole('button', { name: `Remove dependency on ${blocker}` }).click();
+      await expect.poll(() => removedFirst).toBe(200);
       await expect(page.getByTestId('action-error')).toBeVisible();
       await api.dispose();
     });
