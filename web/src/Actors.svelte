@@ -52,7 +52,7 @@
   const action = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
   const link = 'inline-flex min-h-11 min-w-11 items-center text-accent hover:underline';
   const cell = 'md:table-cell md:px-3 md:py-3 md:align-top';
-  const head = 'px-3 py-2 text-sm font-medium text-text-muted';
+  const head = 'px-0 py-2 text-sm font-medium text-text-muted md:px-3';
 </script>
 
 <svelte:window onhashchange={hashChanged} />
