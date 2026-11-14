@@ -372,6 +372,11 @@ transaction (a lease past its `expires_at` is expired first, with its `lease_exp
 - `close` ends every live lease on the task the same way, the caller's own included: `ended_by` the caller and the outcome
   `ended: task closed by <handle>`.
 - Starting a lease on a `done` or a `closed` task is refused (§4.4), so no transition leaves a done or closed task with a live lease.
+  The two sides are atomic against each other across concurrent callers and independent stores on one Postgres: a lease start (and renew)
+  and a done or close (and an initiative close that drops its tasks) each lock the task row (`SELECT ... FOR UPDATE`) before they read the
+  task status or its live leases and hold it to commit. A start that loses the race is the same refusal as above and writes no lease,
+  event or actor; a done or close that follows a winning start settles the lease it wrote under the rules above. SQLite has one writer, so
+  its writes are already serial.
 Every other transition ends nothing.
 
 **Upgrade step on start (R14).** A database written by a Phase 2 release can hold a `done` task that has a live lease. `board serve`

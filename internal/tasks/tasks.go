@@ -199,6 +199,18 @@ type queryer interface {
 // find reads the task a ref names through q: by id for a ULID, else by the
 // initiative slug and seq. A ref that is neither form is ErrNotFound.
 func (s Store) find(ctx context.Context, q queryer, ref string) (Task, error) {
+	return s.read(ctx, q, ref, "")
+}
+
+// lock is find that, on Postgres, also locks the task row until the transaction
+// ends. A transition reads the status and the live leases under it, so a lease
+// start (which takes the same lock) cannot commit between that read and the
+// status change, and no done or closed task holds a live lease.
+func (s Store) lock(ctx context.Context, tx queryer, ref string) (Task, error) {
+	return s.read(ctx, tx, ref, s.Store.Dialect().LockRow("t"))
+}
+
+func (s Store) read(ctx context.Context, q queryer, ref, lock string) (Task, error) {
 	parsed, err := domain.ParseTaskRef(ref)
 	if err != nil {
 		return Task{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
@@ -207,7 +219,7 @@ func (s Store) find(ctx context.Context, q queryer, ref string) (Task, error) {
 	if parsed.ID == "" {
 		where, args = ` WHERE i.slug = ? AND t.seq = ?`, []any{parsed.Slug, parsed.Seq}
 	}
-	t, err := scan(q.QueryRowContext(ctx, s.Store.Dialect().Rebind(selectTask+where), args...))
+	t, err := scan(q.QueryRowContext(ctx, s.Store.Dialect().Rebind(selectTask+where+lock), args...))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Task{}, fmt.Errorf("%w: %s", ErrNotFound, ref)

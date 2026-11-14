@@ -161,3 +161,12 @@ func TestOnlyPostgresLocksEventWritesAndListsTheWriters(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyPostgresLocksTheRowsOfATableAlias(t *testing.T) {
+	if got := (SQLite{}).LockRow("t"); got != "" {
+		t.Errorf("SQLite has one writer and needs no row lock, got %q", got)
+	}
+	if got := (Postgres{}).LockRow("t"); got != " FOR UPDATE OF t" {
+		t.Errorf("Postgres LockRow = %q", got)
+	}
+}

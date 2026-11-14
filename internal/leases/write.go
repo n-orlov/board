@@ -43,7 +43,20 @@ type taskRow struct {
 	ID, InitiativeID, Ref, Status string
 }
 
-func (s Store) findTask(ctx context.Context, tx queryer, ref string) (taskRow, error) {
+// findTask reads the task ref names.
+func (s Store) findTask(ctx context.Context, q queryer, ref string) (taskRow, error) {
+	return s.readTask(ctx, q, ref, "")
+}
+
+// lockTask reads the task ref names and, on Postgres, locks its row until the
+// transaction ends. A lease starts or renews only against a task status that no
+// concurrent done or close can change before this transaction commits, and a
+// done or close that follows reads the lease this one wrote.
+func (s Store) lockTask(ctx context.Context, tx queryer, ref string) (taskRow, error) {
+	return s.readTask(ctx, tx, ref, s.Store.Dialect().LockRow("t"))
+}
+
+func (s Store) readTask(ctx context.Context, tx queryer, ref, lock string) (taskRow, error) {
 	parsed, err := domain.ParseTaskRef(ref)
 	if err != nil {
 		return taskRow{}, fmt.Errorf("%w: task %s", ErrNotFound, ref)
@@ -56,7 +69,7 @@ func (s Store) findTask(ctx context.Context, tx queryer, ref string) (taskRow, e
 	var slug string
 	var seq int
 	err = tx.QueryRowContext(ctx, s.Store.Dialect().Rebind(`SELECT t.id, t.initiative_id, i.slug, t.seq, t.status FROM tasks t
-		JOIN initiatives i ON i.id = t.initiative_id`+where), args...).Scan(&t.ID, &t.InitiativeID, &slug, &seq, &t.Status)
+		JOIN initiatives i ON i.id = t.initiative_id`+where+lock), args...).Scan(&t.ID, &t.InitiativeID, &slug, &seq, &t.Status)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return taskRow{}, fmt.Errorf("%w: task %s", ErrNotFound, ref)
@@ -110,7 +123,7 @@ func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, i
 }
 
 func (s Store) start(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in Start, resources []string) (Result, error) {
-	task, err := s.findTask(ctx, tx, in.Task)
+	task, err := s.lockTask(ctx, tx, in.Task)
 	if err != nil {
 		return Result{}, err
 	}
@@ -274,15 +287,20 @@ func (s Store) renewRef(ctx context.Context, tx *sql.Tx, actor audit.Actor, prin
 	if err != nil {
 		return Result{}, err
 	}
+	// the task is locked before the lease is judged, so a done or close that
+	// ends the lease first is seen, not renewed over
+	task, err := s.lockTask(ctx, tx, cur.TaskID)
+	if err != nil {
+		return Result{}, err
+	}
+	if cur, err = s.find(ctx, tx, ref); err != nil {
+		return Result{}, err
+	}
 	now := s.now()
 	if err := renewable(cur, now); err != nil {
 		return Result{}, err
 	}
 	actorID, err := audit.UpsertActor(ctx, tx, s.Store.Dialect(), actor, now)
-	if err != nil {
-		return Result{}, err
-	}
-	task, err := s.findTask(ctx, tx, cur.TaskID)
 	if err != nil {
 		return Result{}, err
 	}

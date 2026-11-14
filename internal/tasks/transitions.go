@@ -119,7 +119,7 @@ func (s Store) transit(ctx context.Context, actor audit.Actor, principal, ref st
 }
 
 func (s Store) transitInTx(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref string, tr transition) (Task, error) {
-	cur, err := s.find(ctx, tx, ref)
+	cur, err := s.lock(ctx, tx, ref)
 	if err != nil {
 		return Task{}, err
 	}

@@ -42,6 +42,12 @@ type Dialect interface {
 	// Postgres it takes a shared transaction lock, so EventWriters can name every
 	// transaction that may hold an uncommitted event number.
 	LockEventWrite() string
+	// LockRow is the clause a SELECT ends with to lock the rows of the table
+	// alias names until the transaction ends, or "" when the database needs none.
+	// On Postgres it is FOR UPDATE, so a concurrent transaction that locks the
+	// same row waits, and then reads what the winner committed. SQLite has one
+	// writer at a time, so its writes are already serial.
+	LockRow(alias string) string
 	// EventWriters is a query whose rows name, one text column each, the
 	// transactions that currently hold the LockEventWrite lock, or "" when the
 	// database has no such writers.
@@ -260,3 +266,9 @@ func (Postgres) IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// LockRow implements Dialect: SQLite has one writer at a time.
+func (SQLite) LockRow(string) string { return "" }
+
+// LockRow implements Dialect.
+func (Postgres) LockRow(alias string) string { return " FOR UPDATE OF " + alias }
