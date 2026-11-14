@@ -3,12 +3,28 @@
   import NoteForm from './NoteForm.svelte';
   import NoteList from './NoteList.svelte';
   import Toast from './Toast.svelte';
+  import { untrack } from 'svelte';
   import { live } from './lib/live';
+  import { InitiativesApi } from './lib/initiatives';
+  import { TasksApi } from './lib/tasks';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
   import { currentViewEnv } from './lib/viewState';
   import { isFiltered, notesHash, DEFAULT_NOTES_FILTER, type NoteForm as PostForm, type NotesFilter } from './lib/notes';
-  import { affectsNotes, forgetNotes, moreCount, NotesApi, NotesViewStore, openNotes, saveNotes, visibleNotes, type NoteScope, type NotesViewState } from './lib/notesView';
+  import {
+    affectsNotes,
+    forgetNotes,
+    moreCount,
+    notesLookup,
+    NotesApi,
+    NotesViewStore,
+    openNotes,
+    saveNotes,
+    startNotesFilter,
+    visibleNotes,
+    type NoteScope,
+    type NotesViewState,
+  } from './lib/notesView';
 
   // The Notes view (PRD R10): every note newest first, the six filters in the fragment's query, a page at a time and
   // Post note. The data layer is lib/notesView.ts.
@@ -17,26 +33,46 @@
   const browser = currentBrowser();
   const viewEnv = currentViewEnv();
   // A fragment with a query wins and is saved; a bare one restores the saved filters (in place, before the first fetch).
-  const initial = openNotes(viewEnv, window.location.hash);
+  const opened = openNotes(viewEnv, window.location.hash);
+  const initial = opened.filter;
   let draft: NotesFilter = $state({ ...initial });
+  // A restored filter may name an initiative or a task the board no longer has: it is checked before the notes are read.
+  const lookup = notesLookup(new InitiativesApi(browser, () => csrf), new TasksApi(browser, () => csrf));
   let posting = $state(false);
   let toast = $state('');
 
   const store = new NotesViewStore(new NotesApi(browser, () => csrf), (s) => (view = s), initial);
   let view: NotesViewState = $state(store.state);
 
+  // The first read waits for the check of a restored filter; what the board no longer knows is dropped and saved again.
+  async function start() {
+    const kept = await startNotesFilter(opened, lookup);
+    if (kept === initial) {
+      void store.load();
+    } else {
+      draft = { ...kept };
+      persist(kept);
+      void store.setFilter(kept);
+    }
+  }
+
   $effect(() => {
-    void store.load();
+    // Read nothing reactive here: a filter change must not run the first load again.
+    void untrack(start);
     // A note posted elsewhere shows under the filter in place: the page drawn, the bodies read and an open sheet stay.
     return live().subscribe(affectsNotes, () => store.refresh());
   });
 
   // The filter lives in the fragment and in the saved query: applying rewrites both in place (no history entry per
   // choice) and reads again. Clear filters (the defaults) forgets the saved query.
-  function apply(filter: NotesFilter) {
-    draft = { ...filter };
+  function persist(filter: NotesFilter) {
     window.history.replaceState(null, '', notesHash(filter));
     saveNotes(viewEnv.storage, filter);
+  }
+
+  function apply(filter: NotesFilter) {
+    draft = { ...filter };
+    persist(filter);
     void store.setFilter(filter);
   }
 
@@ -46,9 +82,15 @@
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filters.
-  function hashChanged() {
-    if (resolveRoute(window.location.hash, ROUTES).id !== 'notes') return;
-    const filter = openNotes(viewEnv, window.location.hash);
+  let hashTurn = 0;
+  async function hashChanged() {
+    const hash = window.location.hash;
+    if (resolveRoute(hash, ROUTES).id !== 'notes') return;
+    const next = openNotes(viewEnv, hash);
+    const turn = ++hashTurn;
+    const filter = await startNotesFilter(next, lookup);
+    if (turn !== hashTurn) return; // the fragment changed again while the check ran
+    if (filter !== next.filter) persist(filter);
     if (notesHash(filter) === notesHash(view.filter)) return;
     draft = { ...filter };
     void store.setFilter(filter);

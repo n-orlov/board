@@ -91,6 +91,60 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('restored initiative and task the board no longer has are dropped before the first read, valid ones and other filters stay', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-nv-drop-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Notes drop ${vp.name}` }, 201);
+      const created = await api.post('/api/v1/tasks', { data: { initiative: slug, title: 'Known task' } });
+      expect(created.status()).toBe(201);
+      const ref = ((await created.json()) as { ref: string }).ref;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const ghost = `e2e-nv-ghost-${vp.name}`;
+      const author = `nv-drop-${vp.name}`;
+      const put = (query: string) => page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, query] as const);
+
+      // A removed initiative alone, then a removed task beside a valid initiative, then a removed task and initiative together.
+      for (const [seeded, kept] of [
+        [`initiative=${ghost}&author=${author}`, `author=${author}`],
+        [`task=${ghost}-1&initiative=${slug}&author=${author}`, `initiative=${slug}&author=${author}`],
+        [`task=${ghost}-1&initiative=${ghost}&resource=host%3Ax&author=${author}`, `resource=host%3Ax&author=${author}`],
+        [`task=${ref}&initiative=${slug}&author=${author}`, `task=${encodeURIComponent(ref)}&initiative=${slug}&author=${author}`],
+      ]) {
+        await put(seeded);
+        const fresh = await page.context().newPage();
+        const reads = notesReads(fresh);
+        const failed: number[] = [];
+        fresh.on('response', (response) => {
+          if (new URL(response.url()).pathname === '/api/v1/notes' && response.status() >= 400) failed.push(response.status());
+        });
+        await fresh.goto('/#/notes');
+        await expect(fresh).toHaveURL(new RegExp(`#/notes\\?${kept.replace(/[?.]/g, '\\$&')}$`));
+        await expect(fresh.getByTestId('no-notes').or(fresh.getByTestId('notes-list'))).toBeVisible(FIVE_SECONDS);
+        await expect(fresh.getByTestId('notes-error')).toHaveCount(0);
+        expect(failed).toEqual([]);
+        expect(reads.count).toBe(1);
+        const sent = new URLSearchParams(reads.queries[0]);
+        const wanted = new URLSearchParams(kept);
+        for (const name of ['task', 'initiative', 'resource', 'author']) expect(sent.get(name), name).toBe(wanted.get(name));
+        await expect(filters(fresh).getByLabel('Author', { exact: true })).toHaveValue(author);
+        await expect(filters(fresh).getByLabel('Initiative', { exact: true })).toHaveValue(wanted.get('initiative') ?? '');
+        await expect(filters(fresh).getByLabel('Task', { exact: true })).toHaveValue(wanted.get('task') ?? '');
+        expect((await saved(fresh)).query).toBe(kept);
+        await fresh.close();
+      }
+      await api.dispose();
+    });
+
+    test('a link that names an unknown initiative is not rewritten as restored state', async ({ page }) => {
+      const ghost = `e2e-nv-link-ghost-${vp.name}`;
+      await page.goto(`/#/notes?initiative=${ghost}`);
+      await expect(page).toHaveURL(new RegExp(`#/notes\\?initiative=${ghost}$`));
+      await expect(filters(page).getByLabel('Initiative', { exact: true })).toHaveValue(ghost);
+      await expect(page.getByTestId('notes-error')).toBeVisible(FIVE_SECONDS);
+      expect(await saved(page)).toEqual({ v: 1, query: `initiative=${ghost}` });
+    });
+
     test('a fragment with its own query overrides the saved one, and Clear filters then nav away and back shows the defaults', async ({ page }) => {
       await page.goto('/#/notes');
       await expect(page.getByTestId('notes-view')).toBeVisible(FIVE_SECONDS);

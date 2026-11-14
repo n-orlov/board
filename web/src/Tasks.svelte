@@ -55,6 +55,8 @@
   let sort: SortState = $state(opened.sort);
   let view: TasksState = $state({ tasks: [], filter: initial, loading: true, error: undefined });
   let initiatives: string[] = $state([]);
+  // Whether the list answered: an empty answer still drops a restored initiative, only a failed lookup keeps it.
+  let listAnswered = false;
   let formOpen = $state(false);
   let toast = $state('');
 
@@ -74,11 +76,14 @@
   async function start() {
     const listed = new InitiativesApi(browser, () => csrf)
       .list('all')
-      .then((list) => (initiatives = list.map((i) => i.slug)))
+      .then((list) => {
+        initiatives = list.map((i) => i.slug);
+        listAnswered = true;
+      })
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
     if (restoredInitiative) await listed;
     // Only a restored initiative is checked: one a link names stays, and a refusal for it shows in the list.
-    const kept = restoredInitiative && initiatives.length > 0 ? dropUnknownInitiative({ filter: initial, sort }, initiatives) : { filter: initial, sort };
+    const kept = restoredInitiative && listAnswered ? dropUnknownInitiative({ filter: initial, sort }, initiatives) : { filter: initial, sort };
     if (kept.filter === initial) {
       void store.load();
     } else {
@@ -122,7 +127,7 @@
     if (hash !== '#/tasks' && !hash.startsWith('#/tasks?')) return;
     const restoring = queryOf(hash) === '';
     let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
-    if (restoring && initiatives.length > 0 && next.filter.initiative !== '') {
+    if (restoring && listAnswered && next.filter.initiative !== '') {
       next = dropUnknownInitiative(next, initiatives);
       persist(next);
     }

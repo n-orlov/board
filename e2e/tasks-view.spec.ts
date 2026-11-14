@@ -242,6 +242,31 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('a restored initiative is dropped when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
+      await page.goto('/#/attention');
+      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'initiative=e2e-tv-empty-ghost&kind=watch'] as const);
+
+      const fresh = await page.context().newPage();
+      // The lookup succeeds with an empty list: an answer, not a failure, so no restored initiative is known.
+      await fresh.route(
+        (url) => url.pathname === '/api/v1/initiatives',
+        (route) => (route.request().method() === 'GET' ? route.fulfill({ json: { items: [] } }) : route.continue()),
+      );
+      const initiativesSent: string[] = [];
+      fresh.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/v1/tasks') initiativesSent.push(url.searchParams.get('initiative') ?? '');
+      });
+      await fresh.goto('/#/tasks');
+      await expect(fresh).toHaveURL(/#\/tasks\?kind=watch$/);
+      await expect(fresh.getByTestId('kind-filter')).toHaveValue('watch');
+      await expect.poll(() => initiativesSent.length).toBeGreaterThan(0);
+      expect(initiativesSent.every((value) => value === '')).toBe(true);
+      expect(JSON.parse((await fresh.evaluate((k) => localStorage.getItem(k), KEY)) as string).query).toBe('kind=watch');
+      await fresh.close();
+    });
+
     test('sorting by a column of each type orders the rows and sets aria-sort, and the Needs attention section keeps its order', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { slug, refs, needs } = await seed(api, `e2e-tv-sort-${vp.name}`);

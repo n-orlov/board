@@ -180,6 +180,9 @@ describe('dropping a restored initiative the board no longer has', () => {
   it('keeps an initiative the board has', () => {
     expect(dropUnknownInitiative(state, ['gone'])).toBe(state);
   });
+  it('drops the initiative when the board lists none (an empty answer is an answer)', () => {
+    expect(dropUnknownInitiative(state, []).filter.initiative).toBe('');
+  });
   it('keeps a state with no initiative as it is', () => {
     const none = viewFromQuery('sort=ref');
     expect(dropUnknownInitiative(none, [])).toBe(none);

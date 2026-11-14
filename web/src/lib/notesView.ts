@@ -4,6 +4,8 @@
 // expanded), turns it around and reveals `PAGE_SIZE` notes at a time: "Load more" shows the next page.
 import { errorText, Fetches } from './fetches';
 import { apiQuery, filterFromQuery, filterToQuery, newestFirst, toNotePost, type Note, type NoteForm, type NotesFilter } from './notes';
+import { InitiativesError, type InitiativesApi } from './initiatives';
+import type { TasksApi } from './tasks';
 import { ThreadApi } from './threads';
 import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
@@ -165,17 +167,83 @@ export function affectsNotes(event: { type: string }): boolean {
 /** The name of the view's saved state (PRD R16): the key is `board.view.v1.notes`. */
 export const NOTES_VIEW = 'notes';
 
-/**
- * Opens the view for the fragment it is on, before its first fetch, and returns the filter to start with. A fragment
- * with a query wins and is saved; a bare one (`#/notes`) restores the saved query by rewriting the fragment in place, so
- * the view reads `GET /notes` once, under the restored filter.
- */
-export function openNotes(env: ViewEnv, hash: string): NotesFilter {
-  const at = hash.indexOf('?');
-  const own = at < 0 ? '' : hash.slice(at + 1);
-  return filterFromQuery(openView(env, NOTES_VIEW, '#/notes', own));
+/** The filter the view opens with, and whether it came from the saved query (a bare route) rather than a link's own query. */
+export interface OpenedNotes {
+  filter: NotesFilter;
+  restored: boolean;
 }
 
+/**
+ * Opens the view for the fragment it is on, before its first fetch. A fragment with a query wins and is saved; a bare
+ * one (`#/notes`) restores the saved query by rewriting the fragment in place. A restored filter still has to pass
+ * `startNotesFilter` before the view reads `GET /notes`, so the server never sees a reference it no longer knows.
+ */
+export function openNotes(env: ViewEnv, hash: string): OpenedNotes {
+  const at = hash.indexOf('?');
+  const own = at < 0 ? '' : hash.slice(at + 1);
+  const query = openView(env, NOTES_VIEW, '#/notes', own);
+  return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+}
+
+/** What the view asks the board about the references a restored filter names. */
+export interface NotesLookup {
+  /** The slugs of every initiative the board lists. */
+  initiatives: () => Promise<readonly string[]>;
+  /** Whether the board has this task (a ref or an id); a lookup that cannot tell rejects. */
+  taskExists: (ref: string) => Promise<boolean>;
+}
+
+/**
+ * A restored filter without the board references the server no longer knows: an initiative the board does not list and
+ * a task it does not have (the server answers 404 for either) go back to "no filter". The other fields are kept, and a
+ * filter with nothing to drop is returned as it is (the same object). A lookup that fails keeps what it could not check.
+ */
+export async function dropUnknownReferences(filter: NotesFilter, lookup: NotesLookup): Promise<NotesFilter> {
+  const checkInitiative = async (): Promise<boolean> => {
+    if (filter.initiative === '') return true;
+    try {
+      const wanted = filter.initiative.toLowerCase();
+      return (await lookup.initiatives()).some((slug) => slug.toLowerCase() === wanted);
+    } catch {
+      return true;
+    }
+  };
+  const checkTask = async (): Promise<boolean> => {
+    if (filter.task === '') return true;
+    try {
+      return await lookup.taskExists(filter.task);
+    } catch {
+      return true;
+    }
+  };
+  const [initiativeKnown, taskKnown] = await Promise.all([checkInitiative(), checkTask()]);
+  if (initiativeKnown && taskKnown) return filter;
+  return { ...filter, initiative: initiativeKnown ? filter.initiative : '', task: taskKnown ? filter.task : '' };
+}
+
+/**
+ * The filter the view starts from (or moves to on a hash change): only a restored filter is checked. A link's own query
+ * is kept as it is, and the list shows the server's answer for it.
+ */
+export async function startNotesFilter(opened: OpenedNotes, lookup: NotesLookup): Promise<NotesFilter> {
+  return opened.restored ? dropUnknownReferences(opened.filter, lookup) : opened.filter;
+}
+
+/** The lookup of the browser: the initiative list, and a task read that answers 404 for a task the board does not have. */
+export function notesLookup(initiatives: Pick<InitiativesApi, 'list'>, tasks: Pick<TasksApi, 'get'>): NotesLookup {
+  return {
+    initiatives: async () => (await initiatives.list('all')).map((i) => i.slug),
+    taskExists: async (ref) => {
+      try {
+        await tasks.get(ref);
+        return true;
+      } catch (e) {
+        if (e instanceof InitiativesError && e.status === 404) return false;
+        throw e;
+      }
+    },
+  };
+}
 /** Saves the filter's query after a change (the empty filter is the default and removes the key). */
 export function saveNotes(storage: ViewStorage | undefined, filter: NotesFilter): void {
   saveViewQuery(storage, NOTES_VIEW, filterToQuery(filter));

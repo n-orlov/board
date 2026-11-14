@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_NOTES_FILTER, type Note } from './notes';
-import { affectsNotes, forgetNotes, moreCount, NOTES_VIEW, NotesApi, NotesViewStore, openNotes, PAGE_SIZE, postScope, saveNotes, visibleNotes, type NotesViewState } from './notesView';
+import { DEFAULT_NOTES_FILTER, type Note, type NotesFilter } from './notes';
+import { affectsNotes, dropUnknownReferences, forgetNotes, moreCount, NOTES_VIEW, notesLookup, NotesApi, NotesViewStore, openNotes, PAGE_SIZE, postScope, saveNotes, startNotesFilter, visibleNotes, type NotesLookup, type NotesViewState } from './notesView';
+import { InitiativesError } from './initiatives';
 import type { Browser } from './session';
 import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 
@@ -311,7 +312,7 @@ describe('saved Notes filters', () => {
     const storage = memory();
     saveNotes(storage, FILTER);
     const e = env(storage);
-    expect(openNotes(e, '#/notes')).toEqual(FILTER);
+    expect(openNotes(e, '#/notes').filter).toEqual(FILTER);
     expect(e.hashes).toEqual([
       '#/notes?broadcast=only&resource=host%3Ab-1&author=ann',
     ]);
@@ -321,7 +322,7 @@ describe('saved Notes filters', () => {
     const storage = memory();
     saveNotes(storage, FILTER);
     const e = env(storage);
-    expect(openNotes(e, '#/notes?mention=bob')).toEqual({
+    expect(openNotes(e, '#/notes?mention=bob').filter).toEqual({
       ...DEFAULT_NOTES_FILTER,
       mention: 'bob',
     });
@@ -335,13 +336,13 @@ describe('saved Notes filters', () => {
   it('restores the saved filter for a fragment with an empty query', () => {
     const storage = memory();
     saveNotes(storage, FILTER);
-    expect(openNotes(env(storage), '#/notes?')).toEqual(FILTER);
+    expect(openNotes(env(storage), '#/notes?').filter).toEqual(FILTER);
   });
 
   it('reads the query after the first question mark wherever it is', () => {
     const storage = memory();
     saveNotes(storage, FILTER);
-    expect(openNotes(env(storage), '?author=bob').author).toBe('bob');
+    expect(openNotes(env(storage), '?author=bob').filter.author).toBe('bob');
   });
 
   it('forgets the saved filter on Clear filters', () => {
@@ -350,7 +351,7 @@ describe('saved Notes filters', () => {
     forgetNotes(storage);
     expect(storage.data.has(KEY)).toBe(false);
     const e = env(storage);
-    expect(openNotes(e, '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+    expect(openNotes(e, '#/notes').filter).toEqual(DEFAULT_NOTES_FILTER);
     expect(e.hashes).toEqual([]);
   });
 
@@ -362,10 +363,10 @@ describe('saved Notes filters', () => {
       JSON.stringify({ v: 1, query: '' }),
     ]) {
       const e = env(memory({ [KEY]: bad }));
-      expect(openNotes(e, '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+      expect(openNotes(e, '#/notes').filter).toEqual(DEFAULT_NOTES_FILTER);
       expect(e.hashes).toEqual([]);
     }
-    expect(openNotes(env(undefined), '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
+    expect(openNotes(env(undefined), '#/notes').filter).toEqual(DEFAULT_NOTES_FILTER);
     const throwing = {
       ...memory(),
       getItem: () => {
@@ -375,8 +376,8 @@ describe('saved Notes filters', () => {
         throw new Error('quota');
       },
     };
-    expect(openNotes(env(throwing), '#/notes')).toEqual(DEFAULT_NOTES_FILTER);
-    expect(openNotes(env(throwing), '#/notes?author=ann').author).toBe('ann');
+    expect(openNotes(env(throwing), '#/notes').filter).toEqual(DEFAULT_NOTES_FILTER);
+    expect(openNotes(env(throwing), '#/notes?author=ann').filter.author).toBe('ann');
   });
 
   it('a restored filter is what the first read uses (one GET /notes under it)', async () => {
@@ -391,9 +392,98 @@ describe('saved Notes filters', () => {
     const store = new NotesViewStore(
       api,
       () => undefined,
-      openNotes(e, '#/notes'),
+      openNotes(e, '#/notes').filter,
     );
     await store.load();
     expect(api.filtered.mock.calls).toEqual([[FILTER]]);
+  });
+});
+
+describe('restored board references the server no longer knows', () => {
+  const KEY = 'board.view.v1.notes';
+  const lookup = (slugs: string[], tasks: string[]): NotesLookup => ({
+    initiatives: vi.fn(async () => slugs),
+    taskExists: vi.fn(async (ref: string) => tasks.includes(ref)),
+  });
+  const withRefs: NotesFilter = { ...DEFAULT_NOTES_FILTER, initiative: 'gone', task: 'gone-1', author: 'ann', broadcastOnly: true };
+
+  it('drops a removed initiative and keeps the unrelated filters', async () => {
+    const kept = await dropUnknownReferences({ ...withRefs, task: '' }, lookup(['board'], []));
+    expect(kept).toEqual({ ...DEFAULT_NOTES_FILTER, author: 'ann', broadcastOnly: true });
+  });
+
+  it('drops a removed task and keeps a known initiative', async () => {
+    const kept = await dropUnknownReferences({ ...withRefs, initiative: 'board' }, lookup(['board'], []));
+    expect(kept).toEqual({ ...DEFAULT_NOTES_FILTER, initiative: 'board', author: 'ann', broadcastOnly: true });
+  });
+
+  it('drops both when neither is known, and treats an empty initiative list as an answer', async () => {
+    expect(await dropUnknownReferences(withRefs, lookup([], []))).toEqual({ ...DEFAULT_NOTES_FILTER, author: 'ann', broadcastOnly: true });
+  });
+
+  it('compares the slug without regard to case and returns the same object when nothing is dropped', async () => {
+    const filter = { ...DEFAULT_NOTES_FILTER, initiative: 'BOARD', task: 'board-1' };
+    expect(await dropUnknownReferences(filter, lookup(['board'], ['board-1']))).toBe(filter);
+  });
+
+  it('asks nothing for a filter that names no reference', async () => {
+    const l = lookup([], []);
+    const filter = { ...DEFAULT_NOTES_FILTER, author: 'ann' };
+    expect(await dropUnknownReferences(filter, l)).toBe(filter);
+    expect(l.initiatives).not.toHaveBeenCalled();
+    expect(l.taskExists).not.toHaveBeenCalled();
+  });
+
+  it('keeps what a failed lookup could not check', async () => {
+    const failing: NotesLookup = {
+      initiatives: async () => {
+        throw new Error('down');
+      },
+      taskExists: async () => {
+        throw new Error('down');
+      },
+    };
+    expect(await dropUnknownReferences(withRefs, failing)).toBe(withRefs);
+  });
+
+  it('checks only a restored filter: a link names its references and keeps them', async () => {
+    const l = lookup([], []);
+    const storage = memory();
+    saveNotes(storage, DEFAULT_NOTES_FILTER);
+    const linked = openNotes(env(storage), '#/notes?initiative=gone&task=gone-1');
+    expect(linked.restored).toBe(false);
+    expect(await startNotesFilter(linked, l)).toBe(linked.filter);
+    expect(l.initiatives).not.toHaveBeenCalled();
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('initiative=gone&task=gone-1');
+  });
+
+  it('a saved query restores as restored, and the first read uses the filter without the unknown references', async () => {
+    const storage = memory();
+    saveNotes(storage, withRefs);
+    const opened = openNotes(env(storage), '#/notes');
+    expect(opened.restored).toBe(true);
+    const kept = await startNotesFilter(opened, lookup(['board'], []));
+    const api = { filtered: vi.fn(async () => notes(1)), note: vi.fn(), postNote: vi.fn() };
+    await new NotesViewStore(api, () => undefined, kept).load();
+    expect(api.filtered.mock.calls).toEqual([[{ ...DEFAULT_NOTES_FILTER, author: 'ann', broadcastOnly: true }]]);
+    saveNotes(storage, kept);
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('broadcast=only&author=ann');
+  });
+});
+
+describe('notesLookup', () => {
+  const problem = (status: number) => new InitiativesError(status, 'no');
+  it('lists the slugs and treats 404 as no task, any other failure as unknown', async () => {
+    const initiatives = { list: vi.fn(async () => [{ slug: 'a' }, { slug: 'b' }] as never) };
+    const get = vi.fn(async (ref: string) => {
+      if (ref === 'a-1') return {} as never;
+      throw problem(ref === 'boom' ? 500 : 404);
+    });
+    const l = notesLookup(initiatives, { get });
+    expect(await l.initiatives()).toEqual(['a', 'b']);
+    expect(initiatives.list).toHaveBeenCalledWith('all');
+    expect(await l.taskExists('a-1')).toBe(true);
+    expect(await l.taskExists('a-9')).toBe(false);
+    await expect(l.taskExists('boom')).rejects.toBeInstanceOf(InitiativesError);
   });
 });
