@@ -142,4 +142,36 @@ describe('saved state', () => {
     expect(slugs('desc')).toEqual(['ten', 'nine', 'nine-b', 'none']);
     expect(INITIATIVE_COLUMNS.tasks?.type).toBe('number');
   });
+
+  it('sorts Tags ignoring letter case, and an initiative with no tags stays last even when it comes first in the input', () => {
+    const rows = [
+      row({ slug: 'none', tags: [] }),
+      row({ slug: 'upper', tags: ['Zulu'] }),
+      row({ slug: 'lower', tags: ['alpha'] }),
+      row({ slug: 'mid', tags: ['Mike'] }),
+    ];
+    const slugs = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'tags', dir }, INITIATIVE_COLUMNS).map((r) => r.slug);
+    expect(slugs('asc')).toEqual(['lower', 'mid', 'upper', 'none']);
+    expect(slugs('desc')).toEqual(['upper', 'mid', 'lower', 'none']);
+  });
+
+  it('counts an initiative with no tasks as zero, not as empty: it leads ascending and trails descending', () => {
+    const rows = [row({ slug: 'two', counts: { open: 2, done: 0, closed: 0 } }), row({ slug: 'zero' }), row({ slug: 'one', counts: { open: 0, done: 0, closed: 1 } })];
+    const slugs = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'tasks', dir }, INITIATIVE_COLUMNS).map((r) => r.slug);
+    expect(slugs('asc')).toEqual(['zero', 'one', 'two']);
+    expect(slugs('desc')).toEqual(['two', 'one', 'zero']);
+  });
+
+  it('gives every column of the table a sort, a phone Sort choice and a place in the query and the saved state', () => {
+    for (const column of ['tags', 'tasks']) {
+      expect(Object.keys(INITIATIVE_COLUMNS)).toContain(column);
+      expect(INITIATIVE_SORT_LABELS.map((l) => l.column)).toContain(column);
+      expect(viewToQuery({ filter: 'open', sort: { column, dir: 'desc' } })).toBe(`sort=${column}&dir=desc`);
+      const storage = memory();
+      saveViewQuery(storage, INITIATIVES_VIEW, `sort=${column}&dir=asc`);
+      const replaced: string[] = [];
+      openView({ storage, replaceHash: (h) => replaced.push(h) }, INITIATIVES_VIEW, '#/initiatives', '');
+      expect(replaced).toEqual([`#/initiatives?sort=${column}&dir=asc`]);
+    }
+  });
 });
