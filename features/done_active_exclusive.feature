@@ -111,3 +111,26 @@ Feature: A task is never done or closed while it has a live lease
     And the response path "ended_by" is "claude@laptop"
     And the response path "outcome" is "ended: task closed by claude@laptop"
     And exactly 1 lease_ended event exists for the lease "L2"
+
+  Scenario: done after another actor's lease has ended is allowed and leaves no live lease
+    Given I start a lease with body "{'task':'aa-1','intent':'refactor the parser'}" as actor "codex@laptop"
+    And I end the lease "L1" with body "{'outcome':'gave up'}" as actor "codex@laptop"
+    When I mark the task "aa-1" done as actor "claude@laptop"
+    Then the response status is 200
+    And the response path "status" is "done"
+    And the response path "live_leases" has 0 items
+    When I request the lease "L1" as actor "claude@laptop"
+    Then the response path "state" is "ended"
+    And the response path "outcome" is "gave up"
+    And exactly 1 task_done event exists for the task "aa-1"
+
+  Scenario: after a forced done a new lease start is refused and no lease is live
+    Given I start a lease with body "{'task':'aa-1','intent':'refactor the parser'}" as actor "codex@laptop"
+    And I mark the task "aa-1" done with body "{'force':true}" as actor "claude@laptop"
+    And I note the counts of tasks, dependencies, events and actors
+    When I start a lease with body "{'task':'aa-1','intent':'again'}" as actor "codex@laptop"
+    Then the response status is 409
+    And the response path "detail" is "cannot start a lease on task aa-1: it is done"
+    And there are 1 leases in the database
+    And the lease "L1" is "ended" in the database
+    And the counts of tasks, dependencies, events and actors are unchanged
