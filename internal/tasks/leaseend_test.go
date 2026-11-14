@@ -210,3 +210,72 @@ func TestCloseOfADoneTaskAndOfATaskWithNoLeaseEndsNothing(t *testing.T) {
 		t.Errorf("lease_ended events = %d", n)
 	}
 }
+
+// A task is never done or closed while it has a live lease: after done or close
+// settles, no lease on the task is live and a start against it is refused with
+// a conflict that changes nothing, whichever transition settled it.
+func TestAStartAfterDoneOrCloseIsRefusedAndLeavesNoLiveLease(t *testing.T) {
+	for name, settle := range map[string]func(Store, string) error{
+		"done": func(s Store, ref string) error {
+			_, err := s.Done(ctx, who, "key:p", ref, DoneOptions{})
+			return err
+		},
+		"closed": func(s Store, ref string) error {
+			_, err := s.Close(ctx, who, "key:p", ref, "dropped")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, ls, tk := leased(t)
+			startLease(t, ls, who, tk.Ref, "work")
+			if err := settle(s, tk.Ref); err != nil {
+				t.Fatal(err)
+			}
+			started := len(events(t, s, leases.EventStarted))
+			_, err := ls.Start(ctx, bobby, "key:b", leases.Start{Task: tk.Ref, Intent: "late"})
+			var ce leases.ConflictError
+			if !errors.As(err, &ce) {
+				t.Fatalf("start after %s = %v, want a conflict", name, err)
+			}
+			live, lerr := ls.LiveOf(ctx, tk.ID)
+			if lerr != nil || len(live) != 0 {
+				t.Errorf("live leases after %s = %+v, %v, want none", name, live, lerr)
+			}
+			if n := len(events(t, s, leases.EventStarted)); n != started {
+				t.Errorf("lease_started events = %d, want %d: a refused start writes nothing", n, started)
+			}
+		})
+	}
+}
+
+// A forced done or a close settles leases held by several actors at once; none
+// of them survives live, and each transition leaves exactly one ended event per
+// lease it ended.
+func TestDoneForcedAndCloseLeaveNoLiveLeaseHeldByAnyActor(t *testing.T) {
+	for name, settle := range map[string]func(Store, string) error{
+		"forced done": func(s Store, ref string) error {
+			_, err := s.Done(ctx, who, "key:p", ref, DoneOptions{Force: true})
+			return err
+		},
+		"close": func(s Store, ref string) error {
+			_, err := s.Close(ctx, who, "key:p", ref, "dropped")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, ls, tk := leased(t)
+			startLease(t, ls, who, tk.Ref, "mine")
+			startLease(t, ls, bobby, tk.Ref, "theirs")
+			if err := settle(s, tk.Ref); err != nil {
+				t.Fatal(err)
+			}
+			live, err := ls.LiveOf(ctx, tk.ID)
+			if err != nil || len(live) != 0 {
+				t.Errorf("live leases after %s = %+v, %v, want none", name, live, err)
+			}
+			if n := len(events(t, s, leases.EventEnded)); n != 2 {
+				t.Errorf("lease_ended events = %d, want 2", n)
+			}
+		})
+	}
+}
