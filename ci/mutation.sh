@@ -25,6 +25,22 @@
 # written "internal/server#ops", with its own report and its own judgement.
 # Each lane judges and replaces only its own packages' reports, so the lanes
 # leave the reports of all of them in the one directory ci/quality.sh reads.
+#
+# Diff mode (BOARD_MUTATION_DIFF=<ref>, the Jenkinsfile's branch and PR
+# builds): only the units with a measured file changed since the merge base
+# with <ref> run, gremlins mutates only the changed lines (gremlins --diff,
+# which compares the working tree with `git diff --merge-base <ref>`), and
+# ci/mutationgate -diff judges them: a unit with no mutant passes, one with
+# mutants is held to the same efficacy floor. Stryker runs only when
+# web/src/lib changed since that merge base (then over all of it). The
+# unchanged units are never handed to gremlins: with an empty diff gremlins
+# mutates everything.
+#
+# BOARD_MUTATION_WORKERS: gremlins' worker count (default: one per CPU).
+# BOARD_MUTATION_TEST_CPU: GOMAXPROCS for gremlins and every go build and test
+# it runs, so workers x test CPUs stays near the core count. Not gremlins'
+# own --test-cpu: v0.6.0 passes it as the single argument "-cpu N", which go
+# test rejects, so every mutant would count as KILLED.
 set -eu
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -34,9 +50,10 @@ outdir=${1:-ci-results/mutation}
 config=${2:-ci/quality.json}
 lane=${3:-all}
 
-# gremlins' worker count (default: one per CPU). The Jenkinsfile sets it when
-# several lanes share one host. Read before the scrub below.
+# Read before the scrub below (see the header).
 workers=${BOARD_MUTATION_WORKERS:-}
+test_cpu=${BOARD_MUTATION_TEST_CPU:-}
+diff_ref=${BOARD_MUTATION_DIFF:-}
 
 # Same scrub as ci/suite.sh and ci/quality.sh: a stray BOARD_* variable must
 # never reach the tests gremlins runs.
@@ -63,10 +80,37 @@ export GOFLAGS
 
 mkdir -p "$outdir"
 
-packages=$(go run ./ci/mutationgate -config "$config" -list -lane "$lane")
-for pkg in $packages; do
+# Every report of the lane goes, so a diff-mode run never leaves an older
+# full run's report of an unchanged unit behind.
+for pkg in $(go run ./ci/mutationgate -config "$config" -list -lane "$lane"); do
     rm -f "${outdir:?}/$(printf '%s' "$pkg" | tr '/#' '--').json"
 done
+if [ -n "$diff_ref" ]; then
+    echo "ci/mutation.sh: diff mode against the merge base with $diff_ref ($(git merge-base "$diff_ref" HEAD))"
+    # gremlins v0.6.0 --diff runs `git diff --merge-base <ref>` in the module
+    # root, which prints paths from the root, and matches them against paths
+    # relative to the package it mutates ("list.go", not
+    # "internal/notes/list.go"): nothing ever matches, every mutant is
+    # SKIPPED. A git shim first in gremlins' PATH adds --relative=<package
+    # dir> to that one command, so the paths are the package's own. Every
+    # other git command passes through untouched.
+    real_git=$(command -v git)
+    shim=$(mktemp -d)
+    trap 'rm -rf "$shim"' EXIT
+    cat >"$shim/git" <<EOF
+#!/bin/sh
+if [ "\$1" = diff ] && [ -n "\${MUTATION_DIFF_RELATIVE:-}" ]; then
+    shift
+    exec "$real_git" diff --relative="\$MUTATION_DIFF_RELATIVE" "\$@"
+fi
+exec "$real_git" "\$@"
+EOF
+    chmod +x "$shim/git"
+fi
+packages=$(go run ./ci/mutationgate -config "$config" -list -lane "$lane" ${diff_ref:+-diff "$diff_ref"})
+if [ -n "$diff_ref" ] && [ -z "$packages" ]; then
+    echo "ci/mutation.sh: no measured Go file of lane $lane changed: no gremlins run"
+fi
 for pkg in $packages; do
     name=$(printf '%s' "$pkg" | tr '/#' '--')
     dir=${pkg%%#*}
@@ -77,17 +121,30 @@ for pkg in $packages; do
         set -- "$@" -E "$pattern"
     done
     echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags)"
-    gremlins unleash "./$dir" --timeout-coefficient "$timeout_coefficient" ${workers:+--workers "$workers"} "$@" -o "$outdir/$name.json"
+    # nice: a full run takes every core for hours; other jobs on the host win.
+    # The GOMAXPROCS cap applies only here, never to the gate's own go run.
+    env ${test_cpu:+GOMAXPROCS=$test_cpu} ${diff_ref:+PATH="$shim:$PATH" MUTATION_DIFF_RELATIVE="$dir"} \
+        nice -n 10 gremlins unleash "./$dir" \
+        --timeout-coefficient "$timeout_coefficient" ${workers:+--workers "$workers"} \
+        ${diff_ref:+--diff "$diff_ref"} "$@" -o "$outdir/$name.json"
 done
 
 status=0
-go run ./ci/mutationgate -config "$config" -dir "$outdir" -lane "$lane" || status=1
+go run ./ci/mutationgate -config "$config" -dir "$outdir" -lane "$lane" ${diff_ref:+-diff "$diff_ref"} || status=1
 
 # The frontend: Stryker over web/src/lib (web/stryker.config.mjs), then the
 # per-module break from ci/quality.json (web/scripts/mutation/mutation.ts).
 # Its JSON report is copied to "$outdir/stryker/mutation.json", where
 # ci/quality.sh's stryker row reads it.
+stryker=no
 if [ -f web/stryker.config.mjs ] && { [ "$lane" = all ] || [ "$lane" = base ]; }; then
+    stryker=yes
+    if [ -n "$diff_ref" ] && git diff --quiet --merge-base "$diff_ref" -- web/src/lib; then
+        echo "ci/mutation.sh: web/src/lib unchanged since the merge base with $diff_ref: no stryker run"
+        stryker=no
+    fi
+fi
+if [ "$stryker" = yes ]; then
     echo "ci/mutation.sh: stryker over web/src/lib"
     mkdir -p "$outdir/stryker"
     rm -f "$outdir/stryker/mutation.json"

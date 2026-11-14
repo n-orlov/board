@@ -26,6 +26,22 @@
 //	mutationgate -config ci/quality.json -excludes internal/server
 //	                                               # one gremlins -E regexp per out-of-scope file
 //	                                               # (a part: internal/server#ops)
+//	mutationgate -config ci/quality.json -diff <ref> -list -lane logic
+//	                                               # only the units with a measured file changed
+//	                                               # since the merge base with ref
+//	mutationgate -config ci/quality.json -diff <ref> -dir d -lane logic
+//	                                               # judge a diff-mode run (see below)
+//
+// Diff mode (-diff, the Jenkinsfile's branch builds; ci/mutation.sh passes the
+// same ref to gremlins --diff, which mutates only lines changed since the
+// merge base with it): a unit none of whose measured files changed is not run
+// and passes without a report, and a changed unit that generated no mutant
+// (a change with nothing gremlins mutates) passes too, whatever
+// fail_on_no_mutants says. A unit that did generate mutants is held to the
+// same efficacy floor; one whose changed lines no test covers at all fails,
+// and one whose judged mutants all timed out passes (gremlins could not judge
+// them either way). gremlins marks the mutants outside the diff SKIPPED; they
+// sit outside every count.
 //
 // Exit codes: 0 pass, 1 gate failed, 2 usage or config error.
 package main
@@ -258,11 +274,11 @@ type report struct {
 
 // counts is a package's mutants by outcome.
 type counts struct {
-	Killed, Lived, TimedOut, NotViable, NotCovered, Other int
+	Killed, Lived, TimedOut, NotViable, NotCovered, Skipped, Other int
 }
 
 // total is every mutant gremlins generated that compiles: everything but
-// the not-viable ones.
+// the not-viable ones and, in diff mode, the ones outside the diff.
 func (c counts) total() int {
 	return c.Killed + c.Lived + c.TimedOut + c.NotCovered + c.Other
 }
@@ -290,6 +306,8 @@ func (c *counts) add(status string) {
 		c.NotViable++
 	case "NOT COVERED":
 		c.NotCovered++
+	case "SKIPPED":
+		c.Skipped++
 	default:
 		c.Other++
 	}
@@ -318,14 +336,18 @@ func reportName(pkg string) string {
 }
 
 // judge is one package's verdict: a failure message, or "" when it passes.
-func judge(cfg config, c counts) string {
+// diff is a diff-mode run (see the package comment).
+func judge(cfg config, c counts, diff bool) string {
 	if c.total() == 0 {
-		if cfg.FailOnNoMutants {
+		if cfg.FailOnNoMutants && !diff {
 			return "FAILED: gremlins generated no mutant, so nothing was measured"
 		}
 		return ""
 	}
 	pct, ok := c.efficacy()
+	if !ok && diff && c.NotCovered == 0 {
+		return ""
+	}
 	if !ok {
 		return "FAILED: no mutant was judged (every mutant is not covered or timed out), so there is no efficacy"
 	}
@@ -336,23 +358,34 @@ func judge(cfg config, c counts) string {
 }
 
 // evaluatePackages gates the given packages (a lane, or all of them) and
-// returns the report text and whether all of them passed.
-func evaluatePackages(cfg config, dir string, pkgs []string) (string, bool) {
+// returns the report text and whether all of them passed. changed is nil
+// outside diff mode; in diff mode it holds the units that changed, and a unit
+// not in it passes without a report.
+func evaluatePackages(cfg config, dir string, pkgs []string, changed map[string]bool) (string, bool) {
 	if len(pkgs) == 0 {
 		return "mutation-go gate: FAILED, no package is configured\n", false
 	}
+	diff := changed != nil
 	var b strings.Builder
 	allOK := true
 	for _, pkg := range pkgs {
-		line, ok := evaluatePackage(cfg, dir, pkg)
+		if diff && !changed[pkg] {
+			b.WriteString(pkg + ": no measured file changed, nothing to mutate: ok\n")
+			continue
+		}
+		line, ok := evaluatePackage(cfg, dir, pkg, diff)
 		b.WriteString(line)
 		allOK = allOK && ok
 	}
-	fmt.Fprintf(&b, "mutation-go gate: efficacy floor %.2f%%, zero mutants fail=%v\n", cfg.Efficacy, cfg.FailOnNoMutants)
+	if diff {
+		fmt.Fprintf(&b, "mutation-go gate (diff mode): efficacy floor %.2f%% over the changed lines' mutants, zero mutants pass\n", cfg.Efficacy)
+	} else {
+		fmt.Fprintf(&b, "mutation-go gate: efficacy floor %.2f%%, zero mutants fail=%v\n", cfg.Efficacy, cfg.FailOnNoMutants)
+	}
 	return b.String(), allOK
 }
 
-func evaluatePackage(cfg config, dir, pkg string) (string, bool) {
+func evaluatePackage(cfg config, dir, pkg string, diff bool) (string, bool) {
 	path := filepath.Join(dir, reportName(pkg))
 	data, err := os.ReadFile(path) //nolint:gosec // G304: the report path is the gate's own directory argument plus a name derived from the configured package
 	if err != nil {
@@ -365,7 +398,10 @@ func evaluatePackage(cfg config, dir, pkg string) (string, bool) {
 	pct, _ := c.efficacy()
 	summary := fmt.Sprintf("%s: %d mutants (killed %d, lived %d, timed out %d, not covered %d, not viable %d), efficacy %.2f%%",
 		pkg, c.total(), c.Killed, c.Lived, c.TimedOut, c.NotCovered, c.NotViable, pct)
-	if msg := judge(cfg, c); msg != "" {
+	if diff {
+		summary += fmt.Sprintf(" (%d outside the diff skipped)", c.Skipped)
+	}
+	if msg := judge(cfg, c, diff); msg != "" {
 		return summary + "\n" + pkg + ": " + msg + "\n", false
 	}
 	return summary + ": ok\n", true
@@ -417,6 +453,59 @@ func outOfScope(pkg string, scope []string, present map[string]bool) ([]string, 
 	return out, nil
 }
 
+// unitFiles returns the slash-separated paths, relative to the module root,
+// of the files a unit mutates: its part, its package's scope, or every
+// non-test .go file of an unscoped package.
+func unitFiles(cfg config, root, unit string) ([]string, error) {
+	pkg, part := splitUnit(strings.Trim(unit, "./"))
+	names, scoped := cfg.Scopes[pkg]
+	if part != "" {
+		names, scoped = cfg.Parts[pkg][part]
+		if !scoped {
+			return nil, fmt.Errorf("%s: no part %q", pkg, part)
+		}
+	}
+	if !scoped {
+		present, err := nonTestGoFiles(filepath.Join(root, pkg))
+		if err != nil {
+			return nil, err
+		}
+		names = sortedKeys(present)
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, path.Join(pkg, n))
+	}
+	return out, nil
+}
+
+// changedUnits returns the units among units with a measured file that
+// differs between the merge base of ref and HEAD and the working tree: the
+// same comparison gremlins --diff makes (git diff --merge-base ref).
+func changedUnits(cfg config, root, ref string, units []string) (map[string]bool, error) {
+	cmd := exec.Command("git", "diff", "--name-only", "--no-renames", "--diff-filter=d", "--merge-base", ref) //nolint:gosec // G204: git diff against the ref the CI passes
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --merge-base %s: %w", ref, err)
+	}
+	diffed := map[string]bool{}
+	for _, f := range strings.Fields(string(out)) {
+		diffed[f] = true
+	}
+	changed := map[string]bool{}
+	for _, u := range units {
+		files, err := unitFiles(cfg, root, u)
+		if err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(files, func(f string) bool { return diffed[f] }) {
+			changed[u] = true
+		}
+	}
+	return changed, nil
+}
+
 // nonTestGoFiles is the set of a directory's non-test .go file names.
 func nonTestGoFiles(dir string) (map[string]bool, error) {
 	entries, err := os.ReadDir(dir)
@@ -460,6 +549,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	lane := fs.String("lane", allLane, "judge or list only this lane of mutation_go.lanes")
 	excl := fs.String("excludes", "", "print, one per line, the gremlins --exclude-files regexps that keep `package` to its configured scope, and exit")
 	unmeas := fs.Bool("unmeasured", false, "print each application file changed since phase_base that no unit measures; exit 1 if there is one")
+	diffRef := fs.String("diff", "", "diff mode: only the units with a measured file changed since the merge base with `ref` (git diff --merge-base, as gremlins --diff)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -468,9 +558,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
 		return 2
 	}
+	var changed map[string]bool
+	if *diffRef != "" {
+		if changed, err = changedFromCwd(cfg, *diffRef, pkgs); err != nil {
+			_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
+			return 2
+		}
+	}
 	switch {
 	case *list:
-		printLines(stdout, pkgs)
+		printLines(stdout, onlyChanged(pkgs, changed))
 	case *unmeas:
 		return reportUnmeasured(cfg, stdout, stderr)
 	case *excl != "":
@@ -481,7 +578,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		printLines(stdout, lines)
 	default:
-		text, ok := evaluatePackages(cfg, *dir, pkgs)
+		text, ok := evaluatePackages(cfg, *dir, pkgs, changed)
 		_, _ = fmt.Fprint(stdout, text)
 		if !ok {
 			return 1
@@ -505,6 +602,30 @@ func loadLane(cfgPath, lane string) (config, []string, error) {
 	}
 	pkgs, err := cfg.lanePackages(lane)
 	return cfg, pkgs, err
+}
+
+// changedFromCwd is changedUnits with the working directory as the module root.
+func changedFromCwd(cfg config, ref string, units []string) (map[string]bool, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	return changedUnits(cfg, root, ref, units)
+}
+
+// onlyChanged keeps the units in changed, or all of them outside diff mode
+// (changed nil).
+func onlyChanged(units []string, changed map[string]bool) []string {
+	if changed == nil {
+		return units
+	}
+	var out []string
+	for _, u := range units {
+		if changed[u] {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // excludesFromCwd is excludes with the working directory as the module root.

@@ -687,3 +687,107 @@ func TestTheShippedConfigMeasuresEveryApplicationFileThePhaseChanged(t *testing.
 		}
 	}
 }
+
+// In diff mode a unit that generated no mutant passes (its change had nothing
+// gremlins mutates), SKIPPED mutants (outside the diff) count nowhere, the
+// efficacy floor still holds, changed lines no test covers still fail, and
+// mutants that only timed out pass.
+func TestDiffModeJudgesOnlyTheMutantsOfTheChangedLines(t *testing.T) {
+	cfg := config{Efficacy: 80, FailOnNoMutants: true}
+	skipped := counts{Skipped: 40}
+	for name, tc := range map[string]struct {
+		c    counts
+		want string
+	}{
+		"zero mutants":            {counts{}, ""},
+		"only skipped":            {skipped, ""},
+		"at the floor":            {counts{Killed: 4, Lived: 1, Skipped: 40}, ""},
+		"below the floor":         {counts{Killed: 2, Lived: 1, Skipped: 40}, "efficacy 66.67% is below the floor"},
+		"changed lines uncovered": {counts{NotCovered: 2, Skipped: 40}, "no mutant was judged"},
+		"only timed out":          {counts{TimedOut: 1, Skipped: 40}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := judge(cfg, tc.c, true)
+			if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+				t.Fatalf("judge = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// Outside diff mode nothing changes: zero mutants (SKIPPED aside) fail.
+	if judge(cfg, skipped, false) == "" {
+		t.Error("full mode passed a report with only skipped mutants")
+	}
+	if c, _ := tally([]byte(`{"files":[{"mutations":[{"status":"SKIPPED"},{"status":"KILLED"}]}]}`)); c.Skipped != 1 || c.total() != 1 {
+		t.Errorf("tally = %+v, want one skipped outside the total of 1", c)
+	}
+}
+
+// -diff lists and judges only the units whose measured files changed since
+// the merge base with the ref: a change outside a unit's scope or part, or to
+// a test file, does not select it, and an unchanged unit passes without a
+// report. With nothing changed, nothing is listed and the gate passes.
+func TestDiffFlagSelectsAndJudgesOnlyTheChangedUnits(t *testing.T) {
+	code := src("package x\n\nfunc F() int { return 1 }\n")
+	changed := src("package x\n\nfunc F() int { return 2 }\n")
+	before := map[string]*string{
+		"internal/a/a.go": code, "internal/a/a_test.go": code, "internal/b/b.go": code,
+		"internal/s/in.go": code, "internal/s/out.go": code, "internal/s/other.go": code,
+	}
+	root, base := phaseRepo(t, before, map[string]*string{"notes.txt": code})
+	t.Chdir(root)
+	cfgPath := filepath.Join(t.TempDir(), "quality.json")
+	conf := `{"mutation_go":{"enabled":true,"efficacy":80,"fail_on_no_mutants":true,
+	  "packages":["internal/a","internal/b","internal/s"],
+	  "scopes":{"internal/s":["in.go","other.go"]},
+	  "parts":{"internal/s":{"p1":["in.go"],"p2":["other.go"]}}}}`
+	if err := os.WriteFile(cfgPath, []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGate := func(args ...string) (int, string) {
+		var out, errb bytes.Buffer
+		c := run(append([]string{"-config", cfgPath, "-diff", base}, args...), &out, &errb)
+		return c, out.String() + errb.String()
+	}
+	reports := t.TempDir()
+	if c, out := runGate("-list"); c != 0 || out != "" {
+		t.Fatalf("nothing changed: -list exit %d printed %q, want nothing", c, out)
+	}
+	if c, out := runGate("-dir", reports); c != 0 || strings.Contains(out, "FAILED") {
+		t.Fatalf("nothing changed: gate exit %d:\n%s", c, out)
+	}
+	// The working tree, as gremlins --diff sees it: a's code, a test of b, and
+	// a file of s outside its scope and one in part p2.
+	for f, content := range map[string]*string{
+		"internal/a/a.go": changed, "internal/b/b_test.go": code,
+		"internal/s/out.go": changed, "internal/s/other.go": changed,
+	} {
+		if err := os.WriteFile(filepath.FromSlash(f), []byte(*content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c, out := runGate("-list"); c != 0 || out != "internal/a\ninternal/s#p2\n" {
+		t.Fatalf("-list exit %d printed %q, want internal/a and internal/s#p2", c, out)
+	}
+	// a generated no mutant and p2's mutants are above the floor: pass, though
+	// no report exists for b or p1.
+	for name, content := range map[string]string{
+		"internal-a.json":    `{"files":[{"mutations":[{"status":"SKIPPED"}]}]}`,
+		"internal-s-p2.json": gremlinsReport(4, 1, 0, 0),
+	} {
+		if err := os.WriteFile(filepath.Join(reports, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c, out := runGate("-dir", reports); c != 0 || !strings.Contains(out, "internal/b: no measured file changed") {
+		t.Fatalf("gate exit %d, want 0:\n%s", c, out)
+	}
+	if err := os.WriteFile(filepath.Join(reports, "internal-s-p2.json"), []byte(gremlinsReport(3, 1, 0, 0)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, out := runGate("-dir", reports); c != 1 || !strings.Contains(out, "internal/s#p2: FAILED: efficacy 75.00%") {
+		t.Fatalf("gate exit %d, want 1 on p2 below the floor:\n%s", c, out)
+	}
+	if c, out := runGate("-list", "-diff", "no-such-ref"); c != 2 || !strings.Contains(out, "git diff --merge-base no-such-ref") {
+		t.Fatalf("unknown ref: exit %d:\n%s", c, out)
+	}
+}

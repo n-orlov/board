@@ -251,6 +251,18 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
     or
   - a package's report is missing or unreadable.
 
+  Diff mode (`BOARD_MUTATION_DIFF=<commit>`, read before the `BOARD_*` scrub;
+  `ci/mutationgate -diff <commit>`) mutates only the lines changed since the
+  merge base with that commit: units with no measured file changed are not run
+  and pass, gremlins gets `--diff` (through a `git` shim that adds
+  `--relative=<package dir>`, because gremlins 0.6.0 compares root-relative
+  diff paths with package-relative file names and would skip every mutant),
+  and a unit with no mutant or no judged mutant passes while one with mutants
+  keeps the 80 % floor. Stryker runs only if `web/src/lib` changed.
+  `BOARD_MUTATION_WORKERS` sets gremlins' workers and `BOARD_MUTATION_TEST_CPU`
+  each worker's GOMAXPROCS (gremlins' own `--test-cpu` passes `-cpu N` as one
+  argument, which fails every test run and counts every mutant killed).
+
   `internal/server`, `internal/cli` and `internal/tasks` hold older Phase 1
   code beside Phase 2's, and a gremlins run of a package re-runs that
   package's whole test suite for every mutant, so each is narrowed to the
