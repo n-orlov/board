@@ -394,6 +394,66 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('sorting by Initiative and Lease holder orders the rows, rows without a holder stay last both ways, equal values keep the default order, and a saved holder sort is restored on a bare link', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const prefix = `e2e-tv-cols-${vp.name}`;
+      const slugA = `${prefix}-b`;
+      const slugB = `${prefix}-a`;
+      await post(api, '/api/v1/initiatives', { slug: slugA, title: `Cols ${slugA}` }, 201);
+      await post(api, '/api/v1/initiatives', { slug: slugB, title: `Cols ${slugB}` }, 201);
+      const task = async (initiative: string, title: string) => (await post(api, '/api/v1/tasks', { initiative, title }, 201)).ref;
+      // Creation order: b1 (initiative ...-b), a1 (...-a), b2 (...-b), a2 (...-a), b3 (...-b).
+      const b1 = await task(slugA, 'B one');
+      const a1 = await task(slugB, 'A one');
+      const b2 = await task(slugA, 'B two');
+      const a2 = await task(slugB, 'A two');
+      const b3 = await task(slugA, 'B three');
+      // Holders: a1 and b2 are held by "zed", b1 by "amy"; a2 and b3 have no lease.
+      const holderApi = async (actor: string) =>
+        playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor } });
+      const amy = await holderApi(`${prefix}-amy`);
+      const zed = await holderApi(`${prefix}-zed`);
+      await post(amy, '/api/v1/leases', { task: b1, intent: 'cols sort', resources: [`repo:${prefix}-1`] }, 201);
+      await post(zed, '/api/v1/leases', { task: a1, intent: 'cols sort', resources: [`repo:${prefix}-2`] }, 201);
+      await post(zed, '/api/v1/leases', { task: b2, intent: 'cols sort', resources: [`repo:${prefix}-3`] }, 201);
+      const byDefault = [b1, a1, b2, a2, b3];
+
+      await page.goto(`/#/tasks?status=all`);
+      const mine = async () => (await tableRefs(page)).filter((ref) => byDefault.includes(ref));
+      await expect.poll(mine).toEqual(byDefault);
+
+      // Initiative: text, equal initiatives keep the default order.
+      await sortBy(page, phone, 'initiative', 'asc');
+      await expect(th(page, 'initiative')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(mine).toEqual([a1, a2, b1, b2, b3]);
+      await sortBy(page, phone, 'initiative', 'desc');
+      await expect(th(page, 'initiative')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(mine).toEqual([b1, b2, b3, a1, a2]);
+
+      // Lease holder: text, the two without a holder last in both directions, equal holders keep the default order.
+      await sortBy(page, phone, 'holder', 'asc');
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(th(page, 'initiative')).toHaveAttribute('aria-sort', 'none');
+      await expect.poll(mine).toEqual([b1, a1, b2, a2, b3]);
+      await sortBy(page, phone, 'holder', 'desc');
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(mine).toEqual([a1, b2, b1, a2, b3]);
+
+      // The saved holder sort comes back on a bare #/tasks after a visit to Initiatives.
+      await expect(page).toHaveURL(/sort=holder&dir=desc$/);
+      const query = new URL(page.url()).hash.split('?')[1];
+      await goTo(page, 'Initiatives');
+      await expect(page.getByRole('heading', { level: 2, name: 'Initiatives' })).toBeVisible();
+      await goTo(page, 'Tasks');
+      await expect(page).toHaveURL(endsWith(`#/tasks?${query}`));
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(mine).toEqual([a1, b2, b1, a2, b3]);
+      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
+      await amy.dispose();
+      await zed.dispose();
+      await api.dispose();
+    });
+
     if (!phone) {
       test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
         const api = await apiContext(playwright, baseURL);
