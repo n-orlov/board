@@ -255,6 +255,59 @@ describe('columns', () => {
   });
 });
 
+describe('columns, more cases of the same rule', () => {
+  const rows = () =>
+    actorRows(
+      [
+        actor('Bob', '2026-03-01T00:00:00Z', { leases: [{ ...LEASE, ref: 'L10' }, { ...LEASE, ref: 'L2' }] }),
+        actor('alice', '2026-03-05T00:00:00Z', { leases: [{ ...LEASE, ref: 'L9' }] }),
+        actor('carol', '2026-03-03T00:00:00Z'),
+        actor('dave', '2026-03-04T00:00:00Z'),
+      ],
+      NOW,
+    );
+  const handles = (column: string, dir: 'asc' | 'desc') => sortRows(rows(), { column, dir }, ACTOR_COLUMNS).map((r) => r.handle);
+
+  it('sorts Live leases by the first lease only and keeps the actors without one last in both directions', () => {
+    expect(handles('leases', 'asc').slice(0, 2)).toEqual(['alice', 'Bob']);
+    expect(handles('leases', 'desc').slice(0, 2)).toEqual(['Bob', 'alice']);
+    expect(handles('leases', 'asc').slice(2).sort()).toEqual(['carol', 'dave']);
+    expect(handles('leases', 'desc').slice(2).sort()).toEqual(['carol', 'dave']);
+  });
+
+  it('keeps actors that tie on a column in the order the view draws them', () => {
+    const tied = actorRows([actor('b', '2026-03-05T00:00:00Z'), actor('a', '2026-03-05T00:00:00Z'), actor('c', '2026-03-05T00:00:00Z')], NOW);
+    const order = (dir: 'asc' | 'desc') => sortRows(tied, { column: 'seen', dir }, ACTOR_COLUMNS).map((r) => r.handle);
+    expect(order('asc')).toEqual(['a', 'b', 'c']);
+    expect(order('desc')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('sorts a single actor and no actors without failing', () => {
+    expect(sortRows(actorRows([], NOW), { column: 'actor', dir: 'desc' }, ACTOR_COLUMNS)).toEqual([]);
+    expect(sortRows(actorRows([actor('solo', '2026-03-05T00:00:00Z')], NOW), { column: 'wayBack', dir: 'asc' }, ACTOR_COLUMNS)).toHaveLength(1);
+  });
+
+  it('leaves the rows it was given in their order', () => {
+    const input = rows();
+    const before = input.map((r) => r.handle);
+    sortRows(input, { column: 'actor', dir: 'asc' }, ACTOR_COLUMNS);
+    expect(input.map((r) => r.handle)).toEqual(before);
+  });
+});
+
+describe('every column is sortable and survives a reload', () => {
+  it('has a phone label, a query encoding and a saved-state restore for each column', () => {
+    for (const column of ACTOR_SORT_COLUMNS) {
+      expect(ACTOR_SORT_LABELS.some((l) => l.column === column)).toBe(true);
+      expect(actorsHash({ column, dir: 'desc' })).toBe(`#/actors?sort=${column}&dir=desc`);
+      const storage = memory();
+      saveViewQuery(storage, ACTORS_VIEW, actorsHash({ column, dir: 'desc' }).split('?')[1] ?? '');
+      const query = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', '');
+      expect(sortOfQuery(query)).toEqual({ column, dir: 'desc' });
+    }
+  });
+});
+
 describe('saved state', () => {
   it('opens a bare route with the saved query, in place', () => {
     const storage = memory();
