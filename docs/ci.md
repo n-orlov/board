@@ -458,7 +458,13 @@ Scripts, each run through `ci/run.sh` unless noted:
   overlap keeps the Suite stage inside its 45-minute budget, which is unchanged, and
   shortens no spec or bound. The config starts the
   real binary on a free port against a freshly migrated SQLite store
-  (`e2e/serve.sh`) and never retries (`retries: 0`). Only `GET /healthz` is open,
+  (`e2e/serve.sh`) and never retries (`retries: 0`). It has two projects over
+  that one store, `chromium-early` first: `shell.spec.ts`, the `timeline*.spec.ts`
+  specs and `wide.spec.ts`, which load the unfiltered Timeline again and again, then
+  `chromium` with every other spec. The store only grows, and an unfiltered Timeline
+  takes seconds to draw once it holds thousands of tasks; run last, those specs failed
+  the first run on the agent and the repeat took the Suite past its bound.
+  `ci/suitecheck` fails if that order is lost. Only `GET /healthz` is open,
   so `e2e/global-setup.ts` mints a key with `board admin keys create` at test
   time (no key is committed) and the `test` exported by `e2e/fixtures.ts`
   sends it, with a `Board-Actor` header, on every request; every spec imports

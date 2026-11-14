@@ -27,6 +27,9 @@ const work = process.env.E2E_WORK ?? (process.env.E2E_WORK = mkdtempSync(join(tm
 // test artifacts live under it.
 const out = process.env.E2E_OUT ?? 'out';
 
+// The specs that load the unfiltered Timeline or every view in turn: see `projects` below.
+const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];
+
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
@@ -62,5 +65,16 @@ export default defineConfig({
     timeout: 180000,
     env: { E2E_PORT: String(port), E2E_WORK: work },
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  // Two projects over one server and one store, in this order (Playwright runs the first project's files first with
+  // the one worker). Every spec adds initiatives and tasks to the shared store and nothing deletes them, so by the
+  // end of the run the store holds thousands of tasks, and an unfiltered Timeline draws all of them: vis-timeline
+  // needs seconds per load there (about 4 s for 2,400 tasks on a 3-CPU container, measured), and these specs load
+  // that view again and again. Run last, they took 25 of their 30 s on the workstation and over 30 s on the Jenkins
+  // agent, which failed the first run and doubled the Suite past its 45-minute bound. They test the Timeline and the
+  // navigation chrome, not store volume, so they run first, on a store that only the specs before them have filled.
+  // No test, assertion, timeout or retry changes; the project name only appears in a test's title.
+  projects: [
+    { name: 'chromium-early', testMatch: earlySpecs, use: { browserName: 'chromium' } },
+    { name: 'chromium', testMatch: '*.spec.ts', testIgnore: earlySpecs, use: { browserName: 'chromium' } },
+  ],
 });

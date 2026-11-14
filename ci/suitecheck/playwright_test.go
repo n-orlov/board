@@ -50,6 +50,75 @@ func TestPlaywrightConfigNeverRetries(t *testing.T) {
 	}
 }
 
+var earlySpecsList = regexp.MustCompile(`(?s)const earlySpecs = \[([^\]]*)\]`)
+
+// playwrightEarlyProblem returns "" when the config runs the volume-sensitive
+// specs (the navigation chrome, every Timeline spec and the wide layout) in a
+// project listed before the project that runs every other spec, and keeps
+// those specs out of the second one, otherwise what is wrong. The shared e2e
+// store only grows, an unfiltered Timeline takes seconds to draw at the end
+// of the run, and these specs load it many times: run last they failed the
+// first run on the Jenkins agent and the repeat took the Suite past its
+// 45-minute bound.
+func playwrightEarlyProblem(cfg string) string {
+	list := earlySpecsList.FindStringSubmatch(cfg)
+	if list == nil {
+		return "no `const earlySpecs = [...]` list"
+	}
+	for _, want := range []string{"shell.spec.ts", "timeline*.spec.ts", "wide.spec.ts"} {
+		if !strings.Contains(list[1], "'"+want+"'") {
+			return "earlySpecs does not name " + want
+		}
+	}
+	early := strings.Index(cfg, "name: 'chromium-early'")
+	main := strings.Index(cfg, "name: 'chromium',")
+	if early < 0 || main < 0 || early > main {
+		return "the chromium-early project must be listed before the chromium project"
+	}
+	earlyLine := cfg[early:main]
+	if !strings.Contains(earlyLine, "testMatch: earlySpecs") {
+		return "the chromium-early project must match earlySpecs"
+	}
+	if !strings.Contains(cfg[main:], "testIgnore: earlySpecs") {
+		return "the chromium project must ignore earlySpecs"
+	}
+	return ""
+}
+
+func TestPlaywrightRunsTheVolumeSensitiveSpecsFirst(t *testing.T) {
+	root, err := repositoryRoot()
+	if err != nil {
+		t.Fatalf("repositoryRoot: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "e2e", "playwright.config.ts"))
+	if err != nil {
+		t.Fatalf("read e2e/playwright.config.ts: %v", err)
+	}
+	if problem := playwrightEarlyProblem(string(raw)); problem != "" {
+		t.Errorf("e2e/playwright.config.ts: %s", problem)
+	}
+}
+
+func TestPlaywrightEarlyProblemFlagsALostOrdering(t *testing.T) {
+	const good = "const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n" +
+		"projects: [\n{ name: 'chromium-early', testMatch: earlySpecs },\n{ name: 'chromium', testMatch: '*.spec.ts', testIgnore: earlySpecs },\n]"
+	if got := playwrightEarlyProblem(good); got != "" {
+		t.Fatalf("a correct config was flagged: %s", got)
+	}
+	for name, cfg := range map[string]string{
+		"no list":           strings.Replace(good, "const earlySpecs", "const other", 1),
+		"timeline dropped":  strings.Replace(good, " 'timeline*.spec.ts',", "", 1),
+		"shell dropped":     strings.Replace(good, "'shell.spec.ts', ", "", 1),
+		"order swapped":     "const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n{ name: 'chromium', testIgnore: earlySpecs },\n{ name: 'chromium-early', testMatch: earlySpecs },",
+		"early not matched": strings.Replace(good, "testMatch: earlySpecs", "testMatch: '*.spec.ts'", 1),
+		"main not ignoring": strings.Replace(good, "testIgnore: earlySpecs", "testMatch: '*.spec.ts'", 1),
+	} {
+		if playwrightEarlyProblem(cfg) == "" {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+}
+
 func TestPlaywrightRetriesProblemFlagsAnyRetry(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cfg    string
