@@ -446,6 +446,48 @@ describe('restored board references the server no longer knows', () => {
     expect(await dropUnknownReferences(withRefs, failing)).toBe(withRefs);
   });
 
+  it('drops a removed initiative but keeps a task that is still known', async () => {
+    const kept = await dropUnknownReferences({ ...withRefs, task: 'board-1' }, lookup(['board'], ['board-1']));
+    expect(kept).toEqual({ ...DEFAULT_NOTES_FILTER, task: 'board-1', author: 'ann', broadcastOnly: true });
+  });
+
+  it('checks each reference on its own: a failed task lookup keeps the task while a removed initiative is still dropped', async () => {
+    const l: NotesLookup = { initiatives: async () => ['board'], taskExists: async () => { throw new Error('down'); } };
+    expect(await dropUnknownReferences(withRefs, l)).toEqual({ ...withRefs, initiative: '' });
+  });
+
+  it('checks each reference on its own: a failed initiative lookup keeps the initiative while a removed task is still dropped', async () => {
+    const l: NotesLookup = { initiatives: async () => { throw new Error('down'); }, taskExists: async () => false };
+    expect(await dropUnknownReferences(withRefs, l)).toEqual({ ...withRefs, task: '' });
+  });
+
+  it('asks about the task as written and leaves the filter it was given untouched', async () => {
+    const l = lookup(['board'], []);
+    const filter = { ...withRefs, initiative: 'board' };
+    const before = { ...filter };
+    await dropUnknownReferences(filter, l);
+    expect(l.taskExists).toHaveBeenCalledWith('gone-1');
+    expect(l.taskExists).toHaveBeenCalledTimes(1);
+    expect(l.initiatives).toHaveBeenCalledTimes(1);
+    expect(filter).toEqual(before);
+  });
+
+  it('a saved filter that names only references the server no longer knows opens at the defaults and saves nothing', async () => {
+    const storage = memory();
+    saveNotes(storage, { ...DEFAULT_NOTES_FILTER, initiative: 'gone', task: 'gone-1' });
+    const opened = openNotes(env(storage), '#/notes');
+    expect(opened.restored).toBe(true);
+    const kept = await startNotesFilter(opened, lookup([], []));
+    expect(kept).toEqual(DEFAULT_NOTES_FILTER);
+    saveNotes(storage, kept);
+    expect(storage.data.has(KEY)).toBe(false);
+  });
+
+  it('a task that exists is kept even when the initiative list is empty and no initiative is named', async () => {
+    const filter = { ...DEFAULT_NOTES_FILTER, task: 'board-1' };
+    expect(await dropUnknownReferences(filter, lookup([], ['board-1']))).toBe(filter);
+  });
+
   it('checks only a restored filter: a link names its references and keeps them', async () => {
     const l = lookup([], []);
     const storage = memory();
