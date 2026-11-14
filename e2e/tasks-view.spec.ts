@@ -290,6 +290,29 @@ for (const vp of viewports) {
       await fresh.close();
     });
 
+    test('leaving for another view while a restored initiative is still being checked: the departed Tasks rewrites nothing and reads nothing', async ({ page }) => {
+      await page.goto('/#/attention');
+      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, `initiative=e2e-tv-depart-ghost-${vp.name}&kind=watch`] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = taskReads(fresh);
+      await fresh.goto('/#/tasks');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), `#/notes?author=tv-depart-${vp.name}`);
+      await expect(fresh.getByTestId('notes-view')).toBeVisible({ timeout: 5000 });
+      await expect(fresh.getByTestId('tasks-view')).toHaveCount(0);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=tv-depart-${vp.name}$`));
+      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('board.view.v1.notes'))) as string).query).toBe(`author=tv-depart-${vp.name}`);
+      // The departed Tasks never read its table or its needs-attention panel.
+      expect(reads).toEqual({ table: 0, needs: 0 });
+      await fresh.close();
+    });
+
     test('a restored initiative is dropped when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
       await page.goto('/#/attention');
       await expect(page.getByTestId('section-open_asks')).toBeVisible();

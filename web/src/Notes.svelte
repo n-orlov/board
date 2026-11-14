@@ -3,7 +3,7 @@
   import NoteForm from './NoteForm.svelte';
   import NoteList from './NoteList.svelte';
   import Toast from './Toast.svelte';
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { live } from './lib/live';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
@@ -47,6 +47,8 @@
   // The first read waits for the check of a restored filter; what the board no longer knows is dropped and saved again.
   // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
   const turns = new FilterTurns();
+  // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
+  onDestroy(() => turns.end());
   async function start() {
     const current = turns.begin();
     const kept = await startNotesFilter(opened, lookup);

@@ -217,6 +217,28 @@ for (const vp of viewports) {
       await fresh.close();
     });
 
+    test('leaving for another view while a restored filter is still being checked: the departed Timeline rewrites nothing and reads nothing', async ({ page }) => {
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const seeded = `initiative=e2e-tlv-depart-ghost-${vp.name}&tag=tlv-depart-gone-${vp.name}&closed=7`;
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, seeded] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = timelineReads(fresh);
+      await fresh.goto('/#/timeline');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), `#/notes?author=tlv-depart-${vp.name}`);
+      await expect(fresh.getByTestId('notes-view')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.getByTestId('timeline-view')).toHaveCount(0);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=tlv-depart-${vp.name}$`));
+      expect(reads.urls).toEqual([]);
+      await fresh.close();
+    });
+
     test('a restored filter is emptied when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
       await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();

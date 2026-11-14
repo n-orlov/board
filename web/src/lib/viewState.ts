@@ -141,16 +141,27 @@ export function currentViewEnv(win: ViewWindow = window): ViewEnv {
  * Orders a view's filter changes. The first read waits while a restored filter's board references are checked, and
  * a link opened, a filter applied or Clear filters while it waits begins a newer change. Each change asks `begin()`
  * for a check and applies its answer only while that check is true, so a restoration that answers late never
- * rewrites an explicit query (or a choice made since) as restored state, and never reads under it.
+ * rewrites an explicit query (or a choice made since) as restored state, and never reads under it. Leaving the view
+ * calls `end()`, after which no check is true: a late answer never touches the view navigated to.
  */
 export class FilterTurns {
   private turn = 0;
   private read = false;
+  private ended = false;
 
-  /** Begins a change: the check it returns stays true until a later change begins. */
+  /** Begins a change: the check it returns stays true until a later change begins or the view ends. */
   begin(): () => boolean {
     const mine = ++this.turn;
-    return () => mine === this.turn;
+    return () => !this.ended && mine === this.turn;
+  }
+
+  /**
+   * Ends the view's turns when it is left (destroyed): a check still running then answers for a view no longer shown,
+   * so it must neither rewrite the fragment (now another view's, perhaps an explicit link) nor save nor read.
+   */
+  end(): void {
+    this.ended = true;
+    this.turn++;
   }
 
   /** Records that the view has read under some filter. */

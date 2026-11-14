@@ -230,4 +230,22 @@ describe('FilterTurns', () => {
     expect(turns.mustRead(true)).toBe(false);
     expect(turns.mustRead(false)).toBe(true);
   });
+
+  it('a view that ends turns every pending check false, and a change begun after the end is never current', () => {
+    const turns = new FilterTurns();
+    const restoring = turns.begin();
+    const hashChange = turns.begin();
+    turns.end();
+    expect([restoring(), hashChange()]).toEqual([false, false]);
+    expect(turns.begin()()).toBe(false);
+  });
+
+  it('ending a view that already read leaves no check current either', () => {
+    const turns = new FilterTurns();
+    const applied = turns.begin();
+    turns.reading();
+    expect(applied()).toBe(true);
+    turns.end();
+    expect(applied()).toBe(false);
+  });
 });

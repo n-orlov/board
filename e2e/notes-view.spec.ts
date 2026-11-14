@@ -191,6 +191,56 @@ for (const vp of viewports) {
       await fresh.close();
     });
 
+    test('leaving for another view while a restored filter is still being checked: the departed Notes rewrites nothing and reads nothing', async ({ page }) => {
+      const ghost = `e2e-nv-depart-ghost-${vp.name}`;
+      const restored = `nv-depart-restored-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, `initiative=${ghost}&author=${restored}`] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = notesReads(fresh);
+      await fresh.goto('/#/notes');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      // A link to the Timeline with its own query arrives while the Notes check is held.
+      await fresh.evaluate((hash) => (window.location.hash = hash), '#/timeline?actor=playwright');
+      await expect(fresh.getByTestId('timeline-view')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.getByTestId('notes-view')).toHaveCount(0);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(/#\/timeline\?actor=playwright$/);
+      await expect(fresh.getByTestId('timeline-view')).toBeVisible();
+      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('board.view.v1.timeline'))) as string).query).toBe('actor=playwright');
+      // The departed Notes never read: not under the restored filter, not under what its check kept.
+      expect(reads.queries).toEqual([]);
+      await fresh.close();
+    });
+
+    test('leaving for a bare view while a restored filter is still being checked: the late check neither drags the URL back nor reads', async ({ page }) => {
+      const ghost = `e2e-nv-depart-bare-${vp.name}`;
+      const restored = `nv-depart-bare-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, `initiative=${ghost}&task=${ghost}-7&author=${restored}`] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = notesReads(fresh);
+      await fresh.goto('/#/notes');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await goTo(fresh, 'Initiatives');
+      await expect(fresh).toHaveURL(/#\/initiatives$/);
+      await expect(fresh.getByTestId('notes-view')).toHaveCount(0, FIVE_SECONDS);
+      lookups.release(); // the Initiatives list waits on the same held lookup, so it shows only after the release
+      await expect(fresh.getByTestId('initiative-row').first()).toBeVisible(FIVE_SECONDS);
+      await fresh.waitForTimeout(500);
+      await expect(fresh).toHaveURL(/#\/initiatives$/);
+      expect(reads.queries).toEqual([]);
+      await fresh.close();
+    });
+
     test('filters applied while a restored filter is still being checked win: the late check rewrites nothing and reads nothing', async ({ page }) => {
       const ghost = `e2e-nv-race-apply-ghost-${vp.name}`;
       const restored = `nv-race-apply-restored-${vp.name}`;

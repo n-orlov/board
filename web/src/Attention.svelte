@@ -16,7 +16,7 @@
     type ActionKind,
     type ActionsState,
   } from './lib/attentionActions';
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { SECTIONS, attentionHash, emptyText, isFiltered, sectionCount, toggled, type AttentionFilter } from './lib/attention';
   import {
     AttentionApi,
@@ -60,6 +60,8 @@
   // A restored filter may name an initiative or a tag the board no longer has: the first fetch waits for the list to drop them.
   // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
   const turns = new FilterTurns();
+  // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
+  onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
   async function start() {
     const current = turns.begin();

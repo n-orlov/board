@@ -199,6 +199,29 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('leaving for another view while a restored filter is still being checked: the departed Attention rewrites nothing and reads nothing', async ({ page }) => {
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const restored = `tag=av-depart-gone-${vp.name}&initiative=e2e-av-depart-ghost-${vp.name}`;
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, restored] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = attentionReads(fresh);
+      await fresh.goto('/#/attention');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), '#/tasks?kind=watch');
+      await expect(fresh.getByTestId('tasks-view')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.getByTestId('attention-view')).toHaveCount(0);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(/#\/tasks\?kind=watch$/);
+      await expect(fresh.getByTestId('kind-filter')).toHaveValue('watch');
+      expect(reads.queries).toEqual([]);
+      await fresh.close();
+    });
+
     test('a restored filter is emptied when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
       await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();

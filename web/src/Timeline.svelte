@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
   import 'vis-timeline/styles/vis-timeline-graph2d.min.css';
@@ -80,6 +80,8 @@
   // A restored filter may name an initiative or a tag the board no longer has: the first fetch waits for the list to drop them.
   // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
   const turns = new FilterTurns();
+  // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
+  onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
   async function start() {
     const current = turns.begin();
