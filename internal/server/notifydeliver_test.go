@@ -193,21 +193,11 @@ func TestSixFailuresEndFailed(t *testing.T) {
 	})
 }
 
-// hangs are the two ways a receiver outlasts BOARD_NOTIFY_TIMEOUT: before its
-// status line, and after a 200 status line with the body still unfinished.
+// hangs are the ways a receiver outlasts BOARD_NOTIFY_TIMEOUT before a status
+// line: it never answers. A 2xx status line ends the wait, whatever its body does.
 var hangs = map[string]func(w http.ResponseWriter, r *http.Request, release <-chan struct{}){
 	"before the status": func(_ http.ResponseWriter, r *http.Request, release <-chan struct{}) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-	},
-	"inside a 200 body": func(w http.ResponseWriter, r *http.Request, release <-chan struct{}) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":`))
-		w.(http.Flusher).Flush()
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -340,5 +330,61 @@ func TestARowClaimedByAStoppedServerIsDeliveredByTheOtherAfterItsClaimLapses(t *
 	w.tickWorker(two)
 	if s := w.states(); s["sent"] != 1 || len(h.got()) != 1 {
 		t.Fatalf("after the claim lapsed: states %v, %d POSTs", s, len(h.got()))
+	}
+}
+
+// A 2xx status line marks the row sent whatever the body does after it: it
+// stalls past BOARD_NOTIFY_TIMEOUT, breaks off, or the answer has none.
+func TestA2xxIsSentWhateverItsBody(t *testing.T) {
+	t.Parallel()
+	bodies := map[string]func(w http.ResponseWriter, r *http.Request, release <-chan struct{}){
+		"a stalled body": func(w http.ResponseWriter, r *http.Request, release <-chan struct{}) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":`))
+			w.(http.Flusher).Flush()
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		},
+		"a truncated body": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"ok":`))
+		},
+		"no body": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+				w := newOutboxWorld(t, dbs, allKinds())
+				release := make(chan struct{})
+				srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					body(rw, r, release)
+				}))
+				defer srv.Close()
+				defer close(release)
+				timeout, err := notify.ParseTimeout("200ms")
+				if err != nil {
+					t.Fatal(err)
+				}
+				wk := w.worker(w.st, srv.URL)
+				wk.Timeout = timeout
+				w.ask(asks.New{Question: "q"})
+				w.tickWorker(wk)
+				var attempts int
+				var lastErr *string
+				if err := w.st.Reader().QueryRowContext(context.Background(), `SELECT attempts, last_error FROM notifications`).Scan(&attempts, &lastErr); err != nil {
+					t.Fatal(err)
+				}
+				if s := w.states(); s["sent"] != 1 || len(s) != 1 || attempts != 1 || lastErr != nil {
+					t.Fatalf("states %v, %d attempts, last_error %v", s, attempts, lastErr)
+				}
+			})
+		})
 	}
 }

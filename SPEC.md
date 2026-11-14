@@ -804,12 +804,11 @@ stopped before the store closes) that looks for due rows every 2 s. A row is due
    it and the others skip it. A server that dies mid-delivery leaves the claim, and the row is delivered by whichever
    server ticks after the claim lapses.
 2. **POSTs** the `payload` as `Content-Type: application/json` to `BOARD_NOTIFY_URL`, with `BOARD_NOTIFY_HEADER` added
-   when it is set, under `BOARD_NOTIFY_TIMEOUT` for the whole exchange, from connect to the last byte of the response:
-   the response body is read to its end and discarded, so a receiver that sends a 2xx status line and then stalls its
-   body past the timeout fails with `timeout`, and one whose body breaks off fails with `network error`. A redirect is
-   not followed.
-3. **Records the outcome** and releases the claim. A 2xx with its whole body read makes the row `sent` and sets
-   `sent_at`. Anything else (another status, a timeout, a connection error) sets `last_error` to `http <status>`,
+   when it is set, under `BOARD_NOTIFY_TIMEOUT` from connect to the response status line. The status line decides: the
+   response body is never read, so a receiver that sends a 2xx status line and then stalls its body, breaks it off or
+   sends none is still a success. A redirect is not followed.
+3. **Records the outcome** and releases the claim. Any received 2xx status, whatever the response body does, makes the row `sent` and sets
+   `sent_at`. Anything else (another status, a timeout or connection error before the status line) sets `last_error` to `http <status>`,
    `timeout` or `network error`, never a response body, a URL or a header value, and counts one attempt. The first
    failure schedules a retry 30 s later, and the following failures 2 min, 10 min, 30 min and 1 h later; the sixth
    failure (the failure of the fifth retry) ends the row `failed`, and a `failed` row is never tried again. `attempts`
@@ -3219,7 +3218,7 @@ All configuration is by environment variable:
 | `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `BOARD_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
 | `BOARD_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `BOARD_NOTIFY_URL` is set |
-| `BOARD_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take, connect to last byte (§5.4). A Go duration above zero; any other value exits 1, whether or not `BOARD_NOTIFY_URL` is set. A POST that exceeds it fails with `last_error` `timeout` and is retried |
+| `BOARD_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take to get a response status line, connect to status (§5.4); the response body is not read, so a stalled or truncated body after a 2xx does not matter. A Go duration above zero; any other value exits 1, whether or not `BOARD_NOTIFY_URL` is set. A POST that gets no status line within it fails with `last_error` `timeout` and is retried |
 | `BOARD_NOTIFY_HEADER` | (unset: none) | one `Name: value` header sent with every alert POST, for a receiver that wants a token (§5.4). A value that is not a header name, a colon and a non-empty one-line value exits 1, with a message that never repeats it. It comes from the environment only; it is never logged, never written to an event or an outbox row and never part of a payload |
 | `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
 | `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"time"
@@ -127,9 +126,9 @@ func (w *Worker) claim(ctx context.Context, id string) (bool, error) {
 	return n == 1, nil
 }
 
-// post sends the payload and returns "" for a 2xx whose body was read to its
-// end, else the error: the HTTP status or an error class, never a body, a URL
-// or a header value.
+// post sends the payload and returns "" for any received 2xx status, whatever
+// its body, else the error: the HTTP status or an error class, never a body, a
+// URL or a header value. The timeout covers connect to the status line.
 func (w *Worker) post(ctx context.Context, payload string) string {
 	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
 	defer cancel()
@@ -146,11 +145,9 @@ func (w *Worker) post(ctx context.Context, payload string) string {
 		return errorClass(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// The timeout runs to the last byte: a body that stalls or breaks is a
-	// failure even after a 2xx status line.
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return errorClass(err)
-	}
+	// The status line decides: any received 2xx is a success whatever the body
+	// does afterwards, so the body is never read and a stalled or truncated one
+	// cannot fail the delivery.
 	if resp.StatusCode/100 == 2 {
 		return ""
 	}

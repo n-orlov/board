@@ -236,9 +236,14 @@ func TestAHungReceiverTimesOutAndIsRetried(t *testing.T) {
 // stalledBody answers 200 with its headers flushed, then holds the body until
 // the client gives up or release closes.
 func stalledBody(release <-chan struct{}) http.HandlerFunc {
+	return stalledBodyWith(http.StatusOK, release)
+}
+
+// stalledBodyWith is stalledBody under another status.
+func stalledBodyWith(status int, release <-chan struct{}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(status)
 		_, _ = w.Write([]byte(`{"ok":`))
 		w.(http.Flusher).Flush()
 		select {
@@ -248,26 +253,32 @@ func stalledBody(release <-chan struct{}) http.HandlerFunc {
 	}
 }
 
-func TestA200WhoseBodyStallsPastTheTimeoutIsATimeoutAndIsRetried(t *testing.T) {
+// A received 2xx is a success whatever its body does: the PRD marks a row sent
+// on any 2xx, so a body that stalls, breaks off or never ends cannot fail it.
+func TestA200WhoseBodyStallsPastTheTimeoutIsSentAtOnce(t *testing.T) {
 	release := make(chan struct{})
 	hung := httptest.NewServer(stalledBody(release))
 	t.Cleanup(hung.Close)
 	t.Cleanup(func() { close(release) })
 	o := newOutbox(t, hung.URL)
-	o.w.Timeout = 200 * time.Millisecond
+	o.w.Timeout = 2 * time.Second
 	id := o.add(t, "done", `{}`)
 	start := time.Now()
 	o.tick(t)
-	if took := time.Since(start); took < 200*time.Millisecond || took > 3*time.Second {
-		t.Fatalf("the stalled body held the tick for %s", took)
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("the stalled body held the tick for %s, the status line had already said 2xx", took)
 	}
 	r := o.row(t, id)
-	if r.state != "pending" || r.lastErr != "timeout" || r.attempts != 1 || !r.next.Equal(o.now.Add(30*time.Second)) {
+	if r.state != "sent" || r.lastErr != "" || r.attempts != 1 || !r.sent.Valid || r.claimed.Valid {
 		t.Fatalf("row = %+v", r)
+	}
+	o.tick(t)
+	if r := o.row(t, id); r.attempts != 1 {
+		t.Fatalf("a sent row was posted again: %+v", r)
 	}
 }
 
-func TestA200WhoseBodyIsCutShortIsANetworkError(t *testing.T) {
+func TestA200WhoseBodyIsCutShortIsSent(t *testing.T) {
 	cut := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Length", "100")
@@ -279,12 +290,12 @@ func TestA200WhoseBodyIsCutShortIsANetworkError(t *testing.T) {
 	id := o.add(t, "done", `{}`)
 	o.tick(t)
 	r := o.row(t, id)
-	if r.state != "pending" || r.lastErr != "network error" || r.attempts != 1 || r.sent.Valid {
+	if r.state != "sent" || r.lastErr != "" || r.attempts != 1 || !r.sent.Valid {
 		t.Fatalf("row = %+v", r)
 	}
 }
 
-func TestA200WithALongBodyIsReadToTheEndAndSent(t *testing.T) {
+func TestA200WithALongBodyIsSent(t *testing.T) {
 	long := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		_, _ = w.Write([]byte(strings.Repeat("x", 1<<20)))
@@ -295,6 +306,66 @@ func TestA200WithALongBodyIsReadToTheEndAndSent(t *testing.T) {
 	o.tick(t)
 	if r := o.row(t, id); r.state != "sent" || r.lastErr != "" || r.attempts != 1 {
 		t.Fatalf("row = %+v", r)
+	}
+}
+
+// Every 2xx status the receiver may answer is a success, with a stalled body
+// behind the status line or none at all.
+func TestEveryReceived2xxStatusIsSentWhateverItsBody(t *testing.T) {
+	for _, status := range []int{200, 201, 202, 203, 204, 206, 207, 226, 299} {
+		for name, serve := range map[string]func(w http.ResponseWriter, release <-chan struct{}, r *http.Request){
+			"no body": func(_ http.ResponseWriter, _ <-chan struct{}, _ *http.Request) {},
+			"stalled body": func(w http.ResponseWriter, release <-chan struct{}, r *http.Request) {
+				_, _ = w.Write([]byte("partial"))
+				w.(http.Flusher).Flush()
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+			},
+		} {
+			t.Run(fmt.Sprintf("%d %s", status, name), func(t *testing.T) {
+				release := make(chan struct{})
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.WriteHeader(status)
+					serve(w, release, r)
+				}))
+				t.Cleanup(srv.Close)
+				t.Cleanup(func() { close(release) })
+				o := newOutbox(t, srv.URL)
+				o.w.Timeout = 2 * time.Second
+				id := o.add(t, "done", `{}`)
+				start := time.Now()
+				o.tick(t)
+				if took := time.Since(start); took > time.Second {
+					t.Fatalf("the tick took %s", took)
+				}
+				if r := o.row(t, id); r.state != "sent" || r.lastErr != "" || r.attempts != 1 {
+					t.Fatalf("row = %+v", r)
+				}
+			})
+		}
+	}
+}
+
+// A non-2xx status is a failure whatever the body does, and is retried on the schedule.
+func TestANon2xxWithAStalledBodyFailsWithItsStatusAndIsRetried(t *testing.T) {
+	for _, status := range []int{300, 404, 500, 503} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			release := make(chan struct{})
+			srv := httptest.NewServer(stalledBodyWith(status, release))
+			t.Cleanup(srv.Close)
+			t.Cleanup(func() { close(release) })
+			o := newOutbox(t, srv.URL)
+			o.w.Timeout = 2 * time.Second
+			id := o.add(t, "done", `{}`)
+			o.tick(t)
+			r := o.row(t, id)
+			if r.state != "pending" || r.lastErr != fmt.Sprintf("http %d", status) || r.attempts != 1 || r.sent.Valid || !r.next.Equal(o.now.Add(30*time.Second)) {
+				t.Fatalf("row = %+v", r)
+			}
+		})
 	}
 }
 
