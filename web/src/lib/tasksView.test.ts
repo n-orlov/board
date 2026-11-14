@@ -132,6 +132,36 @@ describe('the columns', () => {
     expect(viewToQuery({ filter: DEFAULT_TASKS_FILTER, sort: { column: 'flags', dir: 'desc' } })).toBe('sort=flags&dir=desc');
     expect(viewFromQuery('sort=flags&dir=desc').sort).toEqual({ column: 'flags', dir: 'desc' });
   });
+  it('sorts a row with every flag by its whole label list, and rows with the same flags keep their input order in both directions', () => {
+    const flag = (key: 'active' | 'blocked' | 'overdue') => ({ key, label: key, tone: 'warning' as const });
+    const flagged = [
+      row({ ref: 'a-1', badges: [flag('blocked'), flag('overdue')] }),
+      row({ ref: 'a-2', badges: [flag('active'), flag('blocked'), flag('overdue')] }),
+      row({ ref: 'a-3', badges: [flag('blocked'), flag('overdue')] }),
+      row({ ref: 'a-4', badges: [] }),
+      row({ ref: 'a-5', badges: [flag('blocked')] }),
+    ];
+    const order = (dir: 'asc' | 'desc') => sortRows(flagged, { column: 'flags', dir }, TASK_COLUMNS).map((r) => r.ref);
+    expect(order('asc')).toEqual(['a-2', 'a-5', 'a-1', 'a-3', 'a-4']);
+    expect(order('desc')).toEqual(['a-1', 'a-3', 'a-5', 'a-2', 'a-4']);
+  });
+  it('leaves every row unflagged and in input order when no row has a flag', () => {
+    const plain = [row({ ref: 'a-3' }), row({ ref: 'a-1' }), row({ ref: 'a-2' })];
+    expect(sortRows(plain, { column: 'flags', dir: 'asc' }, TASK_COLUMNS).map((r) => r.ref)).toEqual(['a-3', 'a-1', 'a-2']);
+    expect(sortRows(plain, { column: 'flags', dir: 'desc' }, TASK_COLUMNS).map((r) => r.ref)).toEqual(['a-3', 'a-1', 'a-2']);
+  });
+  it('gives every column of the table a phone Sort choice, a place in the query and the saved state', () => {
+    for (const column of Object.keys(TASK_COLUMNS)) {
+      expect(TASK_SORT_LABELS.map((l) => l.column)).toContain(column);
+      expect(viewToQuery({ filter: DEFAULT_TASKS_FILTER, sort: { column, dir: 'asc' } })).toBe(`sort=${column}&dir=asc`);
+      const storage = memory();
+      saveViewQuery(storage, TASKS_VIEW, `sort=${column}&dir=desc`);
+      const replaced: string[] = [];
+      openView({ storage, replaceHash: (h) => replaced.push(h) }, TASKS_VIEW, '#/tasks', '');
+      expect(replaced).toEqual([`#/tasks?sort=${column}&dir=desc`]);
+      expect(viewFromQuery(`sort=${column}&dir=desc`).sort).toEqual({ column, dir: 'desc' });
+    }
+  });
   it('keeps the input order with no sort', () => {
     expect(sortRows(rows, null, TASK_COLUMNS).map((r) => r.ref)).toEqual(['b-10', 'b-9', 'a-2']);
   });
