@@ -269,7 +269,7 @@
             <SortHeader column="title" label="Title" {sort} onsort={setSort} class={head} />
             <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-20" />
             <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{head} md:w-24" />
-            <th scope="col" class="{head} md:w-1/5">Flags</th>
+            <SortHeader column="flags" label="Flags" {sort} onsort={setSort} class="{head} md:w-1/5" />
             <SortHeader column="holder" label="Lease holder" {sort} onsort={setSort} class="{head} md:w-32" />
           </tr>
         </thead>

@@ -60,6 +60,11 @@ export function leaseHolder(task: Pick<TaskListItem, 'live_leases'>): string {
   return rest.length === 0 ? first.actor : `${first.actor} +${rest.length}`;
 }
 
+/** A row's flags as one sortable text, "active, blocked"; empty when the task has none. */
+export function flagsText(row: Pick<TaskRow, 'badges'>): string {
+  return row.badges.map((badge) => badge.label).join(', ');
+}
+
 export interface TaskRow {
   id: string;
   ref: string;

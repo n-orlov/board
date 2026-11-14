@@ -19,6 +19,7 @@ interface Row {
   ref?: string;
   title?: string | null;
   at?: string | number | null;
+  n?: number | null;
   status?: string;
   kind?: string;
 }
@@ -29,6 +30,7 @@ const columns: Columns<Row> = {
   at: { type: 'time', value: (r) => r.at },
   status: { type: 'status', value: (r) => r.status },
   kind: { type: 'kind', value: (r) => r.kind },
+  n: { type: 'number', value: (r) => r.n },
 };
 
 const ids = (rows: Row[]) => rows.map((r) => r.id);
@@ -78,6 +80,11 @@ describe('time comparator', () => {
     ];
     expect(ids(sortRows(rows, { column: 'at', dir: 'asc' }, columns))).toEqual([4, 2, 3, 1]);
     expect(ids(sortRows(rows, { column: 'at', dir: 'desc' }, columns))).toEqual([1, 3, 2, 4]);
+  });
+  it('compares a number column numerically, so 10 follows 9 and a missing one is last either way', () => {
+    const rows: Row[] = [{ id: 1, n: 10 }, { id: 2, n: null }, { id: 3, n: 9 }, { id: 4, n: 0 }];
+    expect(ids(sortRows(rows, { column: 'n', dir: 'asc' }, columns))).toEqual([4, 3, 1, 2]);
+    expect(ids(sortRows(rows, { column: 'n', dir: 'desc' }, columns))).toEqual([1, 3, 4, 2]);
   });
   it('accepts epoch numbers', () => {
     expect(compareCells('time', 5, 20)).toBeLessThan(0);

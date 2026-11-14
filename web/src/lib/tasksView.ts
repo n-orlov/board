@@ -3,19 +3,20 @@
 // Filters are lib/taskFilters.ts, the sort is lib/tableSort.ts; this module joins the two. Sorting is by the view:
 // the server keeps returning its own order, and the Needs attention section never sorts.
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
-import type { TaskRow } from './initiativePage';
+import { flagsText, type TaskRow } from './initiativePage';
 import { filterFromQuery, filterToQuery, type TasksFilter } from './taskFilters';
 
 /** The name of the view's saved state: the key is `board.view.v1.tasks`. */
 export const TASKS_VIEW = 'tasks';
 
-/** The sortable columns of the table, by the name the `sort` query uses. Flags is not one: it is not one value. */
+/** The sortable columns of the table, by the name the `sort` query uses. Flags sorts by its badge labels (active, blocked, overdue), no flag last. */
 export const TASK_COLUMNS: Columns<TaskRow> = {
   ref: { type: 'ref', value: (row) => row.ref },
   title: { type: 'text', value: (row) => row.title },
   initiative: { type: 'text', value: (row) => row.initiative },
   kind: { type: 'kind', value: (row) => row.kind },
   status: { type: 'status', value: (row) => row.status },
+  flags: { type: 'text', value: (row) => flagsText(row) },
   holder: { type: 'text', value: (row) => row.holder },
 };
 
@@ -29,6 +30,7 @@ export const TASK_SORT_LABELS: readonly { column: string; label: string }[] = [
   { column: 'initiative', label: 'Initiative' },
   { column: 'kind', label: 'Kind' },
   { column: 'status', label: 'Status' },
+  { column: 'flags', label: 'Flags' },
   { column: 'holder', label: 'Lease holder' },
 ];
 

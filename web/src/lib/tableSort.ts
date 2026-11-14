@@ -2,7 +2,7 @@
 // `sort=<column>&dir=asc|desc` query that keeps the order across a reload. The default order is the one the
 // server returns, so it is never written to the URL.
 
-export type ColumnType = 'ref' | 'text' | 'time' | 'status' | 'kind';
+export type ColumnType = 'ref' | 'text' | 'time' | 'status' | 'kind' | 'number';
 export type Direction = 'asc' | 'desc';
 export interface Sort {
   column: string;
@@ -57,6 +57,8 @@ export function compareCells(type: ColumnType, a: Cell, b: Cell): number {
       return ref(String(a), String(b));
     case 'time':
       return instant(a) - instant(b);
+    case 'number':
+      return Number(a) - Number(b);
     case 'status':
       return rank(STATUS_ORDER, String(a), String(b));
     case 'kind':
@@ -67,7 +69,7 @@ export function compareCells(type: ColumnType, a: Cell, b: Cell): number {
 }
 
 function blank(type: ColumnType, cell: Cell): boolean {
-  return isEmpty(cell) || (type === 'time' && Number.isNaN(instant(cell)));
+  return isEmpty(cell) || (type === 'time' && Number.isNaN(instant(cell))) || (type === 'number' && Number.isNaN(Number(cell)));
 }
 
 /** Empty cells (and a time that does not parse) sit last, whichever the direction. Ties return 0. */

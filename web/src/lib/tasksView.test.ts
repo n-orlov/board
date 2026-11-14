@@ -75,9 +75,9 @@ describe('sort <-> query encoding', () => {
   });
 
   it('names the columns of the table and a label for each', () => {
-    expect(TASK_SORT_COLUMNS).toEqual(['ref', 'title', 'initiative', 'kind', 'status', 'holder']);
+    expect(TASK_SORT_COLUMNS).toEqual(['ref', 'title', 'initiative', 'kind', 'status', 'flags', 'holder']);
     expect(TASK_SORT_LABELS.map((l) => l.column)).toEqual(TASK_SORT_COLUMNS);
-    expect(TASK_SORT_LABELS.map((l) => l.label)).toEqual(['Ref', 'Title', 'Initiative', 'Kind', 'Status', 'Lease holder']);
+    expect(TASK_SORT_LABELS.map((l) => l.label)).toEqual(['Ref', 'Title', 'Initiative', 'Kind', 'Status', 'Flags', 'Lease holder']);
   });
 });
 
@@ -89,6 +89,7 @@ describe('the columns', () => {
       initiative: 'text',
       kind: 'kind',
       status: 'status',
+      flags: 'text',
       holder: 'text',
     });
   });
@@ -114,6 +115,22 @@ describe('the columns', () => {
   it('sorts the lease holder as text with the empty ones last either way', () => {
     expect(refs('holder', 'asc')).toEqual(['a-2', 'b-10', 'b-9']);
     expect(refs('holder', 'desc')).toEqual(['b-10', 'a-2', 'b-9']);
+  });
+  it('sorts Flags by the badge labels with the unflagged rows last either way, ties in input order', () => {
+    const flagged = [
+      row({ ref: 'a-1', badges: [] }),
+      row({ ref: 'a-2', badges: [{ key: 'overdue', label: 'overdue', tone: 'danger' }] }),
+      row({ ref: 'a-3', badges: [{ key: 'active', label: 'active', tone: 'success' }, { key: 'blocked', label: 'blocked', tone: 'warning' }] }),
+      row({ ref: 'a-4', badges: [{ key: 'active', label: 'active', tone: 'success' }] }),
+      row({ ref: 'a-5', badges: [] }),
+    ];
+    const order = (dir: 'asc' | 'desc') => sortRows(flagged, { column: 'flags', dir }, TASK_COLUMNS).map((r) => r.ref);
+    expect(order('asc')).toEqual(['a-4', 'a-3', 'a-2', 'a-1', 'a-5']);
+    expect(order('desc')).toEqual(['a-2', 'a-3', 'a-4', 'a-1', 'a-5']);
+  });
+  it('round-trips the flags column through the query', () => {
+    expect(viewToQuery({ filter: DEFAULT_TASKS_FILTER, sort: { column: 'flags', dir: 'desc' } })).toBe('sort=flags&dir=desc');
+    expect(viewFromQuery('sort=flags&dir=desc').sort).toEqual({ column: 'flags', dir: 'desc' });
   });
   it('keeps the input order with no sort', () => {
     expect(sortRows(rows, null, TASK_COLUMNS).map((r) => r.ref)).toEqual(['b-10', 'b-9', 'a-2']);

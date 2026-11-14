@@ -201,9 +201,9 @@ describe('sort <-> query encoding', () => {
 
 describe('columns', () => {
   it('names a label for every sortable column, in the table order', () => {
-    expect(ACTOR_SORT_COLUMNS).toEqual(['actor', 'leases', 'seen']);
+    expect(ACTOR_SORT_COLUMNS).toEqual(['actor', 'leases', 'seen', 'wayBack']);
     expect(ACTOR_SORT_LABELS.map((l) => l.column)).toEqual(ACTOR_SORT_COLUMNS);
-    expect(ACTOR_SORT_LABELS.map((l) => l.label)).toEqual(['Actor', 'Live leases', 'Last seen']);
+    expect(ACTOR_SORT_LABELS.map((l) => l.label)).toEqual(['Actor', 'Live leases', 'Last seen', 'Way back']);
     expect(ACTORS_VIEW).toBe('actors');
   });
 
@@ -226,10 +226,27 @@ describe('columns', () => {
   });
 
   it('compares each column by its own type: text, ref and time', () => {
-    expect(Object.fromEntries(Object.entries(ACTOR_COLUMNS).map(([name, column]) => [name, column.type]))).toEqual({ actor: 'text', leases: 'ref', seen: 'time' });
+    expect(Object.fromEntries(Object.entries(ACTOR_COLUMNS).map(([name, column]) => [name, column.type]))).toEqual({ actor: 'text', leases: 'ref', seen: 'time', wayBack: 'text' });
     // 23:00Z is later than 00:00+02:00 of the same date, though it sorts first as text.
     const rows = actorRows([actor('a', '2026-03-05T00:00:00+02:00'), actor('b', '2026-03-04T23:00:00Z')], NOW);
     expect(sortRows(rows, { column: 'seen', dir: 'asc' }, ACTOR_COLUMNS).map((r) => r.handle)).toEqual(['a', 'b']);
+  });
+
+  it('sorts Way back as text with the actors that have none last in both directions', () => {
+    const rows = actorRows(
+      [
+        actor('none-a', '2026-03-01T00:00:00Z'),
+        actor('zed', '2026-03-02T00:00:00Z', { way_back: 'board attach zed' }),
+        actor('amy', '2026-03-03T00:00:00Z', { way_back: 'Board attach amy' }),
+        actor('none-b', '2026-03-04T00:00:00Z', { way_back: '' }),
+      ],
+      NOW,
+    );
+    const handles = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'wayBack', dir }, ACTOR_COLUMNS).map((r) => r.handle);
+    expect(handles('asc').slice(0, 2)).toEqual(['amy', 'zed']);
+    expect(handles('desc').slice(0, 2)).toEqual(['zed', 'amy']);
+    expect(handles('asc').slice(2).sort()).toEqual(['none-a', 'none-b']);
+    expect(handles('desc').slice(2).sort()).toEqual(['none-a', 'none-b']);
   });
 
   it('keeps the default order when nothing is sorted', () => {

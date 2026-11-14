@@ -75,7 +75,7 @@
           <SortHeader column="actor" label="Actor" {sort} onsort={setSort} class="{head} md:w-1/5" />
           <SortHeader column="leases" label="Live leases" {sort} onsort={setSort} class={head} />
           <SortHeader column="seen" label="Last seen" {sort} onsort={setSort} class="{head} md:w-32" />
-          <th scope="col" class="{head} md:w-1/4">Way back</th>
+          <SortHeader column="wayBack" label="Way back" {sort} onsort={setSort} class="{head} md:w-1/4" />
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">

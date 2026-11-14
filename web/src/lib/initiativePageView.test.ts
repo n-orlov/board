@@ -53,7 +53,7 @@ describe('sort <-> query encoding', () => {
   });
 
   it('takes the defaults for an unknown status, an unknown column and a bad direction', () => {
-    expect(viewFromQuery('status=weird&sort=flags&dir=asc')).toEqual({ filter: 'not-closed', sort: null });
+    expect(viewFromQuery('status=weird&sort=bogus&dir=asc')).toEqual({ filter: 'not-closed', sort: null });
     expect(viewFromQuery('sort=ref&dir=sideways')).toEqual({ filter: 'not-closed', sort: null });
     expect(viewFromQuery('')).toEqual({ filter: 'not-closed', sort: null });
   });
@@ -87,8 +87,8 @@ describe('sort <-> query encoding', () => {
 describe('columns', () => {
   it('names a label for every sortable column, in the table order', () => {
     expect(PAGE_TASK_SORT_LABELS.map((l) => l.column)).toEqual(PAGE_TASK_SORT_COLUMNS);
-    expect(PAGE_TASK_SORT_COLUMNS).toEqual(['ref', 'title', 'kind', 'status', 'holder']);
-    expect(PAGE_TASK_SORT_LABELS.map((l) => l.label)).toEqual(['Ref', 'Title', 'Kind', 'Status', 'Lease holder']);
+    expect(PAGE_TASK_SORT_COLUMNS).toEqual(['ref', 'title', 'kind', 'status', 'flags', 'holder']);
+    expect(PAGE_TASK_SORT_LABELS.map((l) => l.label)).toEqual(['Ref', 'Title', 'Kind', 'Status', 'Flags', 'Lease holder']);
   });
 
   it('sorts refs numerically, titles ignoring case, kinds and statuses in their order, empty holders last', () => {
@@ -106,6 +106,21 @@ describe('columns', () => {
     expect(ids('status', 'asc')).toEqual(['3', '2', '1']);
     expect(ids('holder', 'asc')).toEqual(['3', '2', '1']);
     expect(ids('holder', 'desc')).toEqual(['2', '3', '1']);
+  });
+});
+
+describe('the Flags column', () => {
+  it('sorts by the badge labels, the unflagged rows last in both directions', () => {
+    const rows = [
+      row({ id: '1', badges: [] }),
+      row({ id: '2', badges: [{ key: 'blocked', label: 'blocked', tone: 'warning' }] }),
+      row({ id: '3', badges: [{ key: 'active', label: 'active', tone: 'success' }] }),
+      row({ id: '4', badges: [] }),
+    ];
+    const ids = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'flags', dir }, PAGE_TASK_COLUMNS).map((r) => r.id);
+    expect(ids('asc')).toEqual(['3', '2', '1', '4']);
+    expect(ids('desc')).toEqual(['2', '3', '1', '4']);
+    expect(PAGE_TASK_COLUMNS.flags?.type).toBe('text');
   });
 });
 

@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The Actors table sort and saved view state (PRD R16, SPEC 11): the table sorts by Actor (text), Live leases (ref, the
-// actor's first live lease) and Last seen (time) through the shared header (desktop, with the keyboard) and the Sort select
+// actor's first live lease), Last seen (time) and Way back (text) through the shared header (desktop, with the keyboard) and the Sort select
 // (phone); the sort rides in the fragment query and is saved under `board.view.v1.actors`, so it survives nav away and back.
 // The table has no status or kind column. The server is shared with every other spec, so each test reads only the rows of
 // the three actors it seeded.
@@ -92,7 +92,7 @@ for (const vp of viewports) {
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
       if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
       else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of ['actor', 'leases', 'seen']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
 
       // text: the handle, ascending and descending.
       await sortBy(page, phone, 'actor', 'asc');
@@ -129,6 +129,47 @@ for (const vp of viewports) {
       await expect(page).toHaveURL(endsWith('#/actors'));
       expect(await stored(page)).toBeNull();
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('');
+    });
+
+    // Way back used to be the one data column of this table with no sort.
+    test('sorting by Way back orders the rows as text with the actor that has none last in both directions, and the sort survives a reload', async ({ page, playwright, baseURL }) => {
+      const prefix = `actway-${vp.name}-`;
+      const [bee, cat, none] = [`${prefix}bee`, `${prefix}cat`, `${prefix}none`];
+      const as = async (handle: string, wayBack?: string) => {
+        const api = await playwright.request.newContext({
+          baseURL,
+          extraHTTPHeaders: {
+            Authorization: `Bearer ${process.env.E2E_API_KEY}`,
+            'Board-Actor': handle,
+            ...(wayBack === undefined ? {} : { 'Board-Actor-Way-Back': wayBack }),
+          },
+        });
+        await post(api, '/api/v1/notes', { summary: `${handle} was here` }, 201);
+        await api.dispose();
+      };
+      // Seen oldest first: bee (way back "z..."), cat (way back "a..."), none, so no other sort gives the way-back order.
+      await as(bee, `zeta resume ${bee}`);
+      await as(cat, `Alpha resume ${cat}`);
+      await as(none);
+
+      await page.goto('/#/actors');
+      await expect.poll(() => order(page, prefix)).toHaveLength(3);
+      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'none');
+      await sortBy(page, phone, 'wayBack', 'asc');
+      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => order(page, prefix)).toEqual([cat, bee, none]);
+      await expect(page).toHaveURL(endsWith('#/actors?sort=wayBack&dir=asc'));
+      await sortBy(page, phone, 'wayBack', 'desc');
+      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => order(page, prefix)).toEqual([bee, cat, none]);
+      expect(await saved(page)).toEqual({ v: 1, query: 'sort=wayBack&dir=desc' });
+      await page.reload();
+      await expect.poll(() => order(page, prefix)).toEqual([bee, cat, none]);
+      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'descending');
+      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:desc');
+      await sortBy(page, phone, 'wayBack', null);
+      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'none');
+      expect(await stored(page)).toBeNull();
     });
 
     test('the sort survives nav away and back, a fresh page and a reload, and a fragment with its own query wins', async ({ page, playwright, baseURL }) => {
@@ -173,11 +214,11 @@ for (const vp of viewports) {
       const { prefix, mike, zed, amy } = await seed(playwright, baseURL, `bad-${vp.name}`);
       await page.goto('/#/attention');
       await expect(page.getByTestId('section-open_asks')).toBeVisible();
-      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'sort=way_back&dir=asc'] as const);
+      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'sort=way&dir=asc'] as const);
       const fresh = await page.context().newPage();
       await fresh.goto('/#/actors');
       await expect.poll(() => order(fresh, prefix)).toEqual([zed, mike, amy]);
-      for (const column of ['actor', 'leases', 'seen']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
       await fresh.close();
     });
 

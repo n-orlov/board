@@ -83,6 +83,38 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
+    test('sorting by Flags orders the rows by their badges, the unflagged row last in both directions, and the sort is kept in the fragment', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-tv-flags-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Flags ${slug}` }, 201);
+      const task = async (title: string, extra: object = {}) => (await post(api, '/api/v1/tasks', { initiative: slug, title, ...extra }, 201)).ref;
+      // Creation order: plain (no flag), leased (active), blocked by the leased one (blocked).
+      const plain = await task('Plain');
+      const leased = await task('Leased');
+      const blocked = await task('Blocked', { blocked_by: [leased] });
+      await post(api, '/api/v1/leases', { task: leased, intent: 'flags sort', resources: [`repo:${slug}`] }, 201);
+
+      await page.goto(`/#/tasks?initiative=${slug}&status=all`);
+      await expect.poll(() => tableRefs(page)).toEqual([plain, leased, blocked]);
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'none');
+      await sortBy(page, phone, 'flags', 'asc');
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => tableRefs(page)).toEqual([leased, blocked, plain]);
+      await expect(page).toHaveURL(/sort=flags&dir=asc$/);
+      await sortBy(page, phone, 'flags', 'desc');
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => tableRefs(page)).toEqual([blocked, leased, plain]);
+      await expect(page).toHaveURL(/sort=flags&dir=desc$/);
+      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('flags:desc');
+      await page.reload();
+      await expect.poll(() => tableRefs(page)).toEqual([blocked, leased, plain]);
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'descending');
+      await sortBy(page, phone, 'flags', null);
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'none');
+      await expect.poll(() => tableRefs(page)).toEqual([plain, leased, blocked]);
+      await api.dispose();
+    });
+
     test('two filters and a sort survive Initiatives and back, and a new page of the same context, with one fetch each', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { slug, refs } = await seed(api, `e2e-tv-restore-${vp.name}`);
@@ -225,7 +257,7 @@ for (const vp of viewports) {
       } else {
         await expect(page.getByTestId('sort-select')).toBeHidden();
       }
-      for (const column of ['ref', 'title', 'initiative', 'kind', 'status', 'holder']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['ref', 'title', 'initiative', 'kind', 'status', 'flags', 'holder']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
 
       // ref (numbers compare as numbers): the first step is ascending, the second descending, the third the default.
       await sortBy(page, phone, 'ref', 'desc');

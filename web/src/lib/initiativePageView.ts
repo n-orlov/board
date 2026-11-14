@@ -4,18 +4,19 @@
 // sort another one opens with. The filter is lib/initiativeFilters.ts, the sort is lib/tableSort.ts; this module joins the
 // two. Sorting is by the view: the page holds all of its tasks, and the Needs attention section above never sorts.
 import { DEFAULT_TASK_FILTER, TASK_FILTERS, type TaskFilter } from './initiativeFilters';
-import type { TaskRow } from './initiativePage';
+import { flagsText, type TaskRow } from './initiativePage';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
 /** The name of the view's saved state: the key is `board.view.v1.initiative`, shared by every initiative. */
 export const INITIATIVE_VIEW = 'initiative';
 
-/** The sortable columns of the Tasks table, by the name the `sort` query uses. Flags is not one value, so it is not one. */
+/** The sortable columns of the Tasks table, by the name the `sort` query uses. Flags sorts by its badge labels, no flag last. */
 export const PAGE_TASK_COLUMNS: Columns<TaskRow> = {
   ref: { type: 'ref', value: (row) => row.ref },
   title: { type: 'text', value: (row) => row.title },
   kind: { type: 'kind', value: (row) => row.kind },
   status: { type: 'status', value: (row) => row.status },
+  flags: { type: 'text', value: (row) => flagsText(row) },
   holder: { type: 'text', value: (row) => row.holder },
 };
 
@@ -28,6 +29,7 @@ export const PAGE_TASK_SORT_LABELS: readonly { column: string; label: string }[]
   { column: 'title', label: 'Title' },
   { column: 'kind', label: 'Kind' },
   { column: 'status', label: 'Status' },
+  { column: 'flags', label: 'Flags' },
   { column: 'holder', label: 'Lease holder' },
 ];
 

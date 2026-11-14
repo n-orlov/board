@@ -14,7 +14,7 @@ import {
 } from './initiativesView';
 
 function row(over: Partial<InitiativeListItem>): InitiativeListItem {
-  return { slug: 'a', title: 't', status: 'open', created_at: '2026-01-01T00:00:00Z', ...over } as InitiativeListItem;
+  return { slug: 'a', title: 't', status: 'open', tags: [], counts: { open: 0, done: 0, closed: 0 }, created_at: '2026-01-01T00:00:00Z', ...over } as InitiativeListItem;
 }
 
 function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map<string, string> } {
@@ -51,7 +51,7 @@ describe('sort <-> query encoding', () => {
   });
 
   it('takes the defaults for an unknown status, an unknown column and a bad direction', () => {
-    expect(viewFromQuery('status=weird&sort=tags&dir=asc')).toEqual({ filter: 'open', sort: null });
+    expect(viewFromQuery('status=weird&sort=bogus&dir=asc')).toEqual({ filter: 'open', sort: null });
     expect(viewFromQuery('sort=title&dir=sideways')).toEqual({ filter: 'open', sort: null });
     expect(viewFromQuery('')).toEqual({ filter: 'open', sort: null });
   });
@@ -77,8 +77,8 @@ describe('sort <-> query encoding', () => {
 describe('columns', () => {
   it('names a label for every sortable column, in the table order', () => {
     expect(INITIATIVE_SORT_LABELS.map((l) => l.column)).toEqual(INITIATIVE_SORT_COLUMNS);
-    expect(INITIATIVE_SORT_COLUMNS).toEqual(['title', 'status', 'created']);
-    expect(INITIATIVE_SORT_LABELS.map((l) => l.label)).toEqual(['Title', 'Status', 'Created']);
+    expect(INITIATIVE_SORT_COLUMNS).toEqual(['title', 'status', 'tags', 'tasks', 'created']);
+    expect(INITIATIVE_SORT_LABELS.map((l) => l.label)).toEqual(['Title', 'Status', 'Tags', 'Tasks', 'Created']);
     expect(INITIATIVES_VIEW).toBe('initiatives');
   });
 
@@ -116,5 +116,30 @@ describe('saved state', () => {
     const query = openView({ storage, replaceHash: () => undefined }, INITIATIVES_VIEW, '#/initiatives', 'status=closed');
     expect(viewFromQuery(query)).toEqual({ filter: 'closed', sort: null });
     expect(JSON.parse(storage.data.get('board.view.v1.initiatives')!)).toEqual({ v: 1, query: 'status=closed' });
+  });
+
+  it('sorts Tags as text with the untagged initiatives last in both directions', () => {
+    const rows = [
+      row({ slug: 'n1', tags: [] }),
+      row({ slug: 'b', tags: ['beta'] }),
+      row({ slug: 'a', tags: ['Alpha', 'zed'] }),
+      row({ slug: 'n2', tags: [] }),
+    ];
+    const slugs = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'tags', dir }, INITIATIVE_COLUMNS).map((r) => r.slug);
+    expect(slugs('asc')).toEqual(['a', 'b', 'n1', 'n2']);
+    expect(slugs('desc')).toEqual(['b', 'a', 'n1', 'n2']);
+  });
+
+  it('sorts Tasks by the number of tasks in all, so 10 follows 9, ties in input order', () => {
+    const rows = [
+      row({ slug: 'ten', counts: { open: 4, done: 3, closed: 3 } }),
+      row({ slug: 'nine', counts: { open: 9, done: 0, closed: 0 } }),
+      row({ slug: 'none', counts: { open: 0, done: 0, closed: 0 } }),
+      row({ slug: 'nine-b', counts: { open: 0, done: 5, closed: 4 } }),
+    ];
+    const slugs = (dir: 'asc' | 'desc') => sortRows(rows, { column: 'tasks', dir }, INITIATIVE_COLUMNS).map((r) => r.slug);
+    expect(slugs('asc')).toEqual(['none', 'nine', 'nine-b', 'ten']);
+    expect(slugs('desc')).toEqual(['ten', 'nine', 'nine-b', 'none']);
+    expect(INITIATIVE_COLUMNS.tasks?.type).toBe('number');
   });
 });

@@ -3,16 +3,19 @@
 // restores. The filter is lib/initiativeFilters.ts, the sort is lib/tableSort.ts; this module joins the two. Sorting is by
 // the view: the server keeps returning its own order, and the default order (attention first) is the one a sort replaces.
 import { DEFAULT_INITIATIVE_FILTER, parseInitiativeFilter, type InitiativeFilter } from './initiativeFilters';
+import { totalTasks } from './counts';
 import type { InitiativeListItem } from './initiatives';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
 /** The name of the view's saved state: the key is `board.view.v1.initiatives`. */
 export const INITIATIVES_VIEW = 'initiatives';
 
-/** The sortable columns of the table, by the name the `sort` query uses. Tags and Tasks are not one value each. */
+/** The sortable columns of the table, by the name the `sort` query uses. Tags sorts by the tags as one text (they are kept sorted), none last; Tasks by the number of tasks in all. */
 export const INITIATIVE_COLUMNS: Columns<InitiativeListItem> = {
   title: { type: 'text', value: (row) => row.title },
   status: { type: 'status', value: (row) => row.status },
+  tags: { type: 'text', value: (row) => row.tags.join(', ') },
+  tasks: { type: 'number', value: (row) => totalTasks(row.counts) },
   created: { type: 'time', value: (row) => row.created_at },
 };
 
@@ -23,6 +26,8 @@ export const INITIATIVE_SORT_COLUMNS: readonly string[] = Object.keys(INITIATIVE
 export const INITIATIVE_SORT_LABELS: readonly { column: string; label: string }[] = [
   { column: 'title', label: 'Title' },
   { column: 'status', label: 'Status' },
+  { column: 'tags', label: 'Tags' },
+  { column: 'tasks', label: 'Tasks' },
   { column: 'created', label: 'Created' },
 ];
 

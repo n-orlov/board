@@ -135,8 +135,8 @@
         <tr class="md:border-b md:border-border">
           <SortHeader column="title" label="Title" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted" />
           <SortHeader column="status" label="Status" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-28" />
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/5">Tags</th>
-          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-44">Tasks</th>
+          <SortHeader column="tags" label="Tags" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/5" />
+          <SortHeader column="tasks" label="Tasks" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-44" />
           <SortHeader column="created" label="Created" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-32" />
         </tr>
       </thead>

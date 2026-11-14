@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Initiatives view's sort and saved view state (PRD R16, SPEC 11): the table sorts by Title (text), Status (status) and
-// Created (time) through the shared header (desktop, with the keyboard) and the Sort select (phone); the sort rides in the
+// The Initiatives view's sort and saved view state (PRD R16, SPEC 11): the table sorts by Title (text), Status (status),
+// Tags (text), Tasks (number) and Created (time) through the shared header (desktop, with the keyboard) and the Sort select (phone); the sort rides in the
 // fragment query next to the status filter; the whole query is saved under `board.view.v1.initiatives` and restored on a
 // bare `#/initiatives` with one fetch; a fragment with its own query wins; Clear filters forgets it all. The board is shared
 // with every other spec, so each test seeds initiatives of its own and reads only those rows.
@@ -74,6 +74,55 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
+    test('sorting by Tags and by Tasks orders the rows (text, number), empty tags last in both directions, and the sort survives a reload', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const prefix = `e2e-iv-cols-${vp.name}`;
+      // Creation order: plain (no tags, no tasks), big (tags "zeta", 10 tasks), mid (tags "Alpha", 9 tasks), few (tags "mid", 2 tasks).
+      const defs = [
+        { key: 'plain', tags: [] as string[], tasks: 0 },
+        { key: 'big', tags: ['zeta'], tasks: 10 },
+        { key: 'mid', tags: ['Alpha'], tasks: 9 },
+        { key: 'few', tags: ['mid'], tasks: 2 },
+      ];
+      const slug = (key: string) => `${prefix}-${key}`;
+      for (const d of defs) {
+        await post(api, '/api/v1/initiatives', { slug: slug(d.key), title: `Cols ${d.key}`, tags: d.tags }, 201);
+        for (let i = 0; i < d.tasks; i++) await post(api, '/api/v1/tasks', { initiative: slug(d.key), title: `${d.key} ${i}` }, 201);
+      }
+      const [plain, big, mid, few] = defs.map((d) => slug(d.key));
+
+      await page.goto('/#/initiatives?status=all');
+      await expect.poll(() => ownRows(page, prefix)).toHaveLength(4);
+      for (const column of ['tags', 'tasks']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+
+      // Tags is text, case-insensitive; the untagged initiative sits last whichever the direction.
+      await sortBy(page, phone, 'tags', 'asc');
+      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([mid, few, big, plain]);
+      await expect(page).toHaveURL(endsWith('#/initiatives?status=all&sort=tags&dir=asc'));
+      await sortBy(page, phone, 'tags', 'desc');
+      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([big, few, mid, plain]);
+
+      // Tasks is a number: 9 sorts before 10, an initiative with no tasks first ascending and last descending.
+      await sortBy(page, phone, 'tasks', 'asc');
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'none');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([plain, few, mid, big]);
+      await sortBy(page, phone, 'tasks', 'desc');
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([big, mid, few, plain]);
+      expect((await saved(page)).query).toBe('status=all&sort=tasks&dir=desc');
+
+      await page.reload();
+      await expect.poll(() => ownRows(page, prefix)).toEqual([big, mid, few, plain]);
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('tasks:desc');
+      await sortBy(page, phone, 'tasks', null);
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'none');
+      await api.dispose();
+    });
+
     test('sorting by one column of each type (text, status, time) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { prefix, slugs } = await seed(api, `e2e-iv-sort-${vp.name}`);
@@ -84,7 +133,7 @@ for (const vp of viewports) {
       const byDefault = await ownRows(page, prefix);
       if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
       else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of ['title', 'status', 'created']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
 
       // text: title ascending ignores case, descending reverses it.
       await sortBy(page, phone, 'title', 'asc');
@@ -212,12 +261,12 @@ for (const vp of viewports) {
     test('a saved query with an unknown status or column opens at the defaults', async ({ page }) => {
       await page.goto('/#/attention');
       await expect(page.getByTestId('section-open_asks')).toBeVisible();
-      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'status=bogus&sort=tags&dir=asc'] as const);
+      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'status=bogus&sort=bogus&dir=asc'] as const);
       const fresh = await page.context().newPage();
       await fresh.goto('/#/initiatives');
       await expect(fresh.getByTestId('initiative-row').first()).toBeVisible();
       await expect(fresh.getByTestId('initiative-filter')).toHaveValue('open');
-      for (const column of ['title', 'status', 'created']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
       await fresh.close();
     });
 

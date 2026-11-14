@@ -89,12 +89,13 @@ export const ACTORS_VIEW = 'actors';
 
 /**
  * The sortable columns of the table, by the name the `sort` query uses. A lease column sorts by the ref of the actor's first
- * (oldest) live lease, so an actor without one is empty and sits last; Way back is not a sortable value.
+ * (oldest) live lease, so an actor without one is empty and sits last; Way back sorts by the text, an actor with none last.
  */
 export const ACTOR_COLUMNS: Columns<ActorRow> = {
   actor: { type: 'text', value: (row) => row.handle },
   leases: { type: 'ref', value: (row) => row.leases[0]?.ref },
   seen: { type: 'time', value: (row) => row.lastSeenAt },
+  wayBack: { type: 'text', value: (row) => row.wayBack },
 };
 
 /** The column names, in the order of the table. */
@@ -105,6 +106,7 @@ export const ACTOR_SORT_LABELS: readonly { column: string; label: string }[] = [
   { column: 'actor', label: 'Actor' },
   { column: 'leases', label: 'Live leases' },
   { column: 'seen', label: 'Last seen' },
+  { column: 'wayBack', label: 'Way back' },
 ];
 
 /** The sort a query names: an unknown column or a bad `dir` is the default order (live leases first, then last seen). */
