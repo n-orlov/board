@@ -349,6 +349,51 @@ func TestEveryReceived2xxStatusIsSentWhateverItsBody(t *testing.T) {
 	}
 }
 
+// The body is never read for a verdict: a 2xx whose body says it failed is
+// still a received 2xx, and so is one whose headers a body decoder would choke on.
+func TestA200WhoseBodyReportsAFailureIsStillSent(t *testing.T) {
+	for name, body := range map[string]string{
+		"json error": `{"ok":false,"error":"rejected"}`,
+		"plain text": "ERROR: could not process this notification",
+		"html page":  "<html><body>500 Internal Server Error</body></html>",
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(srv.Close)
+			o := newOutbox(t, srv.URL)
+			id := o.add(t, "done", `{}`)
+			o.tick(t)
+			if r := o.row(t, id); r.state != "sent" || r.lastErr != "" || r.attempts != 1 || !r.sent.Valid {
+				t.Fatalf("row = %+v", r)
+			}
+			o.tick(t)
+			if r := o.row(t, id); r.attempts != 1 {
+				t.Fatalf("a sent row was posted again: %+v", r)
+			}
+		})
+	}
+}
+
+func TestA200WithAnUndecodableContentEncodingIsStillSent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("this is not gzip"))
+	}))
+	t.Cleanup(srv.Close)
+	o := newOutbox(t, srv.URL)
+	id := o.add(t, "done", `{}`)
+	o.tick(t)
+	if r := o.row(t, id); r.state != "sent" || r.lastErr != "" || r.attempts != 1 || !r.sent.Valid {
+		t.Fatalf("row = %+v", r)
+	}
+}
+
 // A non-2xx status is a failure whatever the body does, and is retried on the schedule.
 func TestANon2xxWithAStalledBodyFailsWithItsStatusAndIsRetried(t *testing.T) {
 	for _, status := range []int{300, 404, 500, 503} {
