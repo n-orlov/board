@@ -101,10 +101,34 @@ func TestRootDockerfileStampsVersionAndRevision(t *testing.T) {
 	}
 }
 
+// imageVersionJenkinsProblems: the Jenkinsfile derives the tag or short sha
+// and the commit before any unit's body (which includes the Image unit's
+// build) runs, and hands both to the unit as BOARD_IMAGE_VERSION and
+// BOARD_IMAGE_REVISION, the variables ci/image-build.sh reads.
+func imageVersionJenkinsProblems(jf string) []string {
+	var problems []string
+	for _, want := range []string{
+		"commitSha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()",
+		"imageVersion = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short=7 HEAD').trim()",
+		`"BOARD_IMAGE_REVISION=${commitSha}", "BOARD_IMAGE_VERSION=${imageVersion}"`,
+	} {
+		if !strings.Contains(jf, want) {
+			problems = append(problems, "the Jenkinsfile lacks "+want)
+		}
+	}
+	set, body := strings.Index(jf, "imageVersion = sh("), strings.Index(jf, "int rc = u.body()")
+	if set < 0 || body < 0 || set > body {
+		problems = append(problems, "the Jenkinsfile sets the image version after running the unit that builds the image")
+	}
+	if with := strings.Index(jf, "BOARD_IMAGE_VERSION=${imageVersion}"); with < set || with > body {
+		problems = append(problems, "the version is not in the environment of the unit's body")
+	}
+	return problems
+}
+
 // TestImageBuildAndJenkinsfilePassTheVersionArgs: the tag or the short sha, and
 // the commit, reach both docker builds as the two build args.
 func TestImageBuildAndJenkinsfilePassTheVersionArgs(t *testing.T) {
-	skipOnDistributedExperiment(t)
 	build := readRepoFile(t, "ci", "image-build.sh")
 	if n := strings.Count(build, `--build-arg "VERSION=$version" --build-arg "REVISION=$revision"`); n != 2 {
 		t.Errorf("ci/image-build.sh passes VERSION and REVISION to %d of its 2 docker builds", n)
@@ -115,15 +139,11 @@ func TestImageBuildAndJenkinsfilePassTheVersionArgs(t *testing.T) {
 		}
 	}
 	jf := readRepoFile(t, "Jenkinsfile")
-	for _, want := range []string{
-		"env.BOARD_IMAGE_VERSION = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short=7 HEAD')",
-		"env.BOARD_IMAGE_REVISION = env.GIT_COMMIT",
-	} {
-		if !strings.Contains(jf, want) {
-			t.Errorf("the Jenkinsfile lacks %q", want)
-		}
-	}
-	if strings.Index(jf, "env.BOARD_IMAGE_VERSION =") > strings.Index(jf, "sh 'ci/image-build.sh") {
-		t.Error("the Jenkinsfile sets the image version after building the image")
-	}
+	expectProblems(t, jf, imageVersionJenkinsProblems, map[string]string{
+		"no version":                    replaceOnce(t, jf, `, "BOARD_IMAGE_VERSION=${imageVersion}"`, ""),
+		"no revision":                   replaceOnce(t, jf, `"BOARD_IMAGE_REVISION=${commitSha}", `, ""),
+		"a version without a tag":       replaceOnce(t, jf, "git describe --tags --exact-match HEAD 2>/dev/null || ", ""),
+		"no commit":                     replaceOnce(t, jf, "commitSha = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()", "commitSha = 'unknown'"),
+		"a version set after the build": replaceOnce(t, replaceOnce(t, jf, "imageVersion = sh(", "imageVersion = xsh("), "int rc = u.body()", "int rc = u.body()\n imageVersion = sh("),
+	})
 }

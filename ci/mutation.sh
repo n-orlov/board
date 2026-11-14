@@ -17,10 +17,10 @@
 #   ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic
 #                                             # one lane of mutation_go.lanes
 #
-# A lane is a group of packages the Jenkinsfile runs as its own stage (each
-# under its own 30-minute timeout, none raised): one stage cannot hold every
-# package's mutants. The lane "all" (the default) is every package plus
-# Stryker. Stryker runs in the lane "base" and in "all", and only there.
+# A lane is a group of packages that can be run by hand on their own. The
+# Jenkinsfile's Mutation unit runs the lane "all" (full mode, or diff mode
+# restricted to the changed lines). The lane "all" (the default) is every
+# package plus Stryker. Stryker runs in the lane "base" and in "all", and only there.
 # A package split into parts (mutation_go.parts) is run once per part, a part
 # written "internal/server#ops", with its own report and its own judgement.
 # Each lane judges and replaces only its own packages' reports, so the lanes

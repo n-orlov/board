@@ -249,7 +249,6 @@ func TestRootDockerfileBuildsTheMultiArchContainer(t *testing.T) {
 // and BuildKit images, loads the amd64 image, runs `board version`, probes
 // /healthz and inspects both manifests, and never pushes.
 func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
-	skipOnDistributedExperiment(t)
 	build := readRepoFile(t, "ci", "image-build.sh")
 	check := readRepoFile(t, "ci", "image-check.sh")
 	for _, want := range []string{
@@ -288,7 +287,43 @@ func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
 		}
 	}
 	jf := readRepoFile(t, "Jenkinsfile")
-	if strings.Index(jf, "ci/image-build.sh") > strings.Index(jf, "ci/image-check.sh") {
-		t.Error("the Jenkinsfile checks the image before building it")
+	expectProblems(t, jf, imageUnitProblems, map[string]string{
+		"an image checked before it is built": replaceOnce(t, jf, `ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"`, `ci/image-check.sh "$BOARD_CI_OUT" && ci/image-build.sh "$BOARD_CI_OUT/board-image.tar"`),
+		"an image that is never checked":      replaceOnce(t, jf, ` && ci/image-check.sh "$BOARD_CI_OUT"`, ""),
+		"a pushed image":                      replaceOnce(t, jf, `ci/image-check.sh "$BOARD_CI_OUT"'`, `ci/image-check.sh "$BOARD_CI_OUT" && docker push board:ci'`),
+		"a pushing build":                     replaceOnce(t, jf, `ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" &&`, `ci/image-build.sh --push "$BOARD_CI_OUT/board-image.tar" &&`),
+		"a tar nobody can scan":               replaceOnce(t, jf, "includes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar'", "includes: 'ci-results/none.tar'"),
+		"an image unit with another limit":    replaceOnce(t, jf, "units << [name: 'Image', minutes: 30,", "units << [name: 'Image', minutes: 5,"),
+	})
+}
+
+// imageUnitProblems: the Core phase's Image unit builds the image (both
+// platforms, never pushed), checks it after that and stashes the tar for Quality
+// (Quality's need for that stash is qualityProblems's).
+func imageUnitProblems(jf string) []string {
+	var problems []string
+	core, _ := jenkinsStage(jf, "Core")
+	i := strings.Index(core, "units << [name: 'Image'")
+	if i < 0 {
+		return []string{"Core has no Image unit"}
 	}
+	unit, _, _ := strings.Cut(core[i:], "units << [name: 'Allure smoke'")
+	build, check := strings.Index(unit, "ci/image-build.sh"), strings.Index(unit, "ci/image-check.sh")
+	if build < 0 || check < 0 || build > check {
+		problems = append(problems, "the Image unit does not build the image and then check it")
+	}
+	if !strings.Contains(unit, "minutes: 30,") {
+		problems = append(problems, "the Image unit's limit is not 30 minutes")
+	}
+	if !strings.Contains(unit, "includes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar'") {
+		problems = append(problems, "the Image unit does not stash the image tars")
+	}
+	for _, l := range jenkinsfileLines(jf) {
+		for _, bad := range []string{"docker push", "--push", "type=registry"} {
+			if strings.Contains(l, bad) {
+				problems = append(problems, "the Jenkinsfile pushes the image: "+l)
+			}
+		}
+	}
+	return problems
 }

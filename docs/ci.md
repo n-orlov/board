@@ -94,51 +94,80 @@ The clone is of the committed HEAD, so commit before running it.
 ## The Jenkinsfile
 
 `Jenkinsfile` is the multibranch job `board/ci`
-(`https://jenkins.wisent-owl.ts.net/job/board/job/ci/`; agent label
-`linux && amd64 && docker`, `@Library('homelab')`, `disableConcurrentBuilds`, a
-`git clean -ffdxq` workspace). Stages, in order:
+(`https://jenkins.wisent-owl.ts.net/job/board/job/ci/`; `@Library('homelab')`,
+`agent none`, `disableConcurrentBuilds`, a 480-minute pipeline timeout). The
+header comment of the file is the authoritative description. Every test stage is
+a **unit**: its own parallel branch, with its own retry policy, that checks the
+build's commit out into its own workspace on the one agent every unit uses
+(`int21h-ws`, reached through the single label constant `AMD`, `board-test &&
+amd64 && docker`, with 4 executors; no unit asks for an arm64 or any other
+label), builds `board-ci:local` (`ci/jenkins-image.sh`, cached by the Docker
+daemon; cache volumes `board-go-cache-jenkins` and `board-npm-cache-jenkins`,
+each chowned to the agent's uid once), runs, and removes the sibling and
+Testcontainers containers its attempt labelled (`ralphd.run=<attempt id>`, by
+exact ID). An infrastructure failure (agent lost, Docker unavailable, a timeout)
+gets another attempt, up to three; a failing command is rerun once, and a pass
+there marks the build UNSTABLE ("flaky"). The build page carries a per-unit
+timing table (`ci-results/distributed/timing.md`).
 
-| stage | command | runs |
+The pipeline has three phases, one after another; the units of a phase run in
+parallel, and a phase runs only if every earlier one passed (UNSTABLE counts as
+passed):
+
+| phase | units | runs |
 |---|---|---|
-| CI image | `ci/jenkins-image.sh` (cache volumes `board-go-cache-jenkins` and `board-npm-cache-jenkins`, each chowned to the agent's uid once) | every build |
-| Lint | `ci/run.sh ci/lint.sh` | every build |
-| Suite | `ci/run.sh ci/suite.sh` | every build |
-| Allure smoke | the Godog formatter fixture, then `ci/allure-smoke.sh` on the agent | every build |
-| Quality | `ci/image-build.sh`, `ci/image-check.sh`, then `ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred` | every build |
-| Stability | `ci/stability.sh 3` on the agent | extended lane only |
-| Mutation logic | `ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic` | extended lane only (nightly or `EXTENDED=true`), like Stability |
-| Mutation server ops | the same command, lane `server-ops` (`internal/server#ops`) | same |
-| Mutation server streams | the same command, lane `server-streams` (`internal/server#streams`) | same |
-| Mutation server core | the same command, lane `server-core` (`internal/server#core`) | same |
-| Mutation cli | the same command, lane `cli` (`internal/cli#views`) | same |
-| Mutation cli core | the same command, lane `cli-core` (`internal/cli#core`) | same |
-| Mutation | the same command, lane `base`: gremlins over `internal/domain` and `internal/store`, then Stryker | same; a push build of `main` and a branch build skip all seven |
+| Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
+| Stability | three units, each `ci/stability.sh 1` | `EXTENDED=true` or the nightly timer |
+| Mutation | one unit, in one of two modes (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
 
-The extended lane is the nightly `main` build (03:17) or a build with the
-`EXTENDED` parameter: `-race`, fresh vulnerability databases, Stability and
-Mutation. A red Suite, Allure smoke, Quality, Stability or Mutation stage fails
-the build and the later stages still run.
+Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
+`MUTATION_FULL`. The nightly timer (`17 3 * * *`, on `main` only; every other
+branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
+
+- **Core** runs on every build, a push build of `main` included (about 20-35
+  minutes). `EXTENDED=true` and the nightly timer also add `-race` (the Suite's
+  limit goes from 45 to 120 minutes) and fresh vulnerability databases to Core.
+- **Stability** is the extended lane: `EXTENDED=true` or the nightly timer.
+- **Mutation** is one unit, gated on `MUTATION` or `MUTATION_FULL` or the
+  timer and on nothing else: `EXTENDED=true` on its own runs no mutation.
+  - *diff* (`MUTATION=true`): only the lines changed since a base, in one
+    45-minute unit (`BOARD_MUTATION_DIFF=<base>`). The base is the merge base
+    with `origin/<CHANGE_TARGET, or main>` (fetched into the workspace first,
+    because the multibranch checkout fetches only the built branch), and `HEAD~1`
+    on `main` itself, where the merge base would be `HEAD`. A package with no
+    mutant passes; one with mutants keeps the 80 efficacy floor; Stryker runs
+    only if `web/src/lib` changed.
+  - *full* (`MUTATION_FULL=true` or the nightly timer on `main`): every package
+    plus Stryker in one unit, `ci/run.sh ci/mutation.sh ci-results/mutation
+    ci/quality.json all`, with `nproc / 2` gremlins workers at GOMAXPROCS 2 per
+    worker (`BOARD_MUTATION_WORKERS`, `BOARD_MUTATION_TEST_CPU`), at `nice 10`,
+    under one 6-hour limit and a single attempt (a timeout is not worth another
+    6 hours). It takes about 70 minutes.
+
+A red Lint, Suite, Image, Allure smoke, Quality, Stability or Mutation unit
+fails the build. Within a phase the other units still finish, and a later phase
+does not start after a failure.
 
 **Allure smoke.** `features/allure_formatter_test.go` is board's Godog formatter
 for Allure 2 (selected by `BOARD_GODOG_ALLURE=<absolute results dir>`, which
 `ci/suite.sh` sets for every `features/` run, rerun included, so a rerun scenario
 keeps its history id). `features/allure_formatter_fixture_test.go` runs a fixture
 feature through it (a pass with an issue link, a failure with attachments, a skip
-and a retried scenario). The stage runs that test with `BOARD_ALLURE_FIXTURE_OUT`
+and a retried scenario). The unit runs that test with `BOARD_ALLURE_FIXTURE_OUT`
 set, then `ci/allure-smoke.sh` runs the pinned Allure CLI over the results and
 fails unless the report carries the fixture's steps and its `@gh-61` link.
 
 **Quality and Mutation.** `ci/mutation.sh` writes the reports that `mutation-go`
-and `stryker` read, after Quality, in the extended lane only (a push build of `main` and a branch
-build skip the Mutation stages). So the Quality
-stage passes `--mutation-deferred` as `ci/quality.sh`'s third argument: those two
-rows print "deferred to the Mutation stage" instead of reading reports that
-cannot exist yet. The Mutation stage's `ci/mutation.sh` judges the same reports
-against the same `ci/quality.json` thresholds (efficacy, break, per-module
-break, no mutant fails) and fails the build below them. Without the flag
-(`ci/run.sh ci/quality.sh`, the local recipe) the rows read
+and `stryker` read, in the Mutation phase, which comes after Core (Quality
+included) and runs only when `MUTATION`, `MUTATION_FULL` or the timer asks for
+it. So the Quality unit passes `--mutation-deferred` as `ci/quality.sh`'s third
+argument: those two rows print "deferred to the Mutation phase" instead of
+reading reports that cannot exist yet. The Mutation unit's `ci/mutation.sh`
+judges the same reports against the same `ci/quality.json` thresholds (efficacy,
+break, per-module break, no mutant fails) and fails the build below them.
+Without the flag (`ci/run.sh ci/quality.sh`, the local recipe) the rows read
 `ci-results/mutation/` and fail when it is missing. Every other gate runs in the
-Quality stage on every build.
+Quality unit on every build.
 
 **The image.** The root `Dockerfile` is multi-stage (the Svelte build, a static
 `CGO_ENABLED=0` Go build, then `FROM scratch` with the binary, the CA
@@ -159,8 +188,9 @@ was built: `go run ./ci/imagecheck` (through `ci/run.sh`) requires a manifest fo
 each platform, a non-root user, `/board` as the entrypoint, and an ELF `/board`
 whose machine is that platform's (so an arm64 manifest holding the build host's
 binary fails); `docker run board:ci version` runs the loaded image; a container of
-it must answer `GET /healthz` with 200. Both run in the Quality stage, before
-`ci/quality.sh`. `ci/repocheck` fails when the final stage is not scratch or
+it must answer `GET /healthz` with 200. Both run in the Image unit of the Core
+phase, whose tar the Quality unit then scans with `ci/quality.sh`.
+`ci/repocheck` fails when the final stage is not scratch or
 distroless static, has a `RUN`, runs as root or sets no user, lacks the CA
 certificates or tzdata, when a builder `FROM` lacks `--platform=$BUILDPLATFORM`, or
 when the Go build does not cross-compile. Nothing is pushed: the registry push
@@ -169,8 +199,8 @@ belongs to the release job (Phase 4).
 **Reports.** `post { always }` publishes the JUnit, Allure and CI summary reports,
 declares the README badges, adds the build page summary line, and archives
 `ci-results/` (the gremlins reports in `ci-results/mutation/` and the CycloneDX
-SBOMs `ci-results/*.cdx.json` included). A fully green `main` build (`post {
-success }`) archives `ci-results/release-candidate.json`. `notifyTelegram` runs
+SBOMs `ci-results/*.cdx.json` included). A fully green `main` build (checked in `post { always }`: `SUCCESS`, so an
+UNSTABLE or failed build never qualifies) archives `ci-results/release-candidate.json`. `notifyTelegram` runs
 last, in `post { cleanup }`.
 
 - **Build page summary line** (badge plugin `addSummary`): pass/fail/skip/flaky
@@ -184,11 +214,20 @@ last, in `post { cleanup }`.
   `lastCompletedBuild/CI_20summary/` (the CI summary report), all under
   `https://jenkins.wisent-owl.ts.net/job/board/job/ci/job/main/`.
 
-`ci/repocheck/jenkinsfile_test.go` pins all of it: the seven stages in order (a
-test fails if one is removed), the job shape, the nightly lane, the Quality and
-Mutation stages, that the job never releases, the reports, the badges and
-`notifyTelegram`; `ci/repocheck/lintgate_test.go` pins that Lint runs
-`ci/lint.sh` before the Suite.
+`ci/repocheck/jenkinsfile_test.go` pins all of it: the three phases Core,
+Stability and Mutation in order, with the Core units and Quality's wait for
+Suite and Image; the job shape (the one `AMD` label for every `node()`, the three
+booleanParams, `disableConcurrentBuilds`, the 480-minute timeout, the
+per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
+on `main` only); the Quality unit; the two Mutation modes (diff: one 45-minute
+unit over the lines changed since the merge base, `HEAD~1` on `main`; full: one
+unit over lane `all`, 360 minutes, one attempt, the worker split) and that
+Mutation runs only for `MUTATION`, `MUTATION_FULL` or the timer; that the job
+never releases; the reports, the badges and `notifyTelegram`. Each property has
+a case that feeds the check a copy of the Jenkinsfile with it removed or
+altered, so a test fails if it is lost. `ci/repocheck/lintgate_test.go` pins that
+Lint is the first Core unit and runs `ci/lint.sh`, and that a red unit fails the
+build.
 
 ## Release
 
@@ -219,8 +258,8 @@ its threshold. A gate whose input does not exist yet fails; it never passes.
 | `govulncheck` | zero reachable | runs |
 | `trivy` | HIGH, CRITICAL on the source | runs |
 | `trivy_image` | HIGH, CRITICAL on the image | runs (`trivy image --input ci-results/board-image.tar`; fails when the tar, which `ci/image-build.sh` writes, is missing or empty) |
-| `mutation_go` | efficacy 80 per package, `internal/domain`, `internal/store` and the Phase 2 application logic (see below), zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
-| `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`; with `--mutation-deferred` the Jenkins Mutation stage judges it) |
+| `mutation_go` | efficacy 80 per package, `internal/domain`, `internal/store` and the Phase 2 application logic (see below), zero mutants fails | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/`; with `--mutation-deferred` the Jenkins Mutation phase judges it) |
+| `stryker` | break 80, per module 80, `web/src/lib` | runs (fails until `ci/mutation.sh` has written `ci-results/mutation/stryker/mutation.json`; with `--mutation-deferred` the Jenkins Mutation phase judges it) |
 | `sbom_module` | CycloneDX of `go.mod`, non-empty | runs |
 | `sbom_frontend` | CycloneDX of `web/package.json` and `web/package-lock.json` (dev dependencies included: all of the frontend's are), non-empty | runs |
 | `sbom_image` | CycloneDX, non-empty | runs (from the image tar; fails when it is missing) |
@@ -235,7 +274,8 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 ./ci/...` runs them all:
 
 - `ci/mutation.sh` and `ci/mutationgate`: the Go mutation gate, the command of
-  the Jenkins Mutation stages (the extended lane only: nightly or `EXTENDED=true`; a push build of `main` skips them). The
+  the Jenkins Mutation unit (only with `MUTATION=true`, `MUTATION_FULL=true` or the
+  nightly timer; a push build of `main` skips it). The
   script runs `gremlins unleash` over each package in `mutation_go.packages`
   (`internal/domain`, `internal/store`, and the application logic Phase 2
   introduced or changed: `internal/asks`, `internal/attention`,
@@ -277,27 +317,27 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   `ci/mutationgate -excludes <pkg>`
   prints one `--exclude-files` regexp per other non-test file, and
   `ci/mutation.sh` passes them to gremlins (a scoped file that does not exist
-  fails). One stage measured `internal/server` in over 25 of its 30 minutes on
-  the agent, so `mutation_go.parts` splits its scope into three disjoint
+  fails). A gremlins run of `internal/server` re-runs a large suite for every
+  mutant, so `mutation_go.parts` splits its scope into three disjoint
   parts (`ops`, `streams` and `core`), and `internal/cli`'s into two (`views`
   and `core`), each set together exactly its scope, which `ci/mutationgate`
   checks: each part is a unit `internal/server#ops` that gremlins runs with
   every file outside the part excluded, with its own report
   (`internal-server-ops.json`) and its own judgement against the same floor.
-  `mutation_go.lanes` partitions the packages' units into the seven stages
-  above (a unit in no lane, or two, fails `ci/mutationgate`, and a test
-  holds the Jenkinsfile to one stage per lane): each stage keeps the 30-minute
-  timeout the single stage had, which is why the packages are split instead of
-  the timeout raised. `ci/mutation.sh [outdir [config [lane]]]` runs one lane
-  (default `all`, every package plus Stryker; Stryker also runs in `base`) and
-  `ci/mutationgate -lane` judges only that lane's reports; every lane writes into
-  `ci-results/mutation/`, where `ci/quality.sh` judges them all. gremlins takes a
+  `mutation_go.lanes` partitions the packages' units into lanes (a unit in no
+  lane, or two, fails `ci/mutationgate`). Jenkins no longer runs a lane per
+  stage: its full Mutation unit runs lane `all`, every unit of every package plus
+  Stryker, in one go. A lane is the way to run part of it by hand:
+  `ci/mutation.sh [outdir [config [lane]]]` runs one lane (default `all`; Stryker
+  also runs in `base`) and `ci/mutationgate -lane` judges only that lane's
+  reports; every lane writes into `ci-results/mutation/`, where `ci/quality.sh`
+  judges them all. gremlins takes a
   package's per-mutant bound from the time of its covered `go test` run, which
   go's test cache can answer in milliseconds, so `ci/mutation.sh` runs with
   `GOFLAGS=-count=1`: the covered run is a real run, and `--timeout-coefficient
   60` multiplies the suite's real duration (without it every `internal/server`
-  and `internal/cli` mutant timed out unjudged). The efficacy floor, `--timeout-coefficient 60` and gremlins' default
-  worker count apply to every package alike; nothing is raised for the
+  and `internal/cli` mutant timed out unjudged). The efficacy floor, `--timeout-coefficient 60` and the worker count
+  (`nproc / 2` workers at GOMAXPROCS 2 in Jenkins) apply to every package alike; nothing is raised for the
   scoped ones. `ci/qualitycheck` reports a scope narrowed against the base as a
   loosening, like a dropped package.
   Counts come from the per-mutation statuses, since gremlins' summary fields
@@ -306,7 +346,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   timed out every `internal/store` mutant. `ci/quality.sh` evaluates the same
   reports as its `mutation-go` gate and fails when `ci-results/mutation/` is
   absent. Run it with `ci/run.sh ci/mutation.sh`, which is also the Jenkinsfile
-  Mutation stage's command (see "The Jenkinsfile").
+  Mutation unit's command (see "The Jenkinsfile").
 - The frontend gates (`ci/qualitycheck/frontend.go`, tests in `frontend_test.go`
   and in `web/scripts/*/*.test.ts`, which Vitest runs):
   - `web/scripts/crap/` scores every function of `web/src` (`*.ts`, tests
@@ -459,7 +499,7 @@ Scripts, each run through `ci/run.sh` unless noted:
 - `ci/image-build.sh [tar]`: builds the root `Dockerfile` for linux/amd64 and
   linux/arm64 (cross-compiled, no emulation, nothing pushed), loads amd64 as
   `board:ci` and writes `ci-results/board-image.tar` and
-  `ci-results/board-image-oci.tar` (the Jenkins Quality stage; on the agent). It passes the
+  `ci-results/board-image-oci.tar` (the Jenkins Image unit; on the agent). It passes the
   image's `VERSION` and `REVISION` build args (`BOARD_IMAGE_VERSION`, `BOARD_IMAGE_REVISION`, set by
   the Jenkinsfile to the commit's tag or short sha and the full commit), which the binary reports in
   `board version` and `GET /api/v1/meta`.
@@ -494,10 +534,12 @@ ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
   Phase 4 (SPEC §16), and its tests are rewritten then against SPEC §8.5's
   immutability check, not deck's checksum-only one.
 - **Jenkinsfile tests, carried here.** deck's `ci/repocheck/jenkinsfile_test.go`
-  and `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
-  `ci/repocheck/lintgate_test.go`) are carried against board's `Jenkinsfile`,
-  renamed (`DECK_*` to `BOARD_*`, the `deck/` jobs to `board/`). Board's stages add
-  Mutation and the image build, and drop the tmux-only parts. deck's release
+  and its `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
+  `ci/repocheck/lintgate_test.go`, here `TestLintUnitRunsGolangciLintBeforeLaterPhases`)
+  are carried against board's `Jenkinsfile`, renamed (`DECK_*` to `BOARD_*`, the
+  `deck/` jobs to `board/`) and rewritten for its three phases (Core, Stability,
+  Mutation) and parallel units. Board's pipeline adds Mutation and the image
+  build, and drops the tmux-only parts. deck's release
   assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is adapted to the
   placeholder `Jenkinsfile.release` as
   `TestJenkinsfileReleaseValidatesTheCandidateAndStops`: it asserts the `VERSION`

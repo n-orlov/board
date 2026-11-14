@@ -80,8 +80,8 @@ type config struct {
 	// the package once per part with every file outside the part excluded, and
 	// the part has its own report and its own efficacy judgement against the
 	// same floor. It exists because gremlins re-runs a package's whole suite
-	// for every mutant, so one lane cannot always hold a large package's
-	// mutants inside its 30-minute stage timeout (none is raised). The parts of
+	// for every mutant, so a large package's mutants are split into parts that
+	// each run on their own (no bound is raised). The parts of
 	// a package are disjoint and together are exactly its scope, so splitting
 	// never leaves a scoped file unmeasured.
 	Parts map[string]map[string][]string `json:"parts"`

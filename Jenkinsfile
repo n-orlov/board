@@ -1,8 +1,8 @@
 // board CI on the homelab Jenkins: multibranch job board/ci (see docs/ci.md).
 //
-// EXPERIMENT (branch ci/distributed, cut from 169bb59): every test stage is a
-// "unit" that runs as its own parallel branch with its own retry policy and
-// timing, instead of one stage after another. Every unit runs on int21h-ws
+// Distributed pipeline: every test stage is a "unit" that runs as its own
+// parallel branch with its own retry policy and timing, instead of one stage
+// after another. Every unit runs on int21h-ws
 // (amd64, 12 hardware threads, 4 executors): the arm64 phones of the board-test pool
 // were too slow (#16 took 5 h, mutation lanes ran out of 105 minutes and
 // agents dropped under load 16-53), so no unit asks for them any more. Units
@@ -38,7 +38,7 @@
 //        is a go build plus a go test; 6 x 2 keeps the 12 threads busy
 //        without oversubscribing them, and nice 10 leaves other jobs ahead
 //        of it). One attempt under one 6-hour limit: a timeout is not worth
-//        another 6 hours. About 2-3 hours.
+//        another 6 hours. About 70 minutes.
 //      - diff (MUTATION=true on any other build): only the lines changed
 //        since a base, under 45 minutes (minutes when few packages changed;
 //        a changed internal/server still pays its covered suite run once).
@@ -289,7 +289,7 @@ pipeline {
     booleanParam(name: 'MUTATION', defaultValue: false,
                  description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (and Stability if extended)')
     booleanParam(name: 'MUTATION_FULL', defaultValue: false,
-                 description: 'Full mutation testing: every package and Stryker in one unit (2-3 hours, 6-hour limit), as the nightly build of main does')
+                 description: 'Full mutation testing: every package and Stryker in one unit (about 70 minutes, 6-hour limit), as the nightly build of main does')
   }
 
   triggers {

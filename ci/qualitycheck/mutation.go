@@ -34,5 +34,5 @@ func runMutationGate(configPath, dir string) (ok bool, output string, err error)
 // judged: the Mutation stage's ci/mutation.sh, which reads the same
 // thresholds from ci/quality.json and fails the build below them.
 func deferredToMutationStage(name string) (ok bool, output string, err error) {
-	return true, name + " gate: deferred to the Mutation stage (ci/mutation.sh judges it against the same ci/quality.json thresholds; in the extended lane only: nightly or EXTENDED=true)\n", nil
+	return true, name + " gate: deferred to the Mutation stage (ci/mutation.sh judges it against the same ci/quality.json thresholds; in the Mutation phase only: MUTATION=true, MUTATION_FULL=true or the nightly timer)\n", nil
 }

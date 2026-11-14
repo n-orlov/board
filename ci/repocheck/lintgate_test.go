@@ -47,22 +47,38 @@ func anyLineContains(lines []string, sub string) bool {
 	return false
 }
 
-// TestLintJobRunsGolangciLintBeforeTheSuite: the Jenkinsfile's Lint stage
-// runs ci/lint.sh, ci/lint.sh runs the shared golangci-lint invocation, and
-// the Lint stage comes before the Suite stage, so the linter runs first.
-func TestLintJobRunsGolangciLintBeforeTheSuite(t *testing.T) {
-	skipOnDistributedExperiment(t)
+// lintUnitProblems: Lint is the first unit of the Core phase and runs
+// ci/lint.sh, and a red unit fails the build (unitBranch's catchError), so
+// neither Stability nor Mutation, which run only after a build that has not
+// failed, starts after a Lint failure. (The units run in parallel, so Lint
+// no longer precedes Suite; it gates every later phase instead.)
+func lintUnitProblems(jf string) []string {
+	var problems []string
+	core, _ := jenkinsStage(jf, "Core")
+	units := coreUnits(core)
+	if len(units) == 0 || units[0] != "Lint" {
+		problems = append(problems, "Lint is not the first Core unit: "+strings.Join(units, ","))
+	}
+	if !strings.Contains(core, "units << [name: 'Lint', minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]") {
+		problems = append(problems, "the Lint unit does not run ci/run.sh ci/lint.sh")
+	}
+	if !strings.Contains(jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n        try {\n          runUnit(u)") {
+		problems = append(problems, "a red unit does not fail the build")
+	}
+	return problems
+}
+
+// TestLintUnitRunsGolangciLintBeforeLaterPhases: the Jenkinsfile's Lint unit
+// runs ci/lint.sh before the later phases, ci/lint.sh runs the shared
+// golangci-lint invocation, so the linter gates the build.
+func TestLintUnitRunsGolangciLintBeforeLaterPhases(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
-	lint, ok := jenkinsStage(jf, "Lint")
-	if !ok {
-		t.Fatal("the Jenkinsfile has no Lint stage")
-	}
-	if !strings.Contains(lint, "ci/run.sh ci/lint.sh") {
-		t.Error("the Lint stage does not run ci/run.sh ci/lint.sh")
-	}
-	if !stageBefore(jf, "Lint", "Suite") {
-		t.Error("the Lint stage does not come before the Suite stage, so the linter would not run first")
-	}
+	expectProblems(t, jf, lintUnitProblems, map[string]string{
+		"Lint declared after Suite":      replaceOnce(t, replaceOnce(t, jf, "units << [name: 'Lint'", "units << [name: 'Tidy'"), "units << [name: 'Suite'", "units << [name: 'Lint', minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]\n          units << [name: 'Suite'"),
+		"a Lint unit that runs nothing":  replaceOnce(t, jf, "script: 'ci/run.sh ci/lint.sh'", "script: 'true'"),
+		"a Lint unit with another limit": replaceOnce(t, jf, "units << [name: 'Lint', minutes: 30,", "units << [name: 'Lint', minutes: 60,"),
+		"a red unit that cannot fail":    replaceOnce(t, jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n        try {", "catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n        try {"),
+	})
 
 	lintSh := shellLines(readRepoFile(t, "ci", "lint.sh"))
 	if !anyLineContains(lintSh, "ci/golangci.sh") {
