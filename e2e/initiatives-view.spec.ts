@@ -123,6 +123,58 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('Tags sorts by the whole tag list and Tasks by the total, equal values keep the default order both ways, and a saved Tags or Tasks sort is restored on a bare link', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const prefix = `e2e-iv-ties-${vp.name}`;
+      // Creation order: two (tags alpha+beta, 1 task), three (tags alpha+gamma, 1 task), one (tags alpha, 1 task), same (tags alpha, 1 task).
+      const defs = [
+        { key: 'two', tags: ['alpha', 'beta'] },
+        { key: 'three', tags: ['alpha', 'gamma'] },
+        { key: 'one', tags: ['alpha'] },
+        { key: 'same', tags: ['alpha'] },
+      ];
+      const slug = (key: string) => `${prefix}-${key}`;
+      for (const d of defs) {
+        await post(api, '/api/v1/initiatives', { slug: slug(d.key), title: `Ties ${d.key}`, tags: d.tags }, 201);
+        await post(api, '/api/v1/tasks', { initiative: slug(d.key), title: `${d.key} task` }, 201);
+      }
+      const [two, three, one, same] = defs.map((d) => slug(d.key));
+
+      await page.goto('/#/initiatives?status=all');
+      await expect.poll(() => ownRows(page, prefix)).toHaveLength(4);
+      const byDefault = await ownRows(page, prefix);
+      const inDefaultOrder = (slugs: string[]) => byDefault.filter((s) => slugs.includes(s));
+
+      // Tags compares the whole list as one text: "alpha" < "alpha, beta" < "alpha, gamma"; the two with equal tags keep the default order.
+      await sortBy(page, phone, 'tags', 'asc');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([...inDefaultOrder([one, same]), two, three]);
+      await sortBy(page, phone, 'tags', 'desc');
+      await expect.poll(() => ownRows(page, prefix)).toEqual([three, two, ...inDefaultOrder([one, same])]);
+
+      // Tasks: every initiative has one task, so either direction keeps the default order.
+      await sortBy(page, phone, 'tasks', 'asc');
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
+      await sortBy(page, phone, 'tasks', 'desc');
+      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
+
+      // A saved Tags sort and a saved Tasks sort each come back on a bare #/initiatives after a visit to Tasks.
+      for (const [column, dir] of [['tags', 'desc'], ['tasks', 'asc']] as const) {
+        await sortBy(page, phone, column, dir);
+        const query = `status=all&sort=${column}&dir=${dir}`;
+        expect((await saved(page)).query).toBe(query);
+        await goTo(page, 'Tasks');
+        await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
+        await goTo(page, 'Initiatives');
+        await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+        await expect(page).toHaveURL(endsWith(`#/initiatives?${query}`));
+        await expect(th(page, column)).toHaveAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+        if (phone) await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:${dir}`);
+      }
+      await api.dispose();
+    });
+
     test('sorting by one column of each type (text, status, time) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { prefix, slugs } = await seed(api, `e2e-iv-sort-${vp.name}`);
