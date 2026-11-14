@@ -339,22 +339,34 @@ func reportName(pkg string) string {
 // diff is a diff-mode run (see the package comment).
 func judge(cfg config, c counts, diff bool) string {
 	if c.total() == 0 {
-		if cfg.FailOnNoMutants && !diff {
-			return "FAILED: gremlins generated no mutant, so nothing was measured"
-		}
-		return ""
+		return judgeEmpty(cfg, diff)
 	}
 	pct, ok := c.efficacy()
-	if !ok && diff && c.NotCovered == 0 {
-		return ""
-	}
 	if !ok {
-		return "FAILED: no mutant was judged (every mutant is not covered or timed out), so there is no efficacy"
+		return judgeUnmeasured(c, diff)
 	}
 	if pct < cfg.Efficacy {
 		return fmt.Sprintf("FAILED: efficacy %.2f%% is below the floor %.2f%%", pct, cfg.Efficacy)
 	}
 	return ""
+}
+
+// judgeEmpty is the verdict on a report with no mutant: a failure outside
+// diff mode when the config asks for one; in diff mode the normal case.
+func judgeEmpty(cfg config, diff bool) string {
+	if cfg.FailOnNoMutants && !diff {
+		return "FAILED: gremlins generated no mutant, so nothing was measured"
+	}
+	return ""
+}
+
+// judgeUnmeasured is the verdict when no mutant was judged: in diff mode
+// only timed-out mutants pass (nothing uncovered), otherwise it fails.
+func judgeUnmeasured(c counts, diff bool) string {
+	if diff && c.NotCovered == 0 {
+		return ""
+	}
+	return "FAILED: no mutant was judged (every mutant is not covered or timed out), so there is no efficacy"
 }
 
 // evaluatePackages gates the given packages (a lane, or all of them) and
@@ -571,18 +583,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case *unmeas:
 		return reportUnmeasured(cfg, stdout, stderr)
 	case *excl != "":
-		lines, err := excludesFromCwd(cfg, *excl)
-		if err != nil {
-			_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
-			return 2
-		}
-		printLines(stdout, lines)
+		return printExcludes(cfg, *excl, stdout, stderr)
 	default:
-		text, ok := evaluatePackages(cfg, *dir, pkgs, changed)
-		_, _ = fmt.Fprint(stdout, text)
-		if !ok {
-			return 1
-		}
+		return judgeReports(cfg, *dir, pkgs, changed, stdout)
+	}
+	return 0
+}
+
+// printExcludes prints one unit's gremlins --exclude-files regexps.
+func printExcludes(cfg config, unit string, stdout, stderr io.Writer) int {
+	lines, err := excludesFromCwd(cfg, unit)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
+		return 2
+	}
+	printLines(stdout, lines)
+	return 0
+}
+
+// judgeReports judges the packages' reports and prints the verdict; 1 on a failure.
+func judgeReports(cfg config, dir string, pkgs []string, changed map[string]bool, stdout io.Writer) int {
+	text, ok := evaluatePackages(cfg, dir, pkgs, changed)
+	_, _ = fmt.Fprint(stdout, text)
+	if !ok {
+		return 1
 	}
 	return 0
 }
