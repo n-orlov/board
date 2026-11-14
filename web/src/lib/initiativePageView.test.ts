@@ -124,6 +124,51 @@ describe('the Flags column', () => {
   });
 });
 
+describe('the Flags column, whole label lists', () => {
+  const badge = (label: 'active' | 'blocked' | 'overdue') => ({ key: label, label, tone: 'neutral' as const });
+  const ids = (rows: TaskRow[], dir: 'asc' | 'desc') => sortRows(rows, { column: 'flags', dir }, PAGE_TASK_COLUMNS).map((r) => r.id);
+
+  it('sorts by the whole label list, so a task with two flags is compared on both', () => {
+    const rows = [
+      row({ id: '1', badges: [badge('active'), badge('blocked')] }),
+      row({ id: '2', badges: [badge('active')] }),
+      row({ id: '3', badges: [badge('active'), badge('overdue')] }),
+    ];
+    expect(ids(rows, 'asc')).toEqual(['2', '1', '3']);
+    expect(ids(rows, 'desc')).toEqual(['3', '1', '2']);
+  });
+
+  it('keeps the input order when every task is unflagged, in both directions', () => {
+    const rows = [row({ id: '1' }), row({ id: '2' }), row({ id: '3' })];
+    expect(ids(rows, 'asc')).toEqual(['1', '2', '3']);
+    expect(ids(rows, 'desc')).toEqual(['1', '2', '3']);
+  });
+
+  it('keeps tasks with equal flags in the input order', () => {
+    const rows = [
+      row({ id: '1', badges: [badge('overdue')] }),
+      row({ id: '2', badges: [badge('active')] }),
+      row({ id: '3', badges: [badge('overdue')] }),
+    ];
+    expect(ids(rows, 'asc')).toEqual(['2', '1', '3']);
+    expect(ids(rows, 'desc')).toEqual(['1', '3', '2']);
+  });
+});
+
+describe('every column is sortable and survives a reload', () => {
+  it('has a phone label, a query encoding and a saved-state restore for each column', () => {
+    for (const column of PAGE_TASK_SORT_COLUMNS) {
+      expect(PAGE_TASK_SORT_LABELS.some((l) => l.column === column)).toBe(true);
+      const state = { filter: 'not-closed' as const, sort: { column, dir: 'desc' as const } };
+      expect(viewToQuery(state)).toBe(`sort=${column}&dir=desc`);
+      const storage = memory();
+      saveViewQuery(storage, INITIATIVE_VIEW, viewToQuery(state));
+      const query = openView({ storage, replaceHash: () => undefined }, INITIATIVE_VIEW, pagePath('other'), '');
+      expect(viewFromQuery(query)).toEqual(state);
+    }
+  });
+});
+
 describe('saved state', () => {
   it('shares one key between every initiative', () => {
     expect(viewKey(INITIATIVE_VIEW)).toBe('board.view.v1.initiative');
