@@ -355,6 +355,18 @@ func TestA2xxIsSentWhateverItsBody(t *testing.T) {
 		"no body": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
 			w.WriteHeader(http.StatusNoContent)
 		},
+		"a body that reports a failure": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":false,"error":"rejected"}`))
+		},
+		"an undecodable content encoding": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("not gzip at all"))
+		},
+		"the last 2xx status": func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
+			w.WriteHeader(299)
+		},
 	}
 	for name, body := range bodies {
 		t.Run(name, func(t *testing.T) {
@@ -382,6 +394,36 @@ func TestA2xxIsSentWhateverItsBody(t *testing.T) {
 					t.Fatal(err)
 				}
 				if s := w.states(); s["sent"] != 1 || len(s) != 1 || attempts != 1 || lastErr != nil {
+					t.Fatalf("states %v, %d attempts, last_error %v", s, attempts, lastErr)
+				}
+			})
+		})
+	}
+}
+
+// Only a 2xx status sends: a non-2xx answer stays pending and is retried
+// whatever its body says, so a body claiming success cannot send a row.
+func TestANon2xxIsRetriedWhateverItsBody(t *testing.T) {
+	t.Parallel()
+	for name, code := range map[string]int{"a 500": http.StatusInternalServerError, "a 404": http.StatusNotFound, "a 429": http.StatusTooManyRequests} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+				w := newOutboxWorld(t, dbs, allKinds())
+				srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					rw.WriteHeader(code)
+					_, _ = rw.Write([]byte(`{"ok":true}`))
+				}))
+				defer srv.Close()
+				w.ask(asks.New{Question: "q"})
+				w.tickWorker(w.worker(w.st, srv.URL))
+				var attempts int
+				var lastErr *string
+				if err := w.st.Reader().QueryRowContext(context.Background(), `SELECT attempts, last_error FROM notifications`).Scan(&attempts, &lastErr); err != nil {
+					t.Fatal(err)
+				}
+				if s := w.states(); s["pending"] != 1 || len(s) != 1 || attempts != 1 || lastErr == nil {
 					t.Fatalf("states %v, %d attempts, last_error %v", s, attempts, lastErr)
 				}
 			})
