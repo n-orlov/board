@@ -3347,7 +3347,7 @@ three phases, one after another, each only if the earlier ones passed (UNSTABLE 
 under a 480-minute pipeline timeout. **Core** runs on every build (Lint, Suite, Image, Allure smoke,
 then Quality). **Stability** runs with `EXTENDED=true` or the nightly timer. **Mutation** runs one
 unit, only with `MUTATION=true`, `MUTATION_FULL=true` or the nightly timer. Each unit attempt removes
-the sibling containers it labelled, by exact ID; a unit that fails its command is rerun once (a pass
+the sibling containers it labelled, by exact ID (the Mutation unit's Postgres testcontainers carry the attempt label too: `ci/mutation.sh` hands `BOARD_CI_RUN_ID` to gremlins, so they are reaped); a unit that fails its command is rerun once (a pass
 there marks the build UNSTABLE), and an infrastructure failure gets another attempt. The
 `Jenkinsfile`'s header comment is the authoritative description:
 

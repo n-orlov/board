@@ -54,9 +54,14 @@ lane=${3:-all}
 workers=${BOARD_MUTATION_WORKERS:-}
 test_cpu=${BOARD_MUTATION_TEST_CPU:-}
 diff_ref=${BOARD_MUTATION_DIFF:-}
+# The attempt's run id (ci/run.sh forwards RALPHD_RUN_ID as BOARD_CI_RUN_ID): the
+# tests gremlins runs label their Postgres testcontainers with it, so the
+# Jenkinsfile's per-attempt cleanup reaps the ones a killed mutant run leaves.
+ci_run_id=${BOARD_CI_RUN_ID:-}
 
 # Same scrub as ci/suite.sh and ci/quality.sh: a stray BOARD_* variable must
 # never reach the tests gremlins runs.
+# The one exception is BOARD_CI_RUN_ID, handed to gremlins explicitly below.
 for board_var in $(env | sed -n 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
     unset "$board_var"
 done
@@ -124,7 +129,7 @@ for pkg in $packages; do
     echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags)"
     # nice: a full run takes every core for hours; other jobs on the host win.
     # The GOMAXPROCS cap applies only here, never to the gate's own go run.
-    env ${test_cpu:+GOMAXPROCS=$test_cpu} ${diff_ref:+PATH="$shim:$PATH" MUTATION_DIFF_RELATIVE="$dir"} \
+    env ${ci_run_id:+BOARD_CI_RUN_ID=$ci_run_id} ${test_cpu:+GOMAXPROCS=$test_cpu} ${diff_ref:+PATH="$shim:$PATH" MUTATION_DIFF_RELATIVE="$dir"} \
         nice -n 10 gremlins unleash "./$dir" \
         --timeout-coefficient "$timeout_coefficient" ${workers:+--workers "$workers"} \
         ${diff_ref:+--diff "$diff_ref"} "$@" -o "$outdir/$name.json"
