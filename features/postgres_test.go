@@ -64,8 +64,15 @@ func startPostgres(ctx context.Context) (*postgresServer, error) {
 		Image:        postgresImage,
 		ExposedPorts: []string{"5432/tcp"},
 		Env:          map[string]string{"POSTGRES_USER": pgUser, "POSTGRES_PASSWORD": pgPassword, "POSTGRES_DB": pgAdminDB},
-		Labels:       siblingLabels(),
-		WaitingFor:   wait.ForSQL("5432/tcp", "pgx", func(host string, port network.Port) string { return adminDSN(host, port.Port()) }).WithStartupTimeout(90 * time.Second),
+		// The data directory in memory, as internal/server's test Postgres
+		// has it: each scenario's CREATE DATABASE and migrations no longer
+		// wait on fsyncs of the host's disk, which on a CI host busy with
+		// other builds made a scenario five times slower than on SQLite and
+		// ran the leg into its timeout. The harness drops each scenario's
+		// database when the scenario ends, so the tmpfs stays small.
+		Tmpfs:      map[string]string{"/var/lib/postgresql/data": "rw"},
+		Labels:     siblingLabels(),
+		WaitingFor: wait.ForSQL("5432/tcp", "pgx", func(host string, port network.Port) string { return adminDSN(host, port.Port()) }).WithStartupTimeout(90 * time.Second),
 	}
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{ContainerRequest: req, Started: true})
 	if err != nil {
@@ -121,6 +128,22 @@ func (p *postgresServer) newDatabase(ctx context.Context) (string, error) {
 	return dsn(p.host, p.port, name), nil
 }
 
+// dropDatabase removes a database newDatabase created; FORCE ends any
+// connection still open on it.
+func (p *postgresServer) dropDatabase(ctx context.Context, databaseURL string) error {
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		return err
+	}
+	db, err := sql.Open("pgx", adminDSN(p.host, p.port))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, "DROP DATABASE IF EXISTS "+strings.TrimPrefix(u.Path, "/")+" WITH (FORCE)")
+	return err
+}
+
 // stop stops the container, the way an outage of the database would.
 func (p *postgresServer) stop(ctx context.Context) error {
 	timeout := 10 * time.Second
@@ -129,5 +152,5 @@ func (p *postgresServer) stop(ctx context.Context) error {
 
 // terminate removes the container.
 func (p *postgresServer) terminate(ctx context.Context) {
-	_ = p.container.Terminate(ctx)
+	_ = p.container.Terminate(ctx, testcontainers.StopTimeout(0)) // the data is in memory and thrown away
 }

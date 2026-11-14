@@ -396,6 +396,12 @@ func (h *harness) stopServer() {
 	h.stdin = ""
 	if h.own != nil {
 		h.own.terminate(context.Background())
+	} else if h.shared != nil && strings.HasPrefix(h.dbURL, "postgres://") {
+		// the shared Postgres keeps its data in memory: give the scenario's
+		// database back (the server above has ended)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		_ = h.shared.dropDatabase(ctx, h.dbURL)
+		cancel()
 	}
 	if h.idp != nil {
 		h.idp.Close()

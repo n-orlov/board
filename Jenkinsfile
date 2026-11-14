@@ -3,7 +3,7 @@
 // EXPERIMENT (branch ci/distributed, cut from 169bb59): every test stage is a
 // "unit" that runs as its own parallel branch with its own retry policy and
 // timing, instead of one stage after another. Every unit runs on int21h-ws
-// (amd64, 28 cores, 4 executors): the arm64 phones of the board-test pool
+// (amd64, 12 hardware threads, 4 executors): the arm64 phones of the board-test pool
 // were too slow (#16 took 5 h, mutation lanes ran out of 105 minutes and
 // agents dropped under load 16-53), so no unit asks for them any more. Units
 // that find all 4 executors busy queue for one.
@@ -35,7 +35,7 @@
 //      - full (nightly on main, or MUTATION_FULL=true): every package and
 //        Stryker (ci/mutation.sh lane all, one package after another), each
 //        gremlins with nproc/2 workers and GOMAXPROCS 2 per worker (a mutant
-//        is a go build plus a go test; 14 x 2 keeps the 28 cores busy
+//        is a go build plus a go test; 6 x 2 keeps the 12 threads busy
 //        without oversubscribing them, and nice 10 leaves other jobs ahead
 //        of it). One attempt under one 6-hour limit: a timeout is not worth
 //        another 6 hours. About 2-3 hours.
