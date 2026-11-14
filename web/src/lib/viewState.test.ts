@@ -3,6 +3,7 @@ import {
   clearAllViews,
   clearViewQuery,
   currentViewEnv,
+  FilterTurns,
   loadViewQuery,
   openView,
   pageStorage,
@@ -196,5 +197,37 @@ describe('the browser adapter', () => {
       },
     };
     expect(pageStorage(win)).toBeUndefined();
+  });
+});
+
+describe('FilterTurns', () => {
+  it('keeps a change current until a later one begins', () => {
+    const turns = new FilterTurns();
+    const restoring = turns.begin();
+    expect(restoring()).toBe(true);
+    const link = turns.begin();
+    expect(restoring()).toBe(false);
+    expect(link()).toBe(true);
+    turns.begin();
+    expect(link()).toBe(false);
+  });
+
+  it('a restoration that answers after a link and after a filter applied is stale either way', () => {
+    const turns = new FilterTurns();
+    const first = turns.begin();
+    turns.begin(); // a link
+    const second = turns.begin(); // a filter applied on top
+    expect([first(), second()]).toEqual([false, true]);
+  });
+
+  it('must read before the first read even for the filter shown, and afterwards only for another filter', () => {
+    const turns = new FilterTurns();
+    expect(turns.hasRead()).toBe(false);
+    expect(turns.mustRead(true)).toBe(true);
+    expect(turns.mustRead(false)).toBe(true);
+    turns.reading();
+    expect(turns.hasRead()).toBe(true);
+    expect(turns.mustRead(true)).toBe(false);
+    expect(turns.mustRead(false)).toBe(true);
   });
 });

@@ -78,6 +78,25 @@ async function sortBy(page: Page, phone: boolean, column: string, dir: 'asc' | '
   }
 }
 
+// Holds every GET of the initiatives list (the restored filter's check) until `release()`; `answered` settles once the
+// first held lookup has reached the page.
+async function holdLookups(page: Page) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  await page.route(
+    (url) => url.pathname === '/api/v1/initiatives',
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      held++;
+      await gate;
+      await route.continue();
+    },
+  );
+  const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/initiatives');
+  return { release, held: () => held, answered };
+}
+
 for (const vp of viewports) {
   const phone = vp.name === 'phone';
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
@@ -240,6 +259,35 @@ for (const vp of viewports) {
       await expect(fresh.getByTestId('initiative-filter').locator('option[value="e2e-tv-ghost"]')).toHaveCount(0);
       await fresh.close();
       await api.dispose();
+    });
+
+    test('a link opened while a restored initiative is still being checked wins: the late check rewrites nothing and reads nothing', async ({ page }) => {
+      await page.goto('/#/attention');
+      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, `initiative=e2e-tv-race-ghost-${vp.name}&kind=watch`] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const sent: { initiative: string; kind: string }[] = [];
+      fresh.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.pathname === '/api/v1/tasks') sent.push({ initiative: url.searchParams.get('initiative') ?? '', kind: url.searchParams.get('kind') ?? '' });
+      });
+      await fresh.goto('/#/tasks');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), '#/tasks?sort=title&dir=asc');
+      await expect(fresh.getByTestId('kind-filter')).toHaveValue('', { timeout: 5000 });
+      await expect.poll(() => sent.length, { timeout: 5000 }).toBeGreaterThan(0);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the late check's answer has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(/#\/tasks\?sort=title&dir=asc$/);
+      await expect(fresh.getByTestId('kind-filter')).toHaveValue('');
+      await expect(fresh.getByTestId('initiative-filter')).toHaveValue('');
+      expect(JSON.parse((await fresh.evaluate((k) => localStorage.getItem(k), KEY)) as string).query).toBe('sort=title&dir=asc');
+      // Every read was the link's: neither the restored kind nor the unknown initiative ever reached the server.
+      expect(sent.every((s) => s.initiative === '' && s.kind === '')).toBe(true);
+      await fresh.close();
     });
 
     test('a restored initiative is dropped when the initiatives lookup answers with no initiatives at all', async ({ page }) => {

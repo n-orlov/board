@@ -37,6 +37,25 @@ function attentionReads(page: Page) {
   return reads;
 }
 
+// Holds every GET of the initiatives list (the restored filter's check) until `release()`; `answered` settles once the
+// first held lookup has reached the page.
+async function holdLookups(page: Page) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  await page.route(
+    (url) => url.pathname === '/api/v1/initiatives',
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      held++;
+      await gate;
+      await route.continue();
+    },
+  );
+  const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/initiatives');
+  return { release, held: () => held, answered };
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
@@ -148,6 +167,34 @@ for (const vp of viewports) {
       // The unknown values never reached the server, and the saved query was rewritten without them.
       expect(reads.queries).toEqual([`?${kept}`]);
       expect((await saved(fresh)).query).toBe(kept);
+      await fresh.close();
+      await api.dispose();
+    });
+
+    test('a link opened while a restored filter is still being checked wins: the late check rewrites nothing and reads nothing', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-av-race-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Race ${vp.name}` }, 201);
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const restored = `tag=av-race-gone-${vp.name}&initiative=e2e-av-race-ghost-${vp.name}`;
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, restored] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = attentionReads(fresh);
+      await fresh.goto('/#/attention');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), `#/attention?initiative=${slug}`);
+      await expect.poll(() => reads.count, FIVE_SECONDS).toBe(1);
+      lookups.release();
+      await lookups.answered;
+      await expect(chip(fresh, slug)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
+      await fresh.waitForTimeout(500); // the late check's answer has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(new RegExp(`#/attention\\?initiative=${slug}$`));
+      expect((await saved(fresh)).query).toBe(`initiative=${slug}`);
+      // Only the link's query was read: the restored values never reached the server, and nothing read again after.
+      expect(reads.queries).toEqual([`?initiative=${slug}`]);
       await fresh.close();
       await api.dispose();
     });

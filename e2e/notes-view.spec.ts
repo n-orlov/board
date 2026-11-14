@@ -38,6 +38,25 @@ function notesReads(page: Page) {
   return reads;
 }
 
+// Holds every GET of the initiatives list (the restored filter's check) until `release()`; `answered` settles once the
+// first held lookup has reached the page.
+async function holdLookups(page: Page) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  await page.route(
+    (url) => url.pathname === '/api/v1/initiatives',
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      held++;
+      await gate;
+      await route.continue();
+    },
+  );
+  const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/initiatives');
+  return { release, held: () => held, answered };
+}
+
 async function apply(page: Page, fields: { author?: string; resource?: string; broadcast?: boolean }) {
   const form = filters(page);
   if (fields.broadcast === true) await form.getByTestId('broadcast-filter').click();
@@ -134,6 +153,77 @@ for (const vp of viewports) {
         await fresh.close();
       }
       await api.dispose();
+    });
+
+    test('a link opened while a restored filter is still being checked wins: the late check rewrites nothing and reads nothing', async ({ page }) => {
+      const ghost = `e2e-nv-race-ghost-${vp.name}`;
+      const restored = `nv-race-restored-${vp.name}`;
+      const linked = `nv-race-link-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, `initiative=${ghost}&author=${restored}`] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = notesReads(fresh);
+      const failed: number[] = [];
+      fresh.on('response', (response) => {
+        if (new URL(response.url()).pathname === '/api/v1/notes' && response.status() >= 400) failed.push(response.status());
+      });
+      await fresh.goto('/#/notes');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      // The link arrives while the check of the restored filter is held: it is read at once.
+      await fresh.evaluate((hash) => (window.location.hash = hash), `#/notes?author=${linked}`);
+      await expect(filters(fresh).getByLabel('Author', { exact: true })).toHaveValue(linked, FIVE_SECONDS);
+      await expect.poll(() => reads.count, FIVE_SECONDS).toBe(1);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500); // the late check's answer has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=${linked}$`));
+      await expect(filters(fresh).getByLabel('Author', { exact: true })).toHaveValue(linked);
+      await expect(filters(fresh).getByLabel('Initiative', { exact: true })).toHaveValue('');
+      expect((await saved(fresh)).query).toBe(`author=${linked}`);
+      // Only the link's query was ever read: never the restored author, never the unknown initiative.
+      expect(reads.queries.map((q) => new URLSearchParams(q).get('author'))).toEqual([linked]);
+      expect(reads.queries.every((q) => !new URLSearchParams(q).has('initiative'))).toBe(true);
+      expect(failed).toEqual([]);
+      await expect(fresh.getByTestId('notes-error')).toHaveCount(0);
+      await fresh.close();
+    });
+
+    test('filters applied while a restored filter is still being checked win: the late check rewrites nothing and reads nothing', async ({ page }) => {
+      const ghost = `e2e-nv-race-apply-ghost-${vp.name}`;
+      const restored = `nv-race-apply-restored-${vp.name}`;
+      const chosen = `nv-race-apply-chosen-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(
+        ([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })),
+        [KEY, `task=${ghost}-1&initiative=${ghost}&author=${restored}`] as const,
+      );
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = notesReads(fresh);
+      await fresh.goto('/#/notes');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      // The user clears the restored values by hand and applies another author while the check is held.
+      const form = filters(fresh);
+      await form.getByLabel('Task', { exact: true }).fill('');
+      await form.getByLabel('Initiative', { exact: true }).fill('');
+      await form.getByLabel('Author', { exact: true }).fill(chosen);
+      await fresh.getByTestId('apply-filters').click();
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=${chosen}$`));
+      await expect.poll(() => reads.count, FIVE_SECONDS).toBe(1);
+      lookups.release();
+      await lookups.answered;
+      await fresh.waitForTimeout(500);
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=${chosen}$`));
+      await expect(form.getByLabel('Author', { exact: true })).toHaveValue(chosen);
+      expect((await saved(fresh)).query).toBe(`author=${chosen}`);
+      expect(reads.queries.map((q) => new URLSearchParams(q).get('author'))).toEqual([chosen]);
+      await expect(fresh.getByTestId('notes-error')).toHaveCount(0);
+      await fresh.close();
     });
 
     test('a link that names an unknown initiative is not rewritten as restored state', async ({ page }) => {

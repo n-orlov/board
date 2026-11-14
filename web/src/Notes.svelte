@@ -9,7 +9,7 @@
   import { TasksApi } from './lib/tasks';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
-  import { currentViewEnv } from './lib/viewState';
+  import { currentViewEnv, FilterTurns } from './lib/viewState';
   import { isFiltered, notesHash, DEFAULT_NOTES_FILTER, type NoteForm as PostForm, type NotesFilter } from './lib/notes';
   import {
     affectsNotes,
@@ -45,8 +45,13 @@
   let view: NotesViewState = $state(store.state);
 
   // The first read waits for the check of a restored filter; what the board no longer knows is dropped and saved again.
+  // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
+  const turns = new FilterTurns();
   async function start() {
+    const current = turns.begin();
     const kept = await startNotesFilter(opened, lookup);
+    if (!current()) return;
+    turns.reading();
     if (kept === initial) {
       void store.load();
     } else {
@@ -60,7 +65,8 @@
     // Read nothing reactive here: a filter change must not run the first load again.
     void untrack(start);
     // A note posted elsewhere shows under the filter in place: the page drawn, the bodies read and an open sheet stay.
-    return live().subscribe(affectsNotes, () => store.refresh());
+    // Nothing is read before the first read: the filter may still be under its check.
+    return live().subscribe(affectsNotes, () => (turns.hasRead() ? store.refresh() : undefined));
   });
 
   // The filter lives in the fragment and in the saved query: applying rewrites both in place (no history entry per
@@ -71,6 +77,8 @@
   }
 
   function apply(filter: NotesFilter) {
+    turns.begin();
+    turns.reading();
     draft = { ...filter };
     persist(filter);
     void store.setFilter(filter);
@@ -82,16 +90,16 @@
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filters.
-  let hashTurn = 0;
   async function hashChanged() {
     const hash = window.location.hash;
     if (resolveRoute(hash, ROUTES).id !== 'notes') return;
     const next = openNotes(viewEnv, hash);
-    const turn = ++hashTurn;
+    const current = turns.begin();
     const filter = await startNotesFilter(next, lookup);
-    if (turn !== hashTurn) return; // the fragment changed again while the check ran
+    if (!current()) return; // the fragment (or the filter) changed again while the check ran
     if (filter !== next.filter) persist(filter);
-    if (notesHash(filter) === notesHash(view.filter)) return;
+    if (!turns.mustRead(notesHash(filter) === notesHash(view.filter))) return;
+    turns.reading();
     draft = { ...filter };
     void store.setFilter(filter);
   }

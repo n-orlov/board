@@ -39,7 +39,7 @@
     viewToQuery,
     type TasksViewState,
   } from './lib/tasksView';
-  import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
+  import { clearViewQuery, currentViewEnv, FilterTurns, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
 
@@ -73,8 +73,12 @@
     saveViewQuery(viewEnv.storage, TASKS_VIEW, viewToQuery(state));
   }
 
+  // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
+  const turns = new FilterTurns();
+  let listed: Promise<void> = Promise.resolve();
   async function start() {
-    const listed = new InitiativesApi(browser, () => csrf)
+    const current = turns.begin();
+    listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => {
         initiatives = list.map((i) => i.slug);
@@ -82,6 +86,8 @@
       })
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
     if (restoredInitiative) await listed;
+    if (!current()) return;
+    turns.reading();
     // Only a restored initiative is checked: one a link names stays, and a refusal for it shows in the list.
     const kept = restoredInitiative && listAnswered ? dropUnknownInitiative({ filter: initial, sort }, initiatives) : { filter: initial, sort };
     if (kept.filter === initial) {
@@ -97,11 +103,13 @@
     // Read nothing reactive here: a sort or a filter change must not run the first load again.
     void untrack(start);
     // A change elsewhere refreshes the rows in place under the filter shown: no skeleton, so scroll and an open dialog stay.
-    return live().subscribe(affectsTasks, () => Promise.all([store.refresh(), reloadNeeds()]));
+    return live().subscribe(affectsTasks, () => (turns.hasRead() ? Promise.all([store.refresh(), reloadNeeds()]) : undefined));
   });
 
   // The filters and the sort live in the fragment and in the saved query: a change fetches (the sort only reorders).
   function apply(filter: TasksFilter) {
+    turns.begin();
+    turns.reading();
     persist({ filter, sort });
     void store.setFilter(filter);
     void reloadNeeds();
@@ -114,6 +122,8 @@
 
   // Clear filters: the defaults, and nothing saved.
   function clear() {
+    turns.begin();
+    turns.reading();
     sort = null;
     clearViewQuery(viewEnv.storage, TASKS_VIEW);
     window.history.replaceState(null, '', '#/tasks');
@@ -122,17 +132,22 @@
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare `#/tasks` restores the saved query.
-  function hashChanged() {
+  async function hashChanged() {
     const hash = window.location.hash;
     if (hash !== '#/tasks' && !hash.startsWith('#/tasks?')) return;
     const restoring = queryOf(hash) === '';
     let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
+    const current = turns.begin();
+    // A restored initiative waits for the board's list like the first one does; a link's own query does not.
+    if (restoring && next.filter.initiative !== '') await listed;
+    if (!current()) return; // the fragment (or the filter) changed again while the list was read
     if (restoring && listAnswered && next.filter.initiative !== '') {
       next = dropUnknownInitiative(next, initiatives);
       persist(next);
     }
     sort = next.sort;
-    if (viewToQuery({ filter: next.filter, sort: null }) === viewToQuery({ filter: view.filter, sort: null })) return;
+    if (!turns.mustRead(viewToQuery({ filter: next.filter, sort: null }) === viewToQuery({ filter: view.filter, sort: null }))) return;
+    turns.reading();
     void store.setFilter(next.filter);
     void reloadNeeds();
   }
@@ -147,6 +162,7 @@
   function created(ref: string) {
     formOpen = false;
     toast = `Task ${ref} created`;
+    if (!turns.hasRead()) return; // the first read, still waiting on its check, shows the new task
     void store.load();
     void reloadNeeds();
   }

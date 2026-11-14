@@ -7,7 +7,7 @@
   import { taskHref } from './lib/taskPage';
   import { currentBrowser } from './lib/session';
   import { resolveRoute, ROUTES } from './lib/routes';
-  import { currentViewEnv } from './lib/viewState';
+  import { currentViewEnv, FilterTurns } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
@@ -78,8 +78,12 @@
   let looked: { slug: string; tags: string[] }[] | undefined;
 
   // A restored filter may name an initiative or a tag the board no longer has: the first fetch waits for the list to drop them.
+  // A link, an applied filter or Clear filters while the check runs is newer and wins: the late answer is dropped.
+  const turns = new FilterTurns();
+  let listed: Promise<void> = Promise.resolve();
   async function start() {
-    const listed = new InitiativesApi(browser, () => csrf)
+    const current = turns.begin();
+    listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => {
         looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
@@ -92,6 +96,8 @@
       .then((handles) => (actors = handles))
       .catch(() => undefined);
     if (opened.restored) await listed;
+    if (!current()) return;
+    turns.reading();
     const kept = startFilter(opened, looked);
     if (kept === opened.filter) {
       void store.load();
@@ -105,7 +111,7 @@
     // Read nothing reactive here: a filter change must not run the first load again.
     void untrack(start);
     // A lease, task, ask or milestone event refetches in place: the window and the collapsed rows stay.
-    const unsubscribe = live().subscribe(affectsTimeline, () => store.load());
+    const unsubscribe = live().subscribe(affectsTimeline, () => (turns.hasRead() ? store.load() : undefined));
     return () => {
       unsubscribe();
       store.cancelPan();
@@ -120,24 +126,34 @@
   }
 
   function apply(filter: TimelineFilter) {
+    turns.begin();
+    turns.reading();
     persist(filter);
     void store.setFilter(filter);
   }
 
   // Clear filters: the defaults, and nothing saved.
   function clear() {
+    turns.begin();
+    turns.reading();
     forgetTimeline(viewEnv.storage);
     window.history.replaceState(null, '', '#/timeline');
     void store.setFilter(DEFAULT_TIMELINE_FILTER);
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filter.
-  function hashChanged() {
+  async function hashChanged() {
     if (resolveRoute(window.location.hash, ROUTES).id !== 'timeline') return;
     const next = openTimeline(viewEnv, window.location.hash);
+    const current = turns.begin();
+    // A restored filter waits for the board's list like the first one does; a link's own query does not.
+    if (next.restored) await listed;
+    if (!current()) return; // the fragment (or the filter) changed again while the list was read
     const filter = startFilter(next, looked);
     if (filter !== next.filter) persist(filter);
-    if (timelineHash(filter) !== timelineHash(view.filter)) void store.setFilter(filter);
+    if (!turns.mustRead(timelineHash(filter) === timelineHash(view.filter))) return;
+    turns.reading();
+    void store.setFilter(filter);
   }
 
   // The chart is mounted once, then handed each new model. Only the frame and the model are dependencies: what the chart

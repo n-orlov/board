@@ -136,3 +136,35 @@ export function currentViewEnv(win: ViewWindow = window): ViewEnv {
     replaceHash: (hash) => win.history.replaceState(null, '', hash),
   };
 }
+
+/**
+ * Orders a view's filter changes. The first read waits while a restored filter's board references are checked, and
+ * a link opened, a filter applied or Clear filters while it waits begins a newer change. Each change asks `begin()`
+ * for a check and applies its answer only while that check is true, so a restoration that answers late never
+ * rewrites an explicit query (or a choice made since) as restored state, and never reads under it.
+ */
+export class FilterTurns {
+  private turn = 0;
+  private read = false;
+
+  /** Begins a change: the check it returns stays true until a later change begins. */
+  begin(): () => boolean {
+    const mine = ++this.turn;
+    return () => mine === this.turn;
+  }
+
+  /** Records that the view has read under some filter. */
+  reading(): void {
+    this.read = true;
+  }
+
+  /** Whether the view has read yet: a live refresh before then would read under a filter still being checked. */
+  hasRead(): boolean {
+    return this.read;
+  }
+
+  /** Whether a change must read: always before the first read, else only for a filter other than the one shown. */
+  mustRead(sameAsShown: boolean): boolean {
+    return !this.read || !sameAsShown;
+  }
+}

@@ -48,6 +48,25 @@ function timelineReads(page: Page) {
   return reads;
 }
 
+// Holds every GET of the initiatives list (the restored filter's check) until `release()`; `answered` settles once the
+// first held lookup has reached the page.
+async function holdLookups(page: Page) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  await page.route(
+    (url) => url.pathname === '/api/v1/initiatives',
+    async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      held++;
+      await gate;
+      await route.continue();
+    },
+  );
+  const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/initiatives');
+  return { release, held: () => held, answered };
+}
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
@@ -166,6 +185,36 @@ for (const vp of viewports) {
       expect((await saved(fresh)).query).toBe(kept);
       await fresh.close();
       await api.dispose();
+    });
+
+    test('a link opened while a restored filter is still being checked wins: the late check rewrites nothing and reads nothing', async ({ page }) => {
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const seeded = `initiative=e2e-tlv-race-ghost-${vp.name}&tag=tlv-race-gone-${vp.name}&closed=7`;
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, seeded] as const);
+
+      const fresh = await page.context().newPage();
+      const lookups = await holdLookups(fresh);
+      const reads = timelineReads(fresh);
+      await fresh.goto('/#/timeline');
+      await expect.poll(() => lookups.held()).toBeGreaterThan(0);
+      await fresh.evaluate((hash) => (window.location.hash = hash), '#/timeline?actor=playwright');
+      await expect.poll(() => reads.count, FIVE_SECONDS).toBeGreaterThan(0);
+      lookups.release();
+      await lookups.answered;
+      await expect(fresh.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
+      await fresh.waitForTimeout(500); // the late check's answer has had time to (wrongly) apply itself
+      await expect(fresh).toHaveURL(/#\/timeline\?actor=playwright$/);
+      await expect(fresh.getByTestId('closed-filter')).not.toHaveValue('7');
+      expect((await saved(fresh)).query).toBe('actor=playwright');
+      // Every read was the link's: the restored initiative, tag and window never reached the server.
+      for (const url of reads.urls) {
+        expect(url.searchParams.get('actor')).toBe('playwright');
+        expect(url.searchParams.has('initiative')).toBe(false);
+        expect(url.searchParams.has('tag')).toBe(false);
+        expect(url.searchParams.get('closed_within')).not.toBe('7d');
+      }
+      await fresh.close();
     });
 
     test('a restored filter is emptied when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
