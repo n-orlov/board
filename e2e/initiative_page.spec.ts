@@ -149,16 +149,15 @@ for (const vp of viewports) {
         'all',
       ]);
 
-      await expect.poll(async () => (await shownRefs(page)).length).toBe(3);
-      expect((await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.blocked].sort());
+      await expect.poll(async () => (await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.blocked].sort());
 
       await filter.selectOption('done');
-      expect(await shownRefs(page)).toEqual([seeded.done]);
+      await expect.poll(async () => await shownRefs(page)).toEqual([seeded.done]);
       await filter.selectOption('closed');
-      expect(await shownRefs(page)).toEqual([seeded.dropped]);
+      await expect.poll(async () => await shownRefs(page)).toEqual([seeded.dropped]);
       await expect(taskRow(page, seeded.dropped).getByTestId('task-status')).toHaveText('closed');
       await filter.selectOption('all');
-      expect((await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.dropped, seeded.blocked].sort());
+      await expect.poll(async () => (await shownRefs(page)).sort()).toEqual([seeded.leased, seeded.done, seeded.dropped, seeded.blocked].sort());
       await filter.selectOption('not-closed');
       await expect.poll(async () => (await shownRefs(page)).length).toBe(3);
       // The counts above the table do not follow the filter.
