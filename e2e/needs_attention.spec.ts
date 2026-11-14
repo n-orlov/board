@@ -68,6 +68,7 @@ const CAPPED = [
   { name: 'done', reason: 'done', label: 'done, not closed', accessible: 'Done, not closed', flag: undefined },
   { name: 'asking', reason: 'asking', label: 'waiting on you', accessible: 'Waiting on you', flag: undefined },
   { name: 'blocking ask', reason: 'asking', label: 'waiting on you · blocking', accessible: 'Waiting on you, blocking', flag: 'blocked' },
+  { name: 'stranded', reason: 'stranded', label: 'stranded', accessible: 'Stranded, its lease ran out and was not acknowledged', flag: undefined },
 ] as const;
 const CAP = 200;
 
@@ -77,14 +78,30 @@ async function seedCapped(playwright: PlaywrightTestArgs['playwright'], baseURL:
     extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': `needs-cap-${kind.replace(' ', '-')}` },
   });
   await post(api, '/api/v1/initiatives', { slug, title: `Cap ${kind}` }, 201);
+  const leased: number[] = [];
   for (let from = 0; from <= CAP; from += 20) {
     await Promise.all(
       Array.from({ length: Math.min(20, CAP + 1 - from) }, async (_, i) => {
         const ref = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: `Capped ${from + i}` }, 201)).ref;
         if (kind === 'done') await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
-        else await post(api, '/api/v1/asks', { question: `Which way for ${ref}?`, task: ref, mode: 'poll', blocking: kind === 'blocking ask' }, 201);
+        else if (kind === 'stranded') {
+          const lease = await post<{ lease: { ref: string } }>(api, '/api/v1/leases', { task: ref, intent: 'long edit', resources: [`repo:${slug}-${ref}`] }, 201);
+          leased.push(Number(lease.lease.ref.slice(1)));
+        } else await post(api, '/api/v1/asks', { question: `Which way for ${ref}?`, task: ref, mode: 'poll', blocking: kind === 'blocking ask' }, 201);
       }),
     );
+  }
+  if (leased.length > 0) {
+    // Every lease runs out at once: expiry moves into the past in the e2e store, then an API read expires them.
+    const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
+    try {
+      db.exec('PRAGMA busy_timeout = 5000');
+      const update = db.prepare('UPDATE leases SET expires_at = ? WHERE n = ?');
+      for (const n of leased) expect(update.run(Date.now() - 30_000, n).changes).toBe(1);
+    } finally {
+      db.close();
+    }
+    expect((await api.get('/api/v1/leases?state=expired')).status()).toBe(200);
   }
   return api;
 }
@@ -173,6 +190,24 @@ for (const vp of viewports) {
       await expect(page.locator('[data-testid=task-row]')).toHaveCount(1);
       await s.api.dispose();
     });
+
+    for (const view of views) {
+      test(`${view.name}: a table row that needs nothing carries no attention badge, and an answered task loses its badge`, async ({ page, playwright, baseURL }) => {
+        const s = await seed(playwright, baseURL, `plain-${view.root}-${vp.name}`);
+        await post(s.api, `/api/v1/asks/${s.ask}/answer`, { answer: 'Go left' }, 200);
+        await page.goto(view.url(s.slug));
+        const asked = page.locator(`[data-testid=task-row][data-ref=${s.asking}]`);
+        const quiet = page.locator(`[data-testid=task-row][data-ref=${s.quiet}]`);
+        await expect(asked).toBeVisible(FIVE_SECONDS);
+        await expect(quiet).toBeVisible(FIVE_SECONDS);
+        await expect(section(page).getByTestId('needs-row')).toHaveCount(2); // stranded and done stay in the section
+        for (const row of [asked, quiet]) {
+          await expect(row.locator('[data-testid^=attention-]')).toHaveCount(0);
+          await expect(row.getByTestId('flag-blocked')).toHaveCount(0);
+        }
+        await s.api.dispose();
+      });
+    }
 
     for (const capped of CAPPED) {
       test(`a task past the section cap keeps its ${capped.name} attention badge on the Tasks view and the initiative page`, async ({ page, playwright, baseURL }) => {
