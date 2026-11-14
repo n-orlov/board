@@ -9,6 +9,7 @@ import (
 )
 
 func TestMetaReportsTheServerAndTheCaller(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.send(http.MethodGet, "/api/v1/meta", "", "claude@host")
 	if rec.Code != http.StatusOK {
@@ -34,6 +35,7 @@ func (s *keyServer) protocolSeen(handle string) *int {
 }
 
 func TestProtocolSeenRecordsTheHighestVersionForTheCallingActor(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for _, c := range []struct {
 		send string
@@ -54,6 +56,7 @@ func TestProtocolSeenRecordsTheHighestVersionForTheCallingActor(t *testing.T) {
 }
 
 func TestProtocolSeenRefusesABadBodyWithANextAction(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for _, body := range []string{`{"version":-1}`, ``, `{"version":"x"}`} {
 		rec := s.send(http.MethodPut, "/api/v1/actors/me/protocol-seen", body, "claude@host")
@@ -68,6 +71,7 @@ func TestProtocolSeenRefusesABadBodyWithANextAction(t *testing.T) {
 }
 
 func TestMetaAndProtocolSeenNeedTheActorHeader(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	if rec := s.send(http.MethodGet, "/api/v1/meta", "", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("meta without Board-Actor = %d, want 400", rec.Code)
@@ -78,6 +82,7 @@ func TestMetaAndProtocolSeenNeedTheActorHeader(t *testing.T) {
 }
 
 func TestProtocolSeenAnswers503WithoutAnActorsStore(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, func(context.Context, string) (string, error) { return "k", nil }, nil, nil)
 	r := httptest.NewRequest(http.MethodPut, "/api/v1/actors/me/protocol-seen", strings.NewReader(`{"version":1}`))
 	r.Header.Set("Authorization", "Bearer brd_x")
@@ -91,10 +96,8 @@ func TestProtocolSeenAnswers503WithoutAnActorsStore(t *testing.T) {
 }
 
 func TestMetaOmitsTheRevisionOfABuildThatRecordedNone(t *testing.T) {
-	orig := keyServerBuild
-	keyServerBuild = Build{Version: "devel", Protocol: 7}
-	t.Cleanup(func() { keyServerBuild = orig })
-	s := newKeyServer(t)
+	t.Parallel()
+	s := newKeyServerOfBuild(t, Build{Version: "devel", Protocol: 7})
 	rec := s.send(http.MethodGet, "/api/v1/meta", "", "claude@host")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("meta = %d %s", rec.Code, rec.Body)

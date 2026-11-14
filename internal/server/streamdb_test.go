@@ -76,8 +76,15 @@ var (
 	sharedPostgresErr  error
 )
 
-// TestMain removes the Postgres container the tests of this package share.
+// TestMain registers the SQLite function and connection hook the hold tests
+// use, before any (parallel) test opens a database, and removes the Postgres
+// container the tests of this package share.
 func TestMain(m *testing.M) {
+	installSQLiteHoldHook()
+	if err := installMarkFunc(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if sharedPostgresDone != nil {
 		sharedPostgresDone()
@@ -112,13 +119,23 @@ func runPostgres() (*postgresDatabases, func(), error) {
 		Image:        postgresImage,
 		ExposedPorts: []string{"5432/tcp"},
 		Env:          map[string]string{"POSTGRES_USER": pgUser, "POSTGRES_PASSWORD": pgPassword, "POSTGRES_DB": pgAdminDB},
-		Labels:       labels,
+		// the package's tests run in parallel, each with its own database and
+		// pools, which can outgrow the default of 100 connections
+		Cmd: []string{"postgres", "-c", "max_connections=500"},
+		// the data directory in memory: CREATE DATABASE (once per test and
+		// leg) is several times faster, and the container is gone at once
+		// when killed; New drops each database when its test ends
+		Tmpfs:  map[string]string{"/var/lib/postgresql/data": "rw"},
+		Labels: labels,
 		WaitingFor: wait.ForSQL("5432/tcp", "pgx", func(host string, port network.Port) string { return pgDSN(host, port.Port(), pgAdminDB) }).
 			WithStartupTimeout(90 * time.Second),
 	}})
+	// The container is thrown away with every database in it, so it is killed
+	// rather than stopped: a graceful stop took over 10 s, the longest step of
+	// the package's whole run.
 	terminate := func() {
 		if c != nil {
-			_ = c.Terminate(context.Background())
+			_ = c.Terminate(context.Background(), testcontainers.StopTimeout(0))
 		}
 	}
 	if err != nil {
@@ -149,19 +166,53 @@ func (p *postgresDatabases) New(t *testing.T) string {
 	if _, err := db.ExecContext(context.Background(), "CREATE DATABASE "+name); err != nil {
 		t.Fatalf("creating database %s: %v", name, err)
 	}
+	// registered before the test opens its store, so it runs after the store
+	// is closed; FORCE ends any connection the test left behind
+	t.Cleanup(func() { p.drop(t, name) })
 	return pgDSN(p.host, p.port, name)
 }
 
-// forEachLeg runs fn as a subtest on every leg legs names, with the leg's
-// databases. The Postgres container is shared by the package's tests and
+// drop removes the database name, so the in-memory data directory holds only
+// the databases of the tests running now.
+func (p *postgresDatabases) drop(t *testing.T, name string) {
+	db, err := sql.Open("pgx", pgDSN(p.host, p.port, pgAdminDB))
+	if err != nil {
+		t.Errorf("dropping database %s: %v", name, err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+		t.Errorf("dropping database %s: %v", name, err)
+	}
+}
+
+// forEachLeg runs fn as a parallel subtest on every leg legs names, with the
+// leg's databases. The Postgres container is shared by the package's tests and
 // removed when they have all run.
 func forEachLeg(t *testing.T, fn func(t *testing.T, leg string, dbs databases)) {
+	t.Helper()
+	runLegs(t, true, fn)
+}
+
+// forEachLegInOrder is forEachLeg with the legs run one after the other, for a
+// test that measures the whole process (its goroutines) and so must run alone.
+func forEachLegInOrder(t *testing.T, fn func(t *testing.T, leg string, dbs databases)) {
+	t.Helper()
+	runLegs(t, false, fn)
+}
+
+func runLegs(t *testing.T, parallel bool, fn func(t *testing.T, leg string, dbs databases)) {
 	t.Helper()
 	for _, leg := range legs(t) {
 		var dbs databases = sqliteDatabases{}
 		if leg == "postgres" {
 			dbs = startPostgres(t)
 		}
-		t.Run(leg, func(t *testing.T) { fn(t, leg, dbs) })
+		t.Run(leg, func(t *testing.T) {
+			if parallel {
+				t.Parallel()
+			}
+			fn(t, leg, dbs)
+		})
 	}
 }

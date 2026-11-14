@@ -93,6 +93,7 @@ func (s *sessionServer) lastSeen() int64 {
 }
 
 func TestASessionIsMarkedSeenOnlyByARequestThatSucceeds(t *testing.T) {
+	t.Parallel()
 	s := newSessionServer(t)
 	created := s.lastSeen()
 	s.now = s.now.Add(11 * time.Second) // past a tenth of the idle timeout: a use would write
@@ -126,6 +127,7 @@ func TestASessionIsMarkedSeenOnlyByARequestThatSucceeds(t *testing.T) {
 }
 
 func TestADeadSessionIsRemovedOnlyByARequestThatIsNotRefused(t *testing.T) {
+	t.Parallel()
 	s := newSessionServer(t)
 	s.now = s.now.Add(101 * time.Second) // idle past the timeout
 	if rec := s.send(http.MethodPost, "/api/v1/leases/L9/end", "", true); rec.Code != http.StatusUnauthorized {

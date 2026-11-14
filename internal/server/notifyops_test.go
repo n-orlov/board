@@ -10,6 +10,7 @@ import (
 )
 
 func TestListNotificationsAnswers503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	got, err := notifyOps{}.ListNotifications(context.Background(), ListNotificationsRequestObject{})
 	p, ok := got.(problemResponse)
 	if err != nil || !ok || p.status != http.StatusServiceUnavailable {
@@ -41,6 +42,7 @@ func seedNotifications(t *testing.T, s *keyServer) {
 }
 
 func TestListNotificationsFiltersPagesAndShapesItems(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	seedNotifications(t, s)
 	idsAt := func(path string) (ids []string, doc map[string]any) {
@@ -82,6 +84,7 @@ func TestListNotificationsFiltersPagesAndShapesItems(t *testing.T) {
 }
 
 func TestListNotificationsRefusesWhatItCannotRead(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	seedNotifications(t, s)
 	for _, q := range []string{"state=queued", "state=", "limit=0", "limit=1001", "limit=abc", "after=nope", "after=01JC0000000000000000000099"} {

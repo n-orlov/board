@@ -14,6 +14,7 @@ import (
 
 // WithAttention and WithTasks give the task document its reasons in either order.
 func TestTaskDocumentCarriesItsReasonsWhicheverOptionComesFirst(t *testing.T) {
+	t.Parallel()
 	for name, order := range map[string]func(*keyServer) []Option{
 		"attention first": func(s *keyServer) []Option {
 			return []Option{WithAttention(&attention.Store{Store: s.st}), WithTasks(&tasks.Store{Store: s.st}, &leases.Store{Store: s.st}), WithAsks(&asks.Store{Store: s.st})}
@@ -51,6 +52,7 @@ func TestTaskDocumentCarriesItsReasonsWhicheverOptionComesFirst(t *testing.T) {
 }
 
 func TestApiTaskAttentionLeavesOutFlagsThatAreNotSet(t *testing.T) {
+	t.Parallel()
 	got, lease := apiTaskAttention(attention.TaskReasons{Reasons: []attention.Reason{attention.ReasonAsking, attention.ReasonDone}})
 	if len(got) != 2 || got[0].Blocking != nil || got[0].AskerWaiting != nil || got[1].Reason != TaskAttentionReasonDone || lease != nil {
 		t.Errorf("reasons = %+v %v", got, lease)
@@ -62,6 +64,7 @@ func TestApiTaskAttentionLeavesOutFlagsThatAreNotSet(t *testing.T) {
 }
 
 func TestAttentionCountsCountsEachTaskOnceUnderItsInitiative(t *testing.T) {
+	t.Parallel()
 	d := attention.Derivation{Tasks: []attention.TaskReasons{
 		{Task: "aa-1", Reasons: []attention.Reason{attention.ReasonAsking, attention.ReasonDone}},
 		{Task: "aa-2", Reasons: []attention.Reason{attention.ReasonStranded}},
@@ -78,6 +81,7 @@ func TestAttentionCountsCountsEachTaskOnceUnderItsInitiative(t *testing.T) {
 }
 
 func TestInitiativeAttentionCountIsZeroWithoutAnAttentionStore(t *testing.T) {
+	t.Parallel()
 	n, err := initiativeOps{}.attentionCount(t.Context(), "aa")
 	if n != 0 || err != nil {
 		t.Errorf("count = %d, %v", n, err)
@@ -90,6 +94,7 @@ func TestInitiativeAttentionCountIsZeroWithoutAnAttentionStore(t *testing.T) {
 
 // The initiative list and GET /initiatives/{slug} carry attention_count whichever option comes first.
 func TestInitiativeAttentionCountOnListAndGetWhicheverOptionComesFirst(t *testing.T) {
+	t.Parallel()
 	for name, order := range map[string]func(*keyServer) []Option{
 		"attention first": func(s *keyServer) []Option {
 			return []Option{WithAttention(&attention.Store{Store: s.st}), WithTasks(&tasks.Store{Store: s.st}, &leases.Store{Store: s.st}), WithAsks(&asks.Store{Store: s.st})}

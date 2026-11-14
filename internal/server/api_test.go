@@ -15,6 +15,7 @@ import (
 )
 
 func TestSpecDocumentsAreServedToAnAuthenticatedCaller(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/openapi.yaml"))
 	if rec.Code != http.StatusOK || rec.Body.String() != string(api.YAML()) {
@@ -58,6 +59,7 @@ var (
 )
 
 func TestDocsPageIsSwaggerUIFromEmbeddedAssetsAndReferencesNoExternalHost(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, acceptKey, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, authed("/api/docs"))
@@ -98,6 +100,7 @@ func TestDocsPageIsSwaggerUIFromEmbeddedAssetsAndReferencesNoExternalHost(t *tes
 }
 
 func TestDocsInitScriptNamesNoExternalHostAndLoadsTheSpecFromThisOne(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/docs/assets/init.js"))
 	if rec.Code != http.StatusOK {
@@ -112,6 +115,7 @@ func TestDocsInitScriptNamesNoExternalHostAndLoadsTheSpecFromThisOne(t *testing.
 }
 
 func TestUnknownDocsAssetIs404AProblem(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/docs/assets/nope.js"))
 	if rec.Code != http.StatusNotFound {
@@ -130,6 +134,7 @@ func TestUnknownDocsAssetIs404AProblem(t *testing.T) {
 // unknown asset: any name the embedded set lacks, however spelled, is a 404
 // problem document that keeps its fields and names a next action.
 func TestEveryUnknownDocsAssetNameAnswersAProblemWithNext(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"nope.js", "INIT.JS", "init.js.map", "%2e%2e%2fetc", "swagger-ui.css.gz"} {
 		rec := httptest.NewRecorder()
 		NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/docs/assets/"+name))
@@ -150,6 +155,7 @@ func TestEveryUnknownDocsAssetNameAnswersAProblemWithNext(t *testing.T) {
 }
 
 func TestDocsAssetsNeedACredential(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"/api/docs", "/api/docs/assets/init.js", "/api/docs/assets/nope.js"} {
 		if rec := request(path, nil); rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s with no credential = %d, want 401", path, rec.Code)
@@ -158,6 +164,7 @@ func TestDocsAssetsNeedACredential(t *testing.T) {
 }
 
 func TestSpecDocumentsRefuseACallerWithoutCredentials(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"/api/openapi.yaml", "/api/openapi.json", "/api/docs"} {
 		rec := httptest.NewRecorder()
 		NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -593,6 +600,7 @@ func (s stubOperations) GetDocs(context.Context, GetDocsRequestObject) (GetDocsR
 // cannot be written, and a middleware that swaps in a foreign response: each answers 500 as a
 // problem document, and the strict middleware sees every call.
 func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
+	t.Parallel()
 	paths := []string{
 		"/healthz", "/readyz", "/api/openapi.yaml", "/api/openapi.json", "/api/docs", "/api/docs/assets/init.js",
 		"/auth/login", "/auth/oidc/callback", "/auth/session", "POST /auth/logout",
@@ -643,6 +651,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 // failing operations through the wrapper NewHandler installs: whatever the
 // operation does wrong, the 500 problem document names a next action.
 func TestAFailingOperationThroughTheHandlerAnswersAProblemWithNext(t *testing.T) {
+	t.Parallel()
 	paths := []string{"/healthz", "/api/docs/assets/init.js", "/api/v1/keys", "POST /api/v1/initiatives", "/api/v1/meta"}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
 		mux := http.NewServeMux()
@@ -672,6 +681,7 @@ func TestAFailingOperationThroughTheHandlerAnswersAProblemWithNext(t *testing.T)
 // TestDeclaredProblemResponsesWriteAProblemDocument writes every problem
 // response the document declares and checks status, content type and body.
 func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
+	t.Parallel()
 	problem := Problem{Type: "about:blank", Title: "t", Status: 1}
 	cases := []struct {
 		name  string
@@ -926,6 +936,7 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 // TestReadyzNotReadyIsTextAndTheHandlerHonoursABaseURL covers the 503 body and
 // the generated routers.
 func TestReadyzNotReadyIsTextAndTheHandlerHonoursABaseURL(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	if err := GetReadyz503TextResponse("not ready\n").VisitGetReadyzResponse(rec); err != nil {
 		t.Fatal(err)
@@ -953,6 +964,7 @@ func TestReadyzNotReadyIsTextAndTheHandlerHonoursABaseURL(t *testing.T) {
 // TestParameterErrorsNameTheParameter pins the messages the generated router
 // reports for a bad parameter, and that a wrapped cause stays reachable.
 func TestParameterErrorsNameTheParameter(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("boom")
 	cases := []struct {
 		err    error
@@ -977,6 +989,7 @@ func TestParameterErrorsNameTheParameter(t *testing.T) {
 }
 
 func TestAnUnreadableRequestAnswersAProblemDocument(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	requestUnreadable(rec, httptest.NewRequest(http.MethodGet, "/", nil), errBroken)
 	if rec.Code != http.StatusBadRequest || rec.Header().Get("Content-Type") != "application/problem+json" {

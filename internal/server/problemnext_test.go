@@ -36,6 +36,7 @@ func decodeProblem(t *testing.T, label string, rec *httptest.ResponseRecorder) m
 // (unknown Swagger asset), an unreadable parameter, an unreadable body, an
 // unknown key, a store that is not wired, and refused credentials.
 func TestEveryErrorPathOfTheHandlerAnswersAProblemWithNext(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		req  *http.Request
@@ -62,6 +63,7 @@ func TestEveryErrorPathOfTheHandlerAnswersAProblemWithNext(t *testing.T) {
 }
 
 func TestUnknownDocsAssetKeepsItsOwnNextAndFields(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/api/docs/assets/nope.js"))
 	doc := decodeProblem(t, "asset", rec)
@@ -76,6 +78,7 @@ func TestUnknownDocsAssetKeepsItsOwnNextAndFields(t *testing.T) {
 // TestWithProblemNextCompletesAnyProblemAHandlerWrites covers the wrapper on its
 // own, for statuses and shapes no current operation answers.
 func TestWithProblemNextCompletesAnyProblemAHandlerWrites(t *testing.T) {
+	t.Parallel()
 	write := func(status int, body string, explicitHeader bool) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
@@ -122,6 +125,7 @@ func TestWithProblemNextCompletesAnyProblemAHandlerWrites(t *testing.T) {
 }
 
 func TestWithProblemNextLeavesOtherResponsesAlone(t *testing.T) {
+	t.Parallel()
 	h := withProblemNext(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Content-Length", "3")

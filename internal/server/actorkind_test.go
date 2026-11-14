@@ -105,6 +105,7 @@ func (s *kindServer) principals(handle string) []string {
 }
 
 func TestOperatorHandleUsedByAKeyThenASessionEndsUpOperator(t *testing.T) {
+	t.Parallel()
 	s := newKindServer(t)
 	s.keyWrite("operator")
 	s.sessionWrite()
@@ -117,6 +118,7 @@ func TestOperatorHandleUsedByAKeyThenASessionEndsUpOperator(t *testing.T) {
 }
 
 func TestOperatorHandleUsedByASessionThenAKeyStaysOperator(t *testing.T) {
+	t.Parallel()
 	s := newKindServer(t)
 	s.sessionWrite()
 	s.keyWrite("operator")
@@ -129,6 +131,7 @@ func TestOperatorHandleUsedByASessionThenAKeyStaysOperator(t *testing.T) {
 }
 
 func TestKeyWritesUnderOtherHandlesStayAgentsWhateverTheOrder(t *testing.T) {
+	t.Parallel()
 	s := newKindServer(t)
 	s.keyWrite("ralph:run-1")
 	s.sessionWrite()

@@ -105,6 +105,7 @@ func resetReason(t *testing.T, block string) string {
 // SPEC 7.1: a reconnect with the id of the last event it saw gets exactly the
 // events written while it was away, in order, and then the live ones.
 func TestResumeReplaysExactlyTheEventsWrittenWhileDisconnected(t *testing.T) {
+	t.Parallel()
 	for name, open := range map[string]func(r *rig, id string) *sse{
 		"header": func(r *rig, id string) *sse {
 			return r.openStreamWith("/api/v1/stream?topics=events", map[string]string{"Last-Event-ID": id})
@@ -115,6 +116,7 @@ func TestResumeReplaysExactlyTheEventsWrittenWhileDisconnected(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 				r, _ := resumeRig(t, dbs)
 				first := r.openStream("/api/v1/stream?topics=events")
@@ -142,6 +144,7 @@ func TestResumeReplaysExactlyTheEventsWrittenWhileDisconnected(t *testing.T) {
 
 // A client resuming from the newest event gets no replay and no reset.
 func TestResumeFromTheNewestEventReplaysNothing(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := resumeRig(t, dbs)
 		first := r.openStream("/api/v1/stream?topics=events")
@@ -163,12 +166,14 @@ func TestResumeFromTheNewestEventReplaysNothing(t *testing.T) {
 
 // SPEC 7.1: an id that names no event gets one reset and the stream goes on live.
 func TestResumeWithAnUnknownIDSendsOneResetAndContinuesLive(t *testing.T) {
+	t.Parallel()
 	for name, id := range map[string]string{
 		"a ULID no event has":   "01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		"not an id":             "garbage",
 		"an E ref past the end": "E99999",
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 				r, _ := resumeRig(t, dbs)
 				r.createInitiative("before")
@@ -189,6 +194,7 @@ func TestResumeWithAnUnknownIDSendsOneResetAndContinuesLive(t *testing.T) {
 
 // SPEC 7.1: 1000 missed events replay; 1001 are one reset instead.
 func TestResumeReplaysAGapOf1000AndResetsAtAGapOf1001(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, st := resumeRig(t, dbs)
 		page, err := (&events.Store{Store: st}).List(context.Background(), events.Query{})
@@ -228,6 +234,7 @@ func TestResumeReplaysAGapOf1000AndResetsAtAGapOf1001(t *testing.T) {
 
 // The attention topic alone is not resumed: Last-Event-ID is about events.
 func TestResumeIsIgnoredWithoutTheEventsTopic(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := resumeRig(t, dbs)
 		s := r.openStreamWith("/api/v1/stream?topics=attention", map[string]string{"Last-Event-ID": "garbage"})
@@ -238,6 +245,7 @@ func TestResumeIsIgnoredWithoutTheEventsTopic(t *testing.T) {
 // A client can have read an event from a server whose feed is further ahead
 // than this one: the live part never repeats what the client has.
 func TestResumeDoesNotRepeatEventsTheFeedHasNotDeliveredYet(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, st := resumeRig(t, dbs)
 		r.createInitiative("one")
@@ -258,6 +266,7 @@ func TestResumeDoesNotRepeatEventsTheFeedHasNotDeliveredYet(t *testing.T) {
 }
 
 func TestOutcomeNamesWhatAResumingStreamSends(t *testing.T) {
+	t.Parallel()
 	e := events.Event{N: 5}
 	for name, tc := range map[string]struct {
 		res  events.Resume

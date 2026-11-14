@@ -67,6 +67,7 @@ func itemSummaries(doc map[string]any) []string {
 }
 
 func TestNotesPostGetAndListThroughTheServer(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := boardRig(t, dbs)
 		posted := r.want(http.MethodPost, "/api/v1/notes", `{"summary":"first","body":"the long text"}`, http.StatusCreated)
@@ -98,6 +99,7 @@ func TestNotesPostGetAndListThroughTheServer(t *testing.T) {
 }
 
 func TestNotesAckMovesTheCursorAndSinceCursorReadsAfterIt(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := boardRig(t, dbs)
 		for _, s := range []string{"one", "two", "three"} {
@@ -131,6 +133,7 @@ func TestNotesAckMovesTheCursorAndSinceCursorReadsAfterIt(t *testing.T) {
 }
 
 func TestPutCursorRefusesAMissingBodyAnUnknownStreamAndABadPosition(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := boardRig(t, dbs)
 		r.want(http.MethodPut, "/api/v1/cursors/notes", ``, http.StatusBadRequest)
@@ -141,6 +144,7 @@ func TestPutCursorRefusesAMissingBodyAnUnknownStreamAndABadPosition(t *testing.T
 }
 
 func TestAttentionThroughTheServerAnswersFullAndCounts(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := boardRig(t, dbs)
 		r.raiseAsk()
@@ -157,6 +161,7 @@ func TestAttentionThroughTheServerAnswersFullAndCounts(t *testing.T) {
 }
 
 func TestAskListAndWithdrawThroughTheServer(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := boardRig(t, dbs)
 		withBody, plain := r.raiseAsk(), r.raiseAsk()

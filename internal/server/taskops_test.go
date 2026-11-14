@@ -27,6 +27,7 @@ func (s *keyServer) task(body string) {
 }
 
 func TestGetTaskShowsItsLiveLeasesAndIsActiveOnlyWhileOneIsLive(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -69,6 +70,7 @@ func TestGetTaskShowsItsLiveLeasesAndIsActiveOnlyWhileOneIsLive(t *testing.T) {
 }
 
 func TestGetTaskCarriesOverdueBlockedAndClosedFields(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"watch","kind":"watch","cadence_seconds":60,"next_check_at":"2020-01-01T00:00:00Z"}`)
@@ -95,6 +97,7 @@ func TestGetTaskCarriesOverdueBlockedAndClosedFields(t *testing.T) {
 }
 
 func TestTasksAreUnavailableWithoutAStore(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, acceptKey, nil, nil)
 	for _, c := range []struct{ method, path string }{{"POST", "/api/v1/tasks"}, {"GET", "/api/v1/tasks/aa-1"}, {"PATCH", "/api/v1/tasks/aa-1"}} {
 		rec := httptest.NewRecorder()
@@ -106,6 +109,7 @@ func TestTasksAreUnavailableWithoutAStore(t *testing.T) {
 }
 
 func TestTaskCreateNeedsAUsableBody(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -121,6 +125,7 @@ func TestTaskCreateNeedsAUsableBody(t *testing.T) {
 }
 
 func TestMaybeTellsAbsentNullAndAValueApart(t *testing.T) {
+	t.Parallel()
 	var patch TaskPatch
 	if err := json.Unmarshal([]byte(`{"title":"t","planned_start":null}`), &patch); err != nil {
 		t.Fatal(err)
@@ -140,6 +145,7 @@ func TestMaybeTellsAbsentNullAndAValueApart(t *testing.T) {
 }
 
 func TestPatchTaskAnswersEachRefusalWithAProblemAndNext(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -172,6 +178,7 @@ func TestPatchTaskAnswersEachRefusalWithAProblemAndNext(t *testing.T) {
 }
 
 func TestTaskFailureMapsEachStoreErrorToItsStatus(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		err    error
 		status int
@@ -199,6 +206,7 @@ func TestTaskFailureMapsEachStoreErrorToItsStatus(t *testing.T) {
 }
 
 func TestCreateTaskInAClosedInitiativeIs409AndAnUnknownOneIs404(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	if _, err := s.st.Writer().Exec(`UPDATE initiatives SET status = 'closed'`); err != nil {
@@ -213,6 +221,7 @@ func TestCreateTaskInAClosedInitiativeIs409AndAnUnknownOneIs404(t *testing.T) {
 }
 
 func TestPatchTaskReturnsTheEditedTaskAndOnlyAChangeWritesAnEvent(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -233,6 +242,7 @@ func TestPatchTaskReturnsTheEditedTaskAndOnlyAChangeWritesAnEvent(t *testing.T) 
 }
 
 func TestTaskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]struct {
 		valid   []interface{ Valid() bool }
 		invalid interface{ Valid() bool }
@@ -261,6 +271,7 @@ func TestTaskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 }
 
 func TestTransitionsAnswerTheTaskAndRefusalsAnswerAProblemNamingTheStatus(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -297,6 +308,7 @@ func TestTransitionsAnswerTheTaskAndRefusalsAnswerAProblemNamingTheStatus(t *tes
 }
 
 func TestCloseRecordsTheBoardOnBehalfOfHeaderAndNoOtherTransitionDoes(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -326,6 +338,7 @@ func TestCloseRecordsTheBoardOnBehalfOfHeaderAndNoOtherTransitionDoes(t *testing
 }
 
 func TestDependencyOperationsAnswerTheDependentTaskAndEachRefusalWithAProblem(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -353,6 +366,7 @@ func TestDependencyOperationsAnswerTheDependentTaskAndEachRefusalWithAProblem(t 
 
 // WithAsks and WithTasks give the task document its open asks in either order.
 func TestTaskDocumentListsOpenAsksWhicheverOptionComesFirst(t *testing.T) {
+	t.Parallel()
 	for name, order := range map[string]func(*keyServer) []Option{
 		"asks first": func(s *keyServer) []Option {
 			return []Option{WithAsks(&asks.Store{Store: s.st}), WithTasks(&tasks.Store{Store: s.st}, &leases.Store{Store: s.st})}
@@ -380,6 +394,7 @@ func TestTaskDocumentListsOpenAsksWhicheverOptionComesFirst(t *testing.T) {
 }
 
 func TestDoneTaskEndsLeasesAsTheBodyAsksAndRefusesAnotherActorsLease(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)

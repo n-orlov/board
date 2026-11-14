@@ -11,6 +11,7 @@ import (
 )
 
 func TestListTasksAnswers503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	got, _ := taskOps{}.ListTasks(context.Background(), ListTasksRequestObject{})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 		t.Errorf("list without a store = %#v, want a 503 problem", got)
@@ -18,6 +19,7 @@ func TestListTasksAnswers503WithoutAStore(t *testing.T) {
 }
 
 func TestTaskQueryCarriesEveryParameter(t *testing.T) {
+	t.Parallel()
 	status, kind := ListTasksParamsStatus("closed"), ListTasksParamsKind("watch")
 	ini, tag, win, q, after := []string{"aa", "bb"}, []string{"x"}, "30d", "text", "aa-1"
 	yes, limit := true, 5
@@ -37,6 +39,7 @@ func TestTaskQueryCarriesEveryParameter(t *testing.T) {
 }
 
 func TestListTasksShowsLiveLeasesPagesAndRefusesABadCursor(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)

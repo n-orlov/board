@@ -20,6 +20,7 @@ func (s *keyServer) create(slug, extra string) *httptest.ResponseRecorder {
 }
 
 func TestCreateInitiativeReturnsItAndAppendsAnEventWithPrincipalAndActor(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.create("phone-onboard", `,"description":"# Plan","tags":["Work"," homelab","work"],"target_start":"2026-03-01","target_end":"2026-04-01"`)
 	if rec.Code != http.StatusCreated {
@@ -47,6 +48,7 @@ func TestCreateInitiativeReturnsItAndAppendsAnEventWithPrincipalAndActor(t *test
 }
 
 func TestCreateInitiativeRefusesBadFieldsWithAProblemAndNext(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	cases := map[string]string{
 		"x":                     "",
@@ -78,6 +80,7 @@ func TestCreateInitiativeRefusesBadFieldsWithAProblemAndNext(t *testing.T) {
 }
 
 func TestCreateInitiativeDuplicateIsConflictWithNext(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("phone-onboard", "")
 	rec := s.create("phone-onboard", "")
@@ -91,6 +94,7 @@ func TestCreateInitiativeDuplicateIsConflictWithNext(t *testing.T) {
 }
 
 func TestGetInitiativeBySlugAndUlidAndNotFound(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	id := decode(t, s.create("phone-onboard", `,"tags":["work"]`))["id"].(string)
 	for _, ref := range []string{"phone-onboard", id} {
@@ -107,6 +111,7 @@ func TestGetInitiativeBySlugAndUlidAndNotFound(t *testing.T) {
 }
 
 func TestListInitiativesPagesFiltersAndRefusesBadParameters(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa-one", `,"tags":["work","x"]`)
 	s.create("bb-two", `,"tags":["work"]`)
@@ -141,6 +146,7 @@ func TestListInitiativesPagesFiltersAndRefusesBadParameters(t *testing.T) {
 }
 
 func TestInitiativesAreUnavailableWithoutAStore(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, acceptKey, nil, nil)
 	for _, c := range []struct{ method, path string }{{"GET", "/api/v1/initiatives"}, {"POST", "/api/v1/initiatives"}, {"GET", "/api/v1/initiatives/abc"}, {"PATCH", "/api/v1/initiatives/abc"}} {
 		r := httptest.NewRequest(c.method, c.path, strings.NewReader(`{"slug":"abc","title":"t"}`))
@@ -156,12 +162,14 @@ func TestInitiativesAreUnavailableWithoutAStore(t *testing.T) {
 }
 
 func TestInitiativeStatusEnumAcceptsOnlyTheDeclaredStates(t *testing.T) {
+	t.Parallel()
 	if !InitiativeStatusOpen.Valid() || !InitiativeStatusClosed.Valid() || InitiativeStatus("gone").Valid() {
 		t.Error("InitiativeStatus.Valid is wrong")
 	}
 }
 
 func TestProblemDocumentsCarryTheDefaultNextOfTheirStatus(t *testing.T) {
+	t.Parallel()
 	for status, want := range map[int]string{401: "Bearer", 404: "Check the path", 409: "Read what exists", 503: "Try again", 400: "Fix the request"} {
 		rec := httptest.NewRecorder()
 		writeProblem(rec, status, "d")
@@ -172,6 +180,7 @@ func TestProblemDocumentsCarryTheDefaultNextOfTheirStatus(t *testing.T) {
 }
 
 func TestBindFailedAnswersRequiredAndInvalidParameters(t *testing.T) {
+	t.Parallel()
 	var seen []error
 	siw := &ServerInterfaceWrapper{ErrorHandlerFunc: func(_ http.ResponseWriter, _ *http.Request, err error) { seen = append(seen, err) }}
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -190,6 +199,7 @@ func (s *keyServer) patch(ref, body string) *httptest.ResponseRecorder {
 }
 
 func TestPatchInitiativeChangesFieldsAndWritesOneEvent(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", `,"tags":["old"],"target_start":"2026-03-01"`)
 	rec := s.patch("aa", `{"title":"New","tags":["B","a"],"target_start":null,"target_end":"2026-05-01"}`)
@@ -212,6 +222,7 @@ func TestPatchInitiativeChangesFieldsAndWritesOneEvent(t *testing.T) {
 }
 
 func TestPatchInitiativeRefusesTheSlugANullTitleAndAMissingBody(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	for name, body := range map[string]string{
@@ -237,6 +248,7 @@ func TestPatchInitiativeRefusesTheSlugANullTitleAndAMissingBody(t *testing.T) {
 }
 
 func TestPatchInitiativeUnknownIsNotFoundAndNoOpIsOK(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	if rec := s.patch("zz", `{"title":"x"}`); rec.Code != http.StatusNotFound {
@@ -251,6 +263,7 @@ func TestPatchInitiativeUnknownIsNotFoundAndNoOpIsOK(t *testing.T) {
 }
 
 func TestCloseAndReopenInitiativeAnswerTheInitiativeAndWriteEvents(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -285,6 +298,7 @@ func TestCloseAndReopenInitiativeAnswerTheInitiativeAndWriteEvents(t *testing.T)
 }
 
 func TestCloseAndReopenUnknownInitiativeAreNotFound(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for _, verb := range []string{"close", "reopen"} {
 		rec := s.send(http.MethodPost, "/api/v1/initiatives/zz/"+verb, "", "op@host")
@@ -295,6 +309,7 @@ func TestCloseAndReopenUnknownInitiativeAreNotFound(t *testing.T) {
 }
 
 func TestCloseInitiativeNeedsTheTaskStoreAndReopenNeedsTheInitiativeStore(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, acceptKey, nil, nil)
 	for _, verb := range []string{"close", "reopen"} {
 		rec := httptest.NewRecorder()
@@ -306,6 +321,7 @@ func TestCloseInitiativeNeedsTheTaskStoreAndReopenNeedsTheInitiativeStore(t *tes
 }
 
 func TestCloseInitiativeRefusesABodyThatIsNotJSON(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	rec := s.send(http.MethodPost, "/api/v1/initiatives/aa/close", `{"force":`, "op@host")
@@ -318,6 +334,7 @@ func TestCloseInitiativeRefusesABodyThatIsNotJSON(t *testing.T) {
 }
 
 func TestListInitiativesFiltersByStatusAndCarriesCountsAndLiveLeases(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.create("bb", "")
@@ -349,6 +366,7 @@ func TestListInitiativesFiltersByStatusAndCarriesCountsAndLiveLeases(t *testing.
 }
 
 func TestListInitiativesNeedsTheTaskAndLeaseStoresToCount(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	h := NewHandler(ok, (&auth.Verifier{Store: s.st}).Verify, nil, s.keys, WithInitiatives(&initiatives.Store{Store: s.st}))
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/initiatives", nil)
@@ -362,6 +380,7 @@ func TestListInitiativesNeedsTheTaskAndLeaseStoresToCount(t *testing.T) {
 }
 
 func TestListEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	valid := []interface{ Valid() bool }{
 		InitiativeListItemStatusOpen, InitiativeListItemStatusClosed,
 		ListInitiativesParamsStatusOpen, ListInitiativesParamsStatusClosed, ListInitiativesParamsStatusAll,

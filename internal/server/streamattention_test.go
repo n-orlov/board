@@ -43,6 +43,7 @@ func counts(t *testing.T, block string) AttentionCounts {
 }
 
 func TestAttentionTopicSendsTheCountsOnConnectAndAfterAChange(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := attentionRig(t, dbs, newTestClock())
 		s := r.openStream("/api/v1/stream?topics=attention")
@@ -57,6 +58,7 @@ func TestAttentionTopicSendsTheCountsOnConnectAndAfterAChange(t *testing.T) {
 }
 
 func TestAttentionTopicStaysQuietWhenAChangeLeavesTheCountsEqual(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := attentionRig(t, dbs, newTestClock())
 		s := r.openStream("/api/v1/stream?topics=attention")
@@ -72,6 +74,7 @@ func TestAttentionTopicStaysQuietWhenAChangeLeavesTheCountsEqual(t *testing.T) {
 }
 
 func TestAttentionTopicAloneSendsNoBoardMessage(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := attentionRig(t, dbs, newTestClock())
 		s := r.openStream("/api/v1/stream?topics=attention")
@@ -85,6 +88,7 @@ func TestAttentionTopicAloneSendsNoBoardMessage(t *testing.T) {
 }
 
 func TestBothTopicsSendTheCountsOnceAndEveryEvent(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, _ := attentionRig(t, dbs, newTestClock())
 		s := r.openStream("/api/v1/stream")
@@ -101,6 +105,7 @@ func TestBothTopicsSendTheCountsOnceAndEveryEvent(t *testing.T) {
 }
 
 func TestAttentionTopicSendsAMessageWhenOnlyTheClockMovesAWatchOverdue(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		clock := newTestClock()
 		r, ts := attentionRig(t, dbs, clock)
@@ -123,6 +128,7 @@ func TestAttentionTopicSendsAMessageWhenOnlyTheClockMovesAWatchOverdue(t *testin
 }
 
 func TestRecheckIsAtMostThirtySecondsAndFollowsAShorterHeartbeat(t *testing.T) {
+	t.Parallel()
 	for heartbeat, want := range map[time.Duration]time.Duration{
 		25 * time.Second: 25 * time.Second, time.Minute: AttentionRecheck, 100 * time.Millisecond: 100 * time.Millisecond,
 	} {

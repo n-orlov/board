@@ -240,6 +240,7 @@ func newRig(t *testing.T, dbs databases, cfg streamSettings) *rig {
 }
 
 func TestAnEventWrittenAfterConnectArrivesWithinTwoSeconds(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		// A poll of an hour: only the wake a local write gives can deliver it in time.
 		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: time.Minute})
@@ -276,6 +277,7 @@ func TestAnEventWrittenAfterConnectArrivesWithinTwoSeconds(t *testing.T) {
 }
 
 func TestEveryEventIsOneMessageInOrder(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: time.Minute})
 		s := r.openStream("/api/v1/stream")
@@ -312,6 +314,7 @@ func initiativeOf(s *sse) any {
 // before it that the feed had not read yet is sent, so nothing is lost between
 // a client's read of the board and its stream.
 func TestAStreamStartsAtTheFeedPositionWhenItConnects(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -340,6 +343,7 @@ func TestAStreamStartsAtTheFeedPositionWhenItConnects(t *testing.T) {
 }
 
 func TestTopicsAreCheckedAndAuthenticationIsRequired(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: time.Minute})
 		for path, want := range map[string]int{
@@ -373,6 +377,7 @@ func TestTopicsAreCheckedAndAuthenticationIsRequired(t *testing.T) {
 }
 
 func TestAnIdleStreamSendsAPingAtTheConfiguredHeartbeat(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: 50 * time.Millisecond})
 		s := r.openStream("/api/v1/stream?topics=events")
@@ -391,6 +396,7 @@ func TestAnIdleStreamSendsAPingAtTheConfiguredHeartbeat(t *testing.T) {
 // loaded host), and the client then reads EOF. The stream, not that request,
 // is under test.
 func TestAStreamOutlivesTheServersWriteTimeout(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -439,8 +445,10 @@ func settledGoroutines(want int) int {
 	return n
 }
 
+// It counts the goroutines of the whole process, so it is the one test of the
+// package that is not parallel: it runs alone, before the parallel ones start.
 func TestNoGoroutineOutlivesADisconnectedClientOrTheServer(t *testing.T) {
-	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+	forEachLegInOrder(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
 			t.Fatal(err)
@@ -484,6 +492,7 @@ func TestNoGoroutineOutlivesADisconnectedClientOrTheServer(t *testing.T) {
 }
 
 func TestAnEventWrittenThroughOneServerReachesAStreamOnAnotherOnOnePostgres(t *testing.T) {
+	t.Parallel()
 	url := startPostgres(t).New(t)
 	a := openStore(t, url)
 	if err := a.Migrate(context.Background()); err != nil {
@@ -502,6 +511,7 @@ func TestAnEventWrittenThroughOneServerReachesAStreamOnAnotherOnOnePostgres(t *t
 }
 
 func TestAStreamAnswers503WithoutAFeedAndEndsAtOnceOnAClosedHub(t *testing.T) {
+	t.Parallel()
 	got, err := streamOps{}.GetStream(context.Background(), GetStreamRequestObject{})
 	if p, ok := got.(problemResponse); err != nil || !ok || p.status != http.StatusServiceUnavailable {
 		t.Errorf("stream without a feed = %#v, %v, want a 503 problem", got, err)
@@ -523,6 +533,7 @@ func TestAStreamAnswers503WithoutAFeedAndEndsAtOnceOnAClosedHub(t *testing.T) {
 }
 
 func TestAStreamEndsWhenTheClientCanNoLongerBeWrittenTo(t *testing.T) {
+	t.Parallel()
 	f := feed.NewAt(nil, 0, feed.Options{})
 	hub := &streamHub{feed: f, heartbeat: 5 * time.Millisecond, stop: make(chan struct{})}
 	for name, w := range map[string]http.ResponseWriter{"flush fails": &brokenWriter{failFlush: true}, "write fails": &brokenWriter{failWrite: true}} {
@@ -567,6 +578,7 @@ func (b *brokenWriter) FlushError() error {
 }
 
 func TestParseHeartbeatReadsADurationAboveZero(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]time.Duration{"": DefaultHeartbeat, " ": DefaultHeartbeat, "25s": 25 * time.Second, "150ms": 150 * time.Millisecond} {
 		if got, err := ParseHeartbeat(in); err != nil || got != want {
 			t.Errorf("ParseHeartbeat(%q) = %v, %v, want %v", in, got, err, want)
@@ -580,6 +592,7 @@ func TestParseHeartbeatReadsADurationAboveZero(t *testing.T) {
 }
 
 func TestStreamTopicEnumAcceptsOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	if !GetStreamParamsTopicsEvents.Valid() || !GetStreamParamsTopicsAttention.Valid() || GetStreamParamsTopics("x").Valid() {
 		t.Error("the topics enum does not accept exactly events and attention")
 	}

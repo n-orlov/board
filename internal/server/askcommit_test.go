@@ -56,6 +56,15 @@ func (h *sqliteHold) commit() int32 {
 func registerSQLiteHold(path string) *sqliteHold {
 	h := &sqliteHold{reached: make(chan struct{}), release: make(chan struct{})}
 	sqliteHolds.Store(path, h)
+	installSQLiteHoldHook()
+	return h
+}
+
+// installSQLiteHoldHook makes every SQLite connection opened from now on
+// consult sqliteHolds. TestMain runs it before any test opens a database: the
+// driver reads its hooks unlocked as it opens a connection, so registering one
+// while a parallel test opens its store would be a data race.
+func installSQLiteHoldHook() {
 	sqliteHookOnce.Do(func() {
 		sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
 			if reg, ok := conn.(sqlite.HookRegisterer); ok {
@@ -69,7 +78,6 @@ func registerSQLiteHold(path string) *sqliteHold {
 			return nil
 		})
 	})
-	return h
 }
 
 const pgHoldKey = 424242
@@ -180,6 +188,7 @@ func endFields(doc map[string]any) bool {
 // with none of the end's fields. Neither an in-transaction stamp nor a clock
 // read before the COMMIT is proof. Both databases.
 func TestAnEndWhoseCommitReturnsAfterUntilIsNeverAnsweredEnded(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
 		for _, withdraw := range []bool{false, true} {
 			url := dbs.New(t)

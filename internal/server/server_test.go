@@ -36,6 +36,7 @@ func authed(path string) *http.Request {
 }
 
 func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
+	t.Parallel()
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +72,7 @@ func TestServeListensOnConfiguredAddressAndStopsOnCancel(t *testing.T) {
 }
 
 func TestServeReportsBusyAddress(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +84,7 @@ func TestServeReportsBusyAddress(t *testing.T) {
 }
 
 func TestHealthzIsAlwaysOKAndReadyzFollowsReadiness(t *testing.T) {
+	t.Parallel()
 	notReady := func(context.Context) error { return errors.New("down") }
 	cases := []struct {
 		name  string
@@ -105,6 +108,7 @@ func TestHealthzIsAlwaysOKAndReadyzFollowsReadiness(t *testing.T) {
 }
 
 func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
+	t.Parallel()
 	want, err := fs.ReadFile(webui.Files(), "index.html")
 	if err != nil {
 		t.Fatalf("the embedded UI has no index.html: %v", err)
@@ -126,6 +130,7 @@ func TestRootServesTheEmbeddedIndexHTML(t *testing.T) {
 }
 
 func TestProbesAreNotShadowedByTheUI(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"/healthz", "/readyz"} {
 		rec := httptest.NewRecorder()
 		NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed(path))
@@ -136,6 +141,7 @@ func TestProbesAreNotShadowedByTheUI(t *testing.T) {
 }
 
 func TestUnknownPathIs404NotTheIndex(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	NewHandler(ok, acceptKey, nil, nil).ServeHTTP(rec, authed("/no-such-asset.js"))
 	if rec.Code != http.StatusNotFound {

@@ -8,6 +8,7 @@ import (
 )
 
 func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	valid := []interface{ Valid() bool }{
 		AskChannelApi, AskChannelRelay, AskChannelUi,
 		AskModePoll, AskModeStop,
@@ -40,6 +41,7 @@ func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 // TestWithdrawAskReadsItsOptionalBody sends the withdraw operation a body that
 // is not JSON, which is a 400, and an empty body, which is allowed.
 func TestWithdrawAskReadsItsOptionalBody(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	HandlerFromMux(strictOperations(stubOperations{mode: "fails"}, func(next StrictHandlerFunc, _ string) StrictHandlerFunc { return next }), mux)
 	for body, want := range map[string]int{"{not json": http.StatusBadRequest, "": http.StatusInternalServerError} {

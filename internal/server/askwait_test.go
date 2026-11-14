@@ -142,6 +142,7 @@ func (r *rig) askerWaiting(ref string) bool {
 }
 
 func TestAWaitSetsPollSeenAtAtItsStartAndAtItsEnd(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -178,6 +179,7 @@ func TestAWaitSetsPollSeenAtAtItsStartAndAtItsEnd(t *testing.T) {
 }
 
 func TestAHeldWaitRenewsPollSeenAtOnEveryInterval(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -221,6 +223,7 @@ func TestAHeldWaitRenewsPollSeenAtOnEveryInterval(t *testing.T) {
 // asker counts as waiting turns it from not waiting to waiting again, and that
 // is an event, where a renewal inside the window is none.
 func TestAHeldWaitAppendsAnEventForEveryReturnToWaiting(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := migrated(t, dbs)
 		clock := newTestClock()
@@ -247,6 +250,7 @@ func TestAHeldWaitAppendsAnEventForEveryReturnToWaiting(t *testing.T) {
 // one, marks nothing that changes the display, so it appends no event; a second
 // poll ask is counted on its own.
 func TestAWaitAppendsItsEventToItsOwnAskOnly(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := migrated(t, dbs)
 		r, _ := askRig(t, st, newToken(t, st), newTestClock(), time.Hour)
@@ -269,8 +273,12 @@ func TestAWaitAppendsItsEventToItsOwnAskOnly(t *testing.T) {
 }
 
 func TestAWaitEndsWhenTheClientLeavesAndMarksThePoll(t *testing.T) {
+	t.Parallel()
 	for _, query := range []string{"?wait=60", "?wait=60&until=" + url.QueryEscape(time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano))} {
-		t.Run(query, func(t *testing.T) { testAWaitEndsWhenTheClientLeaves(t, query) })
+		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+			testAWaitEndsWhenTheClientLeaves(t, query)
+		})
 	}
 }
 
@@ -307,6 +315,7 @@ func testAWaitEndsWhenTheClientLeaves(t *testing.T, query string) {
 }
 
 func TestAWaitHeldOnOneServerEndsWhenTheAnswerIsWrittenThroughAnotherOnOnePostgres(t *testing.T) {
+	t.Parallel()
 	url := startPostgres(t).New(t)
 	a := openStore(t, url)
 	if err := a.Migrate(context.Background()); err != nil {
@@ -328,6 +337,7 @@ func TestAWaitHeldOnOneServerEndsWhenTheAnswerIsWrittenThroughAnotherOnOnePostgr
 }
 
 func TestAWaitIsRefusedOutsideOneToThreeHundredAndAnswers503WithoutAFeed(t *testing.T) {
+	t.Parallel()
 	o := askOps{asks: &asks.Store{}}
 	for _, n := range []int{0, 301, -5} {
 		got, err := o.GetAsk(context.Background(), GetAskRequestObject{Ref: "A1", Params: GetAskParams{Wait: &n}})
@@ -362,6 +372,7 @@ func untilQuery(seconds string, at time.Time) string {
 // open, when nothing ends it first; until after the wait's own end changes
 // nothing; until already past answers at once.
 func TestAWaitWithUntilEndsAtUntil(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		testAWaitWithUntilEndsAtUntil(t, openStore(t, dbs.New(t)))
 	})
@@ -400,6 +411,7 @@ func testAWaitWithUntilEndsAtUntil(t *testing.T, st *store.Store) {
 // marking the poll waits for the writer it holds); an end committed before
 // until is.
 func TestAWaitWithUntilAnswersWithTheAskAsReadAtUntil(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		for _, held := range []bool{true, false} {
 			testAWaitWithUntilAnswersAtUntil(t, openStore(t, dbs.New(t)), held)
@@ -456,6 +468,7 @@ func testAWaitWithUntilAnswersAtUntil(t *testing.T, st *store.Store, held bool) 
 // wait). An end committed before until, with the wait started after it, is
 // still the answer.
 func TestAWaitWithUntilIgnoresAnEndHoldingTheWriterBeforeTheWaitStarted(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		for _, withdraw := range []bool{false, true} {
 			for _, touch := range []time.Duration{time.Hour, 50 * time.Millisecond} {
@@ -514,6 +527,7 @@ func testAWaitUntilWithEndHoldingTheWriter(t *testing.T, st *store.Store, withdr
 }
 
 func TestAWaitEndsWithTheOpenAskWhenTheServerShutsDown(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -534,6 +548,7 @@ func TestAWaitEndsWithTheOpenAskWhenTheServerShutsDown(t *testing.T) {
 }
 
 func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -567,6 +582,7 @@ func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
 }
 
 func TestAWaitOnAnOpenAskWithoutAFeedAnswers503AndOnAnAnsweredOneAnswersAtOnce(t *testing.T) {
+	t.Parallel()
 	wait := 5
 	o := askOps{asks: &asks.Store{}}
 	got := o.read(context.Background(), asks.Ask{State: "open"}, time.Now(), &wait, nil)
@@ -587,6 +603,7 @@ func TestAWaitOnAnOpenAskWithoutAFeedAnswers503AndOnAnAnsweredOneAnswersAtOnce(t
 // part included, the way the generated handler binds it: the read at until is
 // timed at the client's deadline itself, never at a rounded one.
 func TestUntilKeepsItsSubMillisecondPart(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]time.Time{
 		"2026-11-10T12:00:01.000123Z":       time.Date(2026, 11, 10, 12, 0, 1, 123_000, time.UTC),
 		"2026-11-10T12:00:01.000000001Z":    time.Date(2026, 11, 10, 12, 0, 1, 1, time.UTC),

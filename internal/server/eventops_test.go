@@ -9,6 +9,7 @@ import (
 )
 
 func TestEventReadsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	list, _ := eventOps{}.ListEvents(ctx, ListEventsRequestObject{})
 	task, _ := eventOps{}.ListTaskEvents(ctx, ListTaskEventsRequestObject{Ref: "aa-1"})
@@ -21,6 +22,7 @@ func TestEventReadsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestListEventsReadsFiltersPagesAndShapesItems(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -47,6 +49,7 @@ func TestListEventsReadsFiltersPagesAndShapesItems(t *testing.T) {
 }
 
 func TestEventReadsRefuseWhatTheyCannotRead(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -72,6 +75,7 @@ func TestEventReadsRefuseWhatTheyCannotRead(t *testing.T) {
 }
 
 func TestCheckAndMilestoneBodiesAreRequired(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)

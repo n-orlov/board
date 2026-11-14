@@ -91,6 +91,7 @@ func decodeBody(t *testing.T, body string) map[string]any {
 }
 
 func TestEachTriggerDeliversOnePOSTWithTheDocumentedFields(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, allKinds())
@@ -146,6 +147,7 @@ func TestEachTriggerDeliversOnePOSTWithTheDocumentedFields(t *testing.T) {
 }
 
 func TestA500ThenA200EndsSentOnTheInjectedClock(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		h := newHook(t, 500, 200)
@@ -169,6 +171,7 @@ func TestA500ThenA200EndsSentOnTheInjectedClock(t *testing.T) {
 }
 
 func TestSixFailuresEndFailed(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		h := newHook(t, 500)
@@ -213,8 +216,12 @@ var hangs = map[string]func(w http.ResponseWriter, r *http.Request, release <-ch
 }
 
 func TestAHungReceiverTimesOutUnderBoardNotifyTimeoutAndIsRetried(t *testing.T) {
+	t.Parallel()
 	for name, hang := range hangs {
-		t.Run(name, func(t *testing.T) { hungReceiverIsRetried(t, hang) })
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			hungReceiverIsRetried(t, hang)
+		})
 	}
 }
 
@@ -260,6 +267,7 @@ func (w *outboxWorld) seedAsks(n int) {
 }
 
 func TestTwoServersDeliverASeededBatchExactlyOnce(t *testing.T) {
+	t.Parallel()
 	dbs := startPostgres(t)
 	w := newOutboxWorld(t, dbs, allKinds())
 	const rows = 30
@@ -298,6 +306,7 @@ func TestTwoServersDeliverASeededBatchExactlyOnce(t *testing.T) {
 }
 
 func TestARowClaimedByAStoppedServerIsDeliveredByTheOtherAfterItsClaimLapses(t *testing.T) {
+	t.Parallel()
 	dbs := startPostgres(t)
 	w := newOutboxWorld(t, dbs, allKinds())
 	w.ask(asks.New{Question: "stuck"})

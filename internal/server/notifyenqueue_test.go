@@ -131,6 +131,7 @@ func (w *outboxWorld) wantRows(want ...string) {
 func allKinds() []string { return append([]string(nil), store.NotifyKinds...) }
 
 func TestEachTriggerEnqueuesOneNotification(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, allKinds())
@@ -161,6 +162,7 @@ func TestEachTriggerEnqueuesOneNotification(t *testing.T) {
 }
 
 func TestDoneThatEndsTheHoldersLeaseEnqueuesOneDoneRow(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		w.lease(outboxAgent, "aa-1", 600)
@@ -177,6 +179,7 @@ func TestDoneThatEndsTheHoldersLeaseEnqueuesOneDoneRow(t *testing.T) {
 }
 
 func TestOnlyTheNewestExpiredLeaseOfATaskEnqueues(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		w.lease(outboxAgent, "aa-1", 60)
@@ -232,6 +235,7 @@ func (w *outboxWorld) expiredEvents() int {
 }
 
 func TestOtherWritesEnqueueNothing(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, nil)
@@ -274,6 +278,7 @@ func TestOtherWritesEnqueueNothing(t *testing.T) {
 }
 
 func TestNotifyOnNarrowsTheKinds(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		kinds, err := store.ParseNotifyOn("done")
@@ -296,6 +301,7 @@ func TestNotifyOnNarrowsTheKinds(t *testing.T) {
 }
 
 func TestNoURLWritesNoRows(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, nil)
@@ -313,6 +319,7 @@ func TestNoURLWritesNoRows(t *testing.T) {
 }
 
 func TestARefusedWriteEnqueuesNothing(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, allKinds())
@@ -335,6 +342,7 @@ func TestARefusedWriteEnqueuesNothing(t *testing.T) {
 }
 
 func TestTheOutboxIsUniqueOnEventAndKind(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		w.tick(time.Second)
@@ -357,6 +365,7 @@ func TestTheOutboxIsUniqueOnEventAndKind(t *testing.T) {
 }
 
 func TestTheNotificationsTableHasTheColumnsOfThePRD(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newOutboxWorld(t, dbs, allKinds())
 		var rs *sql.Rows
@@ -373,6 +382,7 @@ func TestTheNotificationsTableHasTheColumnsOfThePRD(t *testing.T) {
 // TestEachTriggerEnqueuesTheDocumentedPayload reads the payload of the five cases (stranded, done, and asking on a
 // task, an initiative and the board) on both databases.
 func TestEachTriggerEnqueuesTheDocumentedPayload(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		ctx := context.Background()
 		w := newOutboxWorld(t, dbs, allKinds())

@@ -10,6 +10,7 @@ import (
 )
 
 func TestActorOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	o := actorOps{}
 	list, err := o.ListActors(context.Background(), ListActorsRequestObject{})
 	if p, ok := list.(problemResponse); err != nil || !ok || p.status != http.StatusServiceUnavailable {
@@ -22,6 +23,7 @@ func TestActorOperationsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestActorsAreListedAndReadWithTheirLeasesAndAsks(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -60,6 +62,7 @@ func toStrings(v any) []string {
 }
 
 func TestAnUnknownActorIs404WithANextLine(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.send(http.MethodGet, "/api/v1/actors/nobody@host", "", "operator@host")
 	doc := decode(t, rec)
@@ -69,6 +72,7 @@ func TestAnUnknownActorIs404WithANextLine(t *testing.T) {
 }
 
 func TestAnActorWithAWayBackAnswersIt(t *testing.T) {
+	t.Parallel()
 	a := apiActorView(roster.Actor{Handle: "x@host", Kind: "operator", WayBack: "ssh box"})
 	if a.WayBack == nil || *a.WayBack != "ssh box" || a.Kind != Operator {
 		t.Errorf("view = %+v", a)

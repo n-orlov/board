@@ -14,6 +14,7 @@ import (
 )
 
 func TestGetTimelineAnswers503WithoutItsStores(t *testing.T) {
+	t.Parallel()
 	for name, o := range map[string]timelineOps{"no operation": {}, "no leases": {timeline: &timeline.Store{}}, "no timeline": {leases: &leases.Store{}}} {
 		got, err := o.GetTimeline(context.Background(), GetTimelineRequestObject{})
 		p, ok := got.(problemResponse)
@@ -34,6 +35,7 @@ func timelineAt(s *keyServer, query url.Values) (int, map[string]any) {
 }
 
 func TestGetTimelineAnswersTheWindowWithAttentionFromTheDerivation(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", `,"tags":["web"]`)
 	s.task(`{"initiative":"aa","title":"stranded one"}`)
@@ -81,6 +83,7 @@ func TestGetTimelineAnswersTheWindowWithAttentionFromTheDerivation(t *testing.T)
 }
 
 func TestGetTimelineWithoutAnAttentionStoreListsNoReasons(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -92,6 +95,7 @@ func TestGetTimelineWithoutAnAttentionStoreListsNoReasons(t *testing.T) {
 }
 
 func TestGetTimelineRefusesWhatItCannotRead(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	for q, want := range map[string]int{

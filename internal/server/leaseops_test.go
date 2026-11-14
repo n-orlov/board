@@ -20,6 +20,7 @@ import (
 )
 
 func TestLeaseOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	start, _ := leaseOps{}.StartLease(ctx, StartLeaseRequestObject{})
 	list, _ := leaseOps{}.ListLeases(ctx, ListLeasesRequestObject{})
@@ -36,6 +37,7 @@ func TestLeaseOperationsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestLeaseWritesWithoutAPrincipalAre401(t *testing.T) {
+	t.Parallel()
 	o := leaseOps{leases: &leases.Store{}}
 	got, _ := o.StartLease(context.Background(), StartLeaseRequestObject{Body: &LeaseStart{Task: "aa-1", Intent: "x"}})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusUnauthorized {
@@ -44,6 +46,7 @@ func TestLeaseWritesWithoutAPrincipalAre401(t *testing.T) {
 }
 
 func TestLeaseFailureMapsEachErrorToItsStatus(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 5, 12, 0, 0, 123000000, time.UTC)
 	for name, tc := range map[string]struct {
 		err    error
@@ -69,6 +72,7 @@ func TestLeaseFailureMapsEachErrorToItsStatus(t *testing.T) {
 }
 
 func TestLeaseResultKeepsAServerErrorAnError(t *testing.T) {
+	t.Parallel()
 	if _, err := leaseResult[GetLeaseResponseObject](errors.New("disk")); err == nil {
 		t.Error("a server error was swallowed")
 	}
@@ -78,6 +82,7 @@ func TestLeaseResultKeepsAServerErrorAnError(t *testing.T) {
 }
 
 func TestAConflictWithNoResourcesIsAnEmptyList(t *testing.T) {
+	t.Parallel()
 	c := apiConflict(domain.Holding{Lease: "L1", Holder: "claude@host", Task: "aa-1", Intent: "x"})
 	raw, _ := json.Marshal(c)
 	if !strings.Contains(string(raw), `"resources":[]`) {
@@ -86,6 +91,7 @@ func TestAConflictWithNoResourcesIsAnEmptyList(t *testing.T) {
 }
 
 func TestLeaseRoundTripThroughTheHandler(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -116,6 +122,7 @@ func TestLeaseRoundTripThroughTheHandler(t *testing.T) {
 }
 
 func TestAListParameterSentTwiceIsRefused(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for _, p := range []string{"state", "actor", "task", "resource", "limit", "after"} {
 		if rec := s.send(http.MethodGet, "/api/v1/leases?"+p+"=1&"+p+"=2", "", "claude@host"); rec.Code != http.StatusBadRequest {
@@ -125,6 +132,7 @@ func TestAListParameterSentTwiceIsRefused(t *testing.T) {
 }
 
 func TestQueryBinderAnswersOnlyTheFirstFailure(t *testing.T) {
+	t.Parallel()
 	var seen []error
 	siw := &ServerInterfaceWrapper{ErrorHandlerFunc: func(_ http.ResponseWriter, _ *http.Request, err error) { seen = append(seen, err) }}
 	b := siw.queryBinder(nil, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -141,6 +149,7 @@ func TestQueryBinderAnswersOnlyTheFirstFailure(t *testing.T) {
 }
 
 func TestRenewAndEndHandlersReadTheirOptionalBodies(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
@@ -165,6 +174,7 @@ func TestRenewAndEndHandlersReadTheirOptionalBodies(t *testing.T) {
 }
 
 func TestNowWithoutAPrincipalIs401(t *testing.T) {
+	t.Parallel()
 	full := nowOps{checkin: checkin.Store{Leases: &leases.Store{}, Asks: &asks.Store{}, Notes: &notes.Store{}, Cursors: &cursors.Store{}, Attention: &attention.Store{}}}
 	got, _ := full.GetNow(context.Background(), GetNowRequestObject{})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusUnauthorized {
@@ -173,6 +183,7 @@ func TestNowWithoutAPrincipalIs401(t *testing.T) {
 }
 
 func TestQueriedResourcesAreSplitOnCommasAndValidated(t *testing.T) {
+	t.Parallel()
 	ptr := func(s string) *string { return &s }
 	for raw, want := range map[string][]string{"a,b": {"a", "b"}, "a,a": {"a"}, "repo:x": {"repo:x"}} {
 		if got, err := queriedResources(ptr(raw)); err != nil || strings.Join(got, "|") != strings.Join(want, "|") {
@@ -192,6 +203,7 @@ func TestQueriedResourcesAreSplitOnCommasAndValidated(t *testing.T) {
 }
 
 func TestNowRoundTripThroughTheHandler(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)

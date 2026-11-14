@@ -11,6 +11,7 @@ import (
 )
 
 func TestAskOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	raise, _ := askOps{}.RaiseAsk(ctx, RaiseAskRequestObject{})
 	list, _ := askOps{}.ListAsks(ctx, ListAsksRequestObject{})
@@ -25,6 +26,7 @@ func TestAskOperationsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestAskWritesWithoutAPrincipalAre401(t *testing.T) {
+	t.Parallel()
 	o := askOps{asks: &asks.Store{}}
 	ctx := context.Background()
 	raise, _ := o.RaiseAsk(ctx, RaiseAskRequestObject{Body: &AskRaise{Question: "x"}})
@@ -38,6 +40,7 @@ func TestAskWritesWithoutAPrincipalAre401(t *testing.T) {
 }
 
 func TestAskFailureMapsEachErrorToItsStatus(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		err    error
 		status int
@@ -63,6 +66,7 @@ func TestAskFailureMapsEachErrorToItsStatus(t *testing.T) {
 }
 
 func TestAskRequestCarriesEveryFieldAndDefaultsTheRest(t *testing.T) {
+	t.Parallel()
 	mode, blocking, options, details := AskRaiseMode("poll"), true, []string{"a", "b"}, "d"
 	task, ini := "aa-1", "aa"
 	got := askRequest(&AskRaise{Task: &task, Initiative: &ini, Question: "q", Details: &details, Options: &options, Mode: &mode, Blocking: &blocking})
@@ -90,6 +94,7 @@ func equalNew(a, b asks.New) bool {
 }
 
 func TestAnAskDocumentOmitsWhatIsUnsetAndListsNoOptionsAsEmpty(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	o := askOps{asks: &asks.Store{Now: func() time.Time { return at }}}
 	open := o.apiAsk(asks.Ask{ID: "I", Ref: "A1", Actor: "claude@host", Question: "q", State: "open", Mode: "poll", CreatedAt: at, PollSeenAt: &at})

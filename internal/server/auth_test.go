@@ -54,6 +54,7 @@ func problem(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 }
 
 func TestNoCredentialIs401WithAProblemAndNeverTouchesTheStore(t *testing.T) {
+	t.Parallel()
 	noScheme := map[string]string{"Authorization": "brd_x"}
 	basic := map[string]string{"Authorization": "Basic Zm9vOmJhcg=="}
 	empty := map[string]string{"Authorization": "Bearer "}
@@ -74,6 +75,7 @@ func TestNoCredentialIs401WithAProblemAndNeverTouchesTheStore(t *testing.T) {
 }
 
 func TestHealthzNeedsNoCredentialButOtherMethodsDo(t *testing.T) {
+	t.Parallel()
 	if rec := request("/healthz", nil); rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz = %d, want 200", rec.Code)
 	}
@@ -85,6 +87,7 @@ func TestHealthzNeedsNoCredentialButOtherMethodsDo(t *testing.T) {
 }
 
 func TestRefusedKeysAre401WithTheReasonInTheDetail(t *testing.T) {
+	t.Parallel()
 	cases := map[string]error{
 		"key unknown": auth.ErrKeyUnknown,
 		"key revoked": auth.ErrKeyRevoked,
@@ -103,6 +106,7 @@ func TestRefusedKeysAre401WithTheReasonInTheDetail(t *testing.T) {
 }
 
 func TestValidKeyWithoutActorIs400(t *testing.T) {
+	t.Parallel()
 	for _, actor := range []map[string]string{{}, {ActorHeader: "  "}} {
 		actor["Authorization"] = "bearer brd_x"
 		rec := request("/readyz", actor)
@@ -116,6 +120,7 @@ func TestValidKeyWithoutActorIs400(t *testing.T) {
 }
 
 func TestStoreFailureIs503NeverA2xx(t *testing.T) {
+	t.Parallel()
 	h := map[string]string{"Authorization": "Bearer brd_x", ActorHeader: "a"}
 	rec := do(&countingVerifier{err: errors.New("connection refused")}, "/readyz", h)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -125,6 +130,7 @@ func TestStoreFailureIs503NeverA2xx(t *testing.T) {
 }
 
 func TestValidKeyAndActorReachTheRoute(t *testing.T) {
+	t.Parallel()
 	h := map[string]string{"Authorization": "Bearer brd_x", ActorHeader: "a"}
 	if rec := request("/readyz", h); rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", rec.Code)
@@ -141,6 +147,7 @@ func (s *keyServer) lastUsed() bool {
 }
 
 func TestAKeyIsMarkedUsedOnlyByARequestThatSucceeds(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	refused := []struct {
 		method, path, body string
@@ -179,6 +186,7 @@ func publicUI() fstest.MapFS {
 }
 
 func TestThePWAManifestAndIconsNeedNoSessionOrKey(t *testing.T) {
+	t.Parallel()
 	login := &Login{}
 	want := map[string]string{
 		"/manifest.json":        "application/json",
@@ -210,6 +218,7 @@ func TestThePWAManifestAndIconsNeedNoSessionOrKey(t *testing.T) {
 }
 
 func TestOnlyTheSixAssetsArePublicAndOnlyForReads(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, (&countingVerifier{}).verify, nil, nil, WithUI(publicUI()))
 	refused := []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/tasks"},

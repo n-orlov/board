@@ -14,6 +14,7 @@ import (
 )
 
 func TestAttentionAnswers503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	got, _ := attentionOps{}.GetAttention(context.Background(), GetAttentionRequestObject{})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
 		t.Errorf("attention without a store = %#v, want a 503 problem", got)
@@ -21,6 +22,7 @@ func TestAttentionAnswers503WithoutAStore(t *testing.T) {
 }
 
 func TestAttentionFieldsAreFullOrCounts(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string][2]bool{"": {false, true}, "full": {false, true}, "counts": {true, true}, "summary": {false, false}, "COUNTS": {false, false}} {
 		counts, ok := attentionCountsOnly(&in)
 		if counts != want[0] || ok != want[1] {
@@ -38,6 +40,7 @@ func TestAttentionFieldsAreFullOrCounts(t *testing.T) {
 }
 
 func TestAttentionFailureMapsEachErrorToItsStatus(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		err    error
 		status int
@@ -56,6 +59,7 @@ func TestAttentionFailureMapsEachErrorToItsStatus(t *testing.T) {
 }
 
 func TestAttentionQueryCarriesBothFilters(t *testing.T) {
+	t.Parallel()
 	q := attentionQuery(GetAttentionParams{Initiative: &[]string{"aa", "bb"}, Tag: &[]string{"web"}})
 	if len(q.Initiatives) != 2 || q.Initiatives[1] != "bb" || len(q.Tags) != 1 || q.Tags[0] != "web" {
 		t.Errorf("query = %+v", q)
@@ -66,6 +70,7 @@ func TestAttentionQueryCarriesBothFilters(t *testing.T) {
 }
 
 func TestAttentionDocumentCarriesEveryField(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	who := attention.Actor{Handle: "claude@laptop", WayBack: "ssh a"}
 	got := apiAttention(attention.Result{
@@ -104,6 +109,7 @@ func TestAttentionDocumentCarriesEveryField(t *testing.T) {
 }
 
 func TestAttentionSectionsAreEmptyListsNotNull(t *testing.T) {
+	t.Parallel()
 	got := apiAttention(attention.Result{})
 	for name, section := range map[string]bool{"open": got.OpenAsks != nil, "done": got.DoneNotClosed != nil, "expired": got.ExpiredLeases != nil,
 		"watches": got.OverdueWatches != nil, "conflicts": got.Conflicts != nil} {
@@ -127,6 +133,7 @@ func attentionOpsOnEmptyBoard(t *testing.T) attentionOps {
 }
 
 func TestGetAttentionOnAnEmptyBoardAnswersFullAndCounts(t *testing.T) {
+	t.Parallel()
 	o := attentionOpsOnEmptyBoard(t)
 	for name, fields := range map[string]*string{"full": nil, "counts": ptr("counts")} {
 		got, err := o.GetAttention(context.Background(), GetAttentionRequestObject{Params: GetAttentionParams{Fields: fields}})
@@ -141,6 +148,7 @@ func TestGetAttentionOnAnEmptyBoardAnswersFullAndCounts(t *testing.T) {
 }
 
 func TestGetAttentionRefusesABadTagAndAnUnknownInitiative(t *testing.T) {
+	t.Parallel()
 	o := attentionOpsOnEmptyBoard(t)
 	for name, tc := range map[string]struct {
 		params GetAttentionParams
@@ -157,6 +165,7 @@ func TestGetAttentionRefusesABadTagAndAnUnknownInitiative(t *testing.T) {
 }
 
 func TestGetAttentionReturnsAServerErrorAsIs(t *testing.T) {
+	t.Parallel()
 	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +178,7 @@ func TestGetAttentionReturnsAServerErrorAsIs(t *testing.T) {
 }
 
 func TestAttentionAskModeAcceptsOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
 	if !AttentionAskModePoll.Valid() || !AttentionAskModeStop.Valid() || AttentionAskMode("x").Valid() {
 		t.Error("the attention ask mode enum does not accept exactly poll and stop")
 	}

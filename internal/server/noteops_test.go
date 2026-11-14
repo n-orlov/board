@@ -12,6 +12,7 @@ import (
 )
 
 func TestNoteOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	post, _ := noteOps{}.PostNote(ctx, PostNoteRequestObject{})
 	list, _ := noteOps{}.ListNotes(ctx, ListNotesRequestObject{})
@@ -24,6 +25,7 @@ func TestNoteOperationsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestPostingANoteWithoutAPrincipalIs401(t *testing.T) {
+	t.Parallel()
 	got, _ := noteOps{notes: &notes.Store{}}.PostNote(context.Background(), PostNoteRequestObject{Body: &NotePost{Summary: "x"}})
 	if p, ok := got.(problemResponse); !ok || p.status != http.StatusUnauthorized {
 		t.Errorf("post without a principal = %#v, want 401", got)
@@ -31,6 +33,7 @@ func TestPostingANoteWithoutAPrincipalIs401(t *testing.T) {
 }
 
 func TestNoteFailureMapsEachErrorToItsStatusAndSubject(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		err    error
 		status int
@@ -58,6 +61,7 @@ func TestNoteFailureMapsEachErrorToItsStatusAndSubject(t *testing.T) {
 }
 
 func TestNoteRequestCarriesEveryField(t *testing.T) {
+	t.Parallel()
 	task, ini, body, resource, mentions := "aa-1", "aa", "b", "host:x", []string{"a@b"}
 	got := noteRequest(&NotePost{Task: &task, Initiative: &ini, Summary: "s", Body: &body, Resource: &resource, Mentions: &mentions})
 	want := notes.New{Task: "aa-1", Initiative: "aa", Summary: "s", Body: "b", Resource: "host:x", ResourceSet: true, Mentions: []string{"a@b"}}
@@ -76,6 +80,7 @@ func TestNoteRequestCarriesEveryField(t *testing.T) {
 }
 
 func TestAPINoteLeavesTheBodyOutOfASummaryButKeepsHasBody(t *testing.T) {
+	t.Parallel()
 	k := notes.Note{ID: "I", Ref: "N1", Actor: "a", Summary: "s", Body: "text", HasBody: true, Task: "aa-1", CreatedAt: time.Unix(0, 0)}
 	if got := apiNote(k, false); got.Body != nil || !got.HasBody || got.Mentions == nil || got.Task == nil || *got.Task != "aa-1" {
 		t.Errorf("summary note = %+v, want no body, has_body, empty mentions and the task", got)
@@ -90,6 +95,7 @@ func TestAPINoteLeavesTheBodyOutOfASummaryButKeepsHasBody(t *testing.T) {
 }
 
 func TestFieldsFullReadsSummaryAndFullAndRefusesTheRest(t *testing.T) {
+	t.Parallel()
 	summary, full, junk := "summary", "full", "everything"
 	for name, tc := range map[string]struct {
 		in   *string
@@ -104,6 +110,7 @@ func TestFieldsFullReadsSummaryAndFullAndRefusesTheRest(t *testing.T) {
 }
 
 func TestNoteQueryCarriesEveryFilter(t *testing.T) {
+	t.Parallel()
 	s, task, ini, bc, m, a, f, after := "N1", "aa-1", "aa", "only", "x@y", "z@w", "full", "N9"
 	res, limit := []string{"r:1", "r:2"}, EventLimit(5)
 	got := noteQuery(ListNotesParams{Since: &s, Task: &task, Initiative: &ini, Resource: &res, Broadcast: &bc, Mention: &m,

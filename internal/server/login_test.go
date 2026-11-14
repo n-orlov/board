@@ -105,6 +105,7 @@ func handler(l *Login) http.Handler {
 var alice = oidc.Claims{Email: "Alice@Example.com", EmailVerified: true}
 
 func TestAnonymousBrowserNavigationGoesToLoginAndAPICallsGet401(t *testing.T) {
+	t.Parallel()
 	h := handler(newLogin(t, &fakeIdentity{}))
 	rec := browse(h, http.MethodGet, "/")
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/auth/login" {
@@ -125,6 +126,7 @@ func TestAnonymousBrowserNavigationGoesToLoginAndAPICallsGet401(t *testing.T) {
 }
 
 func TestLoginRedirectsToTheProviderWithPKCEStateAndNonce(t *testing.T) {
+	t.Parallel()
 	id := &fakeIdentity{}
 	rec := browse(handler(newLogin(t, id)), http.MethodGet, "/auth/login")
 	if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "https://idp.test/authorize?state=") {
@@ -136,6 +138,7 @@ func TestLoginRedirectsToTheProviderWithPKCEStateAndNonce(t *testing.T) {
 }
 
 func TestLoginReportsAnUnreachableProviderAndATooBusyServer(t *testing.T) {
+	t.Parallel()
 	down := handler(newLogin(t, &fakeIdentity{authErr: oidc.ErrProvider}))
 	if rec := browse(down, http.MethodGet, "/auth/login"); rec.Code != http.StatusBadGateway {
 		t.Errorf("provider down: %d, want 502", rec.Code)
@@ -151,6 +154,7 @@ func TestLoginReportsAnUnreachableProviderAndATooBusyServer(t *testing.T) {
 }
 
 func TestExpiredPendingLoginsAreSweptWhenTheTableIsFull(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{})
 	l.pending = map[string]pendingLogin{}
 	for i := 0; i < maxPending; i++ {
@@ -167,6 +171,7 @@ func TestExpiredPendingLoginsAreSweptWhenTheTableIsFull(t *testing.T) {
 }
 
 func TestCallbackStartsASessionForAnAllowedVerifiedEmail(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{claims: alice})
 	h := handler(l)
 	callback, cookie := startLogin(t, h)
@@ -199,6 +204,7 @@ func TestCallbackStartsASessionForAnAllowedVerifiedEmail(t *testing.T) {
 }
 
 func TestCallbackRefusesWhatDoesNotBelongToALoginInProgress(t *testing.T) {
+	t.Parallel()
 	h := handler(newLogin(t, &fakeIdentity{claims: alice}))
 	cases := map[string]struct {
 		path     func(callback string) string
@@ -229,6 +235,7 @@ func TestCallbackRefusesWhatDoesNotBelongToALoginInProgress(t *testing.T) {
 }
 
 func TestCallbackMapsEachFailureToItsStatus(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		id   *fakeIdentity
 		want int
@@ -252,6 +259,7 @@ func TestCallbackMapsEachFailureToItsStatus(t *testing.T) {
 }
 
 func TestCallbackFailsWhenTheSessionCannotBeStored(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{claims: alice})
 	h := handler(l)
 	callback, cookie := startLogin(t, h)
@@ -262,6 +270,7 @@ func TestCallbackFailsWhenTheSessionCannotBeStored(t *testing.T) {
 }
 
 func TestAnInvalidSessionCookieIsAnonymousAndAStoreFailureIs503(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{})
 	h := handler(l)
 	stale := &http.Cookie{Name: SessionCookie, Value: "stale", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode}
@@ -275,6 +284,7 @@ func TestAnInvalidSessionCookieIsAnonymousAndAStoreFailureIs503(t *testing.T) {
 }
 
 func TestSessionAndLogoutNeedABrowserSessionAndLoginOffAnswers404(t *testing.T) {
+	t.Parallel()
 	h := handler(newLogin(t, &fakeIdentity{}))
 	for _, c := range []struct{ method, path string }{{http.MethodGet, "/auth/session"}, {http.MethodPost, "/auth/logout"}} {
 		r := httptest.NewRequest(c.method, c.path, nil)
@@ -302,6 +312,7 @@ func TestSessionAndLogoutNeedABrowserSessionAndLoginOffAnswers404(t *testing.T) 
 }
 
 func TestLogoutFailsWhenTheStoreCannotDeleteTheSession(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{claims: alice})
 	h := handler(l)
 	callback, cookie := startLogin(t, h)
@@ -342,6 +353,7 @@ func csrfOf(t *testing.T, sessionResponse *httptest.ResponseRecorder) string {
 }
 
 func TestACookieAuthenticatedWriteNeedsTheCSRFTokenAndTheSameOrigin(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{claims: alice})
 	h := handler(l)
 	callback, cookie := startLogin(t, h)
@@ -383,6 +395,7 @@ func TestACookieAuthenticatedWriteNeedsTheCSRFTokenAndTheSameOrigin(t *testing.T
 }
 
 func TestABearerWriteNeedsNoCSRFToken(t *testing.T) {
+	t.Parallel()
 	h := handler(newLogin(t, &fakeIdentity{}))
 	r := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	r.Header.Set("Authorization", "Bearer brd_x")

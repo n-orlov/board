@@ -36,10 +36,17 @@ type keyServer struct {
 	st    *store.Store
 }
 
-// keyServerBuild is the build the key server reports; a test may replace it.
+// keyServerBuild is the build the key server reports, unless a test asks
+// newKeyServerOfBuild for another.
 var keyServerBuild = Build{Version: "v9.9.9", Revision: "abc123def456", Protocol: 7}
 
 func newKeyServer(t *testing.T) *keyServer {
+	t.Helper()
+	return newKeyServerOfBuild(t, keyServerBuild)
+}
+
+// newKeyServerOfBuild is newKeyServer reporting build b.
+func newKeyServerOfBuild(t *testing.T, b Build) *keyServer {
 	t.Helper()
 	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
 	if err != nil {
@@ -57,7 +64,7 @@ func newKeyServer(t *testing.T) *keyServer {
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
 		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
 		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithNotifications(&notify.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), WithActors(&roster.Store{Store: st, Leases: &leases.Store{Store: st}, Asks: &asks.Store{Store: st}}), WithCursors(&cursors.Store{Store: st}),
-		WithMeta(keyServerBuild, &actors.Store{Store: st}))
+		WithMeta(b, &actors.Store{Store: st}))
 	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
 }
 
@@ -105,6 +112,7 @@ func (s *keyServer) events() []eventRow {
 }
 
 func TestCreateKeyReturnsTheKeyOnceAndRecordsPrincipalAndActorSeparately(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.send(http.MethodPost, "/api/v1/keys", `{"name":"laptop","expires_in":"12h"}`, "claude@host")
 	if rec.Code != http.StatusCreated {
@@ -144,6 +152,7 @@ func TestCreateKeyReturnsTheKeyOnceAndRecordsPrincipalAndActorSeparately(t *test
 }
 
 func TestACreatedKeyWithoutExpiryHasNoExpiresAt(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	created := decode(t, s.send(http.MethodPost, "/api/v1/keys", `{"name":"laptop"}`, "a"))
 	if _, has := created["expires_at"]; has {
@@ -155,6 +164,7 @@ func TestACreatedKeyWithoutExpiryHasNoExpiresAt(t *testing.T) {
 }
 
 func TestCreateKeyTakesTheLongestExpiryInDaysOrHours(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for name, in := range map[string]string{"days": "36500d", "hours": "876000h", "six-digit hours": "100000h"} {
 		rec := s.send(http.MethodPost, "/api/v1/keys", `{"name":"`+strings.ReplaceAll(name, " ", "-")+`","expires_in":"`+in+`"}`, "a")
@@ -165,6 +175,7 @@ func TestCreateKeyTakesTheLongestExpiryInDaysOrHours(t *testing.T) {
 }
 
 func TestCreateKeyRefusesWhatItCannotMake(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for name, tc := range map[string]struct {
 		body string
@@ -192,6 +203,7 @@ func TestCreateKeyRefusesWhatItCannotMake(t *testing.T) {
 }
 
 func TestRevokeKeyRevokesOnceAndRecordsIt(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	created := decode(t, s.send(http.MethodPost, "/api/v1/keys", `{"name":"laptop"}`, "a"))
 	first := s.send(http.MethodPost, "/api/v1/keys/laptop/revoke", "", "b")
@@ -217,6 +229,7 @@ func TestRevokeKeyRevokesOnceAndRecordsIt(t *testing.T) {
 }
 
 func TestAKeyRevokedThroughTheAPIGets401(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.send(http.MethodPost, "/api/v1/keys/caller/revoke", "", "a")
 	if rec.Code != http.StatusOK {
@@ -229,6 +242,7 @@ func TestAKeyRevokedThroughTheAPIGets401(t *testing.T) {
 }
 
 func TestKeyOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(ok, acceptKey, nil, nil)
 	for method, path := range map[string]string{http.MethodGet: "/api/v1/keys"} {
 		rec := httptest.NewRecorder()
@@ -255,6 +269,7 @@ func authedWith(method, path, body string) *http.Request {
 }
 
 func TestKeyOperationsRefuseARequestWithoutAPrincipal(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	o := keyOps{keys: s.keys}
 	body := &CreateKeyJSONRequestBody{Name: "x"}
@@ -271,6 +286,7 @@ func TestKeyOperationsRefuseARequestWithoutAPrincipal(t *testing.T) {
 }
 
 func TestASessionActsAsTheOperatorOnTheKeyOperations(t *testing.T) {
+	t.Parallel()
 	l := newLogin(t, &fakeIdentity{})
 	keys := &auth.Keys{Store: l.Sessions.Store}
 	h := NewHandler(ok, acceptKey, l, keys)
@@ -299,6 +315,7 @@ func TestASessionActsAsTheOperatorOnTheKeyOperations(t *testing.T) {
 }
 
 func TestKeyStatusEnumsAcceptOnlyTheDeclaredStates(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"active", "expired", "revoked"} {
 		if !KeyStatus(status).Valid() || !CreatedKeyStatus(status).Valid() {
 			t.Errorf("%s is a declared status", status)

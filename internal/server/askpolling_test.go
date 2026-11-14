@@ -65,6 +65,7 @@ func replicas(t *testing.T, dbs databases) (writer, reader *rig, clock *testCloc
 // the ask_polling event within the feed's tail interval, and the ask it is about
 // reads asker_waiting from that stream's own server.
 func TestAWaitMakingTheAskerWaitingReachesTheStreamOfAnotherReplica(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		writer, reader, _, _ := replicas(t, dbs)
 		ref := writer.raiseAsk()
@@ -91,6 +92,7 @@ func TestAWaitMakingTheAskerWaitingReachesTheStreamOfAnotherReplica(t *testing.T
 // wait and a second wait started while the first still counts write none; a
 // wait started after the 60 seconds ran out of the first writes one again.
 func TestOnlyAChangeOfTheAskerWaitingStateReachesTheFeed(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := migrated(t, dbs)
 		token := newToken(t, st)
@@ -118,6 +120,7 @@ func TestOnlyAChangeOfTheAskerWaitingStateReachesTheFeed(t *testing.T) {
 // An ask that is not a poll ask, or is no longer open, never changes its
 // displayed state by a wait, so no event is appended for it.
 func TestAWaitOnAStopAskOrAnEndedAskAppendsNoPollingEvent(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := migrated(t, dbs)
 		token := newToken(t, st)

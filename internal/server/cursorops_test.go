@@ -11,6 +11,7 @@ import (
 )
 
 func TestCursorOperationsAnswer503WithoutAStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	put, _ := cursorOps{}.PutCursor(ctx, PutCursorRequestObject{Stream: "notes", Body: &CursorSet{Position: "N1"}})
 	if p, ok := put.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
@@ -27,6 +28,7 @@ func TestCursorOperationsAnswer503WithoutAStore(t *testing.T) {
 }
 
 func TestCursorOperationsWithoutAPrincipalAre401(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := cursorOps{cursors: &cursors.Store{}}
 	put, _ := o.PutCursor(ctx, PutCursorRequestObject{Stream: "notes", Body: &CursorSet{Position: "N1"}})
@@ -40,6 +42,7 @@ func TestCursorOperationsWithoutAPrincipalAre401(t *testing.T) {
 }
 
 func TestReadFromPassesEveryOtherSinceThrough(t *testing.T) {
+	t.Parallel()
 	for _, since := range []string{"", "N5", "2026-11-09T12:00:00Z", "Cursor"} {
 		got, problem, err := cursorOps{}.readFrom(context.Background(), cursors.StreamNotes, since)
 		if got != since || problem != nil || err != nil {
@@ -49,6 +52,7 @@ func TestReadFromPassesEveryOtherSinceThrough(t *testing.T) {
 }
 
 func TestCursorFailureMapsEachError(t *testing.T) {
+	t.Parallel()
 	bad, ok := cursorFailure(cursors.InvalidError{Msg: "position \"N9\" names no note", Next: "send one"})
 	if !ok || bad.status != http.StatusBadRequest {
 		t.Errorf("invalid = %#v, %v, want 400", bad, ok)
@@ -63,6 +67,7 @@ func TestCursorFailureMapsEachError(t *testing.T) {
 }
 
 func TestOrProblemPrefersTheProblem(t *testing.T) {
+	t.Parallel()
 	p := failure(http.StatusServiceUnavailable, "x")
 	got, err := orProblem[ListNotesResponseObject](&p, nil)
 	if err != nil || got == nil {

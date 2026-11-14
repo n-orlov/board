@@ -19,6 +19,7 @@ import (
 // committed when the server reads it; one committed before until is the
 // answer. Both databases.
 func TestAWaitWhoseUntilHasPassedAnswersWithTheAskAsItStoodAtUntil(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {

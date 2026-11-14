@@ -50,6 +50,7 @@ func (s *keyServer) countActors() int {
 }
 
 func TestWriteStoresTheActorWayBackAndMetaFromItsHeaders(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	hdr := map[string]string{WayBackHeader: " tmux attach -t ws1 ", MetaHeader: `{"cwd":"/src"}`}
 	if rec := s.sendWith(http.MethodPost, "/api/v1/initiatives", `{"slug":"one","title":"t"}`, "claude@host", hdr); rec.Code != http.StatusCreated {
@@ -75,6 +76,7 @@ func TestWriteStoresTheActorWayBackAndMetaFromItsHeaders(t *testing.T) {
 }
 
 func TestProtocolSeenAlsoStoresTheActorHeaders(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	rec := s.sendWith(http.MethodPut, "/api/v1/actors/me/protocol-seen", `{"version":0}`, "ralph:run-42", map[string]string{WayBackHeader: "pid 7 on h"})
 	if rec.Code != http.StatusOK {
@@ -86,6 +88,7 @@ func TestProtocolSeenAlsoStoresTheActorHeaders(t *testing.T) {
 }
 
 func TestReadsCreateNoActorRowInPhaseZero(t *testing.T) {
+	t.Parallel()
 	s := newKeyServer(t)
 	for _, path := range []string{"/api/v1/meta", "/api/v1/initiatives", "/api/v1/keys"} {
 		if rec := s.sendWith(http.MethodGet, path, "", "reader@host", map[string]string{WayBackHeader: "somewhere"}); rec.Code != http.StatusOK {
@@ -98,6 +101,7 @@ func TestReadsCreateNoActorRowInPhaseZero(t *testing.T) {
 }
 
 func TestMetaHeaderThatIsNotAJSONObjectIs400AndRecordsNothing(t *testing.T) {
+	t.Parallel()
 	for _, meta := range []string{"not json", "[1]", `"s"`, "null", "7"} {
 		s := newKeyServer(t)
 		for _, c := range []struct{ method, path, body string }{

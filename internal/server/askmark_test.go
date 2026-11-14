@@ -63,6 +63,16 @@ var (
 // this runs before the store opens.
 func registerMarkFunc(t *testing.T) {
 	t.Helper()
+	if err := installMarkFunc(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// installMarkFunc registers the scalar function once. TestMain runs it before
+// any test opens a database: the driver reads its functions unlocked as it
+// opens a connection, so registering one while a parallel test opens its
+// store would be a data race.
+func installMarkFunc() error {
 	markFuncOnce.Do(func() {
 		markFuncErr = sqlite.RegisterScalarFunction("hold_end_commit_mark", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 			p, _ := args[0].(string)
@@ -80,9 +90,7 @@ func registerMarkFunc(t *testing.T) {
 			return int64(0), nil
 		})
 	})
-	if markFuncErr != nil {
-		t.Fatal(markFuncErr)
-	}
+	return markFuncErr
 }
 
 func newMarkHold(t *testing.T, leg string, st *store.Store, rawURL string) *markHold {
@@ -190,6 +198,7 @@ type markCase struct {
 // made after. An end whose COMMIT returned after until is never counted, and
 // the mark persisted late by it is no proof. Both databases.
 func TestAWaitCountsAnEndWhoseTimelyMarkIsPersistedAfterUntil(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
 		for _, c := range []markCase{
 			{"answer, mark 400ms early", false, 600 * time.Millisecond, true, 0},
@@ -199,7 +208,10 @@ func TestAWaitCountsAnEndWhoseTimelyMarkIsPersistedAfterUntil(t *testing.T) {
 			{"answer committed 100ms late", false, 1100 * time.Millisecond, false, 0},
 			{"withdrawal committed 100ms late", true, 1100 * time.Millisecond, false, 0},
 		} {
-			t.Run(c.name, func(t *testing.T) { testTimelyMarkPersistedLate(t, leg, dbs, c) })
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				testTimelyMarkPersistedLate(t, leg, dbs, c)
+			})
 		}
 	})
 }
@@ -213,6 +225,7 @@ func TestAWaitCountsAnEndWhoseTimelyMarkIsPersistedAfterUntil(t *testing.T) {
 // no scheduler has to run the end by a set instant; the late ones start the
 // end after until, which a loaded host only makes later.
 func TestAWaitReachingTheServerAfterUntilCountsAnEndWhoseTimelyMarkIsPersistedLate(t *testing.T) {
+	t.Parallel()
 	forEachLeg(t, func(t *testing.T, leg string, dbs databases) {
 		for _, c := range []markCase{
 			{"answer, mark 400ms early", false, 600 * time.Millisecond, true, 100 * time.Millisecond},
@@ -223,6 +236,7 @@ func TestAWaitReachingTheServerAfterUntilCountsAnEndWhoseTimelyMarkIsPersistedLa
 			{"answer committed 100ms late", false, 1100 * time.Millisecond, false, 150 * time.Millisecond},
 		} {
 			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
 				if c.counts {
 					testMarkBeforeUntil(t, leg, dbs, c)
 					return
