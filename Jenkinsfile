@@ -1,36 +1,55 @@
 // board CI on the homelab Jenkins: multibranch job board/ci (see docs/ci.md).
 //
 // EXPERIMENT (branch ci/distributed, cut from 169bb59): every test stage is a
-// "unit" that runs in parallel on its own Jenkins node from the board-test
-// pool (the homelab phones plus int21h-ws), instead of one stage after
-// another on int21h-ws. Units ask for capabilities by label, most preferred
-// first (Suite and Quality prefer amd64; Image needs it, because
-// ci/image-check.sh runs the amd64 image), and never name a node.
+// "unit" that runs as its own parallel branch with its own retry policy and
+// timing, instead of one stage after another. Every unit runs on int21h-ws
+// (amd64, 28 cores, 4 executors): the arm64 phones of the board-test pool
+// were too slow (#16 took 5 h, mutation lanes ran out of 105 minutes and
+// agents dropped under load 16-53), so no unit asks for them any more. Units
+// that find all 4 executors busy queue for one.
 //
-// Retry policy, per unit:
+// Retry policy, per unit (on the same node: there is only one):
 //   - infrastructure failure (agent lost, Docker unavailable, checkout or CI
-//     image build failed, the attempt timed out or went silent, no node free):
-//     the unit moves to a node it has not tried, up to 3 infrastructure
-//     attempts;
-//   - the unit's command fails: one rerun on a different node; a pass there
-//     marks the build UNSTABLE ("flaky on <node>"), a second failure fails it.
+//     image build failed, the attempt timed out or went silent, no executor
+//     free): another attempt, up to 3 infrastructure failures;
+//   - the unit's command fails: one rerun; a pass there marks the build
+//     UNSTABLE ("flaky"), a second failure fails it.
+// A unit may cap its attempts (maxAttempts: the full mutation run has one).
 // Each attempt reports node, queue wait and run time; the build page gets a
 // per-unit timing table (ci-results/distributed/timing.md).
 //
-// Each unit checks out the build's commit on its node, builds board-ci:local
-// there (ci/jenkins-image.sh; cached per Docker daemon), runs, removes the
-// sibling containers it labelled (ralphd.run=<attempt id>, by exact ID) and
-// stashes its ci-results. Quality waits for Suite (coverage) and Image (the
-// image tar). The report runs once at the end, on any pool node, over every
+// Each unit checks out the build's commit in its own workspace, builds
+// board-ci:local (ci/jenkins-image.sh; cached by the Docker daemon), runs,
+// removes the sibling containers it labelled (ralphd.run=<attempt id>, by
+// exact ID) and stashes its ci-results. Quality waits for Suite (coverage)
+// and Image (the image tar). The report runs once at the end over every
 // unit's stash.
 //
-// Three phases, one after another, so the pool never runs all three test
-// kinds at once; each phase's units run in parallel:
-//   1. Core (every build): Lint, Suite, Image, Allure smoke, Quality.
+// Three phases, one after another; each phase's units run in parallel:
+//   1. Core (every build): Lint, Suite, Image, Allure smoke, then Quality
+//      (4 executors: Quality waits for Suite and Image without holding one).
 //   2. Stability (EXTENDED=true, or nightly on main): three stability runs,
 //      one unit each; EXTENDED also adds -race and fresh vulnerability
 //      databases to Core.
-//   3. Mutation (MUTATION=true, or nightly on main): the seven mutation lanes.
+//   3. Mutation, one unit, in one of two modes:
+//      - full (nightly on main, or MUTATION_FULL=true): every package and
+//        Stryker (ci/mutation.sh lane all, one package after another), each
+//        gremlins with nproc/2 workers and GOMAXPROCS 2 per worker (a mutant
+//        is a go build plus a go test; 14 x 2 keeps the 28 cores busy
+//        without oversubscribing them, and nice 10 leaves other jobs ahead
+//        of it). One attempt under one 6-hour limit: a timeout is not worth
+//        another 6 hours. About 2-3 hours.
+//      - diff (MUTATION=true on any other build): only the lines changed
+//        since a base, under 45 minutes (minutes when few packages changed;
+//        a changed internal/server still pays its covered suite run once).
+//        A branch or PR build diffs against the merge base with its target
+//        (origin/main, or CHANGE_TARGET), fetched into the workspace first
+//        because the multibranch checkout fetches the built branch only. A
+//        build of main itself would get HEAD as that merge base, so it diffs
+//        against HEAD~1 (the last commit; the nightly full run covers the
+//        rest). ci/mutation.sh and ci/mutationgate -diff: a package with no
+//        mutant passes, one with mutants keeps the 80 efficacy floor;
+//        Stryker runs only if web/src/lib changed.
 // A phase runs only if every earlier one passed (UNSTABLE counts as passed).
 @Library('homelab') _
 import groovy.transform.Field
@@ -41,8 +60,8 @@ import groovy.transform.Field
 @Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
 @Field String commitSha = ''
 @Field String imageVersion = ''
+@Field String mutationBase = ''  // diff mode: the commit the mutation diff starts from
 @Field final String AMD = 'board-test && amd64 && docker'
-@Field final String ANY = 'board-test && docker'
 
 long nowMs() { System.currentTimeMillis() }
 
@@ -81,40 +100,34 @@ String classify(Throwable e, Map a) {
   return 'infra:' + e.toString().take(80)
 }
 
-// Runs one unit. u: name, labels (most preferred first; retries widen to the
-// last), minutes (budget on amd64; arm64 gets u.armFactor x, default 3),
+// Runs one unit on int21h-ws (AMD; every attempt asks for the same label,
+// which matches that one node). u: name, minutes (the attempt's hard limit),
 // body (closure on the node, returns the command's exit status), needs
-// (stash names to unstash first), extraStash (closure on the node, after a run),
-// pinned (retries may reuse a node: the label matches one node only).
+// (stash names to unstash first), extraStash (closure on the node, after a
+// run), maxAttempts (default 4).
 def runUnit(Map u) {
-  def tried = []
   def attempts = []
   attemptLog[u.name] = attempts
   int infra = 0
   boolean rerun = false
   String firstFail = null
-  int armFactor = u.armFactor ?: 3
+  int maxAttempts = u.maxAttempts ?: 4
   while (true) {
-    String want = attempts.isEmpty() ? u.labels[0] : u.labels[-1]
-    String expr = '(' + want + ')' + (u.pinned ? '' : tried.collect { ' && !' + it }.join(''))
-    def a = [n: attempts.size() + 1, label: expr, node: null, queued: nowMs(), start: 0L, end: 0L, outcome: null]
+    def a = [n: attempts.size() + 1, label: AMD, node: null, queued: nowMs(), start: 0L, end: 0L, outcome: null]
     attempts << a
     String runId = "jenkins-${env.BUILD_NUMBER}-${slug(u.name)}-${a.n}"
     try {
-      // Queue wait (no free node matching) is capped too: 45 minutes.
-      timeout(time: 45 + u.minutes * armFactor, unit: 'MINUTES') {
-        node(expr) {
+      // Queue wait (no free executor) is capped too: 45 minutes.
+      timeout(time: 45 + u.minutes, unit: 'MINUTES') {
+        node(AMD) {
           a.node = env.NODE_NAME
           a.start = nowMs()
-          tried << env.NODE_NAME
-          boolean arm = !(env.NODE_LABELS ?: '').split(' ').contains('amd64')
-          a.arch = arm ? 'arm64' : 'amd64'
-          echo "unit ${u.name}: attempt ${a.n} on ${env.NODE_NAME} (${a.arch}), label ${expr}"
+          echo "unit ${u.name}: attempt ${a.n} of at most ${maxAttempts} on ${env.NODE_NAME}"
           try {
             // One hard limit per attempt, no inner activity timeout: when the
             // hard limit fired first, the orphaned activity timer later found
             // no thread and Jenkins force-killed the whole build (#12).
-            timeout(time: u.minutes * (arm ? armFactor : 1), unit: 'MINUTES') {
+            timeout(time: u.minutes, unit: 'MINUTES') {
               if (sh(returnStatus: true, script: 'docker info >/dev/null 2>&1') != 0) {
                 a.outcome = 'infra:docker'
                 return
@@ -180,21 +193,49 @@ def runUnit(Map u) {
       return
     }
     if (a.outcome.startsWith('fail')) {
-      if (!rerun && attempts.size() < 4) {
+      if (!rerun && attempts.size() < maxAttempts) {
         rerun = true
         firstFail = a.node
-        echo "unit ${u.name}: failed on ${a.node}; one rerun on " + (u.pinned ? 'the same label' : 'another node')
+        echo "unit ${u.name}: failed on ${a.node}; one rerun"
         continue
       }
       results[u.name] = 'fail'
-      error("${u.name}: failed on ${firstFail ?: a.node}" + (firstFail ? " and ${a.node}" : ''))
+      error("${u.name}: failed" + (firstFail ? ' twice' : '') + ' (' + attemptSummary(attempts) + ')')
     }
     infra++
-    if (infra >= 3 || attempts.size() >= 4) {
+    if (infra >= 3 || attempts.size() >= maxAttempts) {
       results[u.name] = 'fail'
-      error("${u.name}: ${infra} infrastructure failures (${attempts.collect { (it.node ?: 'none') + ' ' + it.outcome }.join(', ')})")
+      error("${u.name}: gave up after ${attempts.size()} attempt" + (attempts.size() == 1 ? '' : 's') + ' (' + attemptSummary(attempts) + ')')
     }
   }
+}
+
+// "3 infrastructure failures, 1 test failure: int21h-ws infra:timeout, ..."
+@NonCPS
+String attemptSummary(List attempts) {
+  int fails = attempts.count { it.outcome?.startsWith('fail') }
+  int infras = attempts.count { it.outcome?.startsWith('infra') }
+  def parts = []
+  if (infras) {
+    parts << "${infras} infrastructure failure" + (infras == 1 ? '' : 's')
+  }
+  if (fails) {
+    parts << "${fails} test failure" + (fails == 1 ? '' : 's')
+  }
+  return parts.join(', ') + ': ' + attempts.collect { (it.node ?: 'none') + ' ' + it.outcome }.join(', ')
+}
+
+// The commit diff-mode mutation starts from (see the header), on the unit's
+// node, in its checkout. A failed fetch throws: an infrastructure failure.
+String mutationDiffBase() {
+  if (env.BRANCH_NAME == 'main') {
+    return sh(returnStdout: true, script: 'git rev-parse HEAD~1').trim()
+  }
+  String target = env.CHANGE_TARGET ?: 'main'
+  withCredentials([gitUsernamePassword(credentialsId: 'github-n-orlov', gitToolName: 'Default')]) {
+    sh "git fetch --no-tags --quiet origin +refs/heads/${target}:refs/remotes/origin/${target}"
+  }
+  return sh(returnStdout: true, script: "git merge-base origin/${target} HEAD").trim()
 }
 
 // A unit as a parallel branch: its failure fails the stage and the build,
@@ -217,13 +258,13 @@ def unitBranch(Map u) {
 
 @NonCPS
 String timingReport() {
-  def lines = ['| unit | result | attempt | node | arch | queue (min) | run (min) | outcome |',
-               '|------|--------|---------|------|------|-------------|-----------|---------|']
+  def lines = ['| unit | result | attempt | node | queue (min) | run (min) | outcome |',
+               '|------|--------|---------|------|-------------|-----------|---------|']
   attemptLog.keySet().sort().each { name ->
     attemptLog[name].each { a ->
       def q = a.start ? String.format('%.1f', (a.start - a.queued) / 60000.0) : String.format('%.1f', ((a.end ?: nowMs()) - a.queued) / 60000.0)
       def r = a.start ? String.format('%.1f', ((a.end ?: nowMs()) - a.start) / 60000.0) : '-'
-      lines << "| ${name} | ${results[name] ?: '?'} | ${a.n} | ${a.node ?: '-'} | ${a.arch ?: '-'} | ${q} | ${r} | ${a.outcome} |"
+      lines << "| ${name} | ${results[name] ?: '?'} | ${a.n} | ${a.node ?: '-'} | ${q} | ${r} | ${a.outcome} |"
     }
   }
   return lines.join('\n') + '\n'
@@ -237,7 +278,8 @@ pipeline {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
-    timeout(time: 300, unit: 'MINUTES')
+    // Core and Stability (about 1 h) plus the full mutation run's 6 hours.
+    timeout(time: 480, unit: 'MINUTES')
     copyArtifactPermission('/board/release,/board/ci/*')
   }
 
@@ -245,7 +287,9 @@ pipeline {
     booleanParam(name: 'EXTENDED', defaultValue: false,
                  description: 'Extended CI: -race, fresh vulnerability databases, then the stability runs')
     booleanParam(name: 'MUTATION', defaultValue: false,
-                 description: 'Mutation testing: the seven mutation lanes, after Core (and Stability if extended)')
+                 description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (and Stability if extended)')
+    booleanParam(name: 'MUTATION_FULL', defaultValue: false,
+                 description: 'Full mutation testing: every package and Stryker in one unit (2-3 hours, 6-hour limit), as the nightly build of main does')
   }
 
   triggers {
@@ -267,23 +311,25 @@ pipeline {
           boolean timer = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
           boolean nightly = params.EXTENDED || timer
           env.CI_NIGHTLY = nightly ? 'true' : 'false'
-          env.CI_MUTATION = (params.MUTATION || timer) ? 'true' : 'false'
+          boolean full = params.MUTATION_FULL || timer
+          env.CI_MUTATION = (params.MUTATION || full) ? 'true' : 'false'
+          env.CI_MUTATION_MODE = full ? 'full' : 'diff'
           env.BOARD_CI_GO_EXTRA_FLAGS = nightly ? '-race' : ''
-          def lanes = ['core'] + (nightly ? ['stability'] : []) + (env.CI_MUTATION == 'true' ? ['mutation'] : [])
-          currentBuild.description = 'distributed: ' + lanes.join(' + ') + (nightly ? ' (-race)' : '')
+          def lanes = ['core'] + (nightly ? ['stability'] : []) + (env.CI_MUTATION == 'true' ? ["mutation(${env.CI_MUTATION_MODE})"] : [])
+          currentBuild.description = 'int21h-ws: ' + lanes.join(' + ') + (nightly ? ' (-race)' : '')
           def units = []
           // gofmt, go vet, tidy drift, golangci-lint.
-          units << [name: 'Lint', labels: [ANY], minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
-          units << [name: 'Suite', labels: [AMD, ANY], minutes: nightly ? 120 : 45, armFactor: 2, signal: 'Suite',
+          units << [name: 'Lint', minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
+          units << [name: 'Suite', minutes: nightly ? 120 : 45, signal: 'Suite',
                     body: { sh(returnStatus: true, script: 'ci/run.sh ci/suite.sh') }]
           // Both platforms cross-built and never pushed; the amd64 image is run
-          // and probed, so amd64 only.
-          units << [name: 'Image', labels: [AMD], minutes: 30, signal: 'Image',
+          // and probed.
+          units << [name: 'Image', minutes: 30, signal: 'Image',
                     body: {
                       sh(returnStatus: true, script: 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"')
                     },
                     extraStash: { stash name: 'image', includes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true }]
-          units << [name: 'Allure smoke', labels: [ANY], minutes: 15,
+          units << [name: 'Allure smoke', minutes: 15,
                     body: {
                       sh(returnStatus: true, script: '''
                         set -e
@@ -301,13 +347,13 @@ pipeline {
               waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['Image'] == true }
               catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 env.QUALITY_RESULT = 'failing'
-                runUnit([name: 'Quality', labels: [AMD, ANY], minutes: 30, needs: ['res-suite', 'res-image', 'image'],
+                runUnit([name: 'Quality', minutes: 30, needs: ['res-suite', 'res-image', 'image'],
                          body: {
                            if (env.CI_NIGHTLY == 'true') {
                              sh "ci/run.sh sh -c 'rm -rf /go-cache/trivy/db /go-cache/trivy/java-db /go-cache/xdg-cache/govulncheck'"
                            }
                            // crap-ts and the openapi gates read web/node_modules, which
-                           // Suite installed on its own node, not this one.
+                           // Suite installed in its own workspace, not this one.
                            int rc = sh(returnStatus: true, script: "ci/run.sh sh -c '[ -d web/node_modules ] || (cd web && npm ci --no-audit --no-fund)'")
                            if (rc != 0) {
                              return rc
@@ -333,8 +379,8 @@ pipeline {
           def branches = [:]
           // A list, not 1..3: an IntRange is not serializable in CPS.
           [1, 2, 3].each { i ->
-            // stability.sh prints only at the end (14 min on kilo, 22+ on golf).
-            def u = [name: "Stability ${i}", labels: [ANY], minutes: 40,
+            // stability.sh prints only at the end (11 min on int21h-ws alone).
+            def u = [name: "Stability ${i}", minutes: 40,
                      body: {
                        sh(returnStatus: true, script: '''
                          set -e
@@ -356,21 +402,28 @@ pipeline {
       }
       steps {
         script {
-          def branches = [:]
-          // The Go mutation lanes (ci/quality.json mutation_go.lanes); base
-          // also runs Stryker over web/src/lib. int21h-ws only: on the 8-core
-          // phones gremlins drove the load to 16-53, server-ops and cli-core
-          // ran out of 105 minutes and foxtrot's agent dropped (#16). Its 4
-          // executors run 4 lanes at once, so each gremlins gets a quarter of
-          // the cores instead of all of them.
-          ['logic', 'server-ops', 'server-streams', 'server-core', 'cli', 'cli-core', 'base'].each { lane ->
-            int minutes = lane == 'server-core' ? 80 : 60
-            def u = [name: "Mutation ${lane}", labels: [AMD], pinned: true, minutes: minutes,
-                     body: { sh(returnStatus: true, script: 'BOARD_MUTATION_WORKERS=$(( ($(nproc) + 3) / 4 )) ' +
-                                                            "ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json ${lane}") }]
-            branches[u.name] = unitBranch(u)
+          // One unit in either mode (see the header). The worker and CPU
+          // split is read by ci/mutation.sh before it scrubs BOARD_*, and
+          // ci/run.sh forwards only BOARD_* into its container.
+          String tune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
+          def u
+          if (env.CI_MUTATION_MODE == 'full') {
+            u = [name: 'Mutation full', minutes: 360, maxAttempts: 1,
+                 body: { sh(returnStatus: true, script: tune + ' ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json all') }]
+          } else {
+            u = [name: 'Mutation diff', minutes: 45,
+                 body: {
+                   mutationBase = mutationDiffBase()
+                   currentBuild.description = currentBuild.description.replaceAll('mutation\\(diff[^)]*\\)', "mutation(diff ${mutationBase.take(7)})")
+                   sh(returnStatus: true, script: "BOARD_MUTATION_DIFF=${mutationBase} " + tune +
+                                                  ' ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json all')
+                 }]
           }
-          parallel branches
+          stage(u.name) {
+            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+              runUnit(u)
+            }
+          }
         }
       }
     }
@@ -382,7 +435,7 @@ pipeline {
         // The report on one pool node over every unit's stash.
         try {
           timeout(time: 30, unit: 'MINUTES') {
-            node('board-test && docker && amd64 || board-test && docker') {
+            node(AMD) {
               sh 'rm -rf ci-results ci-summary allure-report previous'
               // Plain lists: a map's key view is not serializable across steps.
               for (String name : attemptLog.collect { it.key }) {
@@ -467,10 +520,10 @@ pipeline {
         // agent none: notifyTelegram's sh needs a workspace.
         try {
           timeout(time: 10, unit: 'MINUTES') {
-            node('board-test') {
+            node(AMD) {
               notifyTelegram(notifyOn: 'ALL', silent: watched ? null : true,
                              extra: 'distributed' + (env.CI_NIGHTLY == 'true' ? ', extended lane' : '') +
-                                    (env.CI_MUTATION == 'true' ? ', mutation' : ''))
+                                    (env.CI_MUTATION == 'true' ? ", mutation(${env.CI_MUTATION_MODE})" : ''))
             }
           }
         } catch (Throwable e) {
