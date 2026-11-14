@@ -276,6 +276,68 @@ for (const vp of viewports) {
       await fresh.close();
     });
 
+    test('a saved filter that names only references the board no longer has opens at the defaults with one unfiltered read and saves nothing', async ({ page }) => {
+      const ghost = `e2e-nv-all-gone-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, `task=${ghost}-1&initiative=${ghost}`] as const);
+
+      const fresh = await page.context().newPage();
+      const reads = notesReads(fresh);
+      const failed: number[] = [];
+      fresh.on('response', (response) => {
+        if (new URL(response.url()).pathname === '/api/v1/notes' && response.status() >= 400) failed.push(response.status());
+      });
+      await fresh.goto('/#/notes');
+      await expect(fresh.getByTestId('no-notes').or(fresh.getByTestId('notes-list'))).toBeVisible(FIVE_SECONDS);
+      await expect(fresh).toHaveURL(/#\/notes$/);
+      await expect(filters(fresh).getByLabel('Initiative', { exact: true })).toHaveValue('');
+      await expect(filters(fresh).getByLabel('Task', { exact: true })).toHaveValue('');
+      await expect(filters(fresh).getByTestId('clear-filters')).toHaveCount(0);
+      await expect(fresh.getByTestId('notes-error')).toHaveCount(0);
+      expect(reads.count).toBe(1);
+      expect(reads.queries[0]).not.toMatch(/initiative=|task=/);
+      expect(failed).toEqual([]);
+      // Nothing is left to restore: the dropped references are not saved back.
+      expect(await stored(fresh)).toBeNull();
+      await fresh.close();
+    });
+
+    test('a restored task whose lookup fails is kept while a removed initiative beside it is still dropped', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-nv-lookup-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `Notes lookup ${vp.name}` }, 201);
+      const created = await api.post('/api/v1/tasks', { data: { initiative: slug, title: 'Lookup task' } });
+      expect(created.status()).toBe(201);
+      const ref = ((await created.json()) as { ref: string }).ref;
+      const ghost = `e2e-nv-lookup-ghost-${vp.name}`;
+      const author = `nv-lookup-${vp.name}`;
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      await page.evaluate(([k, q]) => localStorage.setItem(k, JSON.stringify({ v: 1, query: q })), [KEY, `task=${ref}&initiative=${ghost}&author=${author}`] as const);
+
+      const fresh = await page.context().newPage();
+      // The board cannot tell whether the task exists: its lookup answers 500.
+      await fresh.route(
+        (url) => url.pathname.startsWith('/api/v1/tasks/'),
+        (route) => (route.request().method() === 'GET' ? route.fulfill({ status: 500, contentType: 'application/problem+json', body: '{"title":"down","status":500}' }) : route.continue()),
+      );
+      const reads = notesReads(fresh);
+      await fresh.goto('/#/notes');
+      const kept = `task=${encodeURIComponent(ref)}&author=${author}`;
+      await expect(fresh).toHaveURL(new RegExp(`#/notes\\?${kept.replace(/[?.]/g, '\\$&')}$`), FIVE_SECONDS);
+      await expect(filters(fresh).getByLabel('Task', { exact: true })).toHaveValue(ref);
+      await expect(filters(fresh).getByLabel('Initiative', { exact: true })).toHaveValue('');
+      await expect.poll(() => reads.count, FIVE_SECONDS).toBe(1);
+      const sent = new URLSearchParams(reads.queries[0]);
+      expect(sent.get('task')).toBe(ref);
+      expect(sent.has('initiative')).toBe(false);
+      expect(sent.get('author')).toBe(author);
+      expect((await saved(fresh)).query).toBe(kept);
+      await fresh.close();
+      await api.dispose();
+    });
+
     test('a link that names an unknown initiative is not rewritten as restored state', async ({ page }) => {
       const ghost = `e2e-nv-link-ghost-${vp.name}`;
       await page.goto(`/#/notes?initiative=${ghost}`);
