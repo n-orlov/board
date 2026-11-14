@@ -294,6 +294,62 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
+    test('sorting by Lease holder orders the rows, rows without a holder stay last both ways, equal holders and equal flags keep the default order, and a saved holder sort opens on a second initiative', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const prefix = `e2e-ip-holder-${vp.name}`;
+      const holderApi = async (actor: string) =>
+        playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor } });
+      const amy = await holderApi(`${prefix}-amy`);
+      const zed = await holderApi(`${prefix}-zed`);
+      const make = async (slug: string) => {
+        await post(api, '/api/v1/initiatives', { slug, title: `Holder ${slug}` }, 201);
+        const task = async (title: string) => (await post(api, '/api/v1/tasks', { initiative: slug, title }, 201)).ref;
+        // Creation order: one (zed), two (no lease), three (amy), four (zed), five (no lease).
+        const refs = [await task('One'), await task('Two'), await task('Three'), await task('Four'), await task('Five')] as [string, string, string, string, string];
+        await post(zed, '/api/v1/leases', { task: refs[0], intent: 'holder sort', resources: [`repo:${slug}-1`] }, 201);
+        await post(amy, '/api/v1/leases', { task: refs[2], intent: 'holder sort', resources: [`repo:${slug}-3`] }, 201);
+        await post(zed, '/api/v1/leases', { task: refs[3], intent: 'holder sort', resources: [`repo:${slug}-4`] }, 201);
+        return { slug, refs };
+      };
+      const a = await make(`${prefix}-a`);
+      const b = await make(`${prefix}-b`);
+      const [one, two, three, four, five] = a.refs;
+
+      await page.goto(`/#/i/${a.slug}`);
+      await expect.poll(() => tableRefs(page)).toEqual(a.refs);
+
+      // Lease holder: text, the two without a holder last in both directions, equal holders keep the default order.
+      await sortBy(page, phone, 'holder', 'asc');
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => tableRefs(page)).toEqual([three, one, four, two, five]);
+      await sortBy(page, phone, 'holder', 'desc');
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => tableRefs(page)).toEqual([one, four, three, two, five]);
+      await expect(page).toHaveURL(/sort=holder&dir=desc$/);
+
+      // Flags: the two tasks without a flag and the three with the same flag keep the default order whichever way it runs.
+      await sortBy(page, phone, 'flags', 'asc');
+      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'none');
+      await expect.poll(() => tableRefs(page)).toEqual([one, three, four, two, five]);
+      await sortBy(page, phone, 'flags', 'desc');
+      await expect.poll(() => tableRefs(page)).toEqual([one, three, four, two, five]);
+      await sortBy(page, phone, 'holder', 'desc');
+      await expect.poll(() => tableRefs(page)).toEqual([one, four, three, two, five]);
+
+      // The saved holder sort opens the second initiative, whose rows sort the same way.
+      const query = new URL(page.url()).hash.split('?')[1];
+      expect(await saved(page)).toEqual({ v: 1, query });
+      await openFromList(page, b.slug);
+      await expect(page).toHaveURL(endsWith(`#/i/${b.slug}?${query}`));
+      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => tableRefs(page)).toEqual([b.refs[0], b.refs[3], b.refs[2], b.refs[1], b.refs[4]]);
+      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
+      await amy.dispose();
+      await zed.dispose();
+      await api.dispose();
+    });
+
     if (!phone) {
       test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
         const api = await apiContext(playwright, baseURL);
