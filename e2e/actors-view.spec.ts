@@ -222,6 +222,61 @@ for (const vp of viewports) {
       await fresh.close();
     });
 
+    test('sorting by Live leases uses the first lease only and keeps the actors without a lease last in both directions in the order the view draws them', async ({ page, playwright, baseURL }) => {
+      const prefix = `actfirst-${vp.name}-`;
+      const slug = `e2e-actfirst-${vp.name}`;
+      const [amy, bob, mike, zed] = [`${prefix}amy`, `${prefix}bob`, `${prefix}mike`, `${prefix}zed`];
+      // Seen oldest first: amy, bob (no lease), then mike and zed.
+      for (const handle of [amy, bob]) {
+        const api = await actorApi(playwright, baseURL, handle);
+        await post(api, '/api/v1/notes', { summary: `${handle} was here` }, 201);
+        await api.dispose();
+      }
+      const mikeApi = await actorApi(playwright, baseURL, mike);
+      const zedApi = await actorApi(playwright, baseURL, zed);
+      await post(mikeApi, '/api/v1/initiatives', { slug, title: `Actors first lease ${vp.name}` }, 201);
+      const task = async (title: string) => (await post<{ ref: string }>(mikeApi, '/api/v1/tasks', { initiative: slug, title }, 201)).ref;
+      const [t1, t2, t3] = [await task('one'), await task('two'), await task('three')];
+      // Lease order by ref: mike's first, zed's, mike's second. Only mike's first lease may decide his place.
+      await post(mikeApi, '/api/v1/leases', { task: t1, intent: 'first', resources: [`repo:${prefix}1`] }, 201);
+      await post(zedApi, '/api/v1/leases', { task: t2, intent: 'second', resources: [`repo:${prefix}2`] }, 201);
+      await post(mikeApi, '/api/v1/leases', { task: t3, intent: 'third', resources: [`repo:${prefix}3`] }, 201);
+      await mikeApi.dispose();
+      await zedApi.dispose();
+
+      await page.goto('/#/actors');
+      // The default order: holders first by last seen newest first (mike acted last), then the idle actors newest first.
+      await expect.poll(() => order(page, prefix)).toEqual([mike, zed, bob, amy]);
+      await sortBy(page, phone, 'leases', 'asc');
+      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'ascending');
+      await expect.poll(() => order(page, prefix)).toEqual([mike, zed, bob, amy]);
+      await sortBy(page, phone, 'leases', 'desc');
+      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'descending');
+      await expect.poll(() => order(page, prefix)).toEqual([zed, mike, bob, amy]);
+      await expect(page).toHaveURL(endsWith('#/actors?sort=leases&dir=desc'));
+    });
+
+    test('a saved Live leases or Way back sort opens the bare link after another view and a reload', async ({ page, playwright, baseURL }) => {
+      for (const column of ['leases', 'wayBack'] as const) {
+        const { prefix, mike, zed, amy } = await seed(playwright, baseURL, `col${column === 'leases' ? 'lease' : 'way'}-${vp.name}`);
+        await page.goto('/#/actors');
+        await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
+        await sortBy(page, phone, column, 'desc');
+        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
+        expect(await saved(page)).toEqual({ v: 1, query: `sort=${column}&dir=desc` });
+        await goTo(page, 'Tasks');
+        await expect(page.getByTestId('actors-view')).toHaveCount(0);
+        await goTo(page, 'Actors');
+        await expect(page).toHaveURL(endsWith(`#/actors?sort=${column}&dir=desc`));
+        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
+        if (phone) await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:desc`);
+        await page.reload();
+        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
+        await sortBy(page, phone, column, null);
+        expect(await stored(page)).toBeNull();
+      }
+    });
+
     if (!phone) {
       test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
         const { prefix, mike, zed, amy } = await seed(playwright, baseURL, `keys-${vp.name}`);
