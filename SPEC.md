@@ -2572,7 +2572,9 @@ Needs nothing (`attention=false`). The section is a list of cards (one layout at
 with the task ref (a link to its page), its initiative on the Tasks view, its title, one badge per attention reason (§ Attention
 badges above; the text is visible and the accessible name spelled out) followed by the task's own active, blocked and overdue flags,
 and its lease holder. A task shown in the section is not repeated in the table below, which lists the other tasks that match the
-filters. The section is not rendered at all when it is empty. Beyond 200 tasks a "+K more" link, K counted by following the API's
+filters. Every row of that table, including a task past the 200 that the section left out, shows its own attention badges (the same
+labels, tones and accessible names as the cards, `data-testid="attention-<reason>"`) in its Flags cell before its active, blocked and
+overdue flags; `e2e/needs_attention.spec.ts` covers a task past the cap at phone and desktop. The section is not rendered at all when it is empty. Beyond 200 tasks a "+K more" link, K counted by following the API's
 `next_after`, goes to the Tasks view filtered by `attention=true` (with the view's filters, and the initiative's slug on the initiative
 page), where the table lists the tasks past the 200. A live event that names a task refreshes the section in place (no skeleton, no
 reload), so an answered ask or a closed task leaves it within a moment. A failed read keeps the section it had and says why in an

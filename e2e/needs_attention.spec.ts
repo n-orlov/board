@@ -62,6 +62,33 @@ async function seed(playwright: PlaywrightTestArgs['playwright'], baseURL: strin
   return { slug, api, stranded, asking, ask, done, quiet };
 }
 
+// The cap case: 201 tasks that all need attention, so the section shows 200 of them and `+1 more`, and the one task past the cap is
+// an ordinary table row. That row must carry the same attention badges (label, tone and accessible name) its card would have.
+const CAPPED = [
+  { name: 'done', reason: 'done', label: 'done, not closed', accessible: 'Done, not closed', flag: undefined },
+  { name: 'asking', reason: 'asking', label: 'waiting on you', accessible: 'Waiting on you', flag: undefined },
+  { name: 'blocking ask', reason: 'asking', label: 'waiting on you · blocking', accessible: 'Waiting on you, blocking', flag: 'blocked' },
+] as const;
+const CAP = 200;
+
+async function seedCapped(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, slug: string, kind: (typeof CAPPED)[number]['name']) {
+  const api = await playwright.request.newContext({
+    baseURL,
+    extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': `needs-cap-${kind.replace(' ', '-')}` },
+  });
+  await post(api, '/api/v1/initiatives', { slug, title: `Cap ${kind}` }, 201);
+  for (let from = 0; from <= CAP; from += 20) {
+    await Promise.all(
+      Array.from({ length: Math.min(20, CAP + 1 - from) }, async (_, i) => {
+        const ref = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: `Capped ${from + i}` }, 201)).ref;
+        if (kind === 'done') await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
+        else await post(api, '/api/v1/asks', { question: `Which way for ${ref}?`, task: ref, mode: 'poll', blocking: kind === 'blocking ask' }, 201);
+      }),
+    );
+  }
+  return api;
+}
+
 const section = (page: Page) => page.getByTestId('needs-attention');
 const refs = (page: Page) => section(page).getByTestId('needs-ref').allTextContents();
 
@@ -146,5 +173,34 @@ for (const vp of viewports) {
       await expect(page.locator('[data-testid=task-row]')).toHaveCount(1);
       await s.api.dispose();
     });
+
+    for (const capped of CAPPED) {
+      test(`a task past the section cap keeps its ${capped.name} attention badge on the Tasks view and the initiative page`, async ({ page, playwright, baseURL }) => {
+        test.setTimeout(120_000);
+        const slug = `e2e-needs-cap-${capped.name.replace(' ', '-')}-${vp.name}`;
+        const api = await seedCapped(playwright, baseURL, slug, capped.name);
+        for (const view of views) {
+          await page.goto(view.url(slug));
+          await expect(page.getByTestId(view.root)).toBeVisible();
+          await expect(section(page).getByTestId('needs-row')).toHaveCount(CAP, { timeout: 15_000 });
+          await expect(section(page).getByTestId('needs-more')).toHaveText('+1 more');
+          const rows = page.locator('[data-testid=task-row]');
+          await expect(rows).toHaveCount(1); // the section, its cap and the disjoint table are unchanged
+          const sectionRefs = await refs(page);
+          expect(new Set(sectionRefs).size).toBe(CAP);
+          const ref = await rows.first().getAttribute('data-ref');
+          expect(sectionRefs, `${view.name}: ${ref} is listed once`).not.toContain(ref);
+
+          const badge = rows.first().getByTestId(`attention-${capped.reason}`);
+          await expect(badge, `${view.name}: row ${ref}`).toHaveCount(1);
+          await expect(badge.locator('[aria-hidden=true]')).toHaveText(capped.label);
+          await expect(badge.locator('.sr-only')).toHaveText(capped.accessible);
+          const card = section(page).getByTestId(`attention-${capped.reason}`).first();
+          expect(await badge.getAttribute('class'), `${view.name}: same tone as the card's badge`).toBe(await card.getAttribute('class'));
+          if (capped.flag !== undefined) await expect(rows.first().getByTestId(`flag-${capped.flag}`)).toHaveCount(1); // its flags still show
+        }
+        await api.dispose();
+      });
+    }
   });
 }

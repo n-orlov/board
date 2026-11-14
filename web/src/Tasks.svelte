@@ -250,6 +250,11 @@
             <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
             <td class={cell} data-testid="task-status"><span class="{badge} border-border text-text-muted">{row.status}</span></td>
             <td class="flex flex-wrap gap-1 empty:hidden {cell}" data-testid="task-flags">
+              {#each row.attention as reason (reason.reason)}
+                <span class="{badge} {toneClasses(reason.tone)}" data-testid="attention-{reason.reason}">
+                  <span aria-hidden="true">{reason.label}</span><span class="sr-only">{reason.name}</span>
+                </span>
+              {/each}
               {#each row.badges as flag (flag.key)}
                 <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
               {/each}
