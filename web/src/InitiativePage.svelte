@@ -321,7 +321,7 @@
         {#if asks.length === 0}
           <p class="text-sm text-text-muted" data-testid="no-asks">No open asks.</p>
         {:else}
-          <AskList {asks} testid="initiative-asks" showTask onanswer={(ask) => open({ answer: ask })} onwithdraw={(askRef) => open({ withdraw: askRef })} />
+          <AskList {asks} testid="initiative-asks" showTask actions={{ onanswer: (ask) => open({ answer: ask }), onwithdraw: (askRef) => open({ withdraw: askRef }) }} />
         {/if}
       </div>
 

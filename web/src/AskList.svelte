@@ -6,14 +6,14 @@
 
   // A list of asks as the task page and the initiative page draw them (PRD R10): ref, state, blocking, question, who
   // asked and how, details as Markdown, and for an answered ask the answer. An open ask carries Answer and Withdraw.
-  // `showTask` names the task an ask is on (the initiative page lists the asks of all its tasks).
+  // `showTask` names the task an ask is on (the initiative page lists the asks of all its tasks). Without `actions` the
+  // list is read-only (the timeline's task preview): no Answer or Withdraw.
   let {
     asks,
     testid,
     showTask = false,
-    onanswer,
-    onwithdraw,
-  }: { asks: Ask[]; testid: string; showTask?: boolean; onanswer: (ask: Ask) => void; onwithdraw: (ref: string) => void } = $props();
+    actions,
+  }: { asks: Ask[]; testid: string; showTask?: boolean; actions?: { onanswer: (ask: Ask) => void; onwithdraw: (ref: string) => void } } = $props();
 
   const now = new Date();
   const small = 'min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
@@ -42,7 +42,8 @@
       {#if ask.state === 'answered'}
         <p class="max-w-[75ch]" data-testid="ask-answer"><span class="text-text-muted">Answer:</span> {ask.answer ?? ''}</p>
       {/if}
-      {#if canAct(ask)}
+      {#if actions !== undefined && canAct(ask)}
+        {@const { onanswer, onwithdraw } = actions}
         <p class="mt-2 flex flex-wrap gap-2">
           <button type="button" class={small} aria-label="Answer {ask.ref}" onclick={() => onanswer(ask)}>Answer</button>
           <button type="button" class={small} aria-label="Withdraw {ask.ref}" onclick={() => onwithdraw(ask.ref)}>Withdraw</button>
