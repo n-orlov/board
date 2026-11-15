@@ -633,6 +633,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page) => {
       await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
       await expect(page.getByTestId('timeline-chart')).toBeVisible();
+      await expect(page.getByTestId('timeline-legend')).toBeVisible(); // the legend is part of the scanned view
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
       await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
     },

@@ -3,6 +3,7 @@ import {
   CLOSED_WITHIN_OPTIONS,
   DEFAULT_TIMELINE_FILTER,
   MARKER_GLYPHS,
+  TIMELINE_LEGEND,
   affectsTimeline,
   choiceOptions,
   tagChoices,
@@ -374,5 +375,60 @@ describe('the filter controls', () => {
     for (const type of ['note_added', 'initiative_created', 'key_created', 'notification_sent', 'xlease_started', '']) {
       expect(affectsTimeline({ type }), type).toBe(false);
     }
+  });
+});
+
+describe('item classes and TIMELINE_LEGEND', () => {
+  const base = answer().tasks[0]!;
+  const tasks = (['open', 'done', 'closed'] as const).map((status, n) => ({
+    ...base,
+    ref: `T${n + 1}`,
+    status,
+    closed_at: status === 'open' ? undefined : '2026-03-05T00:00:00Z',
+  }));
+  const leases = (['live', 'expired', 'ended'] as const).map((state, n) => ({
+    ref: `L${n + 1}`,
+    task: 'T1',
+    holder: 'ada',
+    state,
+    started_at: '2026-03-02T10:00:00Z',
+    ended_at: state === 'live' ? undefined : '2026-03-03T10:00:00Z',
+    intent: 'x',
+  }));
+  const markers = (['milestone', 'ask', 'check', 'done', 'closed'] as const).map((type, n) => ({ task: 'T1', type, at: `2026-03-0${n + 1}T00:00:00Z`, label: type }));
+  const classesOf = (kind: string) =>
+    buildTimeline(answer({ tasks, leases, markers }), NOW)
+      .items.filter((i) => i.kind === kind)
+      .map((i) => i.className.split(' ').filter((c) => !c.startsWith('tl-id-')).join(' '));
+
+  it('gives each task status, lease state and marker type its class, and a planned bar its own', () => {
+    expect(classesOf('actual')).toEqual(['tl-actual tl-open', 'tl-actual tl-done', 'tl-actual tl-closed']);
+    expect(classesOf('planned')).toEqual(['tl-planned', 'tl-planned', 'tl-planned']);
+    expect(classesOf('lease')).toEqual(['tl-lease tl-lease-live', 'tl-lease tl-lease-expired', 'tl-lease tl-lease-ended']);
+    expect(classesOf('marker')).toEqual(['milestone', 'ask', 'check', 'done', 'closed'].map((t) => `tl-marker tl-marker-${t}`));
+  });
+
+  it('holds exactly the classes the chart draws, markers by their glyph, each with its own label', () => {
+    expect(TIMELINE_LEGEND.map((e) => e.className)).toEqual([
+      'tl-planned',
+      'tl-actual tl-open',
+      'tl-actual tl-done',
+      'tl-actual tl-closed',
+      'tl-lease tl-lease-live',
+      'tl-lease tl-lease-expired',
+      'tl-lease tl-lease-ended',
+      'tl-marker tl-marker-milestone',
+      'tl-marker tl-marker-ask',
+      'tl-marker tl-marker-check',
+      'tl-marker tl-marker-done',
+      'tl-marker tl-marker-closed',
+    ]);
+    const drawn = new Set(['planned', 'actual', 'lease', 'marker'].flatMap(classesOf));
+    expect(new Set(TIMELINE_LEGEND.map((e) => e.className))).toEqual(drawn);
+    for (const [type, glyph] of Object.entries(MARKER_GLYPHS)) {
+      expect(TIMELINE_LEGEND.find((e) => e.className === `tl-marker tl-marker-${type}`)?.glyph).toBe(glyph);
+    }
+    expect(TIMELINE_LEGEND.filter((e) => e.glyph !== undefined)).toHaveLength(5);
+    expect(new Set(TIMELINE_LEGEND.map((e) => e.label)).size).toBe(TIMELINE_LEGEND.length);
   });
 });

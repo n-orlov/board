@@ -15,6 +15,7 @@
   import {
     CLOSED_WITHIN_OPTIONS,
     DEFAULT_TIMELINE_FILTER,
+    TIMELINE_LEGEND,
     affectsTimeline,
     choiceOptions,
     isFiltered,
@@ -234,6 +235,18 @@
       <span class="text-sm text-text-muted" data-testid="timeline-span" data-span-ms={span} data-from-ms={shownFrom} data-to-ms={shownTo}>{span === 0 ? '' : `Showing ${spanLabel(span)}`}</span>
       <span class="hidden text-xs text-text-muted md:inline" data-testid="timeline-hint">Scroll to pan · Shift+scroll to zoom</span>
     </div>
+    <ul class="timeline-legend mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted" aria-label="Legend" data-testid="timeline-legend">
+      {#each TIMELINE_LEGEND as entry (entry.className)}
+        <li class="flex items-center gap-1.5">
+          {#if entry.glyph === undefined}
+            <span class="tl-swatch {entry.className}" aria-hidden="true"></span>
+          {:else}
+            <span class="tl-swatch-glyph {entry.className}" aria-hidden="true">{entry.glyph}</span>
+          {/if}
+          {entry.label}
+        </li>
+      {/each}
+    </ul>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
     <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" bind:this={frame}></div>
   {/if}
@@ -291,34 +304,94 @@
   .timeline-frame :global(.vis-group-level-unknown-but-gte1) {
     border: 0;
   }
-  .timeline-frame :global(.vis-item) {
-    border-color: var(--border);
-    background: var(--surface);
+  /* Colours by kind and state (lib/timeline.ts TIMELINE_LEGEND): each item sets --tl to a design token; bars are a light
+     wash of it with a solid edge, markers the token itself, so both themes read through the tokens' own dark values. */
+  .timeline-frame :global(.vis-item),
+  .timeline-legend .tl-swatch {
+    --tl: var(--text-muted);
+    border-color: var(--tl);
+    background: color-mix(in srgb, var(--tl) 18%, var(--surface-raised));
     color: var(--text);
+  }
+  .timeline-frame :global(.vis-item) {
     cursor: pointer;
   }
-  .timeline-frame :global(.vis-item.tl-planned) {
+  .timeline-frame :global(.tl-actual.tl-open),
+  .timeline-legend .tl-actual.tl-open {
+    --tl: var(--accent);
+  }
+  .timeline-frame :global(.tl-actual.tl-done),
+  .timeline-legend .tl-actual.tl-done {
+    --tl: var(--success);
+  }
+  .timeline-frame :global(.tl-actual.tl-closed),
+  .timeline-legend .tl-actual.tl-closed {
+    --tl: var(--text-muted);
+  }
+  .timeline-frame :global(.vis-item.tl-planned),
+  .timeline-legend .tl-planned {
+    --tl: var(--text-muted);
     background: transparent;
     border-style: dashed;
-    border-color: var(--text-muted);
   }
-  .timeline-frame :global(.vis-item.tl-actual) {
-    border-color: var(--accent);
+  .timeline-frame :global(.tl-lease-live),
+  .timeline-legend .tl-lease-live {
+    --tl: var(--success);
+    background: color-mix(in srgb, var(--tl) 32%, var(--surface-raised));
   }
-  .timeline-frame :global(.vis-item.tl-closed) {
-    border-color: var(--success);
+  .timeline-frame :global(.tl-lease-expired),
+  .timeline-legend .tl-lease-expired {
+    --tl: var(--warning);
   }
-  .timeline-frame :global(.vis-item.tl-lease) {
-    border-color: var(--warning);
+  .timeline-frame :global(.tl-lease-ended),
+  .timeline-legend .tl-lease-ended {
+    --tl: var(--text-muted);
+    background: color-mix(in srgb, var(--tl) 10%, var(--surface-raised));
   }
-  .timeline-frame :global(.vis-item.tl-lease-expired),
-  .timeline-frame :global(.vis-item.tl-lease-ended) {
-    border-color: var(--text-muted);
-  }
-  .timeline-frame :global(.vis-item.tl-marker) {
+  .timeline-frame :global(.vis-item.tl-marker),
+  .timeline-legend .tl-swatch-glyph {
+    --tl: var(--text-muted);
     background: transparent;
     border: 0;
+    color: var(--tl);
     font-weight: 700;
+  }
+  .timeline-frame :global(.vis-item.tl-marker-milestone),
+  .timeline-legend .tl-marker-milestone {
+    --tl: var(--accent);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-ask),
+  .timeline-legend .tl-marker-ask {
+    --tl: var(--warning);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-check),
+  .timeline-frame :global(.vis-item.tl-marker-done),
+  .timeline-legend .tl-marker-check,
+  .timeline-legend .tl-marker-done {
+    --tl: var(--success);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-closed),
+  .timeline-legend .tl-marker-closed {
+    --tl: var(--text-muted);
+  }
+  .timeline-frame :global(.vis-item.tl-marker .vis-item-content) {
+    color: var(--tl);
+  }
+  .timeline-legend .tl-swatch {
+    display: inline-block;
+    width: 1.25rem;
+    height: 0.75rem;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: 2px;
+  }
+  .timeline-legend .tl-swatch.tl-planned {
+    border-style: dashed;
+  }
+  .timeline-legend .tl-swatch-glyph {
+    display: inline-block;
+    min-width: 1rem;
+    text-align: center;
   }
   .timeline-frame :global(.tl-attention) {
     color: var(--danger);

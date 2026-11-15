@@ -2685,6 +2685,29 @@ stacked below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text
 tokens, light and dark, over vis-timeline's own sheet; at phone the label column is capped at the smaller of 10 rem and
 28 vw (longer labels are ellipsised, the full text is the tooltip) and every label row is at least 44 px high.
 
+*Colours and legend (R2).* Each item sets `--tl` to a design token by its class, and draws itself from it (bars a light
+wash of the token with a solid edge, markers the token itself), so both themes read through the tokens' own values:
+
+| Class | `--tl` |
+|---|---|
+| `tl-actual tl-open` (task bar open) | `--accent` |
+| `tl-actual tl-done` (done) | `--success` |
+| `tl-actual tl-closed` (closed) | `--text-muted` |
+| `tl-planned` (dashed outline, no fill) | `--text-muted` |
+| `tl-lease tl-lease-live` | `--success` |
+| `tl-lease tl-lease-expired` (the amber of a stranded task on Attention) | `--warning` |
+| `tl-lease tl-lease-ended` | `--text-muted` |
+| `tl-marker tl-marker-milestone` | `--accent` |
+| `tl-marker tl-marker-ask` | `--warning` |
+| `tl-marker tl-marker-check` and `tl-marker-done` | `--success` |
+| `tl-marker tl-marker-closed` | `--text-muted` |
+
+The legend (`timeline-legend`, a list labelled "Legend" above the chart) lists exactly these twelve classes, in this
+order, from `TIMELINE_LEGEND` in `web/src/lib/timeline.ts`: Planned, Open, Done, Closed, Lease live, Lease expired, Lease
+ended, then the markers (Milestone, Ask, Check, Marked done, Marked closed) each with its glyph. A swatch carries the same
+classes as the item it explains, so its computed `--tl` is that item's; colour is never the only cue, because every key
+has its label and a marker its glyph.
+
 *Zoom and open.* Two buttons, **Zoom out** (`zoom-out`) and **Zoom in** (`zoom-in`), both 44 px, halve and double the
 visible range without animation; the readout `timeline-span` says it in words ("Showing 3 weeks", `data-span-ms` holds
 the milliseconds, `data-from-ms` and `data-to-ms` the window shown) and each button is disabled at its limit (an hour in,

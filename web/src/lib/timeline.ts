@@ -85,6 +85,34 @@ export const MARKER_GLYPHS: Readonly<Record<MarkerType, string>> = {
   closed: '■',
 };
 
+/** One key of the Timeline's legend: the item classes it shows (styled like the chart's items), a glyph for a marker. */
+export interface LegendEntry {
+  className: string;
+  label: string;
+  glyph?: string;
+}
+
+/**
+ * The legend, in the order it reads. The colours are the view's CSS (Timeline.svelte), on the design tokens: a task bar
+ * open is accent, done success, closed muted, planned a dashed muted outline; a lease live is success, expired warning
+ * (the same amber as a stranded task on Attention), ended muted; a milestone is accent, an ask warning, a check and done
+ * success, a close muted.
+ */
+export const TIMELINE_LEGEND: readonly LegendEntry[] = [
+  { className: 'tl-planned', label: 'Planned' },
+  { className: 'tl-actual tl-open', label: 'Open' },
+  { className: 'tl-actual tl-done', label: 'Done' },
+  { className: 'tl-actual tl-closed', label: 'Closed' },
+  { className: 'tl-lease tl-lease-live', label: 'Lease live' },
+  { className: 'tl-lease tl-lease-expired', label: 'Lease expired' },
+  { className: 'tl-lease tl-lease-ended', label: 'Lease ended' },
+  { className: 'tl-marker tl-marker-milestone', label: 'Milestone', glyph: MARKER_GLYPHS.milestone },
+  { className: 'tl-marker tl-marker-ask', label: 'Ask', glyph: MARKER_GLYPHS.ask },
+  { className: 'tl-marker tl-marker-check', label: 'Check', glyph: MARKER_GLYPHS.check },
+  { className: 'tl-marker tl-marker-done', label: 'Marked done', glyph: MARKER_GLYPHS.done },
+  { className: 'tl-marker tl-marker-closed', label: 'Marked closed', glyph: MARKER_GLYPHS.closed },
+];
+
 const ESCAPES: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 /** Text made safe to hand vis-timeline, which draws `content` and `title` as HTML. */
