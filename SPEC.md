@@ -2772,6 +2772,21 @@ on the empty part of a task row opens the nearest bar in that row within 16 px; 
 `pointerup` or `pointercancel`, the next tap opens normally. Case 2 holds alike for a mouse and a finger: neither task
 opens.
 
+*Keyboard (R9, `operableLabels` and `activatesLabel` in `web/src/lib/timelineView.ts`).* **Every row label is a control.** After
+each redraw each `.vis-label` vis-timeline draws gets `tabindex=0` and `role=button`, so the labels are in the Tab order in
+row order (the DOM order of the label panel, which is the row order: an initiative, then its tasks, then the next
+initiative; the rows of a collapsed initiative are not drawn, so not reached) between the zoom buttons and the page after the
+chart. An initiative's label also carries `aria-expanded`, `true` while its tasks are shown and `false` while collapsed,
+read from the state vis-timeline keeps on the label and written again after every redraw. A focused label shows a 2 px
+`--accent` ring drawn inside it (`:focus-visible`; the label panel would clip a ring outside). **Enter or Space** (bare:
+no Ctrl, Alt, Meta or Shift, and not an auto-repeat) on a focused **task label** opens that task's preview exactly as a click
+does, and the label keeps the focus, so **Escape** or **Close** returns it to that label; on an **initiative label** it
+collapses or expands the initiative through vis-timeline's own toggle (what its tap calls), opens nothing, flips
+`aria-expanded` and is saved with the history entry like a tap's collapse. The label under the key is found by the row at its
+centre, the way a tap finds it. Task bars stay out of the Tab order (`tabindex=-1`, above). `e2e/timeline-keyboard.spec.ts`
+covers it at the desktop viewport with the keyboard only; `e2e/a11y.spec.ts` scans the Timeline with a focused initiative
+label and with a focused task label in both themes.
+
 *Preview (R5).* A click on a task bar, a lease bar, a marker or a task row's label opens a **read-only preview** of that
 task over the chart (`web/src/TaskPreview.svelte`) and does not leave the Timeline; a click on an initiative row collapses
 it instead. The preview is the one `Dialog` (a bottom sheet on a phone, `wide` from 768 px) around `TaskBody` without its
@@ -3088,7 +3103,7 @@ withdraw ask, post note, close from attention, acknowledge and record check from
 the toast it raises once confirmed. The live indicator is held to the bar in each of `live`, `offline` and
 `reconnecting`. No state scrolls sideways or reaches past the viewport at the four widths.
 R12 extends it to Phase 3 in the same way, named in `PHASE3_STATES`: the views `#/timeline` (its filters and frame, the
-filters set to a 40-character slug and handle), `#/actors` and `#/archive`; the Needs attention sections on the Tasks view and on the
+filters set to a 40-character slug and handle; also with a focused initiative label and with a focused task label, R9), `#/actors` and `#/archive`; the Needs attention sections on the Tasks view and on the
 initiative page; the Stranded panel on the task page; the attention chip on the Initiatives list, the attention badges in the task
 header and the attention badge in the navigation; the three dialogs acknowledge on the task page, archive Reopen and the
 force-done confirm; and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables (sorted
@@ -3096,7 +3111,7 @@ through the fragment query, with the sorted header asserted). They are filled wi
 handle, 200-character titles, intents and ways back, 20 resources of 100 characters) and a test names them. The Tasks view, the
 task page, the initiative page and Attention are also held to the bar at 2560x1080 and 3440x1440 (`WIDE_STATE_NAMES`). The
 "Created ... by" line of the task page and of the initiative page wraps anywhere, so a 40-character handle stays inside the column.
-R12 holds the same Phase 3 states to axe in `e2e/a11y.spec.ts` (`PHASE3_STATES`, 18 states, at the phone and the desktop viewport in both themes, the sorted tables opened through the fragment query with the sort asserted: the Sort select at the phone, `aria-sort` on the header from 768 px) and the Tasks view, task page, initiative page and Attention at 2560x1080 in both themes (`WIDE_STATES`). A serious or critical finding fails the scan, and no rule is disabled.
+R12 holds the same Phase 3 states to axe in `e2e/a11y.spec.ts` (`PHASE3_STATES`, 20 states, at the phone and the desktop viewport in both themes, the sorted tables opened through the fragment query with the sort asserted: the Sort select at the phone, `aria-sort` on the header from 768 px) and the Tasks view, task page, initiative page and Attention at 2560x1080 in both themes (`WIDE_STATES`). A serious or critical finding fails the scan, and no rule is disabled.
 
 **Wide layout caps (R13).** On a wide screen the views that are one table or one list do not stretch with the window. Initiatives, Notes, API keys (Settings), Actors and Archive keep their content (`<section>`) at most 1280 px wide and centred in the main column (`mx-auto max-w-[1280px]`), so on a 2560 px or 3440 px screen the table has an equal margin on each side; below 1280 px of main column they take the whole column as before. The Timeline takes the full width of the main column, since a chart gains from the room. Long running text is held to a measure of 75 characters a line: a rendered Markdown description (task descriptions, note bodies, ask details; the `.description` class) has `max-width: 75ch`, and so do an ask's question and answer. `e2e/wide.spec.ts` asserts it at 2560x1080 and 3440x1440 by bounding box and computed style: the Initiatives and Archive tables are at most 1280 px wide with left and right margins equal within 2 px (the same for Notes, API keys and Actors), the Timeline frame is as wide as the main column, and a seeded long task description has a computed `max-width` of at most 75 `ch` and is no wider.
 

@@ -7,7 +7,7 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. R12 (Phase 3) adds PHASE3_STATES, the finite list of 18 states: the views `#/timeline`, `#/actors` and `#/archive`, the Needs attention sections of the Tasks view and the initiative page, the Stranded panel, the attention chip, badges and navigation badge, the three new dialogs (acknowledge on the task page, archive Reopen, force-done confirm) and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables; they run at the phone and the desktop viewport in both themes. WIDE_STATES scans the Tasks view, the task page, the initiative page and Attention at 2560x1080 in both themes. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. R12 (Phase 3) adds PHASE3_STATES, the finite list of 20 states: the views `#/timeline` (also with a focused initiative label and with a focused task label), `#/actors` and `#/archive`, the Needs attention sections of the Tasks view and the initiative page, the Stranded panel, the attention chip, badges and navigation badge, the three new dialogs (acknowledge on the task page, archive Reopen, force-done confirm) and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables; they run at the phone and the desktop viewport in both themes. WIDE_STATES scans the Tasks view, the task page, the initiative page and Attention at 2560x1080 in both themes. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -625,6 +625,20 @@ async function expectSorted(page: Page, column: string, dir: 'asc' | 'desc') {
 
 type Phase3State = { name: string; open: (page: Page, seed: Seed3) => Promise<void> };
 
+// The Timeline of the Phase 3 seed with the focus on one of its row labels, reached by Tab from the last zoom button (`tabs`
+// presses: 1 the initiative's label, 2 its first task's). vis-timeline settles its rows a moment after the first draw and a
+// label focused then loses the focus, so the move is made again until it holds.
+async function focusTimelineLabel(page: Page, tabs: number, selector: string) {
+  await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
+  await expect(page.locator('.vis-labelset .vis-label.tl-task').first()).toBeVisible();
+  await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+  await expect(async () => {
+    await page.getByTestId('zoom-in').focus();
+    for (let i = 0; i < tabs; i++) await page.keyboard.press('Tab');
+    await expect(page.locator(selector).first()).toBeFocused({ timeout: 500 });
+  }).toPass({ timeout: 5000 });
+}
+
 // The finite list of Phase 3 states this spec scans: the 3 views, the Needs attention sections of the Tasks view and the initiative
 // page, the Stranded panel, the 3 attention chips and badges, the 3 new dialogs and the 6 sorted tables.
 const PHASE3_STATES: Phase3State[] = [
@@ -636,6 +650,19 @@ const PHASE3_STATES: Phase3State[] = [
       await expect(page.getByTestId('timeline-legend')).toBeVisible(); // the legend is part of the scanned view
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
       await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+    },
+  },
+  {
+    name: 'view #/timeline with a focused initiative label',
+    open: async (page) => {
+      await focusTimelineLabel(page, 1, '.vis-labelset .vis-label.tl-initiative');
+      await expect(page.locator('.vis-labelset .vis-label.tl-initiative').first()).toHaveAttribute('aria-expanded', 'true');
+    },
+  },
+  {
+    name: 'view #/timeline with a focused task label',
+    open: async (page) => {
+      await focusTimelineLabel(page, 2, '.vis-labelset .vis-label.tl-task');
     },
   },
   {
@@ -957,9 +984,11 @@ test('the Phase 2 list names the 2 views, the six dialogs and the three live ind
   expect(LIVE_STATES).toEqual(['live', 'offline', 'reconnecting']);
 });
 
-test('the Phase 3 list names the 3 views, the Needs attention sections, the Stranded panel, the chips, the 3 dialogs and the 6 sorted tables, and the wide list the 4 views', () => {
+test('the Phase 3 list names the 3 views (the Timeline also with a focused label of each kind), the Needs attention sections, the Stranded panel, the chips, the 3 dialogs and the 6 sorted tables, and the wide list the 4 views', () => {
   expect(PHASE3_STATES.map((s) => s.name)).toEqual([
     'view #/timeline',
+    'view #/timeline with a focused initiative label',
+    'view #/timeline with a focused task label',
     'view #/actors',
     'view #/archive',
     'Needs attention on #/tasks',

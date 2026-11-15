@@ -351,6 +351,11 @@
     border-color: var(--border);
     cursor: pointer;
   }
+  /* The ring sits inside the label: the label panel clips whatever is drawn outside it. */
+  .timeline-frame :global(.vis-labelset .vis-label:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
   .timeline-frame :global(.vis-labelset .vis-label.vis-nested-group) {
     background: var(--surface);
   }

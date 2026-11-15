@@ -208,6 +208,8 @@ export interface ChartTimeline {
   redraw(): void;
   zoomIn(percentage: number, options: { animation: boolean }): void;
   zoomOut(percentage: number, options: { animation: boolean }): void;
+  /** vis-timeline's row store, where an initiative's collapse is toggled (what its own tap on the label calls); absent in a fake. */
+  itemSet?: { groups: Record<string, unknown>; toggleGroupShowNested(group: unknown): void };
 }
 
 /** vis-timeline's classes, passed in by the view that imports them. */
@@ -347,7 +349,7 @@ export function timeAt(range: MsRange, x: number, width: number): number {
 
 /** The part of the DOM the wheel handler and the gesture tracker read: vis-timeline's container and its centre panel. */
 interface ChartDom {
-  ownerDocument?: Partial<Pick<Document, 'elementFromPoint'>> | null;
+  ownerDocument?: Partial<Pick<Document, 'elementFromPoint' | 'activeElement' | 'body'>> | null;
   addEventListener?: HTMLElement['addEventListener'];
   removeEventListener?: HTMLElement['removeEventListener'];
   querySelector?: HTMLElement['querySelector'];
@@ -592,6 +594,55 @@ function focusableBars(container: ChartDom): void {
   });
 }
 
+/** A row label: vis-timeline draws one `.vis-label` per visible row, in row order (an initiative's also `.vis-nesting-group`). */
+const ROW_LABEL = '.vis-label';
+
+/**
+ * Puts every row label in the Tab order, in row order, as a button, and says on an initiative's whether its tasks are
+ * shown (`aria-expanded`, from the `expanded` or `collapsed` class vis-timeline keeps on it). A label drawn since the last
+ * call is made one; the state is read again on each call. Run after each redraw.
+ */
+export function operableLabels(container: ChartDom): void {
+  container.querySelectorAll?.<HTMLElement>(ROW_LABEL).forEach((label) => {
+    if (!label.hasAttribute('tabindex')) {
+      label.tabIndex = 0;
+      label.setAttribute('role', 'button');
+    }
+    if (label.classList.contains('vis-nesting-group')) label.setAttribute('aria-expanded', String(label.classList.contains('expanded')));
+  });
+}
+
+/** Whether a key press activates a focused label: Enter or Space, bare and not held down (a held key would toggle again and again). */
+export function activatesLabel(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'repeat'>): boolean {
+  if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.repeat) return false;
+  return event.key === 'Enter' || event.key === ' ';
+}
+
+/** The point at the middle of a label, where vis-timeline finds its row (the row it is the label of). */
+function centreOf(label: Element): PointAt {
+  const box = label.getBoundingClientRect();
+  return { target: label, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+}
+
+/**
+ * Gives `label` the focus back when a redraw dropped it: to reorder its rows after a collapse or an expand vis-timeline takes
+ * every label out of the page and puts them back, and a focused one is left with no focus at all (the body has it). A focus
+ * that went anywhere else is not taken.
+ */
+export function refocusLabel(container: ChartDom, label: HTMLElement): void {
+  const doc = container.ownerDocument;
+  const active = doc?.activeElement;
+  if (!label.isConnected || (active !== null && active !== undefined && active !== doc?.body)) return;
+  label.focus({ preventScroll: true });
+}
+
+/** Hears the chart's key presses. */
+function listenKeys(container: ChartDom, onkey: (event: KeyboardEvent) => void): () => void {
+  if (typeof container.addEventListener !== 'function') return () => undefined;
+  container.addEventListener('keydown', onkey);
+  return () => container.removeEventListener?.('keydown', onkey);
+}
+
 /** What the view hands the chart: where a click on a task goes, where arrows are drawn, and who hears the range. */
 export interface ChartHooks {
   open(ref: string): void;
@@ -736,6 +787,23 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     hooks.open(ref);
   };
   const unlistenClicks = listenClicks(container, onclick);
+  // Enter or Space on a focused row label does what a tap on it does: a task's opens its preview (the label keeps the focus,
+  // which the dialog gives back on close), an initiative's collapses or expands it.
+  let toggled: HTMLElement | undefined;
+  const onkey = (event: KeyboardEvent) => {
+    const label = labelOf(event.target);
+    if (label === null || label !== event.target || !activatesLabel(event)) return;
+    event.preventDefault();
+    const row = pressOf(centreOf(label), timeline, container, byId);
+    if (row.key.startsWith('t:')) hooks.open(row.key.slice(2));
+    else if (row.key.startsWith('g:')) {
+      const sets = timeline.itemSet;
+      sets?.toggleGroupShowNested(sets.groups[row.key.slice(2)]);
+      operableLabels(container);
+      toggled = label as HTMLElement;
+    }
+  };
+  const unlistenKeys = listenKeys(container, onkey);
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
   // range moves (a zoom, a pan). The span readout and the arrows follow all three.
   // vis-timeline collapses or expands an initiative on its own tap and redraws; the redraw is where it shows.
@@ -752,6 +820,9 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     drawArrows(hooks.arrows, current.dependencies);
     rows.settle();
     focusableBars(container);
+    operableLabels(container);
+    if (toggled !== undefined) refocusLabel(container, toggled);
+    toggled = undefined; // only the redraw its own toggle caused
     reportCollapse();
   };
   timeline.on('changed', sync);
@@ -786,6 +857,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     destroy() {
       unlistenWheel();
       unlistenClicks();
+      unlistenKeys();
       gestures.stop();
       rows.stop();
       timeline.destroy();

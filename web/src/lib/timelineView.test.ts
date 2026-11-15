@@ -585,6 +585,7 @@ describe('mountChart', () => {
       setOptions = vi.fn();
       window = { start: new Date(0), end: new Date(2 * DAY_MS) };
       listeners = new Map<string, Listener>();
+      itemSet?: { groups: Record<string, unknown>; toggleGroupShowNested(group: unknown): void };
       constructor(
         readonly container: unknown,
         readonly items: FakeData<unknown>,
@@ -650,7 +651,7 @@ describe('mountChart', () => {
   });
 
   /** A chart container; with `hitTest`, it sits in a document whose hit test answers `under` (set by `lift`). */
-  function fakeContainer(bars: unknown[] = [], hitTest = false) {
+  function fakeContainer(bars: unknown[] = [], hitTest = false, labels: unknown[] = []) {
     const listeners = new Map<string, (e: unknown) => void>();
     const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
     const left = { scrollTop: 0, scrollHeight: 0, clientHeight: 400 };
@@ -667,7 +668,7 @@ describe('mountChart', () => {
       addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
       removeEventListener: (type: string) => listeners.delete(type),
       querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
-      querySelectorAll: (sel: string) => (sel.startsWith('.vis-item[data-task]') ? bars : []),
+      querySelectorAll: (sel: string) => (sel.startsWith('.vis-item[data-task]') ? bars : sel === '.vis-label' ? labels : []),
     };
     const wheel = (over: object) => {
       const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
@@ -684,7 +685,13 @@ describe('mountChart', () => {
       if (target !== null) hitProps.set(target, props);
       pointer('pointerup', pointerId, x, y, { target: 'the element it went down on' });
     };
-    return { container: container as unknown as HTMLElement, listeners, wheel, pointer, click, lift, hits, left };
+    /** A key goes down on `target`; `preventDefault` says whether the chart took it. */
+    const key = (target: unknown, over: object = {}) => {
+      const e = { key: 'Enter', target, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, repeat: false, preventDefault: vi.fn(), ...over };
+      listeners.get('keydown')?.(e);
+      return e;
+    };
+    return { container: container as unknown as HTMLElement, listeners, wheel, pointer, click, lift, hits, left, key };
   }
 
   it('reports the rows scrolling and puts a saved scroll back once the rows are tall enough', () => {
@@ -1077,6 +1084,137 @@ describe('mountChart', () => {
    * element. The fake chart reads a fake event's `props` as what vis-timeline finds under it and its `target` as the element
    * hit, so each case drives pointer events and a click the way a browser delivers them.
    */
+  describe('row labels from the keyboard (R9)', () => {
+    /** A row label as vis-timeline draws it: with the classes it keeps and the attributes the view adds. */
+    function labelEl(classes: string[], top = 0) {
+      const attrs = new Map<string, string>();
+      const set = new Set(classes);
+      const el = {
+        tabIndex: -1,
+        classList: { contains: (c: string) => set.has(c) },
+        hasAttribute: (name: string) => (name === 'tabindex' ? el.tabIndex >= 0 : attrs.has(name)),
+        setAttribute: (name: string, value: string) => attrs.set(name, value),
+        attrs,
+        set,
+        closest: (selector: string) => (selector === '.vis-label' ? el : null),
+        getBoundingClientRect: () => ({ left: 0, top, width: 80, height: 44 }),
+      };
+      return el;
+    }
+
+    it('puts each label in the Tab order as a button, and gives an initiative its state, read again on every redraw', () => {
+      const { lib, made } = fakeLib();
+      const group = labelEl(['vis-label', 'vis-nesting-group', 'expanded']);
+      const task = labelEl(['vis-label', 'vis-nested-group']);
+      const c = fakeContainer([], false, [group, task]);
+      mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+      made[0]!.emit('changed');
+      expect([group.tabIndex, task.tabIndex]).toEqual([0, 0]);
+      expect([group.attrs.get('role'), task.attrs.get('role')]).toEqual(['button', 'button']);
+      expect(group.attrs.get('aria-expanded')).toBe('true');
+      expect(task.attrs.has('aria-expanded')).toBe(false); // a task row has nothing to expand
+      group.set.delete('expanded');
+      group.set.add('collapsed');
+      made[0]!.emit('changed');
+      expect(group.attrs.get('aria-expanded')).toBe('false');
+    });
+
+    it('opens the task of a label on Enter or Space, and does nothing for any other key, modifier, repeat or element', () => {
+      const { lib } = fakeLib();
+      const h = hooks();
+      const task = labelEl(['vis-label']);
+      const c = fakeContainer([], false, [task]);
+      mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+      hitProps.set(task, { what: 'group-label', group: 't:A1' });
+      const enter = c.key(task);
+      expect(enter.preventDefault).toHaveBeenCalledTimes(1);
+      const space = c.key(task, { key: ' ' });
+      expect(space.preventDefault).toHaveBeenCalledTimes(1);
+      expect(h.opened).toEqual(['A1', 'A1']);
+      for (const over of [{ key: 'a' }, { key: 'Tab' }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }, { repeat: true }]) {
+        expect(c.key(task, over).preventDefault).not.toHaveBeenCalled();
+      }
+      const bar = { closest: () => null };
+      expect(c.key(bar).preventDefault).not.toHaveBeenCalled(); // not a label
+      const inner = { closest: () => task };
+      expect(c.key(inner).preventDefault).not.toHaveBeenCalled(); // a label's child is not the focused label
+      expect(h.opened).toEqual(['A1', 'A1']);
+    });
+
+    it('collapses or expands an initiative on Enter or Space through vis-timeline, opens nothing, and shows the state at once', () => {
+      const { lib, made } = fakeLib();
+      const h = hooks();
+      const group = labelEl(['vis-label', 'vis-nesting-group', 'expanded']);
+      const c = fakeContainer([], false, [group]);
+      mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+      const vis = { id: 'the vis group' };
+      const toggle = vi.fn(() => {
+        group.set.delete('expanded');
+        group.set.add('collapsed');
+      });
+      made[0]!.itemSet = { groups: { 'i:alpha': vis }, toggleGroupShowNested: toggle };
+      hitProps.set(group, { what: 'group-label', group: 'i:alpha' });
+      c.key(group, { key: ' ' });
+      expect(toggle).toHaveBeenCalledWith(vis);
+      expect(group.attrs.get('aria-expanded')).toBe('false');
+      expect(h.opened).toEqual([]);
+    });
+
+    it('gives the focus back to the label it collapsed when the redraw dropped it, once, and takes it from nowhere else', () => {
+      const { lib, made } = fakeLib();
+      const group = Object.assign(labelEl(['vis-label', 'vis-nesting-group', 'expanded']), { isConnected: true, focus: vi.fn() });
+      const c = fakeContainer([], false, [group]);
+      const body = {};
+      const doc = { activeElement: body as unknown, body };
+      Object.assign(c.container, { ownerDocument: doc });
+      mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+      made[0]!.itemSet = { groups: { 'i:alpha': {} }, toggleGroupShowNested: vi.fn() };
+      hitProps.set(group, { what: 'group-label', group: 'i:alpha' });
+      made[0]!.emit('changed');
+      expect(group.focus).not.toHaveBeenCalled(); // nothing was toggled
+      c.key(group);
+      made[0]!.emit('changed'); // the redraw left the focus on the body
+      expect(group.focus).toHaveBeenCalledTimes(1);
+      expect(group.focus).toHaveBeenCalledWith({ preventScroll: true });
+      made[0]!.emit('changed');
+      expect(group.focus).toHaveBeenCalledTimes(1); // only the redraw its own toggle caused
+      c.key(group);
+      doc.activeElement = {}; // the focus went to another element
+      made[0]!.emit('changed');
+      doc.activeElement = group;
+      c.key(group);
+      made[0]!.emit('changed'); // the label still has it
+      group.isConnected = false;
+      doc.activeElement = body;
+      c.key(group);
+      made[0]!.emit('changed'); // and a label no longer drawn is left alone
+      expect(group.focus).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing for a label it finds no row for, and survives a chart with no row store', () => {
+      const { lib } = fakeLib();
+      const h = hooks();
+      const lost = labelEl(['vis-label']);
+      const group = labelEl(['vis-label', 'vis-nesting-group', 'expanded']);
+      const c = fakeContainer([], false, [lost, group]);
+      mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+      expect(c.key(lost).preventDefault).toHaveBeenCalledTimes(1); // the key is taken, nothing is found under it
+      hitProps.set(group, { what: 'group-label', group: 'i:alpha' });
+      expect(c.key(group).preventDefault).toHaveBeenCalledTimes(1); // vis-timeline offers no itemSet
+      expect(h.opened).toEqual([]);
+      expect(group.attrs.get('aria-expanded')).toBe('true');
+    });
+
+    it('hears no key once the chart is destroyed', () => {
+      const { lib } = fakeLib();
+      const c = fakeContainer([], false, []);
+      const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+      expect(c.listeners.has('keydown')).toBe(true);
+      chart.destroy();
+      expect(c.listeners.has('keydown')).toBe(false);
+    });
+  });
+
   describe('the tap rule', () => {
     interface Fake {
       closest(selector: string): Fake | null;
