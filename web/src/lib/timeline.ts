@@ -2,9 +2,10 @@
 // encodes the view's filters in the URL fragment's query (`#/timeline?initiative=aa&tag=work&actor=ada&closed=30`) and
 // in the query of `GET /timeline`.
 //
-// Groups are initiatives (collapsible, holding their tasks as `nestedGroups`) and tasks. A task row carries, as items
-// in three subgroups: a light planned bar, the actual span (created, to closed or now), and one bar per lease coloured
-// by state, stacked; markers are points. Dependencies come out as pairs of actual-span item ids for an arrow drawer.
+// Groups are initiatives (collapsible, holding their tasks as `nestedGroups`) and tasks. A task row carries a light
+// planned bar, the actual span (created, to closed or now), one bar per lease coloured by state, and markers as points.
+// Each kind keeps a lane of its own at a fixed place in a row of fixed height (Timeline.svelte), never stacked, so a
+// row is as tall wherever the chart is scrolled to. Dependencies come out as pairs of actual-span item ids for an arrow drawer.
 // Text that vis-timeline renders as HTML (`content`, `title`) is escaped here.
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
@@ -31,9 +32,6 @@ export interface TimelineGroup {
   /** An initiative lists its task groups here; it can be collapsed. */
   nestedGroups?: string[];
   showNested?: boolean;
-  /** A task row's own subgroups: planned and actual overlap, lease bars stack. */
-  subgroupOrder?: string;
-  subgroupStack?: Record<string, boolean>;
   /** The ref of a task row, or the slug of an initiative row. */
   ref: string;
   /** The R2 attention label of a task row (the badges' texts joined); empty when the task needs nothing. */
@@ -44,7 +42,6 @@ export interface TimelineGroup {
 export interface TimelineItem {
   id: string;
   group: string;
-  subgroup: string;
   kind: ItemKind;
   type: 'range' | 'point';
   /** The text drawn on the item, as HTML. */
@@ -165,8 +162,6 @@ function taskGroup(task: TimelineTask, order: number): TimelineGroup {
     order,
     className: label === '' ? 'tl-task' : 'tl-task tl-needs-attention',
     title: escapeHtml(label === '' ? text : `${text} (needs attention: ${label})`),
-    subgroupOrder: 'subgroupOrder',
-    subgroupStack: { planned: false, actual: false, lease: true },
     ref: task.ref,
     attentionLabel: label,
   };
@@ -180,7 +175,6 @@ function plannedItem(task: TimelineTask): TimelineItem | undefined {
   return {
     id: plannedItemId(task.ref),
     group: taskGroupId(task.ref),
-    subgroup: 'planned',
     kind: 'planned',
     type: 'range',
     content: '',
@@ -199,7 +193,6 @@ function actualItem(task: TimelineTask, nowIso: string): TimelineItem {
   return {
     id,
     group: taskGroupId(task.ref),
-    subgroup: 'actual',
     kind: 'actual',
     type: 'range',
     content: escapeHtml(task.title),
@@ -221,7 +214,6 @@ function leaseItem(lease: TimelineLease, nowIso: string): TimelineItem {
   return {
     id: leaseItemId(lease.ref),
     group: taskGroupId(lease.task),
-    subgroup: 'lease',
     kind: 'lease',
     type: 'range',
     content: escapeHtml(lease.holder),
@@ -238,7 +230,6 @@ function markerItem(marker: TimelineMarker, index: number): TimelineItem {
   return {
     id: `marker:${marker.task}:${marker.type}:${marker.at}:${index}`,
     group: taskGroupId(marker.task),
-    subgroup: 'marker',
     kind: 'marker',
     type: 'point',
     content: MARKER_GLYPHS[marker.type],

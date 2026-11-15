@@ -29,6 +29,7 @@ import {
   mountChart,
   isTap,
   nearestBar,
+  pressOpens,
   TAP_SLOP_PX,
   openTimeline,
   PAN_DEBOUNCE_MS,
@@ -46,6 +47,7 @@ import {
   type ChartClick,
   type ChartHooks,
   type ChartLib,
+  type Press,
   type TimelineViewState,
   type Timers,
   type TimeWindow,
@@ -229,7 +231,7 @@ describe('chartOptions', () => {
       zoomMax: 92 * DAY_MS,
       orientation: 'top',
       stack: false,
-      stackSubgroups: true,
+      margin: { item: { horizontal: 10, vertical: 0 } },
       groupOrder: 'order',
       selectable: false,
       verticalScroll: true,
@@ -633,11 +635,15 @@ describe('mountChart', () => {
     const { lib } = fakeLib();
     const h = hooks();
     // Row t:A1 has a 2 px bar at x 200..202 (y 10..46); row t:A2 below it has a bar at x 300..360 (y 60..96).
-    const bar = (id: string, task: string, left: number, top: number, width: number) => ({
-      dataset: { id, task },
-      focus: vi.fn(),
-      getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + 36 }),
-    });
+    const bar = (id: string, task: string, left: number, top: number, width: number) => {
+      const el = {
+        dataset: { id, task },
+        focus: vi.fn(),
+        getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + 36 }),
+        closest: (sel: string) => (sel === '.vis-item[data-task]' ? el : null),
+      };
+      return el;
+    };
     const thin = bar('act:A1', 'A1', 200, 10, 2);
     const wide = bar('act:A2', 'A2', 300, 60, 60);
     const c = fakeContainer([thin, wide]);
@@ -663,7 +669,7 @@ describe('mountChart', () => {
     mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
     // The first finger of a gesture is the primary pointer, as in a browser.
     const pointer = (type: string, pointerId: number, clientX: number, clientY = 0, isPrimary = pointerId !== 2) =>
-      c.listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary });
+      c.listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary, props: { what: 'item', item: 'act:A1' } });
     const click = () => c.click({ what: 'item', item: 'act:A1' });
 
     pointer('pointerdown', 1, 0);
@@ -696,7 +702,8 @@ describe('mountChart', () => {
     const h = hooks();
     const c = fakeContainer();
     mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
-    const pointer = (type: string, pointerId: number, isPrimary = true) => c.listeners.get(type)?.({ pointerId, clientX: 0, clientY: 0, isPrimary });
+    const pointer = (type: string, pointerId: number, isPrimary = true) =>
+      c.listeners.get(type)?.({ pointerId, clientX: 0, clientY: 0, isPrimary, props: { what: 'item', item: 'act:A1' } });
     const tap = (pointerId: number) => {
       pointer('pointerdown', pointerId);
       pointer('pointerup', pointerId);
@@ -713,6 +720,58 @@ describe('mountChart', () => {
     pointer('pointerup', 4);
     c.click({ what: 'item', item: 'act:A1' });
     expect(h.opened).toEqual(['A1', 'A1']);
+  });
+
+  it('opens a task only when the tap went down on that same task, element and place', () => {
+    const { lib } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1', 'A2']), initialWindow(NOW), h.h);
+    let top = 100;
+    const label = { getBoundingClientRect: () => ({ top }) };
+    const on = { closest: (sel: string) => (sel === '.vis-label' ? label : null) };
+    const down = (props: ChartClick) => c.listeners.get('pointerdown')?.({ pointerId: 1, clientX: 0, clientY: 0, isPrimary: true, props, target: on });
+    const tap = (downOn: ChartClick, clickOn: ChartClick) => {
+      down(downOn);
+      c.listeners.get('pointerup')?.({ pointerId: 1, clientX: 0, clientY: 0 });
+      c.click(clickOn, { target: on });
+    };
+
+    tap({ what: 'group-label', group: 't:A1' }, { what: 'group-label', group: 't:A1' });
+    expect(h.opened).toEqual(['A1']);
+    // vis-timeline collapsed the initiative on its own tap, and the click found the task row that moved under the finger.
+    tap({ what: 'group-label', group: 'i:alpha' }, { what: 'group-label', group: 't:A2' });
+    tap({ what: 'group-label', group: 'i:alpha' }, { what: 'group-label', group: 'i:alpha' });
+    tap({ what: 'item', item: 'act:A1' }, { what: 'item', item: 'act:A2' });
+    expect(h.opened).toEqual(['A1']);
+    down({ what: 'group-label', group: 't:A1' });
+    top = 140; // the rows moved between the press and the click
+    c.click({ what: 'group-label', group: 't:A1' }, { target: on });
+    expect(h.opened).toEqual(['A1']);
+    c.click({ what: 'group-label', group: 't:A1' }, { target: on }); // a click with no press seen (a synthetic one)
+    expect(h.opened).toEqual(['A1', 'A1']);
+  });
+
+  describe('pressOpens', () => {
+    const el = {} as Element;
+    const other = {} as Element;
+    const at = (key: string, e: Element | null = el, top = 0): Press => ({ key, el: e, top });
+    it('opens the task of a click whose press began on it', () => {
+      expect(pressOpens(at('t:A1'), at('t:A1', el, 0.5))).toBe('A1');
+      expect(pressOpens(undefined, at('t:A1'))).toBe('A1');
+      expect(pressOpens(at('t:A1', null), at('t:A1', null))).toBe('A1');
+    });
+    it('opens nothing when the press was elsewhere, on another element, or the element moved', () => {
+      expect(pressOpens(at('g:i:alpha'), at('t:A1'))).toBeUndefined();
+      expect(pressOpens(at(''), at('t:A1'))).toBeUndefined();
+      expect(pressOpens(at('t:A2'), at('t:A1'))).toBeUndefined();
+      expect(pressOpens(at('t:A1', other), at('t:A1'))).toBeUndefined();
+      expect(pressOpens(at('t:A1', el, 0), at('t:A1', el, 2))).toBeUndefined();
+    });
+    it('never opens from an initiative row or nothing', () => {
+      expect(pressOpens(at('g:i:alpha'), at('g:i:alpha'))).toBeUndefined();
+      expect(pressOpens(undefined, at(''))).toBeUndefined();
+    });
   });
 
   it('opens the task of a focused bar on Enter or Space, and leaves other keys and other elements alone', () => {

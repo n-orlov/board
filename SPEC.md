@@ -1432,13 +1432,18 @@ their `lease_expired` events, then reads; it writes nothing else.
 **The Timeline view's mapping** (`web/src/lib/timeline.ts`, vis-timeline bundled with the app, no CDN) turns that answer
 into rows and items. Initiatives are collapsible groups holding their tasks as nested groups. A task row carries a light
 planned bar (`planned_start` to `planned_end`, one end alone standing for both), the actual span (`created_at` to
-`closed_at`, or to now while it is open), one bar per lease in the stacked lease subgroup coloured by its state (`live`,
+`closed_at`, or to now while it is open), one bar per lease in the lease lane coloured by its state (`live`,
 `ended`, `expired`, the bar of a live lease running to now) with the lease's ref, state, holder, intent and times in its
 tooltip, and one point per marker with a class and glyph of its type. A task that needs attention shows its R2 badge text
 on the row label. A dependency is a pair from the blocking task's actual span to the blocked task's, left out when the
 blocking task is not in the window. The view's filters live in the URL fragment's query as `initiative` and `tag`
 (repeated), `actor` and `closed` (`7`, `30` or `90`; absent is off), and `GET /timeline` gets them as `initiative`, `tag`,
-`actor` and `closed_within=<n>d` with the visible window as `from` and `to`.
+`actor` and `closed_within=<n>d` with the visible window as `from` and `to` and `rows=all`, so the rows are every task
+the filters keep and panning or zooming never adds, drops, reorders or resizes a row: every row has a fixed height and
+each kind of item a fixed lane in it (planned on top, the actual span with the markers, the leases below, overlapping
+leases sharing their lane), with no stacking. A tap opens a task only when it went down on that same task (its bar, a
+bar within reach in its row, or its row label) and nothing moved under it before the click; a tap on an initiative's
+label only collapses or expands it.
 
 ### 6.11 Actors
 

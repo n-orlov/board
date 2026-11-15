@@ -220,8 +220,9 @@ export interface ChartOptions {
   zoomMin: number;
   zoomMax: number;
   orientation: 'top';
+  /** No stacking: every item sits at the top of its row and its lane's CSS places it, so rows keep one height. */
   stack: boolean;
-  stackSubgroups: boolean;
+  margin: { item: { horizontal: number; vertical: number } };
   groupOrder: 'order';
   selectable: boolean;
   /** Rows scroll inside the chart (so the time axis stays in view), by wheel, drag and the side scrollbar. */
@@ -255,7 +256,7 @@ export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHA
     zoomMax: ZOOM_MAX_MS,
     orientation: 'top',
     stack: false,
-    stackSubgroups: true,
+    margin: { item: { horizontal: 10, vertical: 0 } },
     groupOrder: 'order',
     selectable: false,
     verticalScroll: true,
@@ -421,18 +422,22 @@ export function isTap(gesture: Gesture, slop: number = TAP_SLOP_PX): boolean {
 
 /**
  * Follows the pointers on the chart, so a drag or a pinch that ends over a bar does not open it. A gesture starts when
- * the first pointer goes down: one that is primary (no other pointer of its kind is down) or none other is known to be.
+ * the first pointer goes down: one that is primary (no other pointer of its kind is down) or none other is known to be;
+ * `onstart` hears that pointerdown.
  *
  * A pointer can leave without its pointerup or pointercancel reaching the chart: on Chrome for Android a swipe on a row
  * label lost its capture and never ended. Were it still counted, every later tap would look like a pinch and open
  * nothing until a reload; so a primary pointer starts afresh, and losing the capture ends a pointer too.
  */
-export function gestureTracker(container: ChartDom) {
+export function gestureTracker(container: ChartDom, onstart: (event: PointerEvent) => void = () => undefined) {
   const down = new Map<number, { x: number; y: number }>();
   let gesture: Gesture = { pointers: 0, moved: 0 };
   const ondown = (e: PointerEvent) => {
     if (e.isPrimary) down.clear();
-    if (down.size === 0) gesture = { pointers: 0, moved: 0 };
+    if (down.size === 0) {
+      gesture = { pointers: 0, moved: 0 };
+      onstart(e);
+    }
     down.set(e.pointerId, { x: e.clientX, y: e.clientY });
     gesture.pointers += 1;
   };
@@ -476,22 +481,53 @@ function barBoxes(container: ChartDom, itemOf: (id: string) => TimelineItem | un
   });
 }
 
+/** A task row's or an initiative row's label an event happened on, or null. */
+function labelOf(target: unknown): Element | null {
+  const el = target as Partial<Pick<Element, 'closest'>> | null | undefined;
+  return typeof el?.closest === 'function' ? el.closest('.vis-label') : null;
+}
+
 /**
- * The task a click on the chart opens, and the bar to give the focus to: what vis-timeline finds under it (a bar or a task
- * row's label), else the nearest bar of the row whose empty part it landed on, within TAP_REACH_PX.
+ * What a press or a click is on: `key` names a task to open (`t:` and its ref) or an initiative row (`g:` and its group
+ * id), and is empty on anything else; `el` is the element it is on (the bar, the bar beside it or the row label) and
+ * `top` that element's top on screen then.
  */
-function tappedTask(
-  event: MouseEvent,
-  timeline: ChartTimeline,
-  container: ChartDom,
-  itemOf: (id: string) => TimelineItem | undefined,
-): { ref: string; bar: HTMLElement | null } | undefined {
+export interface Press {
+  key: string;
+  el: Element | null;
+  top: number;
+}
+
+function press(key: string, el: Element | null): Press {
+  return { key, el, top: typeof el?.getBoundingClientRect === 'function' ? el.getBoundingClientRect().top : 0 };
+}
+
+/**
+ * What an event on the chart is on: what vis-timeline finds under it (a bar or a row's label), else the nearest bar of
+ * the row whose empty part it landed on, within TAP_REACH_PX.
+ */
+function pressOf(event: MouseEvent, timeline: ChartTimeline, container: ChartDom, itemOf: (id: string) => TimelineItem | undefined): Press {
   const props = timeline.getEventProperties(event);
   const ref = clickedTask(props, itemOf);
-  if (ref !== undefined) return { ref, bar: barOf(event.target) };
-  if (props.what !== 'background' || props.group === undefined || props.group === null) return undefined;
+  if (ref !== undefined) return press(`t:${ref}`, barOf(event.target) ?? labelOf(event.target));
+  if (props.group === undefined || props.group === null) return press('', null);
+  if (props.what === 'group-label') return press(`g:${String(props.group)}`, labelOf(event.target));
+  if (props.what !== 'background') return press('', null);
   const near = nearestBar(barBoxes(container, itemOf), event.clientX, event.clientY, String(props.group));
-  return near === undefined || near.task === '' ? undefined : { ref: near.task, bar: near.el };
+  return near === undefined || near.task === '' ? press('', null) : press(`t:${near.task}`, near.el);
+}
+
+/**
+ * The task a click opens: the one it is on, but only when the press it ends began on that same task and element and the
+ * element has not moved since. Between the press and the click vis-timeline may collapse or expand an initiative (its
+ * own tap on the label), or new rows may be drawn, and the click then lands on whatever moved under the finger: it opens
+ * nothing. An initiative's label only collapses or expands it. A click with no press seen (a synthetic one) opens what it
+ * is on.
+ */
+export function pressOpens(down: Press | undefined, up: Press): string | undefined {
+  if (!up.key.startsWith('t:')) return undefined;
+  if (down !== undefined && (down.key !== up.key || down.el !== up.el || Math.abs(down.top - up.top) > 1)) return undefined;
+  return up.key.slice(2);
 }
 
 /** Makes every task bar a button for the keyboard (Tab reaches it, Enter or Space opens it); once per bar vis-timeline draws. */
@@ -586,18 +622,26 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
   const heldItems: Held = new Map(model.items.map((i) => [i.id, JSON.stringify(i)]));
   const byId = (id: string) => current.items.find((item) => item.id === id);
-  const gestures = gestureTracker(container);
+  // What a tap is on is taken when it goes down, before vis-timeline acts on it (it collapses an initiative on its own
+  // tap, ahead of the click), and the click opens it only if it is still the same (pressOpens).
+  let pressed: Press | undefined;
+  const gestures = gestureTracker(container, (event) => {
+    pressed = pressOf(event, timeline, container, byId);
+  });
   const unlistenKeys = listenKeys(container, (ref) => hooks.open(ref));
   // The browser's own click opens a task, not vis-timeline's `click`: that one fires twice for a tap (from its tap
   // recogniser on pointerup, then from the DOM click), and the first, which also drops a press held past 250 ms, would
   // open the dialog before the browser's click, which then lands on the dialog (its backdrop closes it).
   const onclick = (event: MouseEvent) => {
+    const down = pressed;
+    pressed = undefined;
     if (!gestures.tapped()) return;
-    const tapped = tappedTask(event, timeline, container, byId);
-    if (tapped === undefined) return;
+    const up = pressOf(event, timeline, container, byId);
+    const ref = pressOpens(down, up);
+    if (ref === undefined) return;
     // The bar tapped takes the focus first, so a dialog the view opens gives it back to that bar when it closes.
-    tapped.bar?.focus({ preventScroll: true });
-    hooks.open(tapped.ref);
+    barOf(up.el)?.focus({ preventScroll: true });
+    hooks.open(ref);
   };
   const unlistenClicks = listenClicks(container, onclick);
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the

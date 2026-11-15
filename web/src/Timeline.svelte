@@ -326,11 +326,10 @@
     border-color: var(--border);
   }
   /* The label column: the rows' own colours (vis-timeline paints them light), a cap so a long title cannot take the width
-     of a phone, and 44 px rows to tap. */
+     of a phone. */
   .timeline-frame :global(.vis-labelset .vis-label) {
     display: flex;
     align-items: center;
-    min-height: 2.75rem;
     background: var(--surface-raised);
     color: var(--text);
     border-color: var(--border);
@@ -339,13 +338,58 @@
   .timeline-frame :global(.vis-labelset .vis-label.vis-nested-group) {
     background: var(--surface);
   }
+  /* Rows of fixed height: vis-timeline makes a row as tall as its label's inner box or its items, whichever is taller,
+     and every item sits at the row's top inside it (lib/timelineView.ts chartOptions: no stacking, no item margin), so
+     a row is as tall wherever the chart is panned or zoomed to. An initiative row is 44 px to tap, a task row 52 px. */
   .timeline-frame :global(.vis-label .vis-inner) {
     display: block;
+    box-sizing: border-box;
+    height: var(--tl-row);
+    line-height: var(--tl-row);
     max-width: min(10rem, 28vw);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0.25rem 0.5rem;
+    padding: 0 0.5rem;
+  }
+  .timeline-frame :global(.vis-label) {
+    --tl-row: 3.25rem;
+  }
+  .timeline-frame :global(.vis-label.tl-initiative) {
+    --tl-row: 2.75rem;
+  }
+  /* Each kind keeps its lane in a task row, placed by a top margin (vis-timeline measures an item without its margin, so
+     the lanes never grow the row): the planned strip on top, the actual span with its title, the leases below it
+     (overlapping leases share the lane, see-through), the markers on the actual span's lane. */
+  .timeline-frame :global(.vis-item.tl-planned),
+  .timeline-frame :global(.vis-item.tl-actual),
+  .timeline-frame :global(.vis-item.tl-lease),
+  .timeline-frame :global(.vis-item.tl-marker) {
+    box-sizing: border-box;
+    font-size: 0.75rem;
+  }
+  .timeline-frame :global(.vis-item.tl-planned) {
+    margin-top: 0.25rem;
+    height: 0.375rem;
+  }
+  .timeline-frame :global(.vis-item.tl-actual),
+  .timeline-frame :global(.vis-item.tl-marker) {
+    margin-top: 0.75rem;
+    height: 1.25rem;
+    line-height: calc(1.25rem - 2px);
+  }
+  .timeline-frame :global(.vis-item.tl-lease) {
+    margin-top: 2.125rem;
+    height: 0.875rem;
+    line-height: calc(0.875rem - 2px);
+    font-size: 0.6875rem;
+    opacity: 0.85;
+  }
+  .timeline-frame :global(.vis-item.tl-planned .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-actual .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-lease .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-marker .vis-item-content) {
+    padding: 0 0.25rem;
   }
   /* A task bar opens its preview: a pointer, and a keyboard ring inside the bar (the panel clips one outside it). */
   .timeline-frame :global(.vis-item[data-task]) {

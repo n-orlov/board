@@ -74,7 +74,7 @@ describe('groups', () => {
     expect(groups[0]!.className).toBe('tl-initiative');
     expect(groups[3]!.title).toBe('beta');
     expect(groups[1]).toMatchObject({ content: 'T1 First', className: 'tl-task', title: 'T1 First', attentionLabel: '', ref: 'T1' });
-    expect(groups[1]!.subgroupStack).toEqual({ planned: false, actual: false, lease: true });
+    expect(Object.keys(groups[1]!).filter((k) => k.startsWith('subgroup'))).toEqual([]);
   });
 
   it('holds a task of an initiative the answer does not list under a group named by its slug', () => {
@@ -108,7 +108,6 @@ describe('planned and actual bars', () => {
       start: '2026-03-01T00:00:00Z',
       end: '2026-03-12T00:00:00Z',
       className: 'tl-planned',
-      subgroup: 'planned',
       task: 'T1',
     });
     expect(items[1]).toMatchObject({
@@ -117,7 +116,6 @@ describe('planned and actual bars', () => {
       start: '2026-02-28T09:00:00Z',
       end: NOW.toISOString(),
       className: 'tl-actual tl-open tl-id-act-T1',
-      subgroup: 'actual',
       content: 'First',
       title: 'T1 open: created 2026-02-28T09:00:00Z, still open',
     });
@@ -154,9 +152,9 @@ describe('lease bars', () => {
     { ref: 'L3', task: 'T1', holder: 'cy', state: 'expired', started_at: '2026-03-04T10:00:00Z', ended_at: '2026-03-04T12:00:00Z', intent: 'lost' },
   ];
 
-  it('draws one stacked sub-bar per lease, coloured by its state, with text in the tooltip', () => {
+  it('draws one bar per lease in the lease lane, coloured by its state, with text in the tooltip', () => {
     const items = buildTimeline(answer({ leases }), NOW).items.filter((i) => i.kind === 'lease');
-    expect(items.map((i) => [i.id, i.className, i.subgroup])).toEqual([
+    expect(items.map((i) => [i.id, i.className, i.kind])).toEqual([
       ['lease:L1', 'tl-lease tl-lease-live', 'lease'],
       ['lease:L2', 'tl-lease tl-lease-ended', 'lease'],
       ['lease:L3', 'tl-lease tl-lease-expired', 'lease'],
@@ -165,6 +163,12 @@ describe('lease bars', () => {
     expect(items[0]!.title).toBe('L1 (live) held by ada: write it. Started 2026-03-09T10:00:00Z');
     expect(items[1]).toMatchObject({ end: '2026-03-03T10:00:00Z', title: 'L2 (ended) held by bob: review. Started 2026-03-02T10:00:00Z, ended 2026-03-03T10:00:00Z' });
     expect(items[2]).toMatchObject({ end: '2026-03-04T12:00:00Z', title: 'L3 (expired) held by cy: lost. Started 2026-03-04T10:00:00Z, expired 2026-03-04T12:00:00Z' });
+  });
+
+  it('puts no item in a subgroup, so vis-timeline never sizes a row by the items in view', () => {
+    const items = buildTimeline(answer({ leases }), NOW).items;
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) expect(item).not.toHaveProperty('subgroup');
   });
 
   it('writes the tooltip text from the lease alone and escapes it', () => {
@@ -196,7 +200,6 @@ describe('markers', () => {
       expect(items[n]).toMatchObject({
         type: 'point',
         group: 't:T1',
-        subgroup: 'marker',
         start: `2026-03-0${n + 1}T00:00:00Z`,
         className: `tl-marker tl-marker-${type}`,
         content: MARKER_GLYPHS[type],
