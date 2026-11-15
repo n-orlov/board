@@ -2806,6 +2806,16 @@ or a reload) is dropped from the fragment in place instead, so Back still leaves
 desktop: one case for each of the four ways in, no action buttons, the scroll lock and the idle wheel, Escape and Close
 each returning the focus, Back twice, a deep link and a reload, the live milestone and Open full page.
 
+*Phone layout (R10).* At 390 x 844, opening `#/timeline` shows the first task row of the chart in full, above the tab bar, with the page
+not scrolled, whether the filters are at their defaults or all four are set (and wrapped over the most lines, by names as long as the
+board lets them be). The choice is to **keep every control, uncompacted**: the heading, the four 44 px filters (with Clear filters once
+one is set), the 44 px zoom buttons with the readout, and the legend all stay above the chart, and the room they leave is enough, so
+nothing is folded away and no control shrinks below 44 px (`e2e/touch.spec.ts`). The fallback of one page scroll bringing the whole
+chart frame into view is not used: the chart is at least 70 % of the screen (`chartHeight`), so with enough rows the frame itself reaches below the
+tab bar's top and the page scrolls to the rest of it, but its first row never needs that scroll. `e2e/timeline-phone.spec.ts` asserts
+it at both filter states: the first task row's box lies inside the viewport and above the tab bar with `scrollY` 0, so a control added
+above the chart that pushes the row down fails it.
+
 *Filters.* Four selects above the chart (44 px, 16 px text, wrapping on a phone) narrow what is drawn, each in the fragment's
 query and in the query of `GET /timeline`: **Initiative** (`initiative-filter`, `initiative=<slug>`; the board's initiatives,
 read from `GET /initiatives?status=all`), **Tag** (`tag-filter`, `tag=<tag>`; the tags those initiatives carry), **Actor**
