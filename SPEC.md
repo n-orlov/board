@@ -2866,7 +2866,7 @@ and desktop) posts three notes from the UI (on a task, on an initiative, a broad
 and across a reload, the author and mention filters and Clear filters, a refused post and a body expanding, and 45 notes
 drawn 20, 40 and 45 by Load more, a failed live refetch (the list read answered 500) that shows `notes-error` beside the rendered note with its body still expanded and clears it on the next good refresh, and a failed body read that keeps the list and the other expanded body; `a11y.spec.ts` scans the Notes view (a body expanded) and the Post note sheet.
 
-**Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The route table holds it as the entry `task` (a parameter route
+**Task page** (`#/t/<ref>`, `web/src/TaskPage.svelte`, R10). The page's body (header, badges, leases, asks, description, links, dependencies, notes, events) is `web/src/TaskBody.svelte`, which `TaskPage` renders and which takes its action openers as one optional `actions` object: without it the body is read-only, with no button that writes (the Timeline's task preview, R5, reuses it that way). The route table holds it as the entry `task` (a parameter route
 like `#/i/<slug>`, one slash-free segment is the ref, either letter case) with the parent `tasks`, so the Tasks entry of
 the navigation has `aria-current` and there is no navigation entry of its own; the Ref of a row in the Tasks view and in
 the initiative page's table is a link to it. The page reads `GET /api/v1/tasks/<ref>` and every page of
@@ -3084,8 +3084,14 @@ element, else the dialog container. Tab and Shift+Tab are trapped: Tab on the la
 element wraps to the first and Shift+Tab on the first wraps to the last. Escape closes it, and so
 does a click on the backdrop. On close, focus returns to the element that had it when the dialog
 opened (the opener), if that element is still in the page. Below 768 px the dialog is a bottom
-sheet, full width and anchored to the bottom edge; from 768 px up it is a centred dialog. It fades
-in (and the sheet slides up); under `prefers-reduced-motion: reduce` every animation and
+sheet, full width and anchored to the bottom edge; from 768 px up it is a centred dialog, of the forms'
+width, or wider with the `wide` option (a whole task to read, R5; the panel is then `max-w-2xl` instead of
+`max-w-lg`; the phone sheet is the same either way). While it is open the page behind does not scroll: `html`
+and `body` both get `overflow: hidden` (Safari scrolls the `html` one) and the previous values come back on close,
+the panel does not chain its own scroll to the page (`overscroll-behavior: contain`), and a touch drag that starts
+outside the panel is cancelled (a non-passive `touchmove` listener on the overlay), because iOS scrolls the page
+under a fixed overlay otherwise; a drag inside the panel scrolls the panel (`e2e/dialogs.spec.ts`, which fails
+without the lock). It fades in (and the sheet slides up); under `prefers-reduced-motion: reduce` every animation and
 transition is off. Interactive elements show a visible `:focus-visible` ring from the token
 stylesheet.
 

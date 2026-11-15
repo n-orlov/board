@@ -614,3 +614,41 @@ for (const vp of viewports) {
     });
   });
 }
+
+// The page behind an open dialog does not scroll: hidden overflow on both roots (Safari scrolls the html one) and a
+// touch drag outside the panel is cancelled (iOS scrolls the page under a fixed overlay otherwise); a drag inside the
+// panel is left alone, and everything is undone when the dialog closes.
+for (const vp of viewports) {
+  test.describe(`scroll lock ${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
+    test.use({ viewport: vp.size, hasTouch: true });
+
+    test('an open dialog locks html and body from scrolling, cancels a touch drag outside the panel, and unlocks on close', async ({ page }) => {
+      await page.goto('/#/initiatives');
+      await expect(page.getByTestId('initiative-row').first()).toBeVisible();
+      const overflow = () => page.evaluate(() => ({ html: getComputedStyle(document.documentElement).overflow, body: getComputedStyle(document.body).overflow }));
+      const before = await overflow();
+      expect(before.html, 'the html root scrolls while no dialog is open').not.toBe('hidden');
+      expect(before.body, 'the body scrolls while no dialog is open').not.toBe('hidden');
+
+      await page.getByRole('button', { name: 'New initiative' }).locator('visible=true').click();
+      const dialog = page.getByRole('dialog', { name: 'New initiative' });
+      await expect(dialog).toBeVisible();
+      expect(await overflow(), 'html and body are locked while the dialog is open').toEqual({ html: 'hidden', body: 'hidden' });
+
+      // A touchmove is cancelable only when a non-passive listener is there to cancel it; report whether it was.
+      const dragCancelled = (selector: string) =>
+        page.evaluate((sel) => {
+          const target = document.querySelector(sel)!;
+          const event = new TouchEvent('touchmove', { bubbles: true, cancelable: true });
+          target.dispatchEvent(event);
+          return event.defaultPrevented;
+        }, selector);
+      expect(await dragCancelled('[data-testid=dialog-backdrop]'), 'a drag on the backdrop is cancelled').toBe(true);
+      expect(await dragCancelled('[role=dialog] input[name=title]'), 'a drag inside the panel is left to the panel').toBe(false);
+
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      expect(await overflow(), 'html and body scroll again once the dialog is closed').toEqual(before);
+    });
+  });
+}
