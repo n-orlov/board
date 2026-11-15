@@ -198,7 +198,7 @@ export interface ChartClick {
 export interface ChartTimeline {
   destroy(): void;
   /** What the chart has under a DOM event: the item from its target, the group from its height. */
-  getEventProperties(event: Event): ChartClick;
+  getEventProperties(event: Pick<MouseEvent, 'target' | 'clientX' | 'clientY'>): ChartClick;
   on(event: 'changed' | 'rangechange' | 'rangechanged', listener: () => void): void;
   getWindow(): { start: Date; end: Date };
   setWindow(start: Date | number, end: Date | number, options: { animation: boolean }): void;
@@ -345,6 +345,7 @@ export function timeAt(range: MsRange, x: number, width: number): number {
 
 /** The part of the DOM the wheel handler and the gesture tracker read: vis-timeline's container and its centre panel. */
 interface ChartDom {
+  ownerDocument?: Partial<Pick<Document, 'elementFromPoint'>> | null;
   addEventListener?: HTMLElement['addEventListener'];
   removeEventListener?: HTMLElement['removeEventListener'];
   querySelector?: HTMLElement['querySelector'];
@@ -425,8 +426,13 @@ export function gestureKind(gesture: Gesture, slop: number = TAP_SLOP_PX): 'tap'
  * A pointer can leave without its pointerup or pointercancel reaching the chart: on Chrome for Android a swipe on a row
  * label lost its capture and never ended. Were it still counted, every later tap would look like a pinch and open
  * nothing until a reload; so a primary pointer starts afresh, and losing the capture ends a pointer too.
+ * `onrelease` hears the pointerup of a pointer of the gesture (not a cancel, not a lost capture).
  */
-export function gestureTracker(container: ChartDom, onstart: (event: PointerEvent) => void = () => undefined) {
+export function gestureTracker(
+  container: ChartDom,
+  onstart: (event: PointerEvent) => void = () => undefined,
+  onrelease: (event: PointerEvent) => void = () => undefined,
+) {
   const down = new Map<number, { x: number; y: number }>();
   let gesture: Gesture = { pointers: 0, moved: 0 };
   const ondown = (e: PointerEvent) => {
@@ -443,10 +449,13 @@ export function gestureTracker(container: ChartDom, onstart: (event: PointerEven
     if (at !== undefined) gesture.moved = Math.max(gesture.moved, Math.hypot(e.clientX - at.x, e.clientY - at.y));
   };
   const onup = (e: PointerEvent) => down.delete(e.pointerId);
+  const onlift = (e: PointerEvent) => {
+    if (down.delete(e.pointerId)) onrelease(e);
+  };
   const listeners = [
     ['pointerdown', ondown],
     ['pointermove', onmove],
-    ['pointerup', onup],
+    ['pointerup', onlift],
     ['pointercancel', onup],
     ['lostpointercapture', onup],
   ] as const;
@@ -506,11 +515,25 @@ function press(key: string, el: Element | null): Press {
   return { key, el, top: typeof el?.getBoundingClientRect === 'function' ? el.getBoundingClientRect().top : 0 };
 }
 
+/** Where an event on the chart happened: the element it is on and its point on screen (a DOM event, or a point hit-tested). */
+type PointAt = Pick<MouseEvent, 'target' | 'clientX' | 'clientY'>;
+
+/**
+ * Where a pointer came up: the element under the release point and that point. A touch's pointerup is aimed at the element
+ * it went down on (the implicit capture) and its click at where it went down, so neither says what the finger left the
+ * screen over; the document's hit test does. Undefined without one (a chart outside a document).
+ */
+export function releasePoint(container: ChartDom, event: PointerEvent): PointAt | undefined {
+  const hit = container.ownerDocument?.elementFromPoint;
+  if (typeof hit !== 'function') return undefined;
+  return { target: hit.call(container.ownerDocument, event.clientX, event.clientY), clientX: event.clientX, clientY: event.clientY };
+}
+
 /**
  * What an event on the chart is on: what vis-timeline finds under it (a bar or a row's label), else the nearest bar of
  * the row whose empty part it landed on, within TAP_REACH_PX.
  */
-function pressOf(event: MouseEvent, timeline: ChartTimeline, container: ChartDom, itemOf: (id: string) => TimelineItem | undefined): Press {
+function pressOf(event: PointAt, timeline: ChartTimeline, container: ChartDom, itemOf: (id: string) => TimelineItem | undefined): Press {
   const props = timeline.getEventProperties(event);
   const ref = clickedTask(props, itemOf);
   if (ref !== undefined) return press(`t:${ref}`, barOf(event.target) ?? labelOf(event.target));
@@ -520,7 +543,7 @@ function pressOf(event: MouseEvent, timeline: ChartTimeline, container: ChartDom
 }
 
 /** The press on the empty part of the row `group`: the nearest bar of that row within TAP_REACH_PX, or none. */
-function pressBeside(event: MouseEvent, container: ChartDom, itemOf: (id: string) => TimelineItem | undefined, group: string): Press {
+function pressBeside(event: PointAt, container: ChartDom, itemOf: (id: string) => TimelineItem | undefined, group: string): Press {
   const near = nearestBar(barBoxes(container, itemOf), event.clientX, event.clientY, group);
   return near === undefined || near.task === '' ? press('', null) : press(`t:${near.task}`, near.el);
 }
@@ -536,6 +559,17 @@ export function pressOpens(down: Press | undefined, up: Press): string | undefin
   if (!up.key.startsWith('t:')) return undefined;
   if (down !== undefined && (down.key !== up.key || down.el !== up.el || Math.abs(down.top - up.top) > 1)) return undefined;
   return up.key.slice(2);
+}
+
+/**
+ * The task a tap opens: the one its click opens (pressOpens), but only when the pointer also came up on that same element
+ * (`released`, taken at pointerup). A finger pressed on one task and lifted over another task's row opens nothing, though
+ * the browser aims its click at where the finger went down. No release seen (a synthetic click) leaves the click to decide.
+ */
+export function tapOpens(down: Press | undefined, released: Press | undefined, up: Press): string | undefined {
+  const ref = pressOpens(down, up);
+  if (ref === undefined || released === undefined) return ref;
+  return pressOpens(down, released) === ref ? ref : undefined;
 }
 
 /** Hears the chart's DOM clicks. */
@@ -622,19 +656,31 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const byId = (id: string) => current.items.find((item) => item.id === id);
   // What a tap is on is taken when it goes down, before vis-timeline acts on it (it collapses an initiative on its own
   // tap, ahead of the click), and the click opens it only if it is still the same (pressOpens).
+  // What it came up on is taken at pointerup, before vis-timeline's own tap acts, from the release point (releasePoint).
   let pressed: Press | undefined;
-  const gestures = gestureTracker(container, (event) => {
-    pressed = pressOf(event, timeline, container, byId);
-  });
+  let released: Press | undefined;
+  const gestures = gestureTracker(
+    container,
+    (event) => {
+      pressed = pressOf(event, timeline, container, byId);
+      released = undefined;
+    },
+    (event) => {
+      const at = releasePoint(container, event);
+      released = at === undefined ? undefined : pressOf(at, timeline, container, byId);
+    },
+  );
   // The browser's own click opens a task, not vis-timeline's `click`: that one fires twice for a tap (from its tap
   // recogniser on pointerup, then from the DOM click), and the first, which also drops a press held past 250 ms, would
   // open the dialog before the browser's click, which then lands on the dialog (its backdrop closes it).
   const onclick = (event: MouseEvent) => {
     const down = pressed;
+    const lifted = released;
     pressed = undefined;
+    released = undefined;
     if (gestures.kind() !== 'tap') return; // a drag or a pinch that ended over a bar opens nothing
     const up = pressOf(event, timeline, container, byId);
-    const ref = pressOpens(down, up);
+    const ref = tapOpens(down, lifted, up);
     if (ref === undefined) return;
     // The bar tapped takes the focus first, so the dialog the view opens gives it back to that bar when it closes.
     barOf(up.el)?.focus({ preventScroll: true });

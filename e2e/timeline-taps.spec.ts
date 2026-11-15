@@ -2,12 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// A tap on the Timeline acts only on what it went down on (PRD R6, SPEC 11): the target is decided at pointerdown and the
-// click opens a task only when it lands on that same element. Cases 1 to 5, with a finger (CDP Input.dispatchTouchEvent)
-// on the phone and a mouse on the desktop: a bar, a label or the empty part of a row opens its task; a press on one task
-// released over another's row opens nothing; a drag past the slop that ends on a bar pans; a tap on an initiative's label
-// only collapses or expands it, even where the collapse moves a task's row under the pointer; a tap beside a bar opens
-// the nearest bar of its row within 16 px. (Case 6, a pointer lost without its end, is in timelineView.test.ts: a browser
+// A tap on the Timeline acts only on what it went down on (PRD R6, SPEC 11): the target is decided at pointerdown and a
+// task opens only when both the pointer's release and its click land on that same element. Cases 1 to 5, with a finger
+// (CDP Input.dispatchTouchEvent) on the phone and a mouse on the desktop: a bar, a label or the empty part of a row
+// opens its task; a press on one task released over another's row opens nothing; a drag past the slop that ends on a bar
+// pans; a tap on an initiative's label only collapses or expands it, even where the collapse moves a task's row under
+// the pointer; a tap beside a bar opens the nearest bar of its row within 16 px. (Case 6, a pointer lost without its end, is in timelineView.test.ts: a browser
 // cannot be made to lose a pointer.) Each test seeds initiatives of its own and filters the view to them.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 }, touch: true },
@@ -148,7 +148,8 @@ for (const vp of viewports) {
       await open(page, `initiative=${s.slug}`, 3);
       // The lease bar sits at the bottom of the first task's row; the second task's row starts 4 px below the bar's
       // bottom edge, so a release 8 px down is inside the 10 px slop and over the second row.
-      // (A mouse press that is released over the second row: the click lands on their common ancestor, so nothing opens.)
+      // A mouse's click lands on the common ancestor of the two rows; a finger's is aimed by the browser at where it went
+      // down (the lease bar). Either way the pointer came up over the second row, so nothing opens.
       const lease = await boxOf(page.locator('.vis-item.tl-lease-live'));
       const next = await boxOf(label(page, `${s.two} Tap two`));
       const x = lease.x + lease.width / 2;
@@ -156,15 +157,11 @@ for (const vp of viewports) {
       const to = { x, y: next.y + 4 };
       expect(Math.hypot(to.x - from.x, to.y - from.y)).toBeLessThanOrEqual(10);
       await stroke(page, [from, to]);
-      if (vp.touch) {
-        // A finger's tap is aimed by the browser at where it went down (a touch has no release position of its own), so
-        // the click is on the lease bar it began on: the first task may open, the second never does.
-        await page.waitForTimeout(400);
-        await expect(dialogOf(page, s.two)).toHaveCount(0);
-        expect(page.url()).not.toContain(`task=${s.two}`);
-      } else {
-        await noDialog(page);
-      }
+      await noDialog(page);
+
+      // The same press lifted where it went down is a tap on the first task, so the stroke above was a tap in reach.
+      await stroke(page, [from, { x, y: from.y - 1 }]);
+      await expect(dialogOf(page, s.one)).toBeVisible(FIVE_SECONDS);
       await s.api.dispose();
     });
 
