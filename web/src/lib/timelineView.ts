@@ -92,12 +92,13 @@ export class TimelineViewStore {
     filter: TimelineFilter,
     now: () => Date = () => new Date(),
     timers: Timers = BROWSER_TIMERS,
+    window?: TimeWindow,
   ) {
     this.api = api;
     this.publish = publish;
     this.now = now;
     this.timers = timers;
-    this.state = { filter, window: initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
+    this.state = { filter, window: window ?? initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
   }
 
   private set(patch: Partial<TimelineViewState>) {
@@ -199,6 +200,8 @@ export interface ChartTimeline {
   on(event: 'click', listener: (props: ChartClick) => void): void;
   on(event: 'changed' | 'rangechange' | 'rangechanged', listener: () => void): void;
   getWindow(): { start: Date; end: Date };
+  setWindow(start: Date | number, end: Date | number, options: { animation: boolean }): void;
+  setOptions(options: Partial<ChartOptions>): void;
   redraw(): void;
   zoomIn(percentage: number, options: { animation: boolean }): void;
   zoomOut(percentage: number, options: { animation: boolean }): void;
@@ -220,10 +223,25 @@ export interface ChartOptions {
   stackSubgroups: boolean;
   groupOrder: 'order';
   selectable: boolean;
+  /** Rows scroll inside the chart (so the time axis stays in view), by wheel, drag and the side scrollbar. */
+  verticalScroll: boolean;
+  /** The chart's tallest; past it the rows scroll. */
+  maxHeight: number;
+  /** vis-timeline's own wheel zoom needs this key held: the view's wheel handler takes Shift first, so it never does. */
+  zoomKey: 'shiftKey';
 }
 
-/** The vis-timeline options of the view for a window. The wheel zooms (vis-timeline's default), a pinch zooms, a drag pans. */
-export function chartOptions(window: TimeWindow): ChartOptions {
+/** The chart's height when the view does not give one. */
+export const DEFAULT_CHART_HEIGHT = 480;
+/** The chart is never squeezed below this, however little room the screen leaves under the filters. */
+export const MIN_CHART_HEIGHT = 300;
+
+/**
+ * The vis-timeline options of the view for a window. Navigation (PRD R6 follow-up): the wheel and a one-finger drag pan
+ * on both axes, Shift+wheel and a pinch zoom. vis-timeline itself does the drag, the pinch and the vertical wheel (row
+ * scroll); `wheelGesture` does the horizontal wheel and the zoom.
+ */
+export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHART_HEIGHT): ChartOptions {
   return {
     start: window.from,
     end: window.to,
@@ -234,7 +252,115 @@ export function chartOptions(window: TimeWindow): ChartOptions {
     stackSubgroups: true,
     groupOrder: 'order',
     selectable: false,
+    verticalScroll: true,
+    maxHeight,
+    zoomKey: 'shiftKey',
   };
+}
+
+/** Where the filters leave the chart little room (a phone), it still gets this share of the screen, a scroll down. */
+export const CHART_SCREEN_SHARE = 0.7;
+
+/**
+ * The chart's tallest: the screen below its top, less what the page keeps below it (the phone tab bar), so the time axis
+ * stays in view while the rows scroll. Where that is short (the filters wrap on a phone) the chart takes
+ * CHART_SCREEN_SHARE of the screen instead, which leaves a strip of page to drag the page by.
+ */
+export function chartHeight(viewportHeight: number, topOnPage: number, belowOnPage: number): number {
+  const fits = viewportHeight - topOnPage - belowOnPage;
+  const share = (viewportHeight - belowOnPage) * CHART_SCREEN_SHARE;
+  return Math.floor(Math.max(MIN_CHART_HEIGHT, fits, share));
+}
+
+// --- wheel ---
+
+/** The slice of a WheelEvent the gesture reads. */
+export interface WheelInput {
+  deltaX: number;
+  deltaY: number;
+  /** 0 pixels, 1 lines, 2 pages. */
+  deltaMode: number;
+  shiftKey: boolean;
+  /** Set by a trackpad pinch in Chromium, Firefox and Safari. */
+  ctrlKey: boolean;
+}
+
+/** One wheel step in line or page mode, in pixels. */
+const LINE_PX = 40;
+const PAGE_PX = 800;
+/** A zoom of e^(px x rate): one notch of a mouse wheel (100 px) scales the range by about 1.22. */
+export const WHEEL_ZOOM_RATE = 0.002;
+
+/**
+ * What a wheel event over the chart does. Shift (or a trackpad pinch, which arrives as Ctrl+wheel) zooms by the larger
+ * of the two deltas (browsers turn Shift+wheel into deltaX); otherwise a mostly horizontal delta pans the time axis, and
+ * a mostly vertical one is left to vis-timeline (it scrolls the rows, and the page once the rows are at an end).
+ */
+export function wheelGesture(e: WheelInput): { kind: 'zoom'; px: number } | { kind: 'pan'; px: number } | { kind: 'rows' } {
+  const scale = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? PAGE_PX : 1;
+  const dx = e.deltaX * scale;
+  const dy = e.deltaY * scale;
+  if (e.shiftKey || e.ctrlKey) return { kind: 'zoom', px: Math.abs(dy) >= Math.abs(dx) ? dy : dx };
+  if (Math.abs(dx) > Math.abs(dy)) return { kind: 'pan', px: dx };
+  return { kind: 'rows' };
+}
+
+/** A range in milliseconds. */
+export interface MsRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * `range` zoomed by `factor` (above 1 out, below 1 in) around `anchor`, which keeps its place on screen. The length is
+ * held between ZOOM_MIN_MS and ZOOM_MAX_MS.
+ */
+export function zoomAround(range: MsRange, anchor: number, factor: number): MsRange {
+  const span = range.end - range.start;
+  const next = Math.min(ZOOM_MAX_MS, Math.max(ZOOM_MIN_MS, span * factor));
+  const at = span > 0 ? (anchor - range.start) / span : 0.5;
+  const start = anchor - at * next;
+  return { start, end: start + next };
+}
+
+/** `range` moved by `px` pixels of a chart `width` pixels wide (positive is later). */
+export function panBy(range: MsRange, px: number, width: number): MsRange {
+  const shift = width > 0 ? ((range.end - range.start) * px) / width : 0;
+  return { start: range.start + shift, end: range.end + shift };
+}
+
+/** The time under `x` pixels from the left edge of a chart `width` pixels wide. */
+export function timeAt(range: MsRange, x: number, width: number): number {
+  return width > 0 ? range.start + ((range.end - range.start) * x) / width : (range.start + range.end) / 2;
+}
+
+/** The part of the DOM the wheel handler and the row scroll read: vis-timeline's centre panel and its label panel. */
+interface ChartDom {
+  addEventListener?: HTMLElement['addEventListener'];
+  removeEventListener?: HTMLElement['removeEventListener'];
+  querySelector?: HTMLElement['querySelector'];
+}
+
+/** Takes the chart's wheel events before vis-timeline sees them, for the horizontal pan and the zoom. */
+function listenWheel(container: ChartDom, timeline: ChartTimeline): () => void {
+  if (typeof container.addEventListener !== 'function') return () => undefined;
+  const onWheel = (event: WheelEvent) => {
+    const gesture = wheelGesture(event);
+    if (gesture.kind === 'rows') return; // vis-timeline scrolls the rows
+    const centre = container.querySelector?.('.vis-panel.vis-center')?.getBoundingClientRect();
+    if (centre === undefined || centre.width <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { start, end } = timeline.getWindow();
+    const range = { start: start.getTime(), end: end.getTime() };
+    const next =
+      gesture.kind === 'pan'
+        ? panBy(range, gesture.px, centre.width)
+        : zoomAround(range, timeAt(range, event.clientX - centre.left, centre.width), Math.exp(gesture.px * WHEEL_ZOOM_RATE));
+    timeline.setWindow(next.start, next.end, NO_ANIMATION);
+  };
+  container.addEventListener('wheel', onWheel, { capture: true, passive: false });
+  return () => container.removeEventListener?.('wheel', onWheel, { capture: true });
 }
 
 /** The ref of the task a click on the chart opens: a bar of any kind (task, lease or marker) or a task row's label. */
@@ -252,12 +378,20 @@ export interface ChartHooks {
   onSpan(spanMs: number): void;
   /** The visible range, once it stops moving (a drag or a zoom ended). */
   onRange(range: TimeWindow): void;
+  /** How far the rows are scrolled, as they move (for Back to put them back). */
+  onRowScroll?(px: number): void;
 }
 
 /** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
 export interface Chart {
   show(model: TimelineModel): void;
   zoom(direction: 'in' | 'out'): void;
+  /** Shows `window` (the fragment named another one); the range hooks then follow as for a drag. */
+  moveTo(window: TimeWindow): void;
+  /** Sets the chart's tallest (the screen changed size). */
+  setHeight(px: number): void;
+  /** Scrolls the rows to `px` once they are drawn tall enough (Back to this view). */
+  scrollRows(px: number): void;
   destroy(): void;
 }
 
@@ -288,10 +422,12 @@ function replaceRows<T extends { id: string }>(data: ChartData<unknown>, rows: r
 }
 
 /** Draws `model` with vis-timeline into `container`. */
-export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks): Chart {
+export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks, height?: number): Chart {
   const items = new lib.DataSet<unknown>(model.items);
   const groups = new lib.DataSet<unknown>(model.groups);
-  const timeline = new lib.Timeline(container, items, groups, chartOptions(window));
+  const timeline = new lib.Timeline(container, items, groups, chartOptions(window, height));
+  const unlistenWheel = listenWheel(container, timeline);
+  const rows = rowScroll(container, hooks);
   let current = model;
   const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
   const heldItems: Held = new Map(model.items.map((i) => [i.id, JSON.stringify(i)]));
@@ -305,6 +441,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const sync = () => {
     hooks.onSpan(spanOf(timeline.getWindow()));
     drawArrows(hooks.arrows, current.dependencies);
+    rows.settle();
   };
   timeline.on('changed', sync);
   timeline.on('rangechange', sync);
@@ -326,8 +463,56 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
       if (direction === 'in') timeline.zoomIn(ZOOM_FACTOR, NO_ANIMATION);
       else timeline.zoomOut(ZOOM_FACTOR, NO_ANIMATION);
     },
+    moveTo(window: TimeWindow) {
+      timeline.setWindow(window.from, window.to, NO_ANIMATION);
+    },
+    setHeight(px: number) {
+      timeline.setOptions({ maxHeight: px });
+    },
+    scrollRows(px: number) {
+      rows.restore(px);
+    },
     destroy() {
+      unlistenWheel();
+      rows.stop();
       timeline.destroy();
+    },
+  };
+}
+
+/**
+ * The rows' scroll: vis-timeline keeps it as the label panel's scrollTop (and follows that panel's scroll events), so
+ * reading it there reports it and writing it there moves the rows. A restore waits for a redraw tall enough to hold it.
+ */
+function rowScroll(container: ChartDom, hooks: ChartHooks) {
+  const panel = () => container.querySelector?.('.vis-panel.vis-left') ?? null;
+  let pending: number | undefined;
+  let frame: ReturnType<typeof setTimeout> | undefined;
+  const report = () => {
+    frame = undefined;
+    const p = panel();
+    if (p !== null && pending === undefined) hooks.onRowScroll?.(p.scrollTop);
+  };
+  const onScroll = () => {
+    if (frame === undefined) frame = setTimeout(report, 100);
+  };
+  if (typeof container.addEventListener === 'function') container.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  return {
+    restore(px: number) {
+      pending = px > 0 ? px : undefined;
+    },
+    /** After a redraw: apply a pending restore once the rows are tall enough for it. */
+    settle() {
+      const p = panel();
+      if (pending === undefined || p === null) return;
+      const room = p.scrollHeight - p.clientHeight;
+      if (room <= 0) return;
+      p.scrollTop = Math.min(pending, room);
+      if (room >= pending) pending = undefined;
+    },
+    stop() {
+      if (frame !== undefined) clearTimeout(frame);
+      container.removeEventListener?.('scroll', onScroll, { capture: true });
     },
   };
 }
@@ -339,6 +524,45 @@ export const TIMELINE_VIEW = 'timeline';
 export interface OpenedTimeline {
   filter: TimelineFilter;
   restored: boolean;
+  /** The window the fragment names (`from`/`to`), when it names a usable one. */
+  window?: TimeWindow;
+}
+
+/** The query keys of the window. They go in the fragment (a link or Back shows the same range) but are never saved. */
+const WINDOW_KEYS = ['from', 'to'] as const;
+
+/** A window time in the fragment: ISO to the second, UTC. */
+function windowTime(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/** The window a query names, or undefined unless both ends parse, `from` is before `to` and the length is in the zoom range. */
+export function windowFromQuery(query: string): TimeWindow | undefined {
+  const params = new URLSearchParams(query);
+  const from = Date.parse(params.get('from') ?? '');
+  const to = Date.parse(params.get('to') ?? '');
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return undefined;
+  const span = to - from;
+  if (span < ZOOM_MIN_MS / 2 || span > ZOOM_MAX_MS * 2) return undefined;
+  return { from: new Date(from), to: new Date(to) };
+}
+
+/** A query without the window's keys: what the filter is, and what is saved. */
+export function withoutWindow(query: string): string {
+  const params = new URLSearchParams(query);
+  for (const key of WINDOW_KEYS) params.delete(key);
+  return params.toString();
+}
+
+/** The fragment of the view: the filter's query, then the window when there is one (`#/timeline?tag=x&from=…&to=…`). */
+export function timelineViewHash(filter: TimelineFilter, window?: TimeWindow): string {
+  const params = new URLSearchParams(filterToQuery(filter));
+  if (window !== undefined) {
+    params.set('from', windowTime(window.from));
+    params.set('to', windowTime(window.to));
+  }
+  const query = params.toString();
+  return query === '' ? '#/timeline' : `#/timeline?${query}`;
 }
 
 /**
@@ -348,9 +572,15 @@ export interface OpenedTimeline {
  */
 export function openTimeline(env: ViewEnv, hash: string): OpenedTimeline {
   const at = hash.indexOf('?');
-  const own = at < 0 ? '' : hash.slice(at + 1);
+  const full = at < 0 ? '' : hash.slice(at + 1);
+  const own = withoutWindow(full);
+  const window = windowFromQuery(full);
+  // A fragment that names a window describes the whole view (a link, or Back to this entry): its filter, even none,
+  // is the one shown, and nothing saved replaces it.
+  if (window !== undefined && own === '') return { filter: filterFromQuery(''), restored: false, window };
   const query = openView(env, TIMELINE_VIEW, '#/timeline', own);
-  return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+  const opened = { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+  return window === undefined ? opened : { ...opened, window };
 }
 
 /** Saves the filter's query after a change (the empty filter is the default and removes the key). */

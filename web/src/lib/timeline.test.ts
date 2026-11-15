@@ -3,6 +3,7 @@ import {
   CLOSED_WITHIN_OPTIONS,
   DEFAULT_TIMELINE_FILTER,
   MARKER_GLYPHS,
+  TIMELINE_LEGEND,
   affectsTimeline,
   choiceOptions,
   tagChoices,
@@ -374,5 +375,18 @@ describe('the filter controls', () => {
     for (const type of ['note_added', 'initiative_created', 'key_created', 'notification_sent', 'xlease_started', '']) {
       expect(affectsTimeline({ type }), type).toBe(false);
     }
+  });
+});
+
+describe('TIMELINE_LEGEND', () => {
+  it('keys every bar state, lease state and marker the chart draws, markers by their glyph', () => {
+    const classes = TIMELINE_LEGEND.map((e) => e.className);
+    for (const status of ['open', 'done', 'closed']) expect(classes).toContain(`tl-actual tl-${status}`);
+    for (const state of ['live', 'expired', 'ended']) expect(classes).toContain(`tl-lease tl-lease-${state}`);
+    expect(classes).toContain('tl-planned');
+    for (const [type, glyph] of Object.entries(MARKER_GLYPHS)) {
+      expect(TIMELINE_LEGEND.find((e) => e.className === `tl-marker tl-marker-${type}`)?.glyph).toBe(glyph);
+    }
+    expect(new Set(TIMELINE_LEGEND.map((e) => e.label)).size).toBe(TIMELINE_LEGEND.length);
   });
 });

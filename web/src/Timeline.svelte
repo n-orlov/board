@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { replaceHash } from './lib/historyEntry';
+  import { loadCurrent, replaceHash, saveCurrent, scrollOf } from './lib/historyEntry';
   import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
@@ -19,6 +19,7 @@
     choiceOptions,
     isFiltered,
     tagChoices,
+    TIMELINE_LEGEND,
     timelineHash,
     withClosedWithin,
     withInitiative,
@@ -30,7 +31,10 @@
   import {
     canZoomIn,
     canZoomOut,
+    chartHeight,
     mountChart,
+    sameRange,
+    timelineViewHash,
     spanLabel,
     forgetTimeline,
     openTimeline,
@@ -55,7 +59,12 @@
   const viewEnv = currentViewEnv();
   // A fragment with a query wins and is saved; a bare one restores the saved filter (in place, before the first fetch).
   const opened = openTimeline(viewEnv, window.location.hash);
-  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter);
+  // A fragment that names a window (`from`/`to`: a link, or Back to this entry) opens on it; otherwise the default one.
+  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window);
+  /** Whether the fragment carries the window: once it named one or the user moved the chart, so a fresh visit keeps the default. */
+  let windowInHash = opened.window !== undefined;
+  /** The name the rows' scroll is saved under for this history entry. */
+  const ROW_SCROLL = 'timelineRows';
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
@@ -124,7 +133,7 @@
 
   // The filter lives in the fragment and in the saved query: a choice rewrites both in place (no history entry per choice).
   function persist(filter: TimelineFilter) {
-    replaceHash(timelineHash(filter));
+    replaceHash(timelineViewHash(filter, windowInHash ? view.window : undefined));
     saveTimeline(viewEnv.storage, filter);
   }
 
@@ -153,6 +162,10 @@
     if (next.restored) await listed;
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     const filter = startFilter(next, looked);
+    if (next.window !== undefined && !sameRange(next.window, view.window)) {
+      windowInHash = true;
+      chart?.moveTo(next.window);
+    }
     if (filter !== next.filter) persist(filter);
     if (!turns.mustRead(timelineHash(filter) === timelineHash(view.filter))) return;
     turns.reading();
@@ -171,17 +184,42 @@
         arrows,
         onSpan: (ms: number) => (span = ms),
         onRange: (range: TimeWindow) => store.panTo(range),
+        onRowScroll: (px: number) => saveCurrent(ROW_SCROLL, px),
       };
-      if (chart === undefined) chart = mountChart(lib, target, model, view.window, hooks);
-      else if (model !== shown) chart.show(model);
+      if (chart === undefined) {
+        chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
+        const rows = scrollOf(loadCurrent(ROW_SCROLL));
+        if (rows !== undefined) chart.scrollRows(rows);
+      } else if (model !== shown) chart.show(model);
       shown = model;
     });
   });
 
+  // The window the store last read (a pan or zoom that settled) goes in the fragment, so Back and a shared link show it.
+  let lastWindow = untrack(() => view.window);
+  $effect(() => {
+    const window = view.window;
+    if (window === lastWindow) return;
+    lastWindow = window;
+    windowInHash = true;
+    untrack(() => replaceHash(timelineViewHash(view.filter, window)));
+  });
+
+  /** The chart's tallest: the screen below the chart's top, less the phone's tab bar, so the axis stays in view as rows scroll. */
+  function heightFor(target: HTMLElement): number {
+    const top = target.getBoundingClientRect().top + window.scrollY;
+    const tabBar = window.matchMedia('(min-width: 768px)').matches ? 16 : 80;
+    return chartHeight(window.innerHeight, top, tabBar);
+  }
+
+  function resized() {
+    if (chart !== undefined && frame !== undefined) chart.setHeight(heightFor(frame));
+  }
+
   const button = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text enabled:hover:bg-surface disabled:opacity-60';
 </script>
 
-<svelte:window onhashchange={hashChanged} />
+<svelte:window onhashchange={hashChanged} onresize={resized} />
 
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
@@ -213,7 +251,20 @@
       <button type="button" class={button} data-testid="zoom-out" aria-label="Zoom out" disabled={span !== 0 && !canZoomOut(span)} onclick={() => chart?.zoom('out')}>−</button>
       <button type="button" class={button} data-testid="zoom-in" aria-label="Zoom in" disabled={span !== 0 && !canZoomIn(span)} onclick={() => chart?.zoom('in')}>+</button>
       <span class="text-sm text-text-muted" data-testid="timeline-span" data-span-ms={span}>{span === 0 ? '' : `Showing ${spanLabel(span)}`}</span>
+      <span class="hidden text-xs text-text-muted md:inline" data-testid="timeline-hint">Scroll to pan · Shift+scroll to zoom</span>
     </div>
+    <ul class="timeline-legend mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted" aria-label="Legend" data-testid="timeline-legend">
+      {#each TIMELINE_LEGEND as entry (entry.className)}
+        <li class="flex items-center gap-1.5">
+          {#if entry.glyph === undefined}
+            <span class="tl-swatch {entry.className}" aria-hidden="true"></span>
+          {:else}
+            <span class="tl-swatch-glyph {entry.className}" aria-hidden="true">{entry.glyph}</span>
+          {/if}
+          {entry.label}
+        </li>
+      {/each}
+    </ul>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
     <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" bind:this={frame}></div>
   {/if}
@@ -269,34 +320,98 @@
   .timeline-frame :global(.vis-group-level-unknown-but-gte1) {
     border: 0;
   }
-  .timeline-frame :global(.vis-item) {
-    border-color: var(--border);
-    background: var(--surface);
+  /* Colours by kind and state (lib/timeline.ts TIMELINE_LEGEND): each item sets --tl to a design token; bars are a light
+     wash of it with a solid edge, markers the token itself, so both themes read through the tokens' own dark values. */
+  .timeline-frame :global(.vis-item),
+  .timeline-legend .tl-swatch {
+    --tl: var(--text-muted);
+    border-color: var(--tl);
+    background: color-mix(in srgb, var(--tl) 18%, var(--surface-raised));
     color: var(--text);
+  }
+  .timeline-frame :global(.vis-item) {
     cursor: pointer;
   }
-  .timeline-frame :global(.vis-item.tl-planned) {
+  .timeline-frame :global(.tl-actual.tl-open),
+  .timeline-legend .tl-actual.tl-open {
+    --tl: var(--accent);
+  }
+  .timeline-frame :global(.tl-actual.tl-done),
+  .timeline-legend .tl-actual.tl-done {
+    --tl: var(--success);
+  }
+  .timeline-frame :global(.tl-actual.tl-closed),
+  .timeline-legend .tl-actual.tl-closed {
+    --tl: var(--text-muted);
+  }
+  .timeline-frame :global(.vis-item.tl-planned),
+  .timeline-legend .tl-planned {
+    --tl: var(--text-muted);
     background: transparent;
     border-style: dashed;
-    border-color: var(--text-muted);
   }
-  .timeline-frame :global(.vis-item.tl-actual) {
-    border-color: var(--accent);
+  .timeline-frame :global(.tl-lease-live),
+  .timeline-legend .tl-lease-live {
+    --tl: var(--success);
+    background: color-mix(in srgb, var(--tl) 32%, var(--surface-raised));
   }
-  .timeline-frame :global(.vis-item.tl-closed) {
-    border-color: var(--success);
+  .timeline-frame :global(.tl-lease-expired),
+  .timeline-legend .tl-lease-expired {
+    --tl: var(--warning);
   }
-  .timeline-frame :global(.vis-item.tl-lease) {
-    border-color: var(--warning);
+  .timeline-frame :global(.tl-lease-ended),
+  .timeline-legend .tl-lease-ended {
+    --tl: var(--text-muted);
+    background: color-mix(in srgb, var(--tl) 10%, var(--surface-raised));
   }
-  .timeline-frame :global(.vis-item.tl-lease-expired),
-  .timeline-frame :global(.vis-item.tl-lease-ended) {
-    border-color: var(--text-muted);
-  }
-  .timeline-frame :global(.vis-item.tl-marker) {
+  .timeline-frame :global(.vis-item.tl-marker),
+  .timeline-legend .tl-swatch-glyph {
+    --tl: var(--text-muted);
     background: transparent;
     border: 0;
+    color: var(--tl);
     font-weight: 700;
+  }
+  .timeline-frame :global(.vis-item.tl-marker-milestone),
+  .timeline-legend .tl-marker-milestone {
+    --tl: var(--accent);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-ask),
+  .timeline-legend .tl-marker-ask {
+    --tl: var(--warning);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-check),
+  .timeline-frame :global(.vis-item.tl-marker-done),
+  .timeline-legend .tl-marker-check,
+  .timeline-legend .tl-marker-done {
+    --tl: var(--success);
+  }
+  .timeline-frame :global(.vis-item.tl-marker-closed),
+  .timeline-legend .tl-marker-closed {
+    --tl: var(--text-muted);
+  }
+  .timeline-frame :global(.vis-item.tl-marker .vis-item-content) {
+    color: var(--tl);
+  }
+  .timeline-legend .tl-swatch {
+    display: inline-block;
+    width: 1.25rem;
+    height: 0.75rem;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: 2px;
+  }
+  .timeline-legend .tl-swatch.tl-planned {
+    border-style: dashed;
+  }
+  .timeline-legend .tl-swatch-glyph {
+    display: inline-block;
+    min-width: 1rem;
+    text-align: center;
+  }
+  /* The chart takes its own touch gestures (a one-finger drag pans both ways, a pinch zooms); the page scrolls outside it. */
+  .timeline-frame :global(.vis-timeline) {
+    touch-action: none;
   }
   .timeline-frame :global(.tl-attention) {
     color: var(--danger);

@@ -202,7 +202,7 @@ for (const vp of viewports) {
       await s.api.dispose();
     });
 
-    test('the zoom buttons and the wheel change the range between an hour and a quarter', async ({ page, playwright, baseURL }) => {
+    test('the zoom buttons and Shift+wheel change the range between an hour and a quarter, a plain wheel pans', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `zoom-${vp.name}`);
       await open(page, s);
       await expect(page.getByTestId('timeline-span')).toContainText('Showing 3 weeks');
@@ -215,16 +215,24 @@ for (const vp of viewports) {
       await page.getByTestId('zoom-out').click();
       await expect.poll(() => span(page)).toBeGreaterThan(closer);
 
-      // The wheel over the chart zooms (one direction in, the other out), the same range the buttons move.
+      // A plain wheel over the chart never zooms: a sideways one pans the range, a vertical one scrolls the rows.
       const centre = (await page.locator('.vis-panel.vis-center').boundingBox())!;
       await page.mouse.move(centre.x + centre.width / 2, centre.y + centre.height / 2);
       const before = await span(page);
+      const range = () => page.evaluate(() => location.hash);
       await page.mouse.wheel(0, 400);
-      await expect.poll(() => span(page)).not.toBe(before);
+      await page.mouse.wheel(300, 0);
+      await expect.poll(range).toContain('from='); // the pan settled into the fragment
+      expect(Math.abs((await span(page)) - before)).toBeLessThan(1000);
+
+      // Shift+wheel zooms around the pointer, one direction in and the other out.
+      await page.keyboard.down('Shift');
+      await page.mouse.wheel(0, 400);
+      await expect.poll(() => span(page)).toBeGreaterThan(before);
       const wheeled = await span(page);
-      await page.mouse.wheel(0, -400);
-      await expect.poll(() => span(page)).not.toBe(wheeled);
-      expect(Math.sign(wheeled - before) * Math.sign((await span(page)) - wheeled)).toBe(-1); // back the other way
+      await page.mouse.wheel(0, -800);
+      await expect.poll(() => span(page)).toBeLessThan(wheeled);
+      await page.keyboard.up('Shift');
 
       for (let i = 0; i < 20 && (await page.getByTestId('zoom-in').isEnabled()); i++) await page.getByTestId('zoom-in').click();
       await expect(page.getByTestId('zoom-in')).toBeDisabled();

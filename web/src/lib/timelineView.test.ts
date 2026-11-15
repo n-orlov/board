@@ -6,8 +6,20 @@ import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 import {
   canZoomIn,
   canZoomOut,
+  CHART_SCREEN_SHARE,
+  chartHeight,
   chartOptions,
+  DEFAULT_CHART_HEIGHT,
   dropUnknown,
+  MIN_CHART_HEIGHT,
+  panBy,
+  timeAt,
+  timelineViewHash,
+  WHEEL_ZOOM_RATE,
+  wheelGesture,
+  windowFromQuery,
+  withoutWindow,
+  zoomAround,
   forgetTimeline,
   clickedTask,
   DAY_MS,
@@ -141,6 +153,15 @@ describe('TimelineViewStore', () => {
     expect(store.state.window.to.getTime() - store.state.window.from.getTime()).toBe(21 * DAY_MS);
   });
 
+  it('opens on a window handed in (the fragment named one) and reads it', async () => {
+    const api = { read: vi.fn(async () => answer()) };
+    const w = { from: new Date('2026-01-01T00:00:00Z'), to: new Date('2026-01-08T00:00:00Z') };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, undefined, w);
+    expect(store.state.window).toBe(w);
+    await store.load();
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, w);
+  });
+
   it('shows a refusal and keeps what it drew', async () => {
     let fail = false;
     const { store } = rig(async () => {
@@ -207,9 +228,91 @@ describe('chartOptions', () => {
       stackSubgroups: true,
       groupOrder: 'order',
       selectable: false,
+      verticalScroll: true,
+      maxHeight: DEFAULT_CHART_HEIGHT,
+      zoomKey: 'shiftKey',
     });
+    expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
     expect(ZOOM_MAX_MS).toBe(92 * DAY_MS);
+  });
+});
+
+describe('chartHeight', () => {
+  it('is the screen below the chart less what the page keeps under it, else a share of the screen, never below the minimum', () => {
+    expect(chartHeight(900, 200, 80)).toBe(620);
+    expect(chartHeight(900.6, 200, 0)).toBe(700);
+    expect(chartHeight(844, 600, 80)).toBe(Math.floor(764 * CHART_SCREEN_SHARE)); // a phone: a share of the screen
+    expect(chartHeight(380, 300, 0)).toBe(MIN_CHART_HEIGHT);
+  });
+});
+
+describe('wheelGesture', () => {
+  const wheel = (over: Partial<Parameters<typeof wheelGesture>[0]>) => ({ deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, ...over });
+
+  it('leaves a vertical wheel to vis-timeline, which scrolls the rows', () => {
+    expect(wheelGesture(wheel({ deltaY: 100 }))).toEqual({ kind: 'rows' });
+    expect(wheelGesture(wheel({ deltaY: -100, deltaX: 30 }))).toEqual({ kind: 'rows' });
+  });
+  it('pans the time axis on a mostly horizontal wheel', () => {
+    expect(wheelGesture(wheel({ deltaX: 50, deltaY: 10 }))).toEqual({ kind: 'pan', px: 50 });
+    expect(wheelGesture(wheel({ deltaX: -2, deltaMode: 1 }))).toEqual({ kind: 'pan', px: -80 });
+  });
+  it('zooms on Shift or a trackpad pinch (Ctrl), by the larger delta', () => {
+    expect(wheelGesture(wheel({ deltaY: 100, shiftKey: true }))).toEqual({ kind: 'zoom', px: 100 });
+    expect(wheelGesture(wheel({ deltaX: -100, shiftKey: true }))).toEqual({ kind: 'zoom', px: -100 }); // Shift turns the wheel sideways
+    expect(wheelGesture(wheel({ deltaY: 3, ctrlKey: true }))).toEqual({ kind: 'zoom', px: 3 });
+    expect(wheelGesture(wheel({ deltaY: 1, deltaMode: 2, shiftKey: true }))).toEqual({ kind: 'zoom', px: 800 });
+  });
+});
+
+describe('zoomAround, panBy and timeAt', () => {
+  const range = { start: 0, end: 10 * DAY_MS };
+
+  it('zooms around the anchor, which keeps its place', () => {
+    expect(zoomAround(range, 2 * DAY_MS, 0.5)).toEqual({ start: DAY_MS, end: 6 * DAY_MS });
+    expect(zoomAround(range, 0, 2)).toEqual({ start: 0, end: 20 * DAY_MS });
+  });
+  it('holds the length between an hour and a quarter', () => {
+    const tiny = zoomAround(range, 5 * DAY_MS, 1e-9);
+    expect(tiny.end - tiny.start).toBe(ZOOM_MIN_MS);
+    const huge = zoomAround(range, 5 * DAY_MS, 1e9);
+    expect(huge.end - huge.start).toBe(ZOOM_MAX_MS);
+  });
+  it('zooms one wheel notch by about a fifth', () => {
+    expect(Math.exp(100 * WHEEL_ZOOM_RATE)).toBeCloseTo(1.22, 2);
+  });
+  it('pans by the pixels as a share of the width', () => {
+    expect(panBy(range, 100, 1000)).toEqual({ start: DAY_MS, end: 11 * DAY_MS });
+    expect(panBy(range, -50, 1000)).toEqual({ start: -DAY_MS / 2, end: 9.5 * DAY_MS });
+    expect(panBy(range, 100, 0)).toEqual(range);
+  });
+  it('finds the time under a point', () => {
+    expect(timeAt(range, 250, 1000)).toBe(2.5 * DAY_MS);
+    expect(timeAt(range, 250, 0)).toBe(5 * DAY_MS);
+  });
+});
+
+describe('the window in the fragment', () => {
+  const from = '2026-03-01T00:00:00Z';
+  const to = '2026-03-15T00:00:00Z';
+
+  it('reads a window with both ends, in order, within the zoom range', () => {
+    expect(windowFromQuery(`tag=x&from=${from}&to=${to}`)).toEqual({ from: new Date(from), to: new Date(to) });
+    expect(windowFromQuery(`from=${from}`)).toBeUndefined();
+    expect(windowFromQuery(`from=${to}&to=${from}`)).toBeUndefined();
+    expect(windowFromQuery(`from=nope&to=${to}`)).toBeUndefined();
+    expect(windowFromQuery('from=2020-01-01T00:00:00Z&to=2026-01-01T00:00:00Z')).toBeUndefined();
+  });
+  it('strips the window from the filter query', () => {
+    expect(withoutWindow(`tag=x&from=${from}&to=${to}`)).toBe('tag=x');
+    expect(withoutWindow(`from=${from}&to=${to}`)).toBe('');
+  });
+  it('writes the filter, then the window to the second', () => {
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER)).toBe('#/timeline');
+    const w = { from: new Date('2026-03-01T00:00:00.123Z'), to: new Date(to) };
+    expect(timelineViewHash({ ...DEFAULT_TIMELINE_FILTER, tags: ['x'] }, w)).toBe(`#/timeline?tag=x&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    expect(windowFromQuery(timelineViewHash(DEFAULT_TIMELINE_FILTER, w).split('?')[1]!)).toEqual({ from: new Date(from), to: new Date(to) });
   });
 });
 
@@ -297,6 +400,8 @@ describe('mountChart', () => {
       zoomIn = vi.fn();
       zoomOut = vi.fn();
       redraw = vi.fn();
+      setWindow = vi.fn();
+      setOptions = vi.fn();
       window = { start: new Date(0), end: new Date(2 * DAY_MS) };
       listeners = new Map<string, Listener>();
       constructor(
@@ -357,6 +462,86 @@ describe('mountChart', () => {
     expect(made[0]!.destroy).not.toHaveBeenCalled();
     chart.destroy();
     expect(made[0]!.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  /** A container like vis-timeline's: a centre panel 1000 px wide at x 100, a label panel that scrolls the rows. */
+  function fakeContainer() {
+    const listeners = new Map<string, (e: unknown) => void>();
+    const left = { scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
+    const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
+    const container = {
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      removeEventListener: (type: string) => listeners.delete(type),
+      querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
+    };
+    const wheel = (over: object) => {
+      const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
+      listeners.get('wheel')?.(e);
+      return e;
+    };
+    return { container: container as unknown as HTMLElement, listeners, left, wheel };
+  }
+
+  it('pans on a sideways wheel and zooms around the pointer on Shift+wheel, leaving a vertical wheel to vis-timeline', () => {
+    const { lib, made } = fakeLib();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+    const t = made[0]!; // window 0 .. 2 days
+
+    const down = c.wheel({ deltaY: 100 });
+    expect(down.preventDefault).not.toHaveBeenCalled();
+    expect(t.setWindow).not.toHaveBeenCalled();
+
+    const side = c.wheel({ deltaX: 100 });
+    expect(side.preventDefault).toHaveBeenCalled();
+    const [panStart, panEnd, options] = t.setWindow.mock.lastCall as [number, number, object];
+    expect(panStart).toBeCloseTo(0.2 * DAY_MS);
+    expect(panEnd).toBeCloseTo(2.2 * DAY_MS);
+    expect(options).toEqual({ animation: false });
+
+    const zoom = c.wheel({ deltaY: -100, shiftKey: true, clientX: 100 }); // the pointer at the left edge: it stays put
+    expect(zoom.stopPropagation).toHaveBeenCalled();
+    const [start, end] = t.setWindow.mock.lastCall as [number, number];
+    expect(start).toBe(0);
+    expect(end).toBeCloseTo(2 * DAY_MS * Math.exp(-100 * WHEEL_ZOOM_RATE));
+  });
+
+  it('reports the rows scrolling and puts a saved scroll back once the rows are tall enough', () => {
+    vi.useFakeTimers();
+    try {
+      const { lib, made } = fakeLib();
+      const c = fakeContainer();
+      const rowsSeen: number[] = [];
+      const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => rowsSeen.push(px) });
+      c.left.scrollHeight = 0;
+      chart.scrollRows(900);
+      made[0]!.emit('changed');
+      expect(c.left.scrollTop).toBe(0); // not drawn yet
+      c.left.scrollHeight = 2000;
+      made[0]!.emit('changed');
+      expect(c.left.scrollTop).toBe(900);
+
+      c.left.scrollTop = 300;
+      c.listeners.get('scroll')?.({});
+      c.listeners.get('scroll')?.({});
+      vi.advanceTimersByTime(150);
+      expect(rowsSeen).toEqual([300]);
+      chart.destroy();
+      expect(c.listeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves to a window and sets its height through vis-timeline', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h, 700);
+    expect((made[0]!.options as { maxHeight: number }).maxHeight).toBe(700);
+    chart.setHeight(500);
+    expect(made[0]!.setOptions).toHaveBeenCalledWith({ maxHeight: 500 });
+    const w = { from: new Date(0), to: new Date(DAY_MS) };
+    chart.moveTo(w);
+    expect(made[0]!.setWindow).toHaveBeenCalledWith(w.from, w.to, { animation: false });
   });
 
   it('zooms in and out by the factor, without animation', () => {
@@ -638,6 +823,18 @@ describe('saved Timeline filters', () => {
       expect(e.hashes).toEqual([]);
     }
     expect(openTimeline(viewEnv(undefined), '#/timeline').restored).toBe(false);
+  });
+
+  it('opens a fragment that names a window on it, with its own filter and nothing restored or saved', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=saved' }) });
+    const e = viewEnv(storage);
+    const from = '2026-03-01T00:00:00Z';
+    const to = '2026-03-08T00:00:00Z';
+    expect(openTimeline(e, `#/timeline?from=${from}&to=${to}`)).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false, window: { from: new Date(from), to: new Date(to) } });
+    expect(e.hashes).toEqual([]);
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=saved');
+    expect(openTimeline(e, `#/timeline?tag=x&from=${from}&to=${to}`)).toEqual({ filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['x'] }, restored: false, window: { from: new Date(from), to: new Date(to) } });
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=x');
   });
 
   it('forgets the saved filter', () => {
