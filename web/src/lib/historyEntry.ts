@@ -67,6 +67,38 @@ export function replaceHash(hash: string, history: EntryHistory = window.history
   history.replaceState(history.state ?? null, '', hash);
 }
 
+/** The slice of `Window` that `pushHash` uses. */
+export interface PushWindow {
+  readonly history: EntryHistory & { pushState: (data: unknown, unused: string, url?: string) => void };
+  readonly sessionStorage?: EntryStorage;
+  dispatchEvent: (event: Event) => boolean;
+}
+
+/**
+ * Opens a new history entry at `hash` from script (a dialog that Back should close). The new entry starts as a copy of
+ * the current one's saved values (scroll, row scroll), since it shows the same view, and carries `extra` in its state.
+ * A script push fires neither popstate nor hashchange, so both are dispatched: the scroll restore and the router react
+ * as they would to a link.
+ */
+export function pushHash(hash: string, extra: Record<string, unknown> = {}, win: PushWindow = window, make: () => string = newKey, now: () => number = Date.now): void {
+  const storage = sessionStore(win);
+  const from = keyOf(win.history.state);
+  const key = make();
+  const copied = from === undefined ? undefined : readRecord(storage, from);
+  if (copied !== undefined) {
+    try {
+      storage?.setItem(ENTRY_KEY_FAMILY + key, JSON.stringify({ t: now(), values: copied.values }));
+      if (storage !== undefined) trim(storage);
+    } catch {
+      // A full quota: the new entry starts with nothing saved.
+    }
+  }
+  win.history.pushState({ ...extra, boardEntry: key }, '', hash);
+  // Plain events: the listeners here read `history.state` and `location`, not the event's fields.
+  win.dispatchEvent(new Event('popstate'));
+  win.dispatchEvent(new Event('hashchange'));
+}
+
 function readRecord(storage: EntryStorage | undefined, key: string): EntryRecord | undefined {
   try {
     const raw = storage?.getItem(ENTRY_KEY_FAMILY + key);

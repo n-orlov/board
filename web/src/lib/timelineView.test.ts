@@ -19,6 +19,7 @@ import {
   wheelGesture,
   windowFromQuery,
   withoutWindow,
+  taskFromQuery,
   zoomAround,
   forgetTimeline,
   clickedTask,
@@ -26,6 +27,8 @@ import {
   HOUR_MS,
   initialWindow,
   mountChart,
+  isTap,
+  TAP_SLOP_PX,
   openTimeline,
   PAN_DEBOUNCE_MS,
   sameRange,
@@ -231,6 +234,7 @@ describe('chartOptions', () => {
       verticalScroll: true,
       maxHeight: DEFAULT_CHART_HEIGHT,
       zoomKey: 'shiftKey',
+      dataAttributes: ['task'],
     });
     expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
@@ -316,6 +320,22 @@ describe('the window in the fragment', () => {
   });
 });
 
+describe('the previewed task in the fragment', () => {
+  it('reads a ref, and nothing for a missing, blank or overlong one', () => {
+    expect(taskFromQuery('tag=x&task=board-3')).toBe('board-3');
+    expect(taskFromQuery('task=%20T-1%20')).toBe('T-1');
+    expect(taskFromQuery('tag=x')).toBeUndefined();
+    expect(taskFromQuery('task=')).toBeUndefined();
+    expect(taskFromQuery(`task=${'x'.repeat(129)}`)).toBeUndefined();
+  });
+  it('is stripped from the filter query and written after the window', () => {
+    expect(withoutWindow('tag=x&task=T-1')).toBe('tag=x');
+    const w = { from: new Date('2026-03-01T00:00:00Z'), to: new Date('2026-03-15T00:00:00Z') };
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER, undefined, 'T-1')).toBe('#/timeline?task=T-1');
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER, w, 'T-1')).toMatch(/^#\/timeline\?from=.*&to=.*&task=T-1$/);
+  });
+});
+
 describe('zoom', () => {
   it('measures the range and limits the buttons at an hour and a quarter', () => {
     expect(spanOf({ start: new Date(1000), end: new Date(4000) })).toBe(3000);
@@ -341,6 +361,16 @@ describe('zoom', () => {
     expect(spanLabel(21 * DAY_MS)).toBe('3 weeks');
     expect(spanLabel(60 * DAY_MS)).toBe('2 months');
     expect(spanLabel(92 * DAY_MS)).toBe('3 months');
+  });
+});
+
+describe('isTap', () => {
+  it('takes one pointer, or none (a synthetic click), that moved at most the slop', () => {
+    expect(isTap({ pointers: 1, moved: 0 })).toBe(true);
+    expect(isTap({ pointers: 0, moved: 0 })).toBe(true);
+    expect(isTap({ pointers: 1, moved: TAP_SLOP_PX })).toBe(true);
+    expect(isTap({ pointers: 1, moved: TAP_SLOP_PX + 1 })).toBe(false);
+    expect(isTap({ pointers: 2, moved: 0 })).toBe(false);
   });
 });
 
@@ -568,6 +598,59 @@ describe('mountChart', () => {
     made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // no longer drawn
     made[0]!.emit('click', { what: 'item', item: 'act:B1' });
     expect(h.opened).toEqual(['A1', 'A7', 'B1']);
+  });
+
+  it('does not open a task when the pointer moved past the slop or a second finger came down (a pan or a pinch)', () => {
+    const { lib, made } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0) => c.listeners.get(type)?.({ pointerId, clientX, clientY });
+    const click = () => made[0]!.emit('click', { what: 'item', item: 'act:A1' });
+
+    pointer('pointerdown', 1, 0);
+    pointer('pointermove', 1, 6, 6); // within the slop: a tap
+    pointer('pointerup', 1, 6, 6);
+    click();
+    expect(h.opened).toEqual(['A1']);
+
+    pointer('pointerdown', 1, 0);
+    pointer('pointermove', 1, 40); // a drag that ends back where it started is still a pan
+    pointer('pointermove', 1, 0);
+    pointer('pointerup', 1, 0);
+    click();
+
+    pointer('pointerdown', 1, 0);
+    pointer('pointerdown', 2, 100);
+    pointer('pointerup', 1, 0);
+    pointer('pointerup', 2, 100);
+    click();
+    expect(h.opened).toEqual(['A1']);
+
+    pointer('pointerdown', 3, 0); // the next gesture starts afresh
+    pointer('pointerup', 3, 0);
+    click();
+    expect(h.opened).toEqual(['A1', 'A1']);
+  });
+
+  it('opens the task of a focused bar on Enter or Space, and leaves other keys and other elements alone', () => {
+    const { lib } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    const bar = { dataset: { task: 'A1' } };
+    const key = (k: string, target: unknown) => {
+      const e = { key: k, target, preventDefault: vi.fn() };
+      c.listeners.get('keydown')?.(e);
+      return e;
+    };
+    const onBar = { closest: () => bar };
+    expect(key('Enter', onBar).preventDefault).toHaveBeenCalled();
+    key(' ', onBar);
+    expect(key('a', onBar).preventDefault).not.toHaveBeenCalled();
+    key('Enter', { closest: () => null });
+    key('Enter', undefined);
+    expect(h.opened).toEqual(['A1', 'A1']);
   });
 
   it('reports the span and redraws the arrows after every redraw and every range change, and redraws vis-timeline once the range settles', () => {
@@ -834,6 +917,22 @@ describe('saved Timeline filters', () => {
     expect(e.hashes).toEqual([]);
     expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=saved');
     expect(openTimeline(e, `#/timeline?tag=x&from=${from}&to=${to}`)).toEqual({ filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['x'] }, restored: false, window: { from: new Date(from), to: new Date(to) } });
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=x');
+  });
+
+  it('opens a fragment that names a previewed task with it, and a bare preview restores nothing', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=saved' }) });
+    const e = viewEnv(storage);
+    const from = '2026-03-01T00:00:00Z';
+    const to = '2026-03-08T00:00:00Z';
+    expect(openTimeline(e, '#/timeline?task=board-3')).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false, task: 'board-3' });
+    expect(e.hashes).toEqual([]);
+    expect(openTimeline(e, `#/timeline?tag=x&from=${from}&to=${to}&task=board-3`)).toEqual({
+      filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['x'] },
+      restored: false,
+      window: { from: new Date(from), to: new Date(to) },
+      task: 'board-3',
+    });
     expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=x');
   });
 

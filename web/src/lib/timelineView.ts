@@ -192,6 +192,8 @@ export interface ChartClick {
   what: string | null;
   item?: string | number | null;
   group?: string | number | null;
+  /** The input event behind the click: its target is the element tapped. */
+  event?: { target?: EventTarget | null };
 }
 
 /** The slice of vis-timeline's Timeline the chart uses. */
@@ -229,6 +231,8 @@ export interface ChartOptions {
   maxHeight: number;
   /** vis-timeline's own wheel zoom needs this key held: the view's wheel handler takes Shift first, so it never does. */
   zoomKey: 'shiftKey';
+  /** Item fields vis-timeline writes as `data-` attributes: `data-task` makes a bar reachable by keyboard. */
+  dataAttributes: string[];
 }
 
 /** The chart's height when the view does not give one. */
@@ -255,6 +259,7 @@ export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHA
     verticalScroll: true,
     maxHeight,
     zoomKey: 'shiftKey',
+    dataAttributes: ['task'],
   };
 }
 
@@ -339,6 +344,7 @@ interface ChartDom {
   addEventListener?: HTMLElement['addEventListener'];
   removeEventListener?: HTMLElement['removeEventListener'];
   querySelector?: HTMLElement['querySelector'];
+  querySelectorAll?: HTMLElement['querySelectorAll'];
 }
 
 /** Takes the chart's wheel events before vis-timeline sees them, for the horizontal pan and the zoom. */
@@ -368,6 +374,85 @@ export function clickedTask(click: ChartClick, itemOf: (id: string) => TimelineI
   if (click.what === 'item' && click.item !== undefined && click.item !== null) return itemOf(String(click.item))?.task;
   if (click.what === 'group-label' && click.group !== undefined && click.group !== null) return taskOfGroup(String(click.group));
   return undefined;
+}
+
+/** How far (px) a pointer may move between going down and the click and still count as a tap: past it, it was a pan. */
+export const TAP_SLOP_PX = 10;
+
+/** A gesture on the chart so far: how many pointers took part and the farthest any of them moved from where it went down. */
+export interface Gesture {
+  pointers: number;
+  moved: number;
+}
+
+/** Whether a gesture was a tap: at most one pointer (none seen: a synthetic click), moved at most TAP_SLOP_PX. */
+export function isTap(gesture: Gesture, slop: number = TAP_SLOP_PX): boolean {
+  return gesture.pointers <= 1 && gesture.moved <= slop;
+}
+
+/**
+ * Follows the pointers on the chart, so a drag or a pinch that ends over a bar does not open it (vis-timeline's tap has
+ * its own allowance; this is the board's bound on top). A gesture starts when the first pointer goes down.
+ */
+export function gestureTracker(container: ChartDom) {
+  const down = new Map<number, { x: number; y: number }>();
+  let gesture: Gesture = { pointers: 0, moved: 0 };
+  const ondown = (e: PointerEvent) => {
+    if (down.size === 0) gesture = { pointers: 0, moved: 0 };
+    down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    gesture.pointers += 1;
+  };
+  const onmove = (e: PointerEvent) => {
+    const at = down.get(e.pointerId);
+    if (at !== undefined) gesture.moved = Math.max(gesture.moved, Math.hypot(e.clientX - at.x, e.clientY - at.y));
+  };
+  const onup = (e: PointerEvent) => down.delete(e.pointerId);
+  const listeners = [
+    ['pointerdown', ondown],
+    ['pointermove', onmove],
+    ['pointerup', onup],
+    ['pointercancel', onup],
+  ] as const;
+  const options = { capture: true, passive: true };
+  if (typeof container.addEventListener === 'function') for (const [name, fn] of listeners) container.addEventListener(name, fn, options);
+  return {
+    tapped: () => isTap(gesture),
+    stop: () => {
+      for (const [name, fn] of listeners) container.removeEventListener?.(name, fn, options);
+    },
+  };
+}
+
+/** The bars that open a task: vis-timeline writes the item's `task` as `data-task` (chartOptions' dataAttributes). */
+const TASK_BAR = '.vis-item[data-task]';
+
+/** The task bar an event happened on, or null (an element outside one, or no element at all). */
+function barOf(target: unknown): HTMLElement | null {
+  const el = target as Partial<Pick<Element, 'closest'>> | null | undefined;
+  return typeof el?.closest === 'function' ? el.closest<HTMLElement>(TASK_BAR) : null;
+}
+
+/** Makes every task bar a button for the keyboard (Tab reaches it, Enter or Space opens it); once per bar vis-timeline draws. */
+function focusableBars(container: ChartDom): void {
+  container.querySelectorAll?.<HTMLElement>(`${TASK_BAR}:not([tabindex])`).forEach((bar) => {
+    bar.tabIndex = 0;
+    bar.setAttribute('role', 'button');
+    bar.setAttribute('aria-label', `Preview task ${bar.dataset.task ?? ''}: ${bar.textContent?.trim() ?? ''}`.replace(/: $/, ''));
+  });
+}
+
+/** Opens the task of a focused bar on Enter or Space. */
+function listenKeys(container: ChartDom, open: (ref: string) => void): () => void {
+  if (typeof container.addEventListener !== 'function') return () => undefined;
+  const onkey = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const ref = barOf(event.target)?.dataset.task;
+    if (ref === undefined || ref === '') return;
+    event.preventDefault();
+    open(ref);
+  };
+  container.addEventListener('keydown', onkey);
+  return () => container.removeEventListener?.('keydown', onkey);
 }
 
 /** What the view hands the chart: where a click on a task goes, where arrows are drawn, and who hears the range. */
@@ -432,9 +517,15 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
   const heldItems: Held = new Map(model.items.map((i) => [i.id, JSON.stringify(i)]));
   const byId = (id: string) => current.items.find((item) => item.id === id);
+  const gestures = gestureTracker(container);
+  const unlistenKeys = listenKeys(container, (ref) => hooks.open(ref));
   timeline.on('click', (click) => {
+    if (!gestures.tapped()) return;
     const ref = clickedTask(click, byId);
-    if (ref !== undefined) hooks.open(ref);
+    if (ref === undefined) return;
+    // The bar tapped takes the focus first, so a dialog the view opens gives it back to that bar when it closes.
+    barOf(click.event?.target)?.focus({ preventScroll: true });
+    hooks.open(ref);
   });
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
   // range moves (a zoom, a pan). The span readout and the arrows follow all three.
@@ -442,6 +533,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     hooks.onSpan(spanOf(timeline.getWindow()));
     drawArrows(hooks.arrows, current.dependencies);
     rows.settle();
+    focusableBars(container);
   };
   timeline.on('changed', sync);
   timeline.on('rangechange', sync);
@@ -474,6 +566,8 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     },
     destroy() {
       unlistenWheel();
+      unlistenKeys();
+      gestures.stop();
       rows.stop();
       timeline.destroy();
     },
@@ -526,10 +620,18 @@ export interface OpenedTimeline {
   restored: boolean;
   /** The window the fragment names (`from`/`to`), when it names a usable one. */
   window?: TimeWindow;
+  /** The task the fragment previews over the chart (`task`), when it names one. */
+  task?: string;
 }
 
-/** The query keys of the window. They go in the fragment (a link or Back shows the same range) but are never saved. */
-const WINDOW_KEYS = ['from', 'to'] as const;
+/**
+ * The query keys of the window and of the task preview. They go in the fragment (a link or Back shows the same range
+ * and the same preview) but are never saved.
+ */
+const VIEW_KEYS = ['from', 'to', 'task'] as const;
+
+/** The longest task ref the fragment's `task` is taken for: anything longer is not a ref. */
+const TASK_REF_MAX = 128;
 
 /** A window time in the fragment: ISO to the second, UTC. */
 function windowTime(d: Date): string {
@@ -547,20 +649,30 @@ export function windowFromQuery(query: string): TimeWindow | undefined {
   return { from: new Date(from), to: new Date(to) };
 }
 
-/** A query without the window's keys: what the filter is, and what is saved. */
+/** The task a query previews, or undefined when `task` is missing, blank or too long to be a ref. */
+export function taskFromQuery(query: string): string | undefined {
+  const task = new URLSearchParams(query).get('task')?.trim() ?? '';
+  return task === '' || task.length > TASK_REF_MAX ? undefined : task;
+}
+
+/** A query without the window's and the preview's keys: what the filter is, and what is saved. */
 export function withoutWindow(query: string): string {
   const params = new URLSearchParams(query);
-  for (const key of WINDOW_KEYS) params.delete(key);
+  for (const key of VIEW_KEYS) params.delete(key);
   return params.toString();
 }
 
-/** The fragment of the view: the filter's query, then the window when there is one (`#/timeline?tag=x&from=…&to=…`). */
-export function timelineViewHash(filter: TimelineFilter, window?: TimeWindow): string {
+/**
+ * The fragment of the view: the filter's query, then the window and the previewed task when there are
+ * (`#/timeline?tag=x&from=…&to=…&task=…`).
+ */
+export function timelineViewHash(filter: TimelineFilter, window?: TimeWindow, task?: string): string {
   const params = new URLSearchParams(filterToQuery(filter));
   if (window !== undefined) {
     params.set('from', windowTime(window.from));
     params.set('to', windowTime(window.to));
   }
+  if (task !== undefined) params.set('task', task);
   const query = params.toString();
   return query === '' ? '#/timeline' : `#/timeline?${query}`;
 }
@@ -575,12 +687,13 @@ export function openTimeline(env: ViewEnv, hash: string): OpenedTimeline {
   const full = at < 0 ? '' : hash.slice(at + 1);
   const own = withoutWindow(full);
   const window = windowFromQuery(full);
-  // A fragment that names a window describes the whole view (a link, or Back to this entry): its filter, even none,
-  // is the one shown, and nothing saved replaces it.
-  if (window !== undefined && own === '') return { filter: filterFromQuery(''), restored: false, window };
+  const task = taskFromQuery(full);
+  const named = { ...(window === undefined ? {} : { window }), ...(task === undefined ? {} : { task }) };
+  // A fragment that names a window or a preview describes the whole view (a link, or Back to this entry): its filter,
+  // even none, is the one shown, and nothing saved replaces it.
+  if ((window !== undefined || task !== undefined) && own === '') return { filter: filterFromQuery(''), restored: false, ...named };
   const query = openView(env, TIMELINE_VIEW, '#/timeline', own);
-  const opened = { filter: filterFromQuery(query), restored: own === '' && query !== '' };
-  return window === undefined ? opened : { ...opened, window };
+  return { filter: filterFromQuery(query), restored: own === '' && query !== '', ...named };
 }
 
 /** Saves the filter's query after a change (the empty filter is the default and removes the key). */

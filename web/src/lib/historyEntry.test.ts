@@ -6,6 +6,7 @@ import {
   keyOf,
   loadEntry,
   newKey,
+  pushHash,
   replaceHash,
   saveEntry,
   scrollOf,
@@ -143,5 +144,51 @@ describe('scrollOf', () => {
     expect(scrollOf(-1)).toBeUndefined();
     expect(scrollOf(Number.NaN)).toBeUndefined();
     expect(scrollOf('10')).toBeUndefined();
+  });
+});
+
+describe('pushHash', () => {
+  function fakeWindow(state: unknown) {
+    const storage = fakeStorage();
+    const history = Object.assign(fakeHistory(state), {
+      pushed: [] as { data: unknown; url?: string }[],
+      pushState(data: unknown, _unused: string, url?: string) {
+        history.pushed.push({ data, url });
+        (history as { state: unknown }).state = data;
+      },
+    });
+    const events: string[] = [];
+    return { storage, history, events, win: { history, sessionStorage: storage, dispatchEvent: (e: Event) => events.push(e.type) > 0 } };
+  }
+
+  it('opens a new entry carrying the extra state and a fresh key, then announces it as popstate and hashchange', () => {
+    const { history, events, win } = fakeWindow({ boardEntry: 'a' });
+    pushHash('#/timeline?task=T-1', { preview: true }, win, () => 'b');
+    expect(history.pushed).toEqual([{ data: { preview: true, boardEntry: 'b' }, url: '#/timeline?task=T-1' }]);
+    expect(events).toEqual(['popstate', 'hashchange']);
+  });
+
+  it('starts the new entry with the current entry saved values, so its scroll is the same', () => {
+    const { storage, win } = fakeWindow({ boardEntry: 'a' });
+    saveEntry(storage, 'a', 'scroll', 420);
+    saveEntry(storage, 'a', 'timelineRows', 80);
+    pushHash('#/x', {}, win, () => 'b', () => 5);
+    expect(loadEntry(storage, 'b', 'scroll')).toBe(420);
+    expect(loadEntry(storage, 'b', 'timelineRows')).toBe(80);
+    expect(loadEntry(storage, 'a', 'scroll')).toBe(420);
+  });
+
+  it('pushes without copying when the current entry has no key or nothing saved', () => {
+    const { storage, history, win } = fakeWindow(null);
+    pushHash('#/x', {}, win, () => 'b');
+    expect(storage.data).toEqual({});
+    expect(keyOf(history.state)).toBe('b');
+  });
+
+  it('still pushes when the storage throws', () => {
+    const { history, win } = fakeWindow({ boardEntry: 'a' });
+    const broken = { ...win, sessionStorage: { getItem: () => '{"t":1,"values":{"scroll":3}}', setItem: () => { throw new Error('quota'); }, removeItem: () => {} } };
+    pushHash('#/x', {}, broken, () => 'b');
+    expect(history.pushed).toHaveLength(1);
   });
 });

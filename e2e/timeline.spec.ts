@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // The Timeline view at #/timeline (PRD R6, SPEC 11), read through the DOM vis-timeline draws: the initiative group and
 // its task rows, the planned, actual and lease bars and the markers, collapsing the initiative, the zoom buttons and
-// the wheel, a click on a task or a lease opening the task page, and one SVG arrow per dependency from the blocking
+// the wheel, a click on a task or a lease previewing the task in a dialog (Back closes it), and one SVG arrow per dependency from the blocking
 // task's bar to the dependent task's bar (end points inside the two bars, so the spec fails when none is drawn).
 // The board is shared with the other specs, so each test seeds an initiative of its own and filters the view to it.
 const viewports = [
@@ -249,22 +249,123 @@ for (const vp of viewports) {
       await s.api.dispose();
     });
 
-    test('a click on a task bar, a lease bar or a task row opens the task page', async ({ page, playwright, baseURL }) => {
+    test('a click on a task bar, a lease bar or a task row previews the task read-only in a dialog; Back closes it, then leaves', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `open-${vp.name}`);
+      await page.goto('/#/tasks');
+      await expect(page.getByTestId('tasks-view')).toBeVisible();
       await open(page, s);
       await bar(page, s.e).click();
-      await expect(page).toHaveURL(new RegExp(`#/t/${s.e}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      const dialog = page.getByRole('dialog', { name: `Task ${s.e}` });
+      await expect(dialog).toBeVisible(FIVE_SECONDS);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      expect(page.url()).toContain(`task=${s.e}`);
+      await expect(dialog.getByTestId('preview-close')).toBeFocused();
+      // Read-only: the task page's body without its actions, and a way to the full page.
+      await expect(dialog.getByTestId('task-actions')).toHaveCount(0);
+      await expect(dialog.getByRole('button', { name: /^(Edit|Done|Close task|Post note|Milestone|Add dependency)$/ })).toHaveCount(0);
+      await expect(dialog.getByTestId('preview-open')).toHaveAttribute('href', `#/t/${s.e}`);
+      // The page behind does not scroll while it is open.
+      expect(await page.evaluate(() => [document.documentElement.style.overflow, document.body.style.overflow])).toEqual(['hidden', 'hidden']);
+
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
+      await page.goBack();
+      await expect(page).toHaveURL(/#\/tasks$/);
 
       await open(page, s);
       await page.locator('.vis-item.tl-lease-live').click();
-      await expect(page).toHaveURL(new RegExp(`#/t/${s.a}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task A', FIVE_SECONDS);
+      await expect(page.getByRole('dialog', { name: `Task ${s.a}` }).getByTestId('task-title')).toHaveText('Task A', FIVE_SECONDS);
+      await page.getByTestId('preview-close').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
 
-      await open(page, s);
       await labels(page).nth(3).click(); // the row of task C
+      const c = page.getByRole('dialog', { name: `Task ${s.c}` });
+      await expect(c.getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await c.getByTestId('preview-open').click();
       await expect(page).toHaveURL(new RegExp(`#/t/${s.c}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await expect(page.getByTestId('task-page').getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await s.api.dispose();
+    });
+
+    test('a link to a preview opens it over the same window; closing it keeps the window and Back then leaves the view', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `deep-${vp.name}`);
+      const from = new Date(Date.now() - 10 * DAY).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const to = new Date(Date.now() + 4 * DAY).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      await page.goto('/#/tasks');
+      await page.goto(`/#/timeline?initiative=${s.slug}&from=${from}&to=${to}&task=${s.b}`);
+      const dialog = page.getByRole('dialog', { name: `Task ${s.b}` });
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task B', FIVE_SECONDS);
+      await expect.poll(() => span(page)).toBe(14 * DAY);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      expect(page.url()).toContain('from=');
+      expect(await span(page)).toBe(14 * DAY);
+      await page.goBack();
+      await expect(page).toHaveURL(/#\/tasks$/);
+
+      await page.goto(`/#/timeline?initiative=${s.slug}&task=${s.b}`);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task B', FIVE_SECONDS);
+      await page.reload();
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task B', FIVE_SECONDS);
+      await s.api.dispose();
+    });
+
+    test('a drag that ends on a bar pans and opens nothing; Enter on a focused bar opens it and Esc gives the focus back', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `keys-${vp.name}`);
+      await open(page, s);
+      const before = await span(page);
+      const box = (await bar(page, s.e).boundingBox())!;
+      const y = box.y + box.height / 2;
+      const x = box.x + Math.min(box.width / 2, 20);
+      await page.mouse.move(x + 80, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 40, y, { steps: 5 });
+      await page.mouse.move(x, y, { steps: 5 });
+      await page.mouse.up();
+      await page.waitForTimeout(400);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      expect(Math.abs((await span(page)) - before)).toBeLessThan(1000);
+
+      await bar(page, s.e).focus();
+      await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog', { name: `Task ${s.e}` });
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      // The chart under the dialog does not take the wheel.
+      await page.mouse.move(vp.size.width / 2, 20);
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(300);
+      expect(await span(page)).toBe(before);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.task)).toBe(s.e);
+      expect(page.url()).not.toContain('task=');
+      await s.api.dispose();
+    });
+
+    test('the open preview follows the live stream, and the chart redrawn under it keeps its window', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `live-${vp.name}`);
+      await open(page, s);
+      await page.getByTestId('zoom-in').click();
+      await expect.poll(() => page.url()).toContain('from=');
+      const before = await span(page);
+      const url = page.url();
+      await bar(page, s.d).click();
+      const dialog = page.getByRole('dialog', { name: `Task ${s.d}` });
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task D', FIVE_SECONDS);
+      await post(s.api, `/api/v1/tasks/${s.d}/milestones`, { summary: 'Seen live in the preview' }, 200);
+      await expect(dialog.getByTestId('event-summary').filter({ hasText: 'Seen live in the preview' })).toHaveCount(1, FIVE_SECONDS);
+      await expect(dialog).toBeVisible();
+      expect(await span(page)).toBe(before);
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).toBe(url);
+      expect(await span(page)).toBe(before);
       await s.api.dispose();
     });
 

@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { loadCurrent, replaceHash, saveCurrent, scrollOf } from './lib/historyEntry';
+  import { loadCurrent, pushHash, replaceHash, saveCurrent, scrollOf } from './lib/historyEntry';
   import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
   import 'vis-timeline/styles/vis-timeline-graph2d.min.css';
   import { domSurface } from './arrowSurface';
-  import { taskHref } from './lib/taskPage';
   import { currentBrowser } from './lib/session';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentViewEnv, FilterTurns } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
+  import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
   import {
@@ -63,6 +63,11 @@
   const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window);
   /** Whether the fragment carries the window: once it named one or the user moved the chart, so a fresh visit keeps the default. */
   let windowInHash = opened.window !== undefined;
+  /**
+   * The task previewed over the chart (`task` in the fragment). Opening one pushes a history entry, so Back closes it;
+   * a reload or a link opens it again over the same window.
+   */
+  let preview: string | undefined = $state(opened.task);
   /** The name the rows' scroll is saved under for this history entry. */
   const ROW_SCROLL = 'timelineRows';
   let view: TimelineViewState = $state.raw(store.state);
@@ -133,7 +138,7 @@
 
   // The filter lives in the fragment and in the saved query: a choice rewrites both in place (no history entry per choice).
   function persist(filter: TimelineFilter) {
-    replaceHash(timelineViewHash(filter, windowInHash ? view.window : undefined));
+    replaceHash(timelineViewHash(filter, windowInHash ? view.window : undefined, preview));
     saveTimeline(viewEnv.storage, filter);
   }
 
@@ -157,6 +162,7 @@
   async function hashChanged() {
     if (resolveRoute(window.location.hash, ROUTES).id !== 'timeline') return;
     const next = openTimeline(viewEnv, window.location.hash);
+    preview = next.task; // Back from a preview's entry closes it; Forward opens it again
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
     if (next.restored) await listed;
@@ -180,7 +186,7 @@
     if (target === undefined || !view.loaded) return;
     untrack(() => {
       const hooks = {
-        open: (ref: string) => (window.location.hash = taskHref(ref)),
+        open: openPreview,
         arrows,
         onSpan: (ms: number) => (span = ms),
         onRange: (range: TimeWindow) => store.panTo(range),
@@ -202,8 +208,26 @@
     if (window === lastWindow) return;
     lastWindow = window;
     windowInHash = true;
-    untrack(() => replaceHash(timelineViewHash(view.filter, window)));
+    untrack(() => replaceHash(timelineViewHash(view.filter, window, preview)));
   });
+
+  // A tap on a bar (or Enter on it) previews its task in a dialog, on a new history entry of the same view.
+  function openPreview(ref: string) {
+    if (preview !== undefined) return;
+    pushHash(timelineViewHash(view.filter, windowInHash ? view.window : undefined, ref), { preview: true });
+  }
+
+  // Closing goes Back when the preview opened its own entry; a preview that came with the page (a reload, a link) is
+  // dropped from the fragment in place, so Back still leaves the view.
+  function closePreview() {
+    const state: unknown = window.history.state;
+    if (typeof state === 'object' && state !== null && (state as { preview?: unknown }).preview === true) {
+      window.history.back();
+      return;
+    }
+    preview = undefined;
+    replaceHash(timelineViewHash(view.filter, windowInHash ? view.window : undefined));
+  }
 
   /** The chart's tallest: the screen below the chart's top, less the phone's tab bar, so the axis stays in view as rows scroll. */
   function heightFor(target: HTMLElement): number {
@@ -270,6 +294,12 @@
   {/if}
 </section>
 
+{#if preview !== undefined}
+  {#key preview}
+    <TaskPreview {csrf} ref={preview} onclose={closePreview} />
+  {/key}
+{/if}
+
 <style>
   /* vis-timeline's own sheet is light-only and sized for a desktop: map it onto the design tokens and make rows and
      labels fit a phone. The bars carry the task's status; lease bars, markers and arrows keep their own look. */
@@ -316,6 +346,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     padding: 0.25rem 0.5rem;
+  }
+  /* A task bar opens its preview: a pointer, and a keyboard ring inside the bar (the panel clips one outside it). */
+  .timeline-frame :global(.vis-item[data-task]) {
+    cursor: pointer;
+  }
+  .timeline-frame :global(.vis-item[data-task]:focus-visible) {
+    outline-offset: -2px;
   }
   .timeline-frame :global(.vis-group-level-unknown-but-gte1) {
     border: 0;
