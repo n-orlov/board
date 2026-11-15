@@ -48,6 +48,7 @@ import {
   timelineViewHash,
   windowFromQuery,
   withoutWindow,
+  taskFromQuery,
 } from './timelineView';
 
 const NOW = new Date('2026-03-10T12:00:00Z');
@@ -234,6 +235,7 @@ describe('chartOptions', () => {
       verticalScroll: true,
       maxHeight: DEFAULT_CHART_HEIGHT,
       zoomKey: 'shiftKey',
+      dataAttributes: ['task'],
     });
     expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
@@ -421,6 +423,22 @@ describe('gestureTracker', () => {
     const tracker = gestureTracker({});
     expect(tracker.kind()).toBe('tap');
     expect(() => tracker.stop()).not.toThrow();
+  });
+});
+
+describe('the previewed task in the fragment', () => {
+  it('reads a ref, and nothing for a missing, blank or overlong one', () => {
+    expect(taskFromQuery('tag=x&task=board-3')).toBe('board-3');
+    expect(taskFromQuery('task=%20T-1%20')).toBe('T-1');
+    expect(taskFromQuery('tag=x')).toBeUndefined();
+    expect(taskFromQuery('task=')).toBeUndefined();
+    expect(taskFromQuery(`task=${'x'.repeat(129)}`)).toBeUndefined();
+  });
+  it('is stripped from the filter query and written after the window', () => {
+    expect(withoutWindow('tag=x&task=T-1')).toBe('tag=x');
+    const w = { from: new Date('2026-03-01T00:00:00Z'), to: new Date('2026-03-15T00:00:00Z') };
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER, undefined, 'T-1')).toBe('#/timeline?task=T-1');
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER, w, 'T-1')).toMatch(/^#\/timeline\?from=.*&to=.*&task=T-1$/);
   });
 });
 
@@ -802,6 +820,28 @@ describe('mountChart', () => {
     expect(h.opened).toEqual(['A1', 'A7', 'B1']);
   });
 
+  it('focuses the bar a click landed on before it opens the task, and lets each drawn bar take the focus from script, once', () => {
+    const { lib, made } = fakeLib();
+    const order: string[] = [];
+    const h = hooks();
+    const hk = { ...h.h, open: (ref: string) => order.push(`open ${ref}`) };
+    const bar = { focus: vi.fn(() => order.push('focus')), tabIndex: -1, dataset: { task: 'A1' }, textContent: ' Task A ', attrs: {} as Record<string, string>, setAttribute(k: string, v: string) { this.attrs[k] = v; } };
+    const container = {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      querySelectorAll: () => [bar],
+    } as unknown as HTMLElement;
+    mountChart(lib, container, model(['A1']), initialWindow(NOW), hk);
+    made[0]!.emit('click', { what: 'item', item: 'act:A1', event: { target: { closest: () => bar } as unknown as EventTarget } });
+    expect(order).toEqual(['focus', 'open A1']);
+    expect(bar.focus).toHaveBeenCalledWith({ preventScroll: true });
+    made[0]!.emit('click', { what: 'item', item: 'act:A1', event: { target: { closest: () => null } as unknown as EventTarget } });
+    expect(order).toEqual(['focus', 'open A1', 'open A1']);
+    made[0]!.emit('changed');
+    expect(bar.tabIndex).toBe(-1);
+    expect(bar.attrs).toEqual({}); // no role: a bar is not a standalone control
+  });
+
   it('reports the span and redraws the arrows after every redraw and every range change, and redraws vis-timeline once the range settles', () => {
     const { lib, made } = fakeLib();
     const h = hooks();
@@ -1121,6 +1161,22 @@ describe('saved Timeline filters', () => {
       expect(e.hashes).toEqual([]);
     }
     expect(openTimeline(viewEnv(undefined), '#/timeline').restored).toBe(false);
+  });
+
+  it('opens a fragment that names a previewed task with it, and a bare preview restores nothing', () => {
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=saved' }) });
+    const e = viewEnv(storage);
+    const from = '2026-03-01T00:00:00Z';
+    const to = '2026-03-08T00:00:00Z';
+    expect(openTimeline(e, '#/timeline?task=board-3')).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false, task: 'board-3' });
+    expect(e.hashes).toEqual([]);
+    expect(openTimeline(e, `#/timeline?tag=x&from=${from}&to=${to}&task=board-3`)).toEqual({
+      filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['x'] },
+      restored: false,
+      window: { from: new Date(from), to: new Date(to) },
+      task: 'board-3',
+    });
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=x');
   });
 
   it('forgets the saved filter', () => {

@@ -2737,9 +2737,24 @@ on the chart (a primary `pointerdown` starts a gesture afresh and `lostpointerca
 end never arrived cannot leave a stuck gesture) and says whether it was a tap, a one-finger drag or a pinch: a drag or a
 pinch that ends over a bar opens nothing. Desktop shows the hint "Scroll to pan · Shift+scroll to zoom".
 
-*Open.* A click on
-a task bar, a lease bar, a marker or a task row's label opens that task's page (`#/t/<ref>`); a click on an initiative
-row collapses it instead.
+*Preview (R5).* A click on a task bar, a lease bar, a marker or a task row's label opens a **read-only preview** of that
+task over the chart (`web/src/TaskPreview.svelte`) and does not leave the Timeline; a click on an initiative row collapses
+it instead. The preview is the one `Dialog` (a bottom sheet on a phone, `wide` from 768 px) around `TaskBody` without its
+`actions`, so it shows the task page's body and no button that writes, under a header with **Open full page** (a link to
+`#/t/<ref>`, `preview-open`) and **Close** (`preview-close`, focused first). It reads the task like the task page and
+follows the live stream, so a milestone posted through the API shows in it within 5 s. While it is open the page behind
+does not scroll (`overflow: hidden` on `html` and `body`) and the chart under the dialog takes no wheel, so the window does
+not move. A bar that was clicked takes the focus first (`tabindex=-1` on every task bar, drawn by `focusableBars`; a bar has no
+role and is not in the Tab order: it is no standalone control), so **Escape** and **Close** return the focus to the bar
+that opened it. The preview's state is `task=<ref>` in the fragment, after the filter and the window
+(`#/timeline?initiative=aa&from=…&to=…&task=aa-3`, `timelineViewHash`, `taskFromQuery`; a blank or over-128-character value
+names no task); like the window it is never saved. Opening pushes a history entry of its own (`pushHash`, which copies the
+entry's saved scroll and announces popstate and hashchange): **Back closes the preview and a second Back leaves the view**.
+Closing from the button or Escape goes Back when the preview opened its own entry; a preview that came with the page (a link
+or a reload) is dropped from the fragment in place instead, so Back still leaves the view. A deep link or a reload with
+`task=<ref>` opens the preview again over the window the fragment names. `e2e/timeline.spec.ts` covers it at phone and
+desktop: one case for each of the four ways in, no action buttons, the scroll lock and the idle wheel, Escape and Close
+each returning the focus, Back twice, a deep link and a reload, the live milestone and Open full page.
 
 *Filters.* Four selects above the chart (44 px, 16 px text, wrapping on a phone) narrow what is drawn, each in the fragment's
 query and in the query of `GET /timeline`: **Initiative** (`initiative-filter`, `initiative=<slug>`; the board's initiatives,

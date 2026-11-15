@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The Timeline view at #/timeline (PRD R6, SPEC 11), read through the DOM vis-timeline draws: the initiative group and
 // its task rows, the planned, actual and lease bars and the markers, collapsing the initiative, the zoom buttons and
-// Shift+wheel, a click on a task or a lease opening the task page, and one SVG arrow per dependency from the blocking
+// Shift+wheel, a click on a task, a lease, a marker or a row previewing the task in a dialog (Back closes it), and one SVG arrow per dependency from the blocking
 // task's bar to the dependent task's bar (end points inside the two bars, so the spec fails when none is drawn).
 // The board is shared with the other specs, so each test seeds an initiative of its own and filters the view to it.
 const viewports = [
@@ -272,22 +273,151 @@ for (const vp of viewports) {
       await s.api.dispose();
     });
 
-    test('a click on a task bar, a lease bar or a task row opens the task page', async ({ page, playwright, baseURL }) => {
-      const s = await seed(playwright, baseURL, `open-${vp.name}`);
+    // The preview of a task over the chart (PRD R5): the task page's body, read-only, in the one dialog (a bottom sheet on a phone).
+    const dialogOf = (page: Page, ref: string) => page.getByRole('dialog', { name: `Task ${ref}` });
+    const openers: { name: string; ref: (s: Seed) => string; title: string; target: (page: Page, s: Seed) => Locator }[] = [
+      { name: 'a task bar', ref: (s) => s.e, title: 'Task E', target: (page, s) => bar(page, s.e) },
+      { name: 'a lease bar', ref: (s) => s.a, title: 'Task A', target: (page) => page.locator('.vis-item.tl-lease-live') },
+      { name: 'a marker', ref: (s) => s.a, title: 'Task A', target: (page) => page.locator('.vis-item.vis-point.tl-marker-check') },
+      { name: 'a row label', ref: (s) => s.c, title: 'Task C', target: (page) => labels(page).nth(3) },
+    ];
+    for (const [i, opener] of openers.entries()) {
+      test(`a click on ${opener.name} previews the task read-only in a dialog: no actions, the page and the chart do not scroll`, async ({ page, playwright, baseURL }) => {
+        const s = await seed(playwright, baseURL, `prev${i}-${vp.name}`);
+        await open(page, s);
+        const before = await span(page);
+        await opener.target(page, s).click();
+        const dialog = dialogOf(page, opener.ref(s));
+        await expect(dialog).toBeVisible(FIVE_SECONDS);
+        await expect(dialog.getByTestId('task-title')).toHaveText(opener.title, FIVE_SECONDS);
+        expect(page.url()).toContain(`task=${opener.ref(s)}`);
+        // Read-only: the task page's body without its actions, and a way to the full page.
+        await expect(dialog.getByTestId('task-actions')).toHaveCount(0);
+        await expect(dialog.getByRole('button', { name: /^(Edit|Done|Close task|Post note|Milestone|Add dependency)$/ })).toHaveCount(0);
+        await expect(dialog.getByTestId('preview-open')).toHaveAttribute('href', `#/t/${opener.ref(s)}`);
+        // The page behind does not scroll while it is open, and the chart under the dialog takes no wheel.
+        expect(await page.evaluate(() => [document.documentElement.style.overflow, document.body.style.overflow])).toEqual(['hidden', 'hidden']);
+        await page.mouse.move(vp.size.width / 2, vp.size.height / 2);
+        await page.mouse.wheel(0, 400);
+        await page.mouse.wheel(300, 0);
+        await page.mouse.wheel(0, -200);
+        await page.waitForTimeout(300);
+        expect(await span(page)).toBe(before);
+        await s.api.dispose();
+      });
+    }
+
+    test('Esc returns the focus to the bar that opened the preview', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `esc-${vp.name}`);
       await open(page, s);
       await bar(page, s.e).click();
-      await expect(page).toHaveURL(new RegExp(`#/t/${s.e}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      const dialog = dialogOf(page, s.e);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.task)).toBe(s.e);
+      await s.api.dispose();
+    });
 
+    test('the Close button returns the focus to the bar that opened the preview', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `close-${vp.name}`);
       await open(page, s);
-      await page.locator('.vis-item.tl-lease-live').click();
-      await expect(page).toHaveURL(new RegExp(`#/t/${s.a}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task A', FIVE_SECONDS);
+      await bar(page, s.d).click();
+      const dialog = dialogOf(page, s.d);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task D', FIVE_SECONDS);
+      await expect(dialog.getByTestId('preview-close')).toBeFocused();
+      await dialog.getByTestId('preview-close').click();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.task)).toBe(s.d);
+      await s.api.dispose();
+    });
+
+    test('Back closes the preview and a second Back leaves the view; Open full page lands on the task page', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `back-${vp.name}`);
+      await page.goto('/#/tasks');
+      await expect(page.getByTestId('tasks-view')).toBeVisible();
+      await open(page, s);
+      await bar(page, s.e).click();
+      const dialog = dialogOf(page, s.e);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task E', FIVE_SECONDS);
+      await page.goBack();
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
+      await page.goBack();
+      await expect(page).toHaveURL(/#\/tasks$/);
 
       await open(page, s);
       await labels(page).nth(3).click(); // the row of task C
+      const c = dialogOf(page, s.c);
+      await expect(c.getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await c.getByTestId('preview-open').click();
       await expect(page).toHaveURL(new RegExp(`#/t/${s.c}$`));
-      await expect(page.getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await expect(page.getByTestId('task-page').getByTestId('task-title')).toHaveText('Task C', FIVE_SECONDS);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await s.api.dispose();
+    });
+
+    test('a link and a reload with task=<ref> reopen the preview over the given window; closing it keeps the window and Back then leaves the view', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `deep-${vp.name}`);
+      const from = new Date(Date.now() - 10 * DAY).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const to = new Date(Date.now() + 4 * DAY).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      await page.goto('/#/tasks');
+      await page.goto(`/#/timeline?initiative=${s.slug}&from=${from}&to=${to}&task=${s.b}`);
+      const dialog = dialogOf(page, s.b);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task B', FIVE_SECONDS);
+      await expect.poll(() => span(page)).toBe(14 * DAY);
+      await page.reload();
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task B', FIVE_SECONDS);
+      await expect.poll(() => span(page)).toBe(14 * DAY);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      expect(page.url()).not.toContain('task=');
+      expect(page.url()).toContain('from=');
+      expect(await span(page)).toBe(14 * DAY);
+      await page.goBack();
+      await expect(page).toHaveURL(/#\/tasks$/);
+      await s.api.dispose();
+    });
+
+    for (const theme of ['light', 'dark'] as const) {
+      test(`the open preview is axe clean in the ${theme} theme, has 44 px controls and does not scroll the page sideways`, async ({ page, playwright, baseURL }) => {
+        const s = await seed(playwright, baseURL, `axe-${theme}-${vp.name}`);
+        await page.emulateMedia({ colorScheme: theme });
+        await open(page, s);
+        await bar(page, s.a).click();
+        const dialog = dialogOf(page, s.a);
+        await expect(dialog.getByTestId('task-title')).toHaveText('Task A', FIVE_SECONDS);
+        await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))).then(() => undefined));
+        const { violations } = await new AxeBuilder({ page }).analyze();
+        const blocking = violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target) }));
+        expect(blocking, 'serious or critical axe violations').toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+        for (const control of [dialog.getByTestId('preview-open'), dialog.getByTestId('preview-close')]) {
+          const box = (await control.boundingBox())!;
+          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44 - 0.5);
+        }
+        await s.api.dispose();
+      });
+    }
+
+    test('a milestone posted through the API appears in the open preview within 5 s, and the chart redrawn under it keeps its window', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `live-${vp.name}`);
+      await open(page, s);
+      await page.getByTestId('zoom-in').click();
+      await expect.poll(() => page.url()).toContain('from=');
+      const before = await span(page);
+      await bar(page, s.d).click();
+      const dialog = dialogOf(page, s.d);
+      await expect(dialog.getByTestId('task-title')).toHaveText('Task D', FIVE_SECONDS);
+      await post(s.api, `/api/v1/tasks/${s.d}/milestones`, { summary: 'Seen live in the preview' }, 200);
+      await expect(dialog.getByTestId('event-summary').filter({ hasText: 'Seen live in the preview' })).toHaveCount(1, FIVE_SECONDS);
+      await expect(dialog).toBeVisible();
+      expect(await span(page)).toBe(before);
       await s.api.dispose();
     });
 
