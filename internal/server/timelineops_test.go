@@ -160,9 +160,12 @@ func TestGetTimelineWithAllRowsAndAnActorKeepsTheTasksTheActorEverLeased(t *test
 	}
 }
 
-func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
-	t.Parallel()
-	s := newKeyServer(t)
+// dueLeaseServer is a server whose one lease ran out a minute ago and is still
+// live: an expiry would write it, so a read that expires it is seen. count is the
+// lease's state and the number of rows an expiry or any other write would change.
+func dueLeaseServer(t *testing.T) (s *keyServer, count func() (state string, n int)) {
+	t.Helper()
+	s = newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
 	if rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work"}`, "codex@host"); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
@@ -172,17 +175,23 @@ func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
 	if _, err := s.st.Writer().Exec(s.st.Dialect().Rebind(`UPDATE leases SET expires_at = ?`), store.EncodeTime(time.Now().Add(-time.Minute))); err != nil {
 		t.Fatal(err)
 	}
-	count := func() (state string, n int) {
+	count = func() (state string, n int) {
 		row := s.st.Writer().QueryRow(`SELECT (SELECT state FROM leases), (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM leases)`)
 		if err := row.Scan(&state, &n); err != nil {
 			t.Fatal(err)
 		}
 		return state, n
 	}
-	wantState, before := count()
-	if wantState != "live" {
-		t.Fatalf("the seeded lease is %q, want live", wantState)
+	if state, _ := count(); state != "live" {
+		t.Fatalf("the seeded lease is %q, want live", state)
 	}
+	return s, count
+}
+
+func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
+	t.Parallel()
+	s, count := dueLeaseServer(t)
+	_, before := count()
 	for q, want := range map[string]int{
 		"rows=some": 400, "rows=": 400, "rows=ALL": 400, "rows=window,all": 400, "rows=%20all": 400, "rows=window&rows=some": 400,
 		"rows=all&from=yesterday": 400, "rows=all&closed_within=soon": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404, "rows=all&initiative=nope": 404,
@@ -205,6 +214,48 @@ func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
 	}
 	if state, _ := count(); state != "expired" {
 		t.Errorf("the lease after the accepted reads is %q, want expired by the read", state)
+	}
+}
+
+// Every other way a timeline query is refused obeys the same rule as a bad rows:
+// the request changes nothing, whatever rows it carries.
+func TestGetTimelineRefusedWindowsAndFiltersChangeNothing(t *testing.T) {
+	t.Parallel()
+	s, count := dueLeaseServer(t)
+	_, before := count()
+	for q, want := range map[string]int{
+		"to=2000-01-01T00:00:00Z":                                                   400, // ends before the default window starts
+		"from=2030-01-01T00:00:00Z&to=2030-01-01T00:00:00Z&rows=all":                400, // empty window
+		"from=2030-01-01T00:00:00Z&to=2035-01-01T00:00:00Z&rows=window":             400, // over 400 days
+		"from=2030-01-01T00:00:00Z&to=later":                                        400,
+		"closed_within=soon&rows=window":                                            400,
+		"tag=Bad%20Tag&rows=all":                                                    400,
+		"initiative=nope&rows=window":                                               404,
+		"initiative=nope&rows=some":                                                 400, // rows is judged first
+		"rows=some&initiative=nope&tag=Bad%20Tag&closed_within=soon&from=yesterday": 400,
+	} {
+		rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host")
+		if rec.Code != want || decode(t, rec)["next"] == nil {
+			t.Errorf("%s = %d %s, want %d with a next", q, rec.Code, rec.Body, want)
+		}
+		if state, after := count(); state != "live" || after != before {
+			t.Errorf("%s left the lease %q and %d rows, want live and %d: a refusal changes nothing", q, state, after, before)
+		}
+	}
+}
+
+// A read that is accepted keeps expiring the due leases, for each valid rows and
+// for rows left out: only a refusal is exempt from the write.
+func TestGetTimelineAcceptedRowsStillExpireTheDueLeases(t *testing.T) {
+	t.Parallel()
+	for _, q := range []string{"", "rows=window", "rows=all"} {
+		s, count := dueLeaseServer(t)
+		if rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host"); rec.Code != http.StatusOK {
+			t.Fatalf("%q = %d %s, want 200", q, rec.Code, rec.Body)
+		}
+		if state, _ := count(); state != "expired" {
+			t.Errorf("%q left the lease %q, want expired by the read", q, state)
+		}
 	}
 }
 
