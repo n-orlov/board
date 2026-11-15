@@ -2,8 +2,8 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
-// (scroll only), the Actors view (sort only), the Archive view (window and sort), the Notes view (filter and scroll) and
-// Settings -> API keys (sort only) each come back with the scroll position
+// (scroll only), the Actors view (sort only), the Archive view (window and sort), the Notes view (filter and scroll),
+// Settings -> API keys (sort only) and the Timeline (filters, window and the chart's rows) each come back with the scroll position
 // of the history entry, the filters in the fragment, the sort column and direction (the header's aria-sort at desktop,
 // the Sort select at phone, the fragment's `sort` and `dir`) and the row order they had when a link was followed. Forward
 // and then Back again restores the same. Every test seeds rows of its own (slugs start with `e2e-hr-`) and reads only those.
@@ -403,6 +403,73 @@ for (const vp of viewports) {
         landing: /#\/t\//,
       };
       await leaveAndReturn(page, route, phone);
+    });
+
+    test('the Timeline comes back with its filters, window, the rows scrolled inside the chart and the page scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-hr-tl-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `History restore timeline ${vp.name}` }, 201);
+      // More rows than the chart is tall: the rows scroll inside it.
+      for (let i = 0; i < 30; i++) await post(api, '/api/v1/tasks', { initiative: slug, title: `Row ${String(i).padStart(2, '0')}` }, 201);
+
+      await page.goto('/#/timeline');
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      await expect(page.getByTestId('initiative-filter').locator(`option[value="${slug}"]`)).toHaveCount(1, FIVE_SECONDS);
+      await page.getByTestId('initiative-filter').selectOption(slug);
+      await page.getByTestId('closed-filter').selectOption('90');
+      await expect(page).toHaveURL((url) => url.hash.startsWith(`#/timeline?initiative=${slug}`));
+      await expect(page.locator('.vis-labelset .vis-label')).toHaveCount(31, FIVE_SECONDS);
+      await expect(page.locator('.vis-loading-screen')).toHaveCount(0, FIVE_SECONDS);
+
+      // The window: a sideways wheel pans, then a zoom step; the span readout carries the range shown.
+      const windowShown = () =>
+        page.getByTestId('timeline-span').evaluate((el) => ({ from: Number(el.getAttribute('data-from-ms')), to: Number(el.getAttribute('data-to-ms')) }));
+      const opening = await windowShown();
+      const centre = (await page.locator('.vis-panel.vis-center').boundingBox())!;
+      await page.mouse.move(centre.x + centre.width / 2, centre.y + 60);
+      await page.mouse.wheel(300, 0);
+      await expect.poll(async () => (await windowShown()).from, FIVE_SECONDS).not.toBe(opening.from);
+      await page.getByTestId('zoom-in').click();
+      await expect.poll(async () => (await windowShown()).to - (await windowShown()).from, FIVE_SECONDS).toBeLessThan(opening.to - opening.from);
+      // The settled window is in the fragment (from and to), and the readout and the fragment agree.
+      await expect.poll(() => queryOf(page).has('from') && queryOf(page).has('to'), FIVE_SECONDS).toBe(true);
+      await page.waitForTimeout(600); // the read of the settled window comes back and redraws the rows
+
+      // The rows scroll inside the chart (the label column's scrollTop), never the page.
+      const rowsScroll = () => page.locator('.vis-panel.vis-left').evaluate((el) => Math.round(el.scrollTop));
+      await page.locator('.vis-panel.vis-left').evaluate((el) => {
+        el.scrollTop = 400;
+      });
+      await expect.poll(rowsScroll, FIVE_SECONDS).toBe(400);
+      await page.waitForTimeout(300); // the scroll is reported once it settles
+
+      // The page scrolls as far as it goes: the chart is as tall as the screen allows, so a desktop has only a few pixels of room.
+      const room = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+      expect(room, 'the page must scroll under the chart').toBeGreaterThan(4);
+      await page.evaluate((y) => window.scrollTo(0, y), room);
+      await expect.poll(() => scrollY(page)).toBe(room);
+
+      const left = { scrollY: await scrollY(page), fragment: fragment(page), window: await windowShown(), rows: await rowsScroll() };
+      expect(queryOf(page).get('initiative')).toBe(slug);
+      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }).click();
+      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+
+      const restored = async () => {
+        await expect(page).toHaveURL((url) => url.hash === left.fragment, FIVE_SECONDS);
+        await expect(page.getByTestId('initiative-filter')).toHaveValue(slug, FIVE_SECONDS);
+        await expect(page.getByTestId('closed-filter')).toHaveValue('90');
+        await expect.poll(async () => Math.abs((await rowsScroll()) - left.rows), FIVE_SECONDS).toBeLessThanOrEqual(2);
+        await expect.poll(async () => Math.abs((await windowShown()).from - left.window.from), FIVE_SECONDS).toBeLessThanOrEqual(1000);
+        await expect.poll(async () => Math.abs((await windowShown()).to - left.window.to), FIVE_SECONDS).toBeLessThanOrEqual(1000);
+        await expect.poll(async () => Math.abs((await scrollY(page)) - left.scrollY), FIVE_SECONDS).toBeLessThanOrEqual(2);
+      };
+      await page.goBack();
+      await restored();
+      await page.goForward();
+      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+      await page.goBack();
+      await restored();
+      await api.dispose();
     });
 
     test('Settings -> API keys comes back with its sort, row order and scroll', async ({ page, playwright, baseURL }) => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { replaceHash } from './lib/historyEntry';
+  import { loadCurrent, replaceHash, saveCurrent, scrollOf } from './lib/historyEntry';
   import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
@@ -64,6 +64,8 @@
   const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window);
   /** Whether the fragment carries the window: once it named one or the user moved the chart, so a fresh visit keeps the default. */
   let windowInHash = opened.window !== undefined;
+  /** The name the rows' scroll is saved under for this history entry. */
+  const ROW_SCROLL = 'timelineRows';
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
@@ -190,9 +192,13 @@
           shownFrom = range.from.getTime();
           shownTo = range.to.getTime();
         },
+        onRowScroll: (px: number) => saveCurrent(ROW_SCROLL, px),
       };
-      if (chart === undefined) chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
-      else if (model !== shown) chart.show(model);
+      if (chart === undefined) {
+        chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
+        const rows = scrollOf(loadCurrent(ROW_SCROLL));
+        if (rows !== undefined) chart.scrollRows(rows);
+      } else if (model !== shown) chart.show(model);
       shown = model;
     });
   });

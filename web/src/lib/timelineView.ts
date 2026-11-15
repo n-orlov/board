@@ -439,6 +439,8 @@ export interface ChartHooks {
   onRange(range: TimeWindow): void;
   /** The visible range, after every redraw and while it moves. */
   onWindow?(range: TimeWindow): void;
+  /** How far the rows are scrolled, as they move (for Back to put them back). */
+  onRowScroll?(px: number): void;
 }
 
 /** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
@@ -449,6 +451,8 @@ export interface Chart {
   moveTo(window: TimeWindow): void;
   /** Sets the chart's tallest (the screen changed size). */
   setHeight(px: number): void;
+  /** Scrolls the rows to `px` once they are drawn tall enough (Back to this view). */
+  scrollRows(px: number): void;
   destroy(): void;
 }
 
@@ -484,6 +488,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const groups = new lib.DataSet<unknown>(model.groups);
   const timeline = new lib.Timeline(container, items, groups, chartOptions(window, height));
   const unlistenWheel = listenWheel(container, timeline);
+  const rows = rowScroll(container, hooks);
   const gestures = gestureTracker(container);
   let current = model;
   const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
@@ -501,6 +506,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     hooks.onSpan(spanOf(shown));
     hooks.onWindow?.({ from: shown.start, to: shown.end });
     drawArrows(hooks.arrows, current.dependencies);
+    rows.settle();
   };
   timeline.on('changed', sync);
   timeline.on('rangechange', sync);
@@ -528,10 +534,54 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     setHeight(px: number) {
       timeline.setOptions({ maxHeight: px });
     },
+    scrollRows(px: number) {
+      rows.restore(px);
+    },
     destroy() {
       unlistenWheel();
       gestures.stop();
+      rows.stop();
       timeline.destroy();
+    },
+  };
+}
+
+/** How long the rows' scroll settles before it is reported: a drag of the scrollbar is one report, not hundreds. */
+const ROW_SCROLL_REPORT_MS = 100;
+
+/**
+ * The rows' scroll: vis-timeline keeps it as the label panel's scrollTop (and follows that panel's scroll events), so
+ * reading it there reports it and writing it there moves the rows. A restore waits for a redraw tall enough to hold it.
+ */
+function rowScroll(container: ChartDom, hooks: ChartHooks) {
+  const panel = () => container.querySelector?.('.vis-panel.vis-left') ?? null;
+  let pending: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const report = () => {
+    timer = undefined;
+    const p = panel();
+    if (p !== null && pending === undefined) hooks.onRowScroll?.(p.scrollTop);
+  };
+  const onScroll = () => {
+    timer ??= setTimeout(report, ROW_SCROLL_REPORT_MS);
+  };
+  if (typeof container.addEventListener === 'function') container.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  return {
+    restore(px: number) {
+      pending = px > 0 ? px : undefined;
+    },
+    /** After a redraw: apply a pending restore once the rows are tall enough for it. */
+    settle() {
+      const p = panel();
+      if (pending === undefined || p === null) return;
+      const room = p.scrollHeight - p.clientHeight;
+      if (room <= 0) return;
+      p.scrollTop = Math.min(pending, room);
+      if (room >= pending) pending = undefined;
+    },
+    stop() {
+      if (timer !== undefined) clearTimeout(timer);
+      container.removeEventListener?.('scroll', onScroll, { capture: true });
     },
   };
 }

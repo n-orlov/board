@@ -575,10 +575,11 @@ describe('mountChart', () => {
   function fakeContainer() {
     const listeners = new Map<string, (e: unknown) => void>();
     const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
+    const left = { scrollTop: 0, scrollHeight: 0, clientHeight: 400 };
     const container = {
       addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
       removeEventListener: (type: string) => listeners.delete(type),
-      querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : null),
+      querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
     };
     const wheel = (over: object) => {
       const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
@@ -587,8 +588,84 @@ describe('mountChart', () => {
     };
     const pointer = (type: string, pointerId: number, clientX: number, clientY = 0) =>
       listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary: pointerId === 1 });
-    return { container: container as unknown as HTMLElement, listeners, wheel, pointer };
+    return { container: container as unknown as HTMLElement, listeners, wheel, pointer, left };
   }
+
+  it('reports the rows scrolling and puts a saved scroll back once the rows are tall enough', () => {
+    vi.useFakeTimers();
+    try {
+      const { lib, made } = fakeLib();
+      const c = fakeContainer();
+      const rowsSeen: number[] = [];
+      const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => rowsSeen.push(px) });
+      chart.scrollRows(900);
+      made[0]!.emit('changed');
+      expect(c.left.scrollTop).toBe(0); // not drawn yet
+      c.left.scrollHeight = 2000;
+      made[0]!.emit('changed');
+      expect(c.left.scrollTop).toBe(900);
+
+      c.left.scrollTop = 300;
+      c.listeners.get('scroll')?.({});
+      c.listeners.get('scroll')?.({});
+      vi.advanceTimersByTime(150);
+      expect(rowsSeen).toEqual([300]);
+      chart.destroy();
+      expect(c.listeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports nothing while a restore is pending or without a hook, and stops a report still waiting on destroy', () => {
+    vi.useFakeTimers();
+    try {
+      const { lib } = fakeLib();
+      const c = fakeContainer();
+      const rowsSeen: number[] = [];
+      const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => rowsSeen.push(px) });
+      chart.scrollRows(500);
+      c.listeners.get('scroll')?.({});
+      vi.advanceTimersByTime(150);
+      expect(rowsSeen).toEqual([]); // the rows are still waiting for the restore: their scrollTop is not the user's
+
+      c.listeners.get('scroll')?.({});
+      chart.destroy(); // a report still waiting is dropped
+      vi.advanceTimersByTime(150);
+      expect(rowsSeen).toEqual([]);
+
+      const bare = fakeContainer();
+      mountChart(lib, bare.container, model(['A1']), initialWindow(NOW), hooks().h);
+      bare.listeners.get('scroll')?.({});
+      vi.advanceTimersByTime(150); // no onRowScroll hook: nothing to call
+
+      const empty = { addEventListener: () => undefined, removeEventListener: () => undefined, querySelector: () => null } as unknown as HTMLElement;
+      const none = mountChart(lib, empty, model(['A1']), initialWindow(NOW), hooks().h);
+      none.scrollRows(100);
+      none.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds a saved rows scroll as far as the rows go, and keeps waiting while they are shorter than it', () => {
+    const { lib, made } = fakeLib();
+    const c = fakeContainer();
+    const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+    chart.scrollRows(900);
+    c.left.scrollHeight = 700; // 300 px of room
+    made[0]!.emit('changed');
+    expect(c.left.scrollTop).toBe(300);
+    c.left.scrollHeight = 1500; // now tall enough
+    made[0]!.emit('changed');
+    expect(c.left.scrollTop).toBe(900);
+    c.left.scrollTop = 10;
+    made[0]!.emit('changed'); // restored: a later redraw leaves the user's own scroll alone
+    expect(c.left.scrollTop).toBe(10);
+    chart.scrollRows(0); // nothing to restore
+    made[0]!.emit('changed');
+    expect(c.left.scrollTop).toBe(10);
+  });
 
   it('pans on a sideways wheel, leaving a vertical wheel to vis-timeline', () => {
     const { lib, made } = fakeLib();
