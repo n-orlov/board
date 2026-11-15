@@ -210,7 +210,7 @@ export interface ChartTimeline {
   zoomIn(percentage: number, options: { animation: boolean }): void;
   zoomOut(percentage: number, options: { animation: boolean }): void;
   /** vis-timeline's row store, where an initiative's collapse is toggled (what its own tap on the label calls); absent in a fake. */
-  itemSet?: { groups: Record<string, unknown>; toggleGroupShowNested(group: unknown): void };
+  itemSet?: { groups: Record<string, unknown>; toggleGroupShowNested(group: unknown, force?: boolean): void };
 }
 
 /** vis-timeline's classes, passed in by the view that imports them. */
@@ -672,6 +672,14 @@ export interface Chart {
   setHeight(px: number): void;
   /** Scrolls the rows to `px` once they are drawn tall enough (Back to this view). */
   scrollRows(px: number): void;
+  /**
+   * Reports what the chart displays now, ahead of the debounce and the redraw that would report it: the rows' scroll
+   * the user last left (when no restore is still under way) and the collapsed initiatives. The history entry being
+   * left calls it before it changes owner; `destroy` does it too.
+   */
+  flush(): void;
+  /** Shows another history entry's state (a Back or a link to this view): its collapsed initiatives and its rows' scroll. */
+  showEntry(state: { collapsed: readonly string[]; rows: number }): void;
   destroy(): void;
 }
 
@@ -683,9 +691,6 @@ function withoutCollapse<T extends { id: string }>(group: T & { showNested?: boo
   delete rest.showNested;
   return rest;
 }
-
-/** The name the collapsed initiatives are saved under for a history entry. */
-export const COLLAPSED = 'timelineCollapsed';
 
 /** The most collapsed initiatives one entry remembers: a saved value past it is not one this view wrote. */
 const COLLAPSED_MAX = 500;
@@ -814,6 +819,12 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     collapsed = next;
     hooks.onCollapse?.(encodeCollapsed(next));
   };
+  // The collapse as the data now holds it, which vis-timeline sets when it toggles, ahead of the redraw that calls `sync`;
+  // and the rows' scroll, ahead of its debounce.
+  const flush = () => {
+    rows.flush();
+    reportCollapse();
+  };
   const sync = () => {
     const shown = timeline.getWindow();
     hooks.onSpan(spanOf(shown));
@@ -855,7 +866,19 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     scrollRows(px: number) {
       rows.restore(px);
     },
+    flush,
+    showEntry(state) {
+      collapsed = new Set(state.collapsed);
+      const sets = timeline.itemSet;
+      for (const g of groups.get() as Nesting[]) {
+        if (g.nestedGroups === undefined || (g.showNested === false) === collapsed.has(g.id)) continue;
+        sets?.toggleGroupShowNested(sets.groups[g.id], !collapsed.has(g.id));
+      }
+      operableLabels(container);
+      rows.show(state.rows);
+    },
     destroy() {
+      flush();
       unlistenWheel();
       unlistenClicks();
       unlistenKeys();
@@ -887,7 +910,16 @@ function rowScroll(container: ChartDom, hooks: ChartHooks) {
   const report = () => {
     timer = undefined;
     const p = panel();
-    if (p !== null && pending === undefined) hooks.onRowScroll?.(p.scrollTop);
+    // A panel the page has already dropped (the view is being replaced) has no scroll: it reads 0, which is not the user's.
+    if (p !== null && p.isConnected !== false && pending === undefined) hooks.onRowScroll?.(p.scrollTop);
+  };
+  /**
+   * Reports where the rows are now, ahead of the debounce (the entry is being left or the page unloaded). The scroll
+   * event of a scroll just made may not even have fired yet, so the panel itself is read, not whether a report waits.
+   */
+  const flush = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    report();
   };
   const onScroll = () => {
     timer ??= setTimeout(report, ROW_SCROLL_REPORT_MS);
@@ -928,6 +960,19 @@ function rowScroll(container: ChartDom, hooks: ChartHooks) {
     /** After a redraw: apply a pending restore once the rows are tall enough for it. */
     settle() {
       if (place()) end();
+    },
+    flush,
+    /** Shows the rows at `px` for another history entry: no wait, the rows it was left on are the ones it names. */
+    show(px: number) {
+      end();
+      const p = panel();
+      if (px <= 0) {
+        if (p !== null) p.scrollTop = 0;
+        return;
+      }
+      pending = px;
+      if (place()) end();
+      else deadline = setTimeout(giveUp, RESTORE_WAIT_MS);
     },
     stop() {
       end();

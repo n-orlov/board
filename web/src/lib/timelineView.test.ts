@@ -14,7 +14,6 @@ import {
   dropUnknown,
   forgetTimeline,
   clickedTask,
-  COLLAPSED,
   collapseAfter,
   collapsedOf,
   encodeCollapsed,
@@ -1136,6 +1135,142 @@ describe('mountChart', () => {
     expect(made[0]!.groups.rows.map((g) => (g as { id: string; showNested?: boolean }).showNested)).toEqual([false, true]);
   });
 
+  describe('what the chart displays, reported before the deferred reports (R7, R8)', () => {
+    const group = (slug: string, showNested = true) => ({ id: `i:${slug}`, ref: slug, order: 0, nestedGroups: [`t:${slug}1`], showNested }) as unknown as TimelineModel['groups'][number];
+    const two = (): TimelineModel => ({ groups: [group('a'), group('b')], items: [], dependencies: [] });
+
+    it('flush reports the scroll of the rows now (inside its debounce, or before its scroll event fired), and destroy does the same', () => {
+      vi.useFakeTimers();
+      try {
+        const { lib } = fakeLib();
+        const c = fakeContainer();
+        const seen: number[] = [];
+        const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => seen.push(px) });
+        c.left.scrollTop = 120;
+        c.listeners.get('scroll')?.({});
+        chart.flush();
+        expect(seen).toEqual([120]);
+        vi.advanceTimersByTime(500);
+        expect(seen).toEqual([120]); // the debounce was cancelled: no second report, later, for another entry
+        c.left.scrollTop = 200; // moved, but its scroll event has not fired yet: the rows themselves are what is read
+        chart.flush();
+        expect(seen).toEqual([120, 200]);
+
+        c.left.scrollTop = 340;
+        c.listeners.get('scroll')?.({});
+        chart.destroy(); // torn down before the debounce fires
+        expect(seen).toEqual([120, 200, 340]);
+        vi.advanceTimersByTime(500);
+        expect(seen).toEqual([120, 200, 340]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('flush reports a collapse and an expand that vis-timeline has toggled in the data but not yet redrawn', () => {
+      const { lib, made } = fakeLib();
+      const reported: string[][] = [];
+      const chart = mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), { ...hooks().h, onCollapse: (ids) => reported.push(ids) });
+      (made[0]!.groups.rows[1] as { showNested?: boolean }).showNested = false; // the toggle; no `changed` yet
+      chart.flush();
+      expect(reported).toEqual([['i:b']]);
+      (made[0]!.groups.rows[1] as { showNested?: boolean }).showNested = true;
+      (made[0]!.groups.rows[0] as { showNested?: boolean }).showNested = false;
+      chart.destroy();
+      expect(reported).toEqual([['i:b'], ['i:a']]);
+      made[0]!.emit('changed'); // the redraw that comes after teardown reports nothing new
+      expect(reported).toEqual([['i:b'], ['i:a']]);
+    });
+
+    it('reports nothing for rows the page has already dropped (they read 0, which is not where the user left them)', () => {
+      const { lib } = fakeLib();
+      const c = fakeContainer();
+      const seen: number[] = [];
+      const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => seen.push(px) });
+      c.left.scrollTop = 0;
+      (c.left as { isConnected?: boolean }).isConnected = false;
+      chart.flush();
+      chart.destroy();
+      expect(seen).toEqual([]);
+    });
+
+    it('does not report a restore still under way as the user\'s scroll', () => {
+      vi.useFakeTimers();
+      try {
+        const { lib } = fakeLib();
+        const c = fakeContainer();
+        const seen: number[] = [];
+        const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (px) => seen.push(px) });
+        chart.scrollRows(800);
+        c.listeners.get('scroll')?.({});
+        chart.flush();
+        expect(seen).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows another entry: toggles only the initiatives that differ and puts its rows scroll back', () => {
+      const { lib, made } = fakeLib();
+      const c = fakeContainer();
+      const chart = mountChart(lib, c.container, two(), initialWindow(NOW), { ...hooks().h, collapsed: ['i:a'] });
+      const vis = { a: {}, b: {} };
+      const toggle = vi.fn((g: unknown, force?: boolean) => {
+        const id = g === vis.a ? 'i:a' : 'i:b';
+        (made[0]!.groups.rows.find((r) => (r as { id: string }).id === id) as { showNested?: boolean }).showNested = force;
+      });
+      made[0]!.itemSet = { groups: { 'i:a': vis.a, 'i:b': vis.b }, toggleGroupShowNested: toggle };
+      c.left.scrollHeight = 2000;
+      c.left.scrollTop = 50;
+      chart.showEntry({ collapsed: ['i:b'], rows: 700 });
+      expect(toggle.mock.calls).toEqual([
+        [vis.a, true],
+        [vis.b, false],
+      ]);
+      expect(c.left.scrollTop).toBe(700);
+      toggle.mockClear();
+      chart.showEntry({ collapsed: ['i:b'], rows: 700 });
+      expect(toggle).not.toHaveBeenCalled(); // already displayed
+      chart.showEntry({ collapsed: [], rows: 0 }); // an entry with nothing saved: every initiative open, rows at the top
+      expect(toggle.mock.calls).toEqual([[vis.b, true]]);
+      expect(c.left.scrollTop).toBe(0);
+    });
+
+    it('shows an entry for a chart with no rows panel yet, and never toggles a row that is not an initiative', () => {
+      const { lib, made } = fakeLib();
+      const empty = { addEventListener: () => undefined, removeEventListener: () => undefined, querySelector: () => null } as unknown as HTMLElement;
+      const chart = mountChart(lib, empty, model(['A1']), initialWindow(NOW), hooks().h);
+      const toggle = vi.fn();
+      made[0]!.itemSet = { groups: { 't:A1': {} }, toggleGroupShowNested: toggle };
+      chart.showEntry({ collapsed: ['t:A1'], rows: 0 });
+      chart.showEntry({ collapsed: [], rows: 100 });
+      expect(toggle).not.toHaveBeenCalled();
+      chart.destroy();
+    });
+
+    it('shows an entry whose rows are not tall enough yet once they are, and gives up after the bounded wait', () => {
+      vi.useFakeTimers();
+      try {
+        const { lib, made } = fakeLib();
+        const c = fakeContainer();
+        const chart = mountChart(lib, c.container, two(), initialWindow(NOW), hooks().h);
+        chart.showEntry({ collapsed: [], rows: 900 });
+        expect(c.left.scrollTop).toBe(0);
+        c.left.scrollHeight = 1700; // room 1300
+        made[0]!.emit('changed');
+        expect(c.left.scrollTop).toBe(900);
+        c.left.scrollTop = 0;
+        chart.showEntry({ collapsed: [], rows: 5000 });
+        c.left.scrollHeight = 900; // room 500: never tall enough
+        made[0]!.emit('changed');
+        vi.advanceTimersByTime(RESTORE_WAIT_MS + 1);
+        expect(c.left.scrollTop).toBe(500);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('collapsed initiatives', () => {
     const group = (slug: string, showNested = true) => ({ id: `i:${slug}`, ref: slug, order: 0, nestedGroups: [`t:${slug}1`], showNested }) as unknown as TimelineModel['groups'][number];
     const two = (): TimelineModel => ({ groups: [group('a'), group('b')], items: [], dependencies: [] });
@@ -1846,7 +1981,6 @@ describe('the collapsed initiatives of an entry', () => {
   ];
 
   it('is saved under one name, sorted and without repeats', () => {
-    expect(COLLAPSED).toBe('timelineCollapsed');
     expect(encodeCollapsed(new Set(['i:b', 'i:a']))).toEqual(['i:a', 'i:b']);
     expect(encodeCollapsed(['i:b', 'i:a', 'i:b'])).toEqual(['i:a', 'i:b']);
     expect(encodeCollapsed([])).toEqual([]);

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { loadCurrent, pushHash, replaceHash, saveCurrent, scrollOf } from './lib/historyEntry';
+  import { pushHash, replaceHash } from './lib/historyEntry';
+  import { TimelineEntry } from './lib/timelineEntry';
   import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
@@ -41,8 +42,6 @@
     openTimeline,
     saveTimeline,
     startFilter,
-    COLLAPSED,
-    collapsedOf,
     TimelineApi,
     TimelineViewStore,
     type Chart,
@@ -71,11 +70,16 @@
    * a reload or a link opens it again over the same window.
    */
   let preview: string | undefined = $state(opened.task);
-  /** The name the rows' scroll is saved under for this history entry. */
-  const ROW_SCROLL = 'timelineRows';
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
+  // Which initiatives are collapsed and how far the rows are scrolled belong to the history entry the chart is displayed
+  // on, and are saved under that entry's key, however late the report comes (see lib/timelineEntry.ts).
+  const entry = new TimelineEntry(
+    window,
+    () => chart,
+    () => resolveRoute(window.location.hash, ROUTES).id === 'timeline',
+  );
   /** The model the chart holds; a state that changes only the loading flag or the error leaves the chart alone. */
   let shown: TimelineModel | undefined;
   /** The visible range's length in milliseconds, 0 until the chart has drawn. */
@@ -138,7 +142,7 @@
     return () => {
       unsubscribe();
       store.cancelPan();
-      chart?.destroy();
+      chart?.destroy(); // reports what it displays to the entry it was shown on first
     };
   });
 
@@ -200,19 +204,28 @@
           shownFrom = range.from.getTime();
           shownTo = range.to.getTime();
         },
-        onRowScroll: (px: number) => saveCurrent(ROW_SCROLL, px),
-        // Which initiatives are collapsed belongs to this history entry: Back, Forward and a reload show it again, and a
-        // visit with no entry of its own (the nav, a new tab) starts with every initiative expanded.
-        collapsed: collapsedOf(loadCurrent(COLLAPSED)),
-        onCollapse: (ids: string[]) => saveCurrent(COLLAPSED, ids),
+        onRowScroll: (px: number) => entry.saveRows(px),
+        // Back, Forward and a reload show the entry's collapsed initiatives again, and a visit with no entry of its own
+        // (the nav, a new tab) starts with every initiative expanded.
+        collapsed: entry.collapsed(),
+        onCollapse: (ids: string[]) => entry.saveCollapsed(ids),
       };
       if (chart === undefined) {
         chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
-        const rows = scrollOf(loadCurrent(ROW_SCROLL));
+        const rows = entry.rows();
         if (rows !== undefined) chart.scrollRows(rows);
       } else if (model !== shown) chart.show(model);
       shown = model;
     });
+  });
+
+  // A move to another history entry first saves what the chart displays to the entry being left. The router unmounts the
+  // view on the same event (and Svelte drops its rows before the chart is destroyed), so this runs in the capture phase,
+  // ahead of the router, while the rows are still on the page.
+  $effect(() => {
+    const moved = () => entry.navigated();
+    window.addEventListener('popstate', moved, true);
+    return () => window.removeEventListener('popstate', moved, true);
   });
 
   // The window the store last read (a pan or zoom that settled) goes in the fragment, so Back and a shared link show it.
@@ -228,6 +241,7 @@
   // A tap on a bar previews its task in a dialog, on a new history entry of the same view.
   function openPreview(ref: string) {
     if (preview !== undefined) return;
+    entry.leaving(); // the entry pushed starts as a copy of this one's saved state: save the latest first
     pushHash(timelineViewHash(view.filter, windowInHash ? view.window : undefined, ref), { preview: true });
   }
 
@@ -257,7 +271,7 @@
   const button = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text enabled:hover:bg-surface disabled:opacity-60';
 </script>
 
-<svelte:window onhashchange={hashChanged} onresize={resized} />
+<svelte:window onhashchange={hashChanged} onresize={resized} onpagehide={() => entry.leaving()} />
 
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
