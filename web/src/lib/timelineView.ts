@@ -187,19 +187,18 @@ export interface ChartData<T> {
   update(rows: T[]): unknown;
 }
 
-/** What vis-timeline tells a `click` listener: what was hit, and the item or group under the pointer. */
+/** What vis-timeline makes of an input event (getEventProperties): what was hit, and the item or group under the pointer. */
 export interface ChartClick {
   what: string | null;
   item?: string | number | null;
   group?: string | number | null;
-  /** The input event behind the click: its target is the element tapped. */
-  event?: { target?: EventTarget | null };
 }
 
 /** The slice of vis-timeline's Timeline the chart uses. */
 export interface ChartTimeline {
   destroy(): void;
-  on(event: 'click', listener: (props: ChartClick) => void): void;
+  /** What the chart has under a DOM event: the item from its target, the group from its height. */
+  getEventProperties(event: Event): ChartClick;
   on(event: 'changed' | 'rangechange' | 'rangechanged', listener: () => void): void;
   getWindow(): { start: Date; end: Date };
   setWindow(start: Date | number, end: Date | number, options: { animation: boolean }): void;
@@ -231,7 +230,10 @@ export interface ChartOptions {
   maxHeight: number;
   /** vis-timeline's own wheel zoom needs this key held: the view's wheel handler takes Shift first, so it never does. */
   zoomKey: 'shiftKey';
-  /** Item fields vis-timeline writes as `data-` attributes: `data-task` makes a bar reachable by keyboard. */
+  /**
+   * Item fields vis-timeline writes as `data-` attributes: `data-task` makes a bar reachable by keyboard, `data-id` names
+   * its item (and so its row) for a tap that lands beside it.
+   */
   dataAttributes: string[];
 }
 
@@ -259,7 +261,7 @@ export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHA
     verticalScroll: true,
     maxHeight,
     zoomKey: 'shiftKey',
-    dataAttributes: ['task'],
+    dataAttributes: ['task', 'id'],
   };
 }
 
@@ -379,6 +381,33 @@ export function clickedTask(click: ChartClick, itemOf: (id: string) => TimelineI
 /** How far (px) a pointer may move between going down and the click and still count as a tap: past it, it was a pan. */
 export const TAP_SLOP_PX = 10;
 
+/**
+ * How far (px) from a bar a tap on the empty part of its row still opens it: a fingertip is wider than a short bar (a
+ * few px at a wide zoom) or a marker (about 19 px), and Chrome's own touch adjustment does not always reach that far.
+ */
+export const TAP_REACH_PX = 16;
+
+/** A drawn bar where a tap may land: its task, its row and its box on screen. */
+export interface BarBox {
+  task: string;
+  group: string | undefined;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** The bar in `group` nearest to (x, y) and at most `reach` px from it (0 inside it); the first drawn wins a tie. */
+export function nearestBar<B extends BarBox>(bars: readonly B[], x: number, y: number, group: string, reach: number = TAP_REACH_PX): B | undefined {
+  let best: { bar: B; distance: number } | undefined;
+  for (const bar of bars) {
+    if (bar.group !== group) continue;
+    const distance = Math.hypot(Math.max(bar.left - x, 0, x - bar.right), Math.max(bar.top - y, 0, y - bar.bottom));
+    if (distance <= reach && (best === undefined || distance < best.distance)) best = { bar, distance };
+  }
+  return best?.bar;
+}
+
 /** A gesture on the chart so far: how many pointers took part and the farthest any of them moved from where it went down. */
 export interface Gesture {
   pointers: number;
@@ -391,13 +420,18 @@ export function isTap(gesture: Gesture, slop: number = TAP_SLOP_PX): boolean {
 }
 
 /**
- * Follows the pointers on the chart, so a drag or a pinch that ends over a bar does not open it (vis-timeline's tap has
- * its own allowance; this is the board's bound on top). A gesture starts when the first pointer goes down.
+ * Follows the pointers on the chart, so a drag or a pinch that ends over a bar does not open it. A gesture starts when
+ * the first pointer goes down: one that is primary (no other pointer of its kind is down) or none other is known to be.
+ *
+ * A pointer can leave without its pointerup or pointercancel reaching the chart: on Chrome for Android a swipe on a row
+ * label lost its capture and never ended. Were it still counted, every later tap would look like a pinch and open
+ * nothing until a reload; so a primary pointer starts afresh, and losing the capture ends a pointer too.
  */
 export function gestureTracker(container: ChartDom) {
   const down = new Map<number, { x: number; y: number }>();
   let gesture: Gesture = { pointers: 0, moved: 0 };
   const ondown = (e: PointerEvent) => {
+    if (e.isPrimary) down.clear();
     if (down.size === 0) gesture = { pointers: 0, moved: 0 };
     down.set(e.pointerId, { x: e.clientX, y: e.clientY });
     gesture.pointers += 1;
@@ -412,6 +446,7 @@ export function gestureTracker(container: ChartDom) {
     ['pointermove', onmove],
     ['pointerup', onup],
     ['pointercancel', onup],
+    ['lostpointercapture', onup],
   ] as const;
   const options = { capture: true, passive: true };
   if (typeof container.addEventListener === 'function') for (const [name, fn] of listeners) container.addEventListener(name, fn, options);
@@ -430,6 +465,33 @@ const TASK_BAR = '.vis-item[data-task]';
 function barOf(target: unknown): HTMLElement | null {
   const el = target as Partial<Pick<Element, 'closest'>> | null | undefined;
   return typeof el?.closest === 'function' ? el.closest<HTMLElement>(TASK_BAR) : null;
+}
+
+/** The task bars drawn in `container`, with their rows (from the model) and boxes. */
+function barBoxes(container: ChartDom, itemOf: (id: string) => TimelineItem | undefined): (BarBox & { el: HTMLElement })[] {
+  return [...(container.querySelectorAll?.<HTMLElement>(TASK_BAR) ?? [])].map((el) => {
+    const box = el.getBoundingClientRect();
+    const group = itemOf(el.dataset.id ?? '')?.group;
+    return { el, task: el.dataset.task ?? '', group, left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+  });
+}
+
+/**
+ * The task a click on the chart opens, and the bar to give the focus to: what vis-timeline finds under it (a bar or a task
+ * row's label), else the nearest bar of the row whose empty part it landed on, within TAP_REACH_PX.
+ */
+function tappedTask(
+  event: MouseEvent,
+  timeline: ChartTimeline,
+  container: ChartDom,
+  itemOf: (id: string) => TimelineItem | undefined,
+): { ref: string; bar: HTMLElement | null } | undefined {
+  const props = timeline.getEventProperties(event);
+  const ref = clickedTask(props, itemOf);
+  if (ref !== undefined) return { ref, bar: barOf(event.target) };
+  if (props.what !== 'background' || props.group === undefined || props.group === null) return undefined;
+  const near = nearestBar(barBoxes(container, itemOf), event.clientX, event.clientY, String(props.group));
+  return near === undefined || near.task === '' ? undefined : { ref: near.task, bar: near.el };
 }
 
 /** Makes every task bar a button for the keyboard (Tab reaches it, Enter or Space opens it); once per bar vis-timeline draws. */
@@ -453,6 +515,13 @@ function listenKeys(container: ChartDom, open: (ref: string) => void): () => voi
   };
   container.addEventListener('keydown', onkey);
   return () => container.removeEventListener?.('keydown', onkey);
+}
+
+/** Hears the chart's DOM clicks. */
+function listenClicks(container: ChartDom, onclick: (event: MouseEvent) => void): () => void {
+  if (typeof container.addEventListener !== 'function') return () => undefined;
+  container.addEventListener('click', onclick);
+  return () => container.removeEventListener?.('click', onclick);
 }
 
 /** What the view hands the chart: where a click on a task goes, where arrows are drawn, and who hears the range. */
@@ -519,14 +588,18 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const byId = (id: string) => current.items.find((item) => item.id === id);
   const gestures = gestureTracker(container);
   const unlistenKeys = listenKeys(container, (ref) => hooks.open(ref));
-  timeline.on('click', (click) => {
+  // The browser's own click opens a task, not vis-timeline's `click`: that one fires twice for a tap (from its tap
+  // recogniser on pointerup, then from the DOM click), and the first, which also drops a press held past 250 ms, would
+  // open the dialog before the browser's click, which then lands on the dialog (its backdrop closes it).
+  const onclick = (event: MouseEvent) => {
     if (!gestures.tapped()) return;
-    const ref = clickedTask(click, byId);
-    if (ref === undefined) return;
+    const tapped = tappedTask(event, timeline, container, byId);
+    if (tapped === undefined) return;
     // The bar tapped takes the focus first, so a dialog the view opens gives it back to that bar when it closes.
-    barOf(click.event?.target)?.focus({ preventScroll: true });
-    hooks.open(ref);
-  });
+    tapped.bar?.focus({ preventScroll: true });
+    hooks.open(tapped.ref);
+  };
+  const unlistenClicks = listenClicks(container, onclick);
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
   // range moves (a zoom, a pan). The span readout and the arrows follow all three.
   const sync = () => {
@@ -567,6 +640,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     destroy() {
       unlistenWheel();
       unlistenKeys();
+      unlistenClicks();
       gestures.stop();
       rows.stop();
       timeline.destroy();

@@ -28,6 +28,7 @@ import {
   initialWindow,
   mountChart,
   isTap,
+  nearestBar,
   TAP_SLOP_PX,
   openTimeline,
   PAN_DEBOUNCE_MS,
@@ -234,7 +235,7 @@ describe('chartOptions', () => {
       verticalScroll: true,
       maxHeight: DEFAULT_CHART_HEIGHT,
       zoomKey: 'shiftKey',
-      dataAttributes: ['task'],
+      dataAttributes: ['task', 'id'],
     });
     expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
@@ -374,6 +375,22 @@ describe('isTap', () => {
   });
 });
 
+describe('nearestBar', () => {
+  const bar = (task: string, group: string | undefined, left: number, right: number) => ({ task, group, left, right, top: 10, bottom: 46 });
+
+  it('finds the nearest bar of the same row within the reach, the first drawn on a tie', () => {
+    const bars = [bar('A', 't:1', 100, 102), bar('B', 't:1', 130, 140), bar('C', 't:2', 105, 200), bar('D', 't:1', 90, 98)];
+    expect(nearestBar(bars, 110, 30, 't:1')?.task).toBe('A'); // 8 px from A, 20 from B
+    expect(nearestBar(bars, 101, 30, 't:1')?.task).toBe('A'); // inside A
+    expect(nearestBar(bars, 116, 50, 't:1')?.task).toBe('A'); // 14 px right, 4 px below: within 16
+    expect(nearestBar(bars, 99, 30, 't:1')?.task).toBe('A'); // 1 px from A and from D: the first drawn wins
+    expect(nearestBar(bars, 160, 30, 't:1')).toBeUndefined(); // 20 px from B
+    expect(nearestBar(bars, 150, 30, 't:2')?.task).toBe('C');
+    expect(nearestBar(bars, 110, 30, 't:3')).toBeUndefined();
+    expect(nearestBar(bars, 110, 30, 't:1', 5)).toBeUndefined();
+  });
+});
+
 describe('clickedTask', () => {
   const items = new Map([
     ['act:T1', { id: 'act:T1', task: 'T1' }],
@@ -448,6 +465,10 @@ describe('mountChart', () => {
       getWindow() {
         return this.window;
       }
+      /** A test's fake click carries what vis-timeline would find under it. */
+      getEventProperties(event: { props?: ChartClick }) {
+        return event.props ?? { what: null };
+      }
       emit(event: string, props?: ChartClick) {
         this.listeners.get(event)?.(props);
       }
@@ -495,7 +516,7 @@ describe('mountChart', () => {
   });
 
   /** A container like vis-timeline's: a centre panel 1000 px wide at x 100, a label panel that scrolls the rows. */
-  function fakeContainer() {
+  function fakeContainer(bars: unknown[] = []) {
     const listeners = new Map<string, (e: unknown) => void>();
     const left = { scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
     const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
@@ -503,13 +524,16 @@ describe('mountChart', () => {
       addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
       removeEventListener: (type: string) => listeners.delete(type),
       querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
+      querySelectorAll: (sel: string) => (sel === '.vis-item[data-task]' ? bars : []),
     };
     const wheel = (over: object) => {
       const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
       listeners.get('wheel')?.(e);
       return e;
     };
-    return { container: container as unknown as HTMLElement, listeners, left, wheel };
+    /** A DOM click on the chart that vis-timeline reads as `props`. */
+    const click = (props: ChartClick, over: object = {}) => listeners.get('click')?.({ props, target: null, clientX: 0, clientY: 0, ...over });
+    return { container: container as unknown as HTMLElement, listeners, left, wheel, click };
   }
 
   it('pans on a sideways wheel and zooms around the pointer on Shift+wheel, leaving a vertical wheel to vis-timeline', () => {
@@ -585,28 +609,62 @@ describe('mountChart', () => {
     expect(made[0]!.zoomIn).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the task of a click on a bar or a task row, from the model last shown', () => {
-    const { lib, made } = fakeLib();
-    const h = hooks();
-    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), h.h);
-    made[0]!.emit('click', { what: 'item', item: 'act:A1' });
-    made[0]!.emit('click', { what: 'group-label', group: 't:A7' });
-    made[0]!.emit('click', { what: 'group-label', group: 'i:alpha' });
-    made[0]!.emit('click', { what: 'background' });
-    expect(h.opened).toEqual(['A1', 'A7']);
-    chart.show(model(['B1']));
-    made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // no longer drawn
-    made[0]!.emit('click', { what: 'item', item: 'act:B1' });
-    expect(h.opened).toEqual(['A1', 'A7', 'B1']);
-  });
-
-  it('does not open a task when the pointer moved past the slop or a second finger came down (a pan or a pinch)', () => {
+  it('opens the task of a DOM click on a bar or a task row, from the model last shown, and ignores vis-timeline\'s own click', () => {
     const { lib, made } = fakeLib();
     const h = hooks();
     const c = fakeContainer();
+    const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    c.click({ what: 'item', item: 'act:A1' });
+    c.click({ what: 'group-label', group: 't:A7' });
+    c.click({ what: 'group-label', group: 'i:alpha' });
+    c.click({ what: 'background' });
+    expect(h.opened).toEqual(['A1', 'A7']);
+    made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // vis-timeline's click (its tap recogniser) is not heard
+    expect(h.opened).toEqual(['A1', 'A7']);
+    chart.show(model(['B1']));
+    c.click({ what: 'item', item: 'act:A1' }); // no longer drawn
+    c.click({ what: 'item', item: 'act:B1' });
+    expect(h.opened).toEqual(['A1', 'A7', 'B1']);
+    chart.destroy();
+    expect(c.listeners.has('click')).toBe(false);
+  });
+
+  it('opens the nearest bar of the row a click on its empty part landed in, within the reach, and gives it the focus', () => {
+    const { lib } = fakeLib();
+    const h = hooks();
+    // Row t:A1 has a 2 px bar at x 200..202 (y 10..46); row t:A2 below it has a bar at x 300..360 (y 60..96).
+    const bar = (id: string, task: string, left: number, top: number, width: number) => ({
+      dataset: { id, task },
+      focus: vi.fn(),
+      getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + 36 }),
+    });
+    const thin = bar('act:A1', 'A1', 200, 10, 2);
+    const wide = bar('act:A2', 'A2', 300, 60, 60);
+    const c = fakeContainer([thin, wide]);
+    mountChart(lib, c.container, model(['A1', 'A2']), initialWindow(NOW), h.h);
+    const background = (group: string, clientX: number, clientY: number) => c.click({ what: 'background', group }, { clientX, clientY });
+
+    background('t:A1', 214, 30); // 12 px right of the thin bar
+    expect(h.opened).toEqual(['A1']);
+    expect(thin.focus).toHaveBeenCalledWith({ preventScroll: true });
+    background('t:A1', 220, 30); // 18 px: out of reach
+    background('t:A1', 330, 50); // the wide bar is near, but in the next row
+    background('t:A9', 201, 30); // a row with no bar
+    c.click({ what: 'axis', group: 't:A1' }, { clientX: 201, clientY: 30 });
+    expect(h.opened).toEqual(['A1']);
+    background('t:A2', 330, 50); // 10 px above the wide bar, in its row
+    expect(h.opened).toEqual(['A1', 'A2']);
+  });
+
+  it('does not open a task when the pointer moved past the slop or a second finger came down (a pan or a pinch)', () => {
+    const { lib } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
     mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
-    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0) => c.listeners.get(type)?.({ pointerId, clientX, clientY });
-    const click = () => made[0]!.emit('click', { what: 'item', item: 'act:A1' });
+    // The first finger of a gesture is the primary pointer, as in a browser.
+    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0, isPrimary = pointerId !== 2) =>
+      c.listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary });
+    const click = () => c.click({ what: 'item', item: 'act:A1' });
 
     pointer('pointerdown', 1, 0);
     pointer('pointermove', 1, 6, 6); // within the slop: a tap
@@ -630,6 +688,30 @@ describe('mountChart', () => {
     pointer('pointerdown', 3, 0); // the next gesture starts afresh
     pointer('pointerup', 3, 0);
     click();
+    expect(h.opened).toEqual(['A1', 'A1']);
+  });
+
+  it('forgets a pointer whose end never reached the chart, so later taps still open', () => {
+    const { lib } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    const pointer = (type: string, pointerId: number, isPrimary = true) => c.listeners.get(type)?.({ pointerId, clientX: 0, clientY: 0, isPrimary });
+    const tap = (pointerId: number) => {
+      pointer('pointerdown', pointerId);
+      pointer('pointerup', pointerId);
+      c.click({ what: 'item', item: 'act:A1' });
+    };
+
+    pointer('pointerdown', 1); // a swipe whose pointerup and pointercancel were lost (seen on Chrome for Android)
+    tap(2); // the next touch is primary: no other finger is down
+    expect(h.opened).toEqual(['A1']);
+
+    pointer('pointerdown', 3);
+    pointer('lostpointercapture', 3); // with no pointerup after it
+    pointer('pointerdown', 4, false); // a later pointer that is not primary is counted on its own
+    pointer('pointerup', 4);
+    c.click({ what: 'item', item: 'act:A1' });
     expect(h.opened).toEqual(['A1', 'A1']);
   });
 
