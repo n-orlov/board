@@ -182,6 +182,8 @@ export function spanLabel(spanMs: number): string {
 /** The slice of vis-data's DataSet the chart uses. */
 export interface ChartData<T> {
   getIds(): (string | number)[];
+  /** Every row it holds, as vis-timeline last left it (a collapse is in `showNested`). */
+  get(): T[];
   remove(ids: (string | number)[]): unknown;
   /** Adds the rows it does not hold and merges the fields of the ones it does. */
   update(rows: T[]): unknown;
@@ -602,6 +604,10 @@ export interface ChartHooks {
   onWindow?(range: TimeWindow): void;
   /** How far the rows are scrolled, as they move (for Back to put them back). */
   onRowScroll?(px: number): void;
+  /** The initiative rows (their ids) that open collapsed: what Back, Forward or a reload restores. */
+  collapsed?: readonly string[];
+  /** The collapsed initiatives' ids (sorted), each time a collapse or an expand changes them. */
+  onCollapse?(ids: string[]): void;
 }
 
 /** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
@@ -626,6 +632,48 @@ function withoutCollapse<T extends { id: string }>(group: T & { showNested?: boo
   return rest;
 }
 
+/** The name the collapsed initiatives are saved under for a history entry. */
+export const COLLAPSED = 'timelineCollapsed';
+
+/** The most collapsed initiatives one entry remembers: a saved value past it is not one this view wrote. */
+const COLLAPSED_MAX = 500;
+
+/** The collapsed initiatives' ids a saved value holds, in order and without repeats; anything else is no collapse at all. */
+export function collapsedOf(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > COLLAPSED_MAX) return [];
+  const ids = value.filter((id): id is string => typeof id === 'string' && id !== '');
+  return [...new Set(ids)].sort();
+}
+
+/** The set to save: sorted, so the same collapse is always the same value. */
+export function encodeCollapsed(ids: Iterable<string>): string[] {
+  return collapsedOf([...ids]);
+}
+
+/** A row as far as a collapse is concerned. */
+interface Nesting {
+  id: string;
+  nestedGroups?: string[];
+  showNested?: boolean;
+}
+
+/** The groups with the initiatives named in `collapsed` drawn collapsed (a row that is not an initiative is left alone). */
+export function withCollapsed<G extends Nesting>(groups: readonly G[], collapsed: ReadonlySet<string>): G[] {
+  if (collapsed.size === 0) return [...groups];
+  return groups.map((g) => (g.nestedGroups !== undefined && collapsed.has(g.id) ? { ...g, showNested: false } : g));
+}
+
+/** `collapsed` after a redraw: an initiative held open leaves it, one held shut joins it, one not held is left as it was. */
+export function collapseAfter(collapsed: ReadonlySet<string>, held: readonly Nesting[]): Set<string> {
+  const next = new Set(collapsed);
+  for (const g of held) {
+    if (g.nestedGroups === undefined) continue;
+    if (g.showNested === false) next.add(g.id);
+    else next.delete(g.id);
+  }
+  return next;
+}
+
 /** The rows a chart holds, by id, as the text they were last drawn from: what a refresh compares against. */
 type Held = Map<string, string>;
 
@@ -635,18 +683,19 @@ type Held = Map<string, string>;
  * keeps what vis-timeline holds about it (a collapse), a refresh does not flicker, and a drag or a click under way is not
  * disturbed by an answer that changed nothing. `merged` shapes a changed row that `data` already holds.
  */
-function replaceRows<T extends { id: string }>(data: ChartData<unknown>, rows: readonly T[], held: Held, merged: (row: T) => T) {
+function replaceRows<T extends { id: string }>(data: ChartData<unknown>, rows: readonly T[], held: Held, merged: (row: T) => T, added: (row: T) => T = (row) => row) {
   const next: Held = new Map(rows.map((row) => [row.id, JSON.stringify(row)]));
   data.remove([...held.keys()].filter((id) => !next.has(id)));
-  data.update(rows.filter((row) => held.get(row.id) !== next.get(row.id)).map((row) => (held.has(row.id) ? merged(row) : row)));
+  data.update(rows.filter((row) => held.get(row.id) !== next.get(row.id)).map((row) => (held.has(row.id) ? merged(row) : added(row))));
   held.clear();
   next.forEach((text, id) => held.set(id, text));
 }
 
 /** Draws `model` with vis-timeline into `container`. */
 export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks, height?: number): Chart {
+  let collapsed: ReadonlySet<string> = new Set(hooks.collapsed ?? []);
   const items = new lib.DataSet<unknown>(model.items);
-  const groups = new lib.DataSet<unknown>(model.groups);
+  const groups = new lib.DataSet<unknown>(withCollapsed(model.groups, collapsed));
   const timeline = new lib.Timeline(container, items, groups, chartOptions(window, height));
   const unlistenWheel = listenWheel(container, timeline);
   const rows = rowScroll(container, hooks);
@@ -689,6 +738,13 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   const unlistenClicks = listenClicks(container, onclick);
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
   // range moves (a zoom, a pan). The span readout and the arrows follow all three.
+  // vis-timeline collapses or expands an initiative on its own tap and redraws; the redraw is where it shows.
+  const reportCollapse = () => {
+    const next = collapseAfter(collapsed, groups.get() as Nesting[]);
+    if (next.size === collapsed.size && [...next].every((id) => collapsed.has(id))) return;
+    collapsed = next;
+    hooks.onCollapse?.(encodeCollapsed(next));
+  };
   const sync = () => {
     const shown = timeline.getWindow();
     hooks.onSpan(spanOf(shown));
@@ -696,6 +752,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     drawArrows(hooks.arrows, current.dependencies);
     rows.settle();
     focusableBars(container);
+    reportCollapse();
   };
   timeline.on('changed', sync);
   timeline.on('rangechange', sync);
@@ -710,7 +767,7 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
   return {
     show(next: TimelineModel) {
       current = next;
-      replaceRows(groups, next.groups, heldGroups, withoutCollapse);
+      replaceRows(groups, next.groups, heldGroups, withoutCollapse, (row) => withCollapsed([row], collapsed)[0]!);
       replaceRows(items, next.items, heldItems, (row) => row);
     },
     zoom(direction) {

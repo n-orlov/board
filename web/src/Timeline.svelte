@@ -41,6 +41,8 @@
     openTimeline,
     saveTimeline,
     startFilter,
+    COLLAPSED,
+    collapsedOf,
     TimelineApi,
     TimelineViewStore,
     type Chart,
@@ -199,6 +201,10 @@
           shownTo = range.to.getTime();
         },
         onRowScroll: (px: number) => saveCurrent(ROW_SCROLL, px),
+        // Which initiatives are collapsed belongs to this history entry: Back, Forward and a reload show it again, and a
+        // visit with no entry of its own (the nav, a new tab) starts with every initiative expanded.
+        collapsed: collapsedOf(loadCurrent(COLLAPSED)),
+        onCollapse: (ids: string[]) => saveCurrent(COLLAPSED, ids),
       };
       if (chart === undefined) {
         chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));

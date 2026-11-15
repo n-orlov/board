@@ -13,6 +13,11 @@ import {
   dropUnknown,
   forgetTimeline,
   clickedTask,
+  COLLAPSED,
+  collapseAfter,
+  collapsedOf,
+  encodeCollapsed,
+  withCollapsed,
   DAY_MS,
   HOUR_MS,
   gestureKind,
@@ -551,6 +556,9 @@ describe('mountChart', () => {
     getIds() {
       return this.rows.map((r) => (r as { id: string }).id);
     }
+    get() {
+      return this.rows;
+    }
     remove(ids: (string | number)[]) {
       this.rows = this.rows.filter((r) => !ids.includes((r as { id: string }).id));
     }
@@ -965,6 +973,60 @@ describe('mountChart', () => {
     expect(made[0]!.groups.rows[0]).toMatchObject({ content: 'renamed', showNested: false });
     chart.show({ groups: [...withNested(true, 'renamed').groups, { id: 'i:b', ref: 'b', order: 1, showNested: true } as unknown as TimelineModel['groups'][number]], items: [], dependencies: [] });
     expect(made[0]!.groups.rows.map((g) => (g as { id: string; showNested?: boolean }).showNested)).toEqual([false, true]);
+  });
+
+  describe('collapsed initiatives', () => {
+    const group = (slug: string, showNested = true) => ({ id: `i:${slug}`, ref: slug, order: 0, nestedGroups: [`t:${slug}1`], showNested }) as unknown as TimelineModel['groups'][number];
+    const two = (): TimelineModel => ({ groups: [group('a'), group('b')], items: [], dependencies: [] });
+    const shown = (g: { rows: unknown[] }) => g.rows.map((r) => (r as { showNested?: boolean }).showNested);
+
+    it('opens the initiatives it was told are collapsed collapsed, and the others expanded', () => {
+      const { lib, made } = fakeLib();
+      mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), { ...hooks().h, collapsed: ['i:b'] });
+      expect(shown(made[0]!.groups)).toEqual([true, false]);
+    });
+
+    it('opens every initiative expanded when it is told nothing', () => {
+      const { lib, made } = fakeLib();
+      mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), hooks().h);
+      expect(shown(made[0]!.groups)).toEqual([true, true]);
+    });
+
+    it('reports a collapse and an expand once each, when vis-timeline has redrawn', () => {
+      const { lib, made } = fakeLib();
+      const reported: string[][] = [];
+      mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), { ...hooks().h, onCollapse: (ids) => reported.push(ids) });
+      made[0]!.emit('changed');
+      expect(reported).toEqual([]); // nothing moved
+      (made[0]!.groups.rows[1] as { showNested?: boolean }).showNested = false; // vis-timeline's own toggle
+      made[0]!.emit('changed');
+      made[0]!.emit('changed');
+      (made[0]!.groups.rows[0] as { showNested?: boolean }).showNested = false;
+      made[0]!.emit('changed');
+      (made[0]!.groups.rows[1] as { showNested?: boolean }).showNested = true;
+      made[0]!.emit('changed');
+      expect(reported).toEqual([['i:b'], ['i:a', 'i:b'], ['i:a']]);
+    });
+
+    it('does not report a restored collapse as a change, and reports expanding it', () => {
+      const { lib, made } = fakeLib();
+      const reported: string[][] = [];
+      mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), { ...hooks().h, collapsed: ['i:a'], onCollapse: (ids) => reported.push(ids) });
+      made[0]!.emit('changed');
+      expect(reported).toEqual([]);
+      (made[0]!.groups.rows[0] as { showNested?: boolean }).showNested = true;
+      made[0]!.emit('changed');
+      expect(reported).toEqual([[]]);
+    });
+
+    it('draws an initiative that comes back after a filter dropped it collapsed again', () => {
+      const { lib, made } = fakeLib();
+      const chart = mountChart(lib, {} as HTMLElement, two(), initialWindow(NOW), { ...hooks().h, collapsed: ['i:b'] });
+      chart.show({ groups: [group('a')], items: [], dependencies: [] });
+      made[0]!.emit('changed'); // i:b is no longer held: it stays collapsed
+      chart.show(two());
+      expect(shown(made[0]!.groups)).toEqual([true, false]);
+    });
   });
 
   it('touches only the rows that changed, so an answer that changed nothing disturbs nothing', () => {
@@ -1481,5 +1543,45 @@ describe('saved Timeline filters', () => {
 
   it('drops an unknown tag and keeps the known one and the initiatives', () => {
     expect(dropUnknown({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['gone', 'home'] }, known)).toEqual({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['home'] });
+  });
+});
+
+describe('the collapsed initiatives of an entry', () => {
+  const rows = [
+    { id: 'i:a', nestedGroups: ['t:1'], showNested: true },
+    { id: 'i:b', nestedGroups: ['t:2'], showNested: true },
+    { id: 't:1' },
+  ];
+
+  it('is saved under one name, sorted and without repeats', () => {
+    expect(COLLAPSED).toBe('timelineCollapsed');
+    expect(encodeCollapsed(new Set(['i:b', 'i:a']))).toEqual(['i:a', 'i:b']);
+    expect(encodeCollapsed(['i:b', 'i:a', 'i:b'])).toEqual(['i:a', 'i:b']);
+    expect(encodeCollapsed([])).toEqual([]);
+  });
+
+  it('restores what it saved and nothing else', () => {
+    expect(collapsedOf(encodeCollapsed(['i:b', 'i:a']))).toEqual(['i:a', 'i:b']);
+    expect(collapsedOf(JSON.parse(JSON.stringify(['i:a'])))).toEqual(['i:a']);
+    for (const bad of [undefined, null, 'i:a', 3, { 0: 'i:a' }]) expect(collapsedOf(bad)).toEqual([]);
+    expect(collapsedOf(['i:a', 4, '', null, 'i:a', 'i:c'])).toEqual(['i:a', 'i:c']);
+    expect(collapsedOf(Array.from({ length: 501 }, (_, i) => `i:${i}`))).toEqual([]);
+    expect(collapsedOf(Array.from({ length: 500 }, (_, i) => `i:${i}`))).toHaveLength(500);
+  });
+
+  it('draws the named initiatives collapsed and touches no task row', () => {
+    const out = withCollapsed(rows, new Set(['i:b', 't:1']));
+    expect(out.map((g) => g.showNested)).toEqual([true, false, undefined]);
+    expect(rows[1]!.showNested).toBe(true); // the model's own rows are not changed
+    expect(withCollapsed(rows, new Set())).toEqual(rows);
+  });
+
+  it('follows what vis-timeline holds: an open one leaves the set, a shut one joins it, one not held stays', () => {
+    const held = [
+      { id: 'i:a', nestedGroups: ['t:1'], showNested: false },
+      { id: 'i:b', nestedGroups: ['t:2'], showNested: true },
+      { id: 't:1', showNested: false },
+    ];
+    expect([...collapseAfter(new Set(['i:b', 'i:gone']), held)].sort()).toEqual(['i:a', 'i:gone']);
   });
 });

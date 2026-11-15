@@ -2681,7 +2681,13 @@ hour to a quarter, no stacking and no subgroups, rows in the mapping's order). U
 it is loading; a window with no task says so.
 
 *Rows and bars.* An initiative is a row whose label is a collapsible toggle (a click on it hides and shows its task rows);
-a task is a row below it (label `<ref> <title>`, with the attention badge). On a task row the planned bar is dashed
+**which initiatives are collapsed lives in the history entry, not in the fragment or the saved filter** (PRD R8): the ids
+of the collapsed initiative rows are saved under the entry as `timelineCollapsed` (a sorted list, in the entry's
+`sessionStorage` record next to `timelineRows`) each time vis-timeline redraws after a collapse or an expand, and the chart
+mounts with exactly those initiatives collapsed. Back, Forward and a reload show the entry as it was left, a script-opened
+preview entry starts as a copy of it, and a visit with no entry of its own (the nav, a link, a new tab) opens with every
+initiative expanded. A link or a saved filter never carries it; a stored value that is not a list of ids is no collapse;
+a task is a row below its initiative (label `<ref> <title>`, with the attention badge). On a task row the planned bar is dashed
 (`tl-planned`), the actual span is the bar named by its status (`tl-actual tl-open|done|closed`), each lease is a bar
 in the lane below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
 (`tl-marker tl-marker-<type>`, glyph from the mapping). The bars, rows and the toggle take their colours from the design
@@ -2827,7 +2833,7 @@ limits), the wheel navigation at desktop (a vertical wheel leaves the span, a si
 Ctrl+wheel zoom both ways with the instant under the pointer kept within 2 % of the span, and stop at an hour and 92 days),
 the touch navigation at phone (CDP `Input.dispatchTouchEvent`: a pinch out zooms in, a pinch in zooms out, a one-finger
 horizontal drag moves the window without zooming), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
-end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows. `timeline-rows.spec.ts` seeds an initiative whose tasks' spans lie inside and
+end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows. `timeline-collapse.spec.ts` collapses one of two seeded initiatives at phone and desktop and finds it still collapsed after Tasks and Back, after Forward and Back again and after a reload, expanded after expanding it and reloading, and every initiative expanded on a visit through the nav and in a new tab. `timeline-rows.spec.ts` seeds an initiative whose tasks' spans lie inside and
 outside the opening window (two closed tasks dated months back, a planned strip ahead of it), records the row labels in order
 and each row's offset, and finds them unchanged within 1 px after a pan far past every span, a zoom in and a zoom out, with every
 `GET /timeline` carrying `rows=all`; it also reads the row heights (52 px and 44 px) and the lane order from the DOM, at phone and desktop.
