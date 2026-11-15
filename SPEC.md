@@ -2689,7 +2689,7 @@ preview entry starts as a copy of it, and a visit with no entry of its own (the 
 initiative expanded. A link or a saved filter never carries it; a stored value that is not a list of ids is no collapse;
 a task is a row below its initiative (label `<ref> <title>`, with the attention badge). On a task row the planned bar is dashed
 (`tl-planned`), the actual span is the bar named by its status (`tl-actual tl-open|done|closed`), each lease is a bar
-in the lane below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
+in a slot of the lane below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
 (`tl-marker tl-marker-<type>`, glyph from the mapping). The bars, rows and the toggle take their colours from the design
 tokens, light and dark, over vis-timeline's own sheet; at phone the label column is capped at the smaller of 10 rem and
 28 vw (longer labels are ellipsised, the full text is the tooltip) and every label row is at least 44 px high.
@@ -2699,9 +2699,22 @@ rows are the tasks the filters keep wherever their spans fall and the window pic
 row appears, vanishes or changes place as the window moves. A task row is 52 px high and an initiative row 44 px, in every
 window, and each kind of item keeps a lane in the task row, measured from its top (`LANES` in `web/src/lib/timeline.ts`,
 handed to the CSS as custom properties by `laneStyle`): the planned strip on top (4 px down, 6 px high), the actual span
-with the markers on its lane (12 px down, 20 px high) and the leases below (34 px down, 14 px high; leases that overlap in
-time share the lane, drawn see-through). Items are never stacked and sit in no subgroup, so vis-timeline never sizes a row
-by the items in view, and nothing on the chart moves vertically on a pan or a zoom.
+with the markers on its lane (12 px down, 20 px high) and the leases below (34 px down, in slots, next paragraph). Items are
+never stacked and sit in no subgroup, so vis-timeline never sizes a row by the items in view, and nothing on the chart
+moves vertically on a pan or a zoom.
+
+*Lease slots (R11, `assignLeaseSlots` and `leaseSlotBox` in `web/src/lib/timeline.ts`).* Overlapping leases of one task
+each keep a strip nobody else covers, so each is readable and its tooltip and tap (which open that task) reach it. The
+leases of a task, in the order they began, each take the first slot free at their start; a slot is free from the instant
+its last bar ended, so two leases that touch end to start share one slot. A task whose leases never overlap uses one slot,
+a bar 14 px high at 34 px down (as before); two slots are bars 11 px high at 34 and 39 px down; three (for example a lease
+that lies inside another and a third that overlaps both) are bars 6 px high at 34, 39 and 44 px down, so every bar's box has
+rows the other boxes leave uncovered, whichever is drawn on top, and the lane ends at 50 px: the row stays 52 px high. The
+bars carry `tl-lease-c<slots>` (height) and `tl-lease-c<slots>-s<slot>` (top), numbers from `laneStyle`; a 6 px bar shows
+no text (it is in the tooltip). At most three slots exist: a fourth lease overlapping three others shares the third.
+`e2e/timeline-leases.spec.ts` seeds a task for each case (two overlapping leases, three with one inside another, two
+touching) and at desktop asserts every bar is visible, that `elementFromPoint` at a point only that bar's box holds returns
+that bar and a click there opens its task, and that every task row is 52 px.
 
 *Colours and legend (R2).* Each item sets `--tl` to a design token by its class, and draws itself from it (bars a light
 wash of the token with a solid edge, markers the token itself), so both themes read through the tokens' own values:

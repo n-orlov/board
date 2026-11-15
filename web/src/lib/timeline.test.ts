@@ -24,6 +24,9 @@ import {
   filterToQuery,
   isFiltered,
   leaseText,
+  assignLeaseSlots,
+  leaseSlotBox,
+  LEASE_SLOTS,
   taskOfGroup,
   timelineHash,
   type Timeline,
@@ -159,9 +162,9 @@ describe('lease bars', () => {
   it('draws one bar per lease in the lease lane, coloured by its state, with text in the tooltip', () => {
     const items = buildTimeline(answer({ leases }), NOW).items.filter((i) => i.kind === 'lease');
     expect(items.map((i) => [i.id, i.className, i.kind])).toEqual([
-      ['lease:L1', 'tl-lease tl-lease-live', 'lease'],
-      ['lease:L2', 'tl-lease tl-lease-ended', 'lease'],
-      ['lease:L3', 'tl-lease tl-lease-expired', 'lease'],
+      ['lease:L1', 'tl-lease tl-lease-live tl-lease-c1 tl-lease-c1-s0', 'lease'],
+      ['lease:L2', 'tl-lease tl-lease-ended tl-lease-c1 tl-lease-c1-s0', 'lease'],
+      ['lease:L3', 'tl-lease tl-lease-expired tl-lease-c1 tl-lease-c1-s0', 'lease'],
     ]);
     expect(items[0]).toMatchObject({ group: 't:T1', type: 'range', start: '2026-03-09T10:00:00Z', end: NOW.toISOString(), content: 'ada', lease: 'L1', task: 'T1' });
     expect(items[0]!.title).toBe('L1 (live) held by ada: write it. Started 2026-03-09T10:00:00Z');
@@ -406,7 +409,7 @@ describe('item classes and TIMELINE_LEGEND', () => {
   const classesOf = (kind: string) =>
     buildTimeline(answer({ tasks, leases, markers }), NOW)
       .items.filter((i) => i.kind === kind)
-      .map((i) => i.className.split(' ').filter((c) => !c.startsWith('tl-id-')).join(' '));
+      .map((i) => i.className.split(' ').filter((c) => !c.startsWith('tl-id-') && !/^tl-lease-c\d/.test(c)).join(' '));
 
   it('gives each task status, lease state and marker type its class, and a planned bar its own', () => {
     expect(classesOf('actual')).toEqual(['tl-actual tl-open', 'tl-actual tl-done', 'tl-actual tl-closed']);
@@ -483,5 +486,49 @@ describe('fixed rows and lanes', () => {
     const leaseItems = items.filter((i) => i.kind === 'lease');
     expect(leaseItems).toHaveLength(2);
     expect(new Set(leaseItems.map((i) => i.group))).toEqual(new Set(['t:T1']));
+  });
+});
+
+describe('lease slots (R11)', () => {
+  const at = (day: number) => Date.UTC(2026, 2, day);
+  const span = (id: string, from: number, to: number) => ({ id, start: at(from), end: at(to) });
+
+  /** Whether every bar of the slotted spans shows a strip of its box that no other bar's box covers. */
+  function everyBarHasAnUncoveredStrip(slots: Map<string, number>, count: number): boolean {
+    const boxes = [...slots.values()].map((slot) => leaseSlotBox(slot, count));
+    const rowsOf = (box: { top: number; height: number }) => Array.from({ length: box.height }, (_, n) => box.top + n);
+    return boxes.every((box, i) => {
+      const others = new Set(boxes.filter((_, j) => j !== i).flatMap(rowsOf));
+      return rowsOf(box).some((row) => !others.has(row));
+    });
+  }
+
+  it('puts two overlapping leases in two slots, the later one below, each bar with a strip of its own', () => {
+    const { slots, count } = assignLeaseSlots([span('a', 1, 5), span('b', 3, 8)]);
+    expect([...slots]).toEqual([['a', 0], ['b', 1]]);
+    expect(count).toBe(2);
+    expect(leaseSlotBox(0, count)).toEqual({ top: 34, height: 11 });
+    expect(leaseSlotBox(1, count)).toEqual({ top: 39, height: 11 });
+    expect(everyBarHasAnUncoveredStrip(slots, count)).toBe(true);
+  });
+
+  it('puts three leases, one of them inside another, in three slots that every bar shows a strip of', () => {
+    const { slots, count } = assignLeaseSlots([span('outer', 1, 10), span('inner', 3, 6), span('late', 5, 12)]);
+    expect([...slots].sort()).toEqual([['inner', 1], ['late', 2], ['outer', 0]]);
+    expect(count).toBe(LEASE_SLOTS);
+    expect([0, 1, 2].map((slot) => leaseSlotBox(slot, count))).toEqual([
+      { top: 34, height: 6 },
+      { top: 39, height: 6 },
+      { top: 44, height: 6 },
+    ]);
+    expect(everyBarHasAnUncoveredStrip(slots, count)).toBe(true);
+    for (const slot of [0, 1, 2]) expect(leaseSlotBox(slot, count).top + leaseSlotBox(slot, count).height).toBeLessThanOrEqual(TASK_ROW_PX);
+  });
+
+  it('lets two leases that touch end to start share one slot, at the full lane', () => {
+    const { slots, count } = assignLeaseSlots([span('second', 5, 9), span('first', 1, 5)]);
+    expect([...slots].sort()).toEqual([['first', 0], ['second', 0]]);
+    expect(count).toBe(1);
+    expect(leaseSlotBox(0, count)).toEqual(LANES.lease);
   });
 });

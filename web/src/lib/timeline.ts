@@ -159,7 +159,60 @@ export function laneStyle(): string {
   const lanes = (Object.keys(LANES) as (keyof typeof LANES)[]).map(
     (k) => `--tl-${k}-top:${LANES[k].top}px;--tl-${k}-h:${LANES[k].height}px`,
   );
-  return [`--tl-task-row:${TASK_ROW_PX}px`, `--tl-initiative-row:${INITIATIVE_ROW_PX}px`, ...lanes].join(';');
+  const slots = [2, 3].flatMap((count) => [
+    `--tl-lease-c${count}-h:${leaseSlotBox(0, count).height}px`,
+    ...Array.from({ length: count }, (_, slot) => `--tl-lease-c${count}-s${slot}-top:${leaseSlotBox(slot, count).top}px`),
+  ]);
+  return [`--tl-task-row:${TASK_ROW_PX}px`, `--tl-initiative-row:${INITIATIVE_ROW_PX}px`, ...lanes, ...slots].join(';');
+}
+
+/**
+ * The most slots a task's leases are spread over (R11). A lease takes the first slot whose last bar ended at or before
+ * it began, so leases that touch end to start share one; a fourth lease overlapping three others shares the last slot.
+ */
+export const LEASE_SLOTS = 3;
+
+/** The area the lease slots divide, below the actual span: 16 px from 34 px down, leaving the row's last 2 px free. */
+const LEASE_AREA_PX = 16;
+
+/** The bar height for a task whose leases need `count` slots; the slots step down by (area - height) / (count - 1), so
+ * the bars overlap but each shows a strip no other bar covers (the middle one of three needs 2 x step > height). */
+const LEASE_SLOT_HEIGHT: readonly number[] = [LANES.lease.height, 11, 6];
+
+/** Where a lease bar sits in a row whose leases fill `count` (1 to LEASE_SLOTS) slots: its top offset in the row and its height, in px. */
+export function leaseSlotBox(slot: number, count: number): Lane {
+  const height = LEASE_SLOT_HEIGHT[count - 1]!;
+  const step = count < 2 ? 0 : (LEASE_AREA_PX - height) / (count - 1);
+  return { top: LANES.lease.top + slot * step, height };
+}
+
+/** The class that places a lease bar: `tl-lease-c<count>` sets its height, `tl-lease-c<count>-s<slot>` its top. */
+export function leaseSlotClass(slot: number, count: number): string {
+  return `tl-lease-c${count} tl-lease-c${count}-s${slot}`;
+}
+
+/** One lease's span, in ms since the epoch, for slot assignment. */
+export interface LeaseSpan {
+  id: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * The slot (0 is the top one) of each lease of ONE task: leases in the order they began each take the first slot free
+ * at their start (a slot is free from the instant its last bar ended, so end-to-start leases share it), and no more than
+ * `LEASE_SLOTS` slots exist. The count is how many slots the task's leases use.
+ */
+export function assignLeaseSlots(spans: readonly LeaseSpan[]): { slots: Map<string, number>; count: number } {
+  const slots = new Map<string, number>();
+  const freeAt: number[] = [];
+  for (const span of [...spans].sort((a, b) => a.start - b.start)) {
+    const free = freeAt.findIndex((end) => end <= span.start);
+    const slot = free >= 0 ? free : Math.min(freeAt.length, LEASE_SLOTS - 1);
+    freeAt[slot] = Math.max(span.end, freeAt[slot] ?? span.end);
+    slots.set(span.id, slot);
+  }
+  return { slots, count: Math.max(1, freeAt.length) };
 }
 
 /** The CSS class that names an item in the DOM (vis-timeline draws no id attribute), for the dependency arrows. */
@@ -239,7 +292,12 @@ export function leaseText(lease: TimelineLease): string {
   return `${lease.ref} (${lease.state}) held by ${lease.holder}: ${lease.intent}. Started ${lease.started_at}${end}`;
 }
 
-function leaseItem(lease: TimelineLease, nowIso: string): TimelineItem {
+/** The end of a lease bar: when it ended, or `now` while it is live (never before it began). */
+function leaseEnd(lease: TimelineLease, nowIso: string): string {
+  return lease.ended_at ?? laterOf(lease.started_at, nowIso);
+}
+
+function leaseItem(lease: TimelineLease, nowIso: string, place: string): TimelineItem {
   return {
     id: leaseItemId(lease.ref),
     group: taskGroupId(lease.task),
@@ -248,8 +306,8 @@ function leaseItem(lease: TimelineLease, nowIso: string): TimelineItem {
     content: escapeHtml(lease.holder),
     title: escapeHtml(leaseText(lease)),
     start: lease.started_at,
-    end: lease.ended_at ?? laterOf(lease.started_at, nowIso),
-    className: `tl-lease tl-lease-${lease.state}`,
+    end: leaseEnd(lease, nowIso),
+    className: `tl-lease tl-lease-${lease.state} ${place}`,
     task: lease.task,
     lease: lease.ref,
   };
@@ -311,6 +369,19 @@ function dependencyPairs(tasks: readonly TimelineTask[], held: ReadonlySet<strin
   );
 }
 
+/** The lease bars, each placed in its task's lease slots (R11) so overlapping leases stay readable and tappable. */
+function leaseItems(leases: readonly TimelineLease[], nowIso: string): TimelineItem[] {
+  const byTask = new Map<string, TimelineLease[]>();
+  for (const lease of leases) byTask.set(lease.task, [...(byTask.get(lease.task) ?? []), lease]);
+  const places = new Map<string, string>();
+  for (const own of byTask.values()) {
+    const spans = own.map((l) => ({ id: l.ref, start: Date.parse(l.started_at), end: Date.parse(leaseEnd(l, nowIso)) }));
+    const { slots, count } = assignLeaseSlots(spans);
+    for (const [ref, slot] of slots) places.set(ref, leaseSlotClass(slot, count));
+  }
+  return leases.map((l) => leaseItem(l, nowIso, places.get(l.ref)!));
+}
+
 /**
  * The groups, items and dependency pairs of an answer; `now` ends the spans that are still open. Leases and markers
  * of a task the answer does not hold, and dependencies on one it does not hold, are left out (the window cut them).
@@ -329,7 +400,7 @@ export function buildTimeline(timeline: Timeline, now: Date): TimelineModel {
       items.push(...spanItems(task, nowIso));
     }
   }
-  items.push(...timeline.leases.filter((l) => held.has(l.task)).map((l) => leaseItem(l, nowIso)));
+  items.push(...leaseItems(timeline.leases.filter((l) => held.has(l.task)), nowIso));
   items.push(...timeline.markers.flatMap((m, index) => (held.has(m.task) ? [markerItem(m, index)] : [])));
   return { groups, items, dependencies: dependencyPairs(timeline.tasks, held) };
 }

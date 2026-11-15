@@ -376,7 +376,7 @@
   }
   /* Each kind keeps its lane in a task row, placed by a top margin (vis-timeline measures an item without its margin, so
      the lanes never grow the row): the planned strip on top, the actual span with its title, the leases below it
-     (overlapping leases share the lane, see-through), the markers on the actual span's lane. */
+     (overlapping leases spread over slots, below), the markers on the actual span's lane. */
   .timeline-frame :global(.vis-item.tl-planned),
   .timeline-frame :global(.vis-item.tl-actual),
   .timeline-frame :global(.vis-item.tl-lease),
@@ -400,6 +400,34 @@
     line-height: calc(var(--tl-lease-h) - 2px);
     font-size: 0.6875rem;
     opacity: 0.85;
+  }
+  /* Lease slots (R11): a task whose leases overlap spreads them over 2 or 3 slots (tl-lease-c<slots>-s<slot>), each bar
+     stepping down from the one above so a strip of every bar is uncovered; the numbers come from laneStyle. The text of
+     a 6 px bar is only its tooltip. */
+  .timeline-frame :global(.vis-item.tl-lease-c2) {
+    height: var(--tl-lease-c2-h);
+    line-height: calc(var(--tl-lease-c2-h) - 2px);
+    font-size: 0.5625rem;
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c3) {
+    height: var(--tl-lease-c3-h);
+    line-height: calc(var(--tl-lease-c3-h) - 2px);
+    font-size: 0;
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c2-s0) {
+    margin-top: var(--tl-lease-c2-s0-top);
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c2-s1) {
+    margin-top: var(--tl-lease-c2-s1-top);
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c3-s0) {
+    margin-top: var(--tl-lease-c3-s0-top);
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c3-s1) {
+    margin-top: var(--tl-lease-c3-s1-top);
+  }
+  .timeline-frame :global(.vis-item.tl-lease-c3-s2) {
+    margin-top: var(--tl-lease-c3-s2-top);
   }
   .timeline-frame :global(.vis-item.tl-planned .vis-item-content),
   .timeline-frame :global(.vis-item.tl-actual .vis-item-content),
