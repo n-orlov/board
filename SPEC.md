@@ -1404,7 +1404,9 @@ their `lease_expired` events, then reads; it writes nothing else.
   are still listed. `closed_within` (`7d`, `30d`, `90d` or a number of days, as for tasks; anything else is **400**)
   adds the tasks closed within that many days of now. Without it closed tasks are left out, and with it open and done
   tasks are still kept: it adds, it does not narrow.
-- **Rows.** `rows` is `window` (the default) or `all`; anything else is **400**. `window` keeps the tasks that are in
+- **Rows.** `rows` is `window` (the default) or `all`; anything else is **400**. Only leaving `rows` out
+  means `window`: a supplied empty `rows=` is **400** too. A refused request is decided before the leases that ran out are
+  expired, so it changes no lease and appends no event. `window` keeps the tasks that are in
   the window (below). `all` keeps the tasks the filters keep wherever their spans fall, so a view that pans or zooms
   keeps the same rows: the window then picks only the leases and markers, and `actor` keeps the tasks on which that
   actor ever held a lease.

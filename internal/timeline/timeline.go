@@ -101,6 +101,20 @@ func (s Store) now() time.Time {
 	return time.Now().UTC()
 }
 
+// Check is the refusal Read would answer q with, or nil, without reading the
+// tasks, leases or markers and without writing: a caller that writes before it
+// reads (the expiry of the leases that ran out) calls it first, so a refused
+// request changes nothing.
+func (s Store) Check(ctx context.Context, q Query) error {
+	now := s.now()
+	from, to, err := window(q, now)
+	if err != nil {
+		return err
+	}
+	_, err = s.scope(ctx, q, now, from, to)
+	return err
+}
+
 // Read answers the window q selects. It returns ErrInvalid for a time that does
 // not read, a window that is empty or over 400 days, a bad closed_within or a
 // bad tag, and ErrNoInitiative for an initiative that names nothing. It reads
@@ -186,13 +200,24 @@ const nextRows = "Send rows as window (the tasks in the window, the default) or 
 // allRows is whether the query keeps its tasks wherever their spans fall
 // (rows=all) rather than only those in the window.
 func allRows(q Query) (bool, error) {
-	switch q.Rows {
-	case "", RowsWindow:
+	if q.Rows == "" {
 		return false, nil
-	case RowsAll:
-		return true, nil
 	}
-	return false, InvalidError{Msg: fmt.Sprintf("rows %q is neither window nor all", q.Rows), Next: nextRows}
+	if err := ValidRows(q.Rows); err != nil {
+		return false, err
+	}
+	return q.Rows == RowsAll, nil
+}
+
+// ValidRows is nil for a rows value that was supplied and is window or all, and
+// otherwise the InvalidError a request carrying it is refused with. The empty
+// text is invalid here: a caller that left rows out does not call it.
+func ValidRows(rows string) error {
+	switch rows {
+	case RowsWindow, RowsAll:
+		return nil
+	}
+	return InvalidError{Msg: fmt.Sprintf("rows %q is neither window nor all", rows), Next: nextRows}
 }
 
 // span keeps the tasks whose actual span (created to closed, open while it is not

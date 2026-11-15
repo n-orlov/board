@@ -1164,9 +1164,9 @@ paths:
         leases and markers and the rows of a view stay the same as it pans or zooms; `actor` then keeps the tasks on
         which that actor ever held a lease. `rows` `window` (the default) keeps the tasks in the window. Each task's
         `attention` list is the one of `GET /api/v1/tasks`. Leases that ran out
-        are expired before the read. Everything is in stable order: initiatives in board order, tasks by initiative
+        are expired before the read, but only once the request is accepted: a refused request changes nothing. Everything is in stable order: initiatives in board order, tasks by initiative
         then number, leases by number, markers by time then event. An unreadable time, `to` not after `from`, a window
-        over 400 days, a bad `closed_within`, `rows` or tag is 400; an initiative that names nothing is 404.
+        over 400 days, a bad `closed_within`, a `rows` that is neither `window` nor `all` (an empty `rows=` included) or a bad tag is 400; an initiative that names nothing is 404.
       security:
         - bearerAuth: []
         - cookieAuth: []

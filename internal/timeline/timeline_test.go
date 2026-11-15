@@ -492,3 +492,47 @@ func TestPlannedOnlyTasksKeepBothEnds(t *testing.T) {
 		t.Errorf("tasks = %+v", got.Tasks)
 	}
 }
+
+func TestValidRowsAcceptsOnlyWindowAndAll(t *testing.T) {
+	t.Parallel()
+	for _, ok := range []string{timeline.RowsWindow, timeline.RowsAll} {
+		if err := timeline.ValidRows(ok); err != nil {
+			t.Errorf("ValidRows(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "some", "ALL", "Window", " all", "all ", "window,all"} {
+		err := timeline.ValidRows(bad)
+		var inv timeline.InvalidError
+		if !errors.As(err, &inv) || inv.Next == "" || !strings.Contains(inv.Msg, "window") {
+			t.Errorf("ValidRows(%q) = %v, want an InvalidError naming window and all", bad, err)
+		}
+	}
+}
+
+func TestCheckRefusesWhatReadRefusesAndAcceptsWhatItReads(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.initiative(t, "aa")
+	base := "2030-01-01T00:00:00Z"
+	for name, q := range map[string]timeline.Query{
+		"a bad rows":      {Rows: "some"},
+		"a bad from":      {From: "yesterday"},
+		"an empty window": {From: base, To: base},
+		"a bad closed":    {ClosedWithin: "soon"},
+		"a bad tag":       {Tags: []string{"No Good"}},
+	} {
+		if err := e.tl.Check(ctx, q); !errors.Is(err, timeline.ErrInvalid) {
+			t.Errorf("%s: Check = %v, want ErrInvalid", name, err)
+		}
+	}
+	if err := e.tl.Check(ctx, timeline.Query{Initiatives: []string{"nope"}}); !errors.Is(err, timeline.ErrNoInitiative) {
+		t.Errorf("an initiative that names nothing: Check = %v, want ErrNoInitiative", err)
+	}
+	for name, q := range map[string]timeline.Query{
+		"no query": {}, "rows window": {Rows: timeline.RowsWindow}, "rows all": {Rows: timeline.RowsAll, Initiatives: []string{"aa"}},
+	} {
+		if err := e.tl.Check(ctx, q); err != nil {
+			t.Errorf("%s: Check = %v, want nil", name, err)
+		}
+	}
+}

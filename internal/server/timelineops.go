@@ -54,6 +54,10 @@ func (o timelineOps) GetTimeline(ctx context.Context, req GetTimelineRequestObje
 	if r, off := o.ready(); off {
 		return r, nil
 	}
+	// A refusal comes before the expiry below, which writes: a refused request changes nothing.
+	if p, bad := o.refusal(ctx, req.Params); bad {
+		return p, nil
+	}
 	if _, err := o.leases.ExpireDue(ctx); err != nil {
 		return nil, err
 	}
@@ -115,4 +119,22 @@ func rowsText(r *GetTimelineParamsRows) string {
 		return ""
 	}
 	return string(*r)
+}
+
+// refusal is the problem a request that cannot be read is answered with, or
+// false when it can. It is decided before anything is written: a rows value
+// that was supplied and is neither window nor all (the empty value included), a
+// window, closed_within or tag that does not read, or an initiative that names
+// nothing. A request that leaves rows out is never refused for it.
+func (o timelineOps) refusal(ctx context.Context, p GetTimelineParams) (problemResponse, bool) {
+	if p.Rows != nil {
+		if r, bad := timelineFailure(timeline.ValidRows(string(*p.Rows))); bad {
+			return r, true
+		}
+	}
+	err := o.timeline.Check(ctx, timelineQuery(p))
+	if r, bad := timelineFailure(err); bad {
+		return r, true
+	}
+	return problemResponse{}, false
 }

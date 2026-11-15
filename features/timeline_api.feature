@@ -280,6 +280,23 @@ Feature: Timeline over HTTP
     When I request the timeline for the window from -8 to 5 days with "rows=all&actor=nobody@laptop" as actor "operator@laptop"
     Then the timeline tasks have ref ""
 
+  Scenario: a refused rows leaves a lease that is due live, and a supplied empty rows is refused too
+    When I note the lease rows
+    And I request the timeline for the window from -10 to 5 days with "rows=some" as actor "operator@laptop"
+    Then the response status is 400
+    And the problem detail contains "rows"
+    And the lease rows are unchanged
+    When I request the timeline for the window from -10 to 5 days with "rows=" as actor "operator@laptop"
+    Then the response status is 400
+    And the problem has a next field containing "window"
+    And the lease rows are unchanged
+    When I request the timeline for the window from -10 to 5 days with "rows=ALL" as actor "operator@laptop"
+    Then the response status is 400
+    And the lease rows are unchanged
+    When I request the timeline for the window from -10 to 5 days with "rows=all" as actor "operator@laptop"
+    Then the response status is 200
+    And the timeline leases have ref "L2,L3,L4"
+
   Scenario: a rows that is neither window nor all is 400 and changes nothing
     When I request the timeline for the window from -10 to 5 days with "" as actor "operator@laptop"
     Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"

@@ -165,20 +165,46 @@ func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
 	s := newKeyServer(t)
 	s.create("aa", "")
 	s.task(`{"initiative":"aa","title":"one"}`)
-	count := func() (n int) {
-		row := s.st.Writer().QueryRow(`SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM leases)`)
-		if err := row.Scan(&n); err != nil {
+	if rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work"}`, "codex@host"); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("start lease = %d %s", rec.Code, rec.Body)
+	}
+	// the lease ran out a minute ago and is still live: an expiry would write it
+	if _, err := s.st.Writer().Exec(s.st.Dialect().Rebind(`UPDATE leases SET expires_at = ?`), store.EncodeTime(time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	count := func() (state string, n int) {
+		row := s.st.Writer().QueryRow(`SELECT (SELECT state FROM leases), (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM leases)`)
+		if err := row.Scan(&state, &n); err != nil {
 			t.Fatal(err)
 		}
-		return n
+		return state, n
 	}
-	before := count()
-	rec := s.send(http.MethodGet, "/api/v1/timeline?rows=some", "", "claude@host")
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "window") {
-		t.Errorf("rows=some = %d %s, want 400 naming the values", rec.Code, rec.Body)
+	wantState, before := count()
+	if wantState != "live" {
+		t.Fatalf("the seeded lease is %q, want live", wantState)
 	}
-	if after := count(); after != before {
-		t.Errorf("rows before and after the refusal = %d and %d, want the same", before, after)
+	for q, want := range map[string]int{
+		"rows=some": 400, "rows=": 400, "rows=ALL": 400, "rows=window,all": 400, "rows=%20all": 400, "rows=window&rows=some": 400,
+		"rows=all&from=yesterday": 400, "rows=all&closed_within=soon": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404, "rows=all&initiative=nope": 404,
+	} {
+		rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host")
+		if rec.Code != want || decode(t, rec)["next"] == nil {
+			t.Errorf("%s = %d %s, want %d with a next", q, rec.Code, rec.Body, want)
+		}
+		if strings.HasPrefix(q, "rows=") && !strings.Contains(q, "&") && !strings.Contains(rec.Body.String(), "window") {
+			t.Errorf("%s = %s, want the values named", q, rec.Body)
+		}
+		if state, after := count(); state != "live" || after != before {
+			t.Errorf("%s left the lease %q and %d rows, want live and %d: a refusal changes nothing", q, state, after, before)
+		}
+	}
+	for _, q := range []string{"", "rows=window", "rows=all"} {
+		if rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host"); rec.Code != http.StatusOK {
+			t.Errorf("%q = %d %s, want 200", q, rec.Code, rec.Body)
+		}
+	}
+	if state, _ := count(); state != "expired" {
+		t.Errorf("the lease after the accepted reads is %q, want expired by the read", state)
 	}
 }
 
