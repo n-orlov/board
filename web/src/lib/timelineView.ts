@@ -92,12 +92,13 @@ export class TimelineViewStore {
     filter: TimelineFilter,
     now: () => Date = () => new Date(),
     timers: Timers = BROWSER_TIMERS,
+    window?: TimeWindow,
   ) {
     this.api = api;
     this.publish = publish;
     this.now = now;
     this.timers = timers;
-    this.state = { filter, window: initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
+    this.state = { filter, window: window ?? initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
   }
 
   private set(patch: Partial<TimelineViewState>) {
@@ -443,6 +444,8 @@ export interface ChartHooks {
 export interface Chart {
   show(model: TimelineModel): void;
   zoom(direction: 'in' | 'out'): void;
+  /** Shows `window` (the fragment named another one); the range hooks then follow as for a drag. */
+  moveTo(window: TimeWindow): void;
   /** Sets the chart's tallest (the screen changed size). */
   setHeight(px: number): void;
   destroy(): void;
@@ -518,6 +521,9 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
       if (direction === 'in') timeline.zoomIn(ZOOM_FACTOR, NO_ANIMATION);
       else timeline.zoomOut(ZOOM_FACTOR, NO_ANIMATION);
     },
+    moveTo(window: TimeWindow) {
+      timeline.setWindow(window.from, window.to, NO_ANIMATION);
+    },
     setHeight(px: number) {
       timeline.setOptions({ maxHeight: px });
     },
@@ -536,6 +542,48 @@ export const TIMELINE_VIEW = 'timeline';
 export interface OpenedTimeline {
   filter: TimelineFilter;
   restored: boolean;
+  /** The window the fragment names (`from`/`to`), when it names a usable one. */
+  window?: TimeWindow;
+}
+
+/**
+ * The query keys that are the view's state rather than its filter: the window and the previewed task. They go in the
+ * fragment (a link or Back shows the same range) but are never saved.
+ */
+const VIEW_KEYS = ['from', 'to', 'task'] as const;
+
+/** A window time in the fragment: ISO to the second, UTC. */
+function windowTime(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/** The window a query names, or undefined unless both ends parse, `from` is before `to` and the length is in the zoom range. */
+export function windowFromQuery(query: string): TimeWindow | undefined {
+  const params = new URLSearchParams(query);
+  const from = Date.parse(params.get('from') ?? '');
+  const to = Date.parse(params.get('to') ?? '');
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return undefined;
+  const span = to - from;
+  if (span < ZOOM_MIN_MS / 2 || span > ZOOM_MAX_MS * 2) return undefined;
+  return { from: new Date(from), to: new Date(to) };
+}
+
+/** A query without the window's and the task's keys: what the filter is, and what is saved. */
+export function withoutWindow(query: string): string {
+  const params = new URLSearchParams(query);
+  for (const key of VIEW_KEYS) params.delete(key);
+  return params.toString();
+}
+
+/** The fragment of the view: the filter's query, then the window when there is one (`#/timeline?tag=x&from=…&to=…`). */
+export function timelineViewHash(filter: TimelineFilter, window?: TimeWindow): string {
+  const params = new URLSearchParams(filterToQuery(filter));
+  if (window !== undefined) {
+    params.set('from', windowTime(window.from));
+    params.set('to', windowTime(window.to));
+  }
+  const query = params.toString();
+  return query === '' ? '#/timeline' : `#/timeline?${query}`;
 }
 
 /**
@@ -545,9 +593,15 @@ export interface OpenedTimeline {
  */
 export function openTimeline(env: ViewEnv, hash: string): OpenedTimeline {
   const at = hash.indexOf('?');
-  const own = at < 0 ? '' : hash.slice(at + 1);
+  const full = at < 0 ? '' : hash.slice(at + 1);
+  const own = withoutWindow(full);
+  const window = windowFromQuery(full);
+  // A fragment that names a window describes the whole view (a link, or Back to this entry): its filter, even none, is
+  // the one shown, and nothing saved replaces it.
+  if (window !== undefined && own === '') return { filter: filterFromQuery(''), restored: false, window };
   const query = openView(env, TIMELINE_VIEW, '#/timeline', own);
-  return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+  const opened = { filter: filterFromQuery(query), restored: own === '' && query !== '' };
+  return window === undefined ? opened : { ...opened, window };
 }
 
 /** Saves the filter's query after a change (the empty filter is the default and removes the key). */

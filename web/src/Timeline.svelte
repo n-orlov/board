@@ -33,6 +33,8 @@
     canZoomOut,
     chartHeight,
     mountChart,
+    sameRange,
+    timelineViewHash,
     spanLabel,
     forgetTimeline,
     openTimeline,
@@ -57,7 +59,10 @@
   const viewEnv = currentViewEnv();
   // A fragment with a query wins and is saved; a bare one restores the saved filter (in place, before the first fetch).
   const opened = openTimeline(viewEnv, window.location.hash);
-  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter);
+  // A fragment that names a window (`from`/`to`: a link, or Back to this entry) opens on it; otherwise the default one.
+  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window);
+  /** Whether the fragment carries the window: once it named one or the user moved the chart, so a fresh visit keeps the default. */
+  let windowInHash = opened.window !== undefined;
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
   let chart: Chart | undefined;
@@ -129,7 +134,7 @@
 
   // The filter lives in the fragment and in the saved query: a choice rewrites both in place (no history entry per choice).
   function persist(filter: TimelineFilter) {
-    replaceHash(timelineHash(filter));
+    replaceHash(timelineViewHash(filter, windowInHash ? view.window : undefined));
     saveTimeline(viewEnv.storage, filter);
   }
 
@@ -158,6 +163,10 @@
     if (next.restored) await listed;
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     const filter = startFilter(next, looked);
+    if (next.window !== undefined && !sameRange(next.window, view.window)) {
+      windowInHash = true;
+      chart?.moveTo(next.window);
+    }
     if (filter !== next.filter) persist(filter);
     if (!turns.mustRead(timelineHash(filter) === timelineHash(view.filter))) return;
     turns.reading();
@@ -185,6 +194,16 @@
       else if (model !== shown) chart.show(model);
       shown = model;
     });
+  });
+
+  // The window the store last read (a pan or zoom that settled) goes in the fragment, so Back and a shared link show it.
+  let lastWindow = untrack(() => view.window);
+  $effect(() => {
+    const window = view.window;
+    if (window === lastWindow) return;
+    lastWindow = window;
+    windowInHash = true;
+    untrack(() => replaceHash(timelineViewHash(view.filter, window)));
   });
 
   /** The chart's tallest: the screen below the chart's top, less the phone's tab bar, so the axis stays in view as rows scroll. */

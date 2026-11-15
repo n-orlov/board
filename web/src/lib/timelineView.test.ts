@@ -45,6 +45,9 @@ import {
   type TimelineViewState,
   type Timers,
   type TimeWindow,
+  timelineViewHash,
+  windowFromQuery,
+  withoutWindow,
 } from './timelineView';
 
 const NOW = new Date('2026-03-10T12:00:00Z');
@@ -142,6 +145,15 @@ describe('TimelineViewStore', () => {
     expect(store.state).toMatchObject({ loaded: true, loading: false, error: '' });
     expect(store.state.model.groups.map((g) => g.id)).toEqual(['i:alpha', 't:T1']);
     expect(store.state.model.items.map((i) => i.id)).toContain('act:T1');
+  });
+
+  it('opens on a window handed in (the fragment named one) and reads it', async () => {
+    const w = { from: new Date('2026-01-01T00:00:00Z'), to: new Date('2026-01-08T00:00:00Z') };
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, undefined, w);
+    expect(store.state.window).toBe(w);
+    await store.load();
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, w);
   });
 
   it('opens on the window around the real clock when no clock is handed in', () => {
@@ -777,6 +789,14 @@ describe('mountChart', () => {
     expect(made[0]!.items.rows.map((i) => (i as { id: string }).id)).toEqual(['act:A2', 'act:A3']);
   });
 
+  it('moves to a window through vis-timeline, without animation', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h);
+    const w = { from: new Date(DAY_MS), to: new Date(3 * DAY_MS) };
+    chart.moveTo(w);
+    expect(made[0]!.setWindow).toHaveBeenCalledWith(w.from, w.to, { animation: false });
+  });
+
   it('tells the view the visible range once it stops moving, not while it moves', () => {
     const { lib, made } = fakeLib();
     const h = hooks();
@@ -928,6 +948,64 @@ function viewEnv(storage: ViewStorage | undefined): ViewEnv & { hashes: string[]
   const hashes: string[] = [];
   return { storage, replaceHash: (h) => void hashes.push(h), hashes };
 }
+
+describe('the window in the fragment', () => {
+  const from = '2026-03-01T00:00:00Z';
+  const to = '2026-03-08T06:30:15Z';
+  const w = { from: new Date(from), to: new Date(to) };
+
+  it('reads a window with both ends, in order, within the zoom range', () => {
+    expect(windowFromQuery(`tag=x&from=${from}&to=${to}`)).toEqual(w);
+    expect(windowFromQuery(`from=${from}`)).toBeUndefined();
+    expect(windowFromQuery(`to=${to}`)).toBeUndefined();
+    expect(windowFromQuery(`from=${to}&to=${from}`)).toBeUndefined();
+    expect(windowFromQuery(`from=nope&to=${to}`)).toBeUndefined();
+    expect(windowFromQuery(`from=${from}&to=nope`)).toBeUndefined();
+    expect(windowFromQuery('from=2020-01-01T00:00:00Z&to=2026-01-01T00:00:00Z')).toBeUndefined();
+    expect(windowFromQuery('from=2026-03-01T00:00:00Z&to=2026-03-01T00:01:00Z')).toBeUndefined();
+  });
+
+  it('strips from, to and task from the filter query, keeping the filter', () => {
+    expect(withoutWindow(`tag=x&from=${from}&to=${to}`)).toBe('tag=x');
+    expect(withoutWindow(`from=${from}&to=${to}`)).toBe('');
+    expect(withoutWindow('tag=x&task=T-1')).toBe('tag=x');
+    expect(withoutWindow('task=T-1&from=2026-03-01T00:00:00Z')).toBe('');
+    expect(withoutWindow('tag=x&actor=bob')).toBe('tag=x&actor=bob');
+  });
+
+  it('writes the filter, then the window to the second, and reads it back', () => {
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER)).toBe('#/timeline');
+    expect(timelineViewHash(DEFAULT_TIMELINE_FILTER, w)).toBe(`#/timeline?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const hash = timelineViewHash({ ...DEFAULT_TIMELINE_FILTER, tags: ['x'] }, { from: new Date('2026-03-01T00:00:00.789Z'), to: w.to });
+    expect(hash).toMatch(/^#\/timeline\?tag=x&from=2026-03-01T00%3A00%3A00Z&to=/);
+    expect(windowFromQuery(hash.split('?')[1]!)).toEqual(w);
+  });
+
+  it('opens on the window a fragment names, with the filter it names and none saved over it', () => {
+    const KEY = 'board.view.v1.timeline';
+    const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=old' }) });
+    const e = viewEnv(storage);
+    expect(openTimeline(e, `#/timeline?from=${from}&to=${to}`)).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false, window: w });
+    expect(e.hashes).toEqual([]);
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=old');
+    expect(openTimeline(e, `#/timeline?tag=new&from=${from}&to=${to}`)).toEqual({ filter: { ...DEFAULT_TIMELINE_FILTER, tags: ['new'] }, restored: false, window: w });
+    expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=new');
+  });
+
+  it('never saves the window or the task: the saved query is the filter alone', () => {
+    const KEY = 'board.view.v1.timeline';
+    const storage = memory();
+    openTimeline(viewEnv(storage), `#/timeline?actor=bob&from=${from}&to=${to}&task=T-1`);
+    expect(JSON.parse(storage.data.get(KEY)!)).toEqual({ v: 1, query: 'actor=bob' });
+    const bare = memory();
+    openTimeline(viewEnv(bare), `#/timeline?task=T-1&from=${from}&to=${to}`);
+    expect(bare.data.has(KEY)).toBe(false);
+  });
+
+  it('ignores a window it cannot use and opens on the default one', () => {
+    expect(openTimeline(viewEnv(memory()), `#/timeline?from=${to}&to=${from}`).window).toBeUndefined();
+  });
+});
 
 describe('saved Timeline filters', () => {
   const KEY = 'board.view.v1.timeline';

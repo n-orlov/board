@@ -2740,6 +2740,20 @@ the selects do not list is still offered and kept. **Clear filters** (`clear-fil
 fragment. A fragment edited by hand, or the back button, applies the filter it now holds. The helpers are in
 `web/src/lib/timeline.ts` (`withInitiative`, `withTag`, `withClosedWithin`, `choiceOptions`, `tagChoices`).
 
+*The window in the URL (R3).* The visible window is part of the view's address: once a pan or zoom has settled and the
+store has read the new window (`TimelineViewStore.panTo`), the fragment gains `from` and `to` (UTC, ISO to the second:
+`#/timeline?initiative=aa&from=2026-03-01T00:00:00Z&to=2026-03-22T00:00:00Z`) with `history.replaceState`, so no history entry
+is added (`history.length` is unchanged) and Back leaves the view as it did before. A fresh visit keeps the default window
+out of the URL until the chart is first moved. A fragment that names a window (`windowFromQuery`: both ends parse, `from` is
+before `to`, and the length is within half an hour and twice a quarter) opens the chart on it, with one read, and a reload,
+a shared link, or a fragment edited by hand (`chart.moveTo`) shows the same span; one that does not (a missing end, a reversed
+or absurd range) opens on the default window. A fragment that names a window and no filter describes the whole view: it shows
+no filter and nothing saved replaces it. **The window is never saved.** `from`, `to` and `task` are the view's state, not its
+filter, so `withoutWindow` strips them from the query that is saved under `board.view.v1.timeline`: the saved value holds the
+filters alone, and a bare `#/timeline` restores those on the default window. `e2e/timeline-window.spec.ts` covers, at phone and
+desktop, a zoom putting the settled window in the fragment with `history.length` unchanged, a reload opening on the same span,
+a link with a window opening on it, and `localStorage` holding the filters and no window.
+
 *Panning and live refresh.* When the visible range stops moving (`rangechanged`: the end of a drag, a wheel or a pinch, a zoom
 button) and differs from the window last read by more than 1% of its length at either end, `TimelineViewStore.panTo` waits
 `PAN_DEBOUNCE_MS` (300 ms, a new move inside it replaces the pending range) and then reads `GET /timeline` for that range under
