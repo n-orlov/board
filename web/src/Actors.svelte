@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
   import Toast from './Toast.svelte';
@@ -29,7 +30,7 @@
   // A sort only reorders the rows the view holds: the fragment and the saved query follow it, and no request is made.
   function setSort(next: SortState) {
     sort = next;
-    window.history.replaceState(null, '', actorsHash(next));
+    replaceHash(actorsHash(next));
     saveViewQuery(viewEnv.storage, ACTORS_VIEW, sortToQuery(next));
   }
 

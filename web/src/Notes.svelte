@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import Dialog from './Dialog.svelte';
   import NoteForm from './NoteForm.svelte';
   import NoteList from './NoteList.svelte';
@@ -74,7 +75,7 @@
   // The filter lives in the fragment and in the saved query: applying rewrites both in place (no history entry per
   // choice) and reads again. Clear filters (the defaults) forgets the saved query.
   function persist(filter: NotesFilter) {
-    window.history.replaceState(null, '', notesHash(filter));
+    replaceHash(notesHash(filter));
     saveNotes(viewEnv.storage, filter);
   }
 

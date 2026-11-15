@@ -116,7 +116,7 @@ export function openView(env: ViewEnv, view: string, path: string, query: string
 
 /** The slice of `window` the browser adapter reads. */
 export interface ViewWindow {
-  history: { replaceState: (data: unknown, unused: string, url: string) => void };
+  history: { readonly state?: unknown; replaceState: (data: unknown, unused: string, url: string) => void };
   readonly localStorage?: ViewStorage;
 }
 
@@ -133,7 +133,7 @@ export function pageStorage(win: Pick<ViewWindow, 'localStorage'> = window): Vie
 export function currentViewEnv(win: ViewWindow = window): ViewEnv {
   return {
     storage: pageStorage(win),
-    replaceHash: (hash) => win.history.replaceState(null, '', hash),
+    replaceHash: (hash) => win.history.replaceState(win.history.state ?? null, '', hash),
   };
 }
 

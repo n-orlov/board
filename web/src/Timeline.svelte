@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import { onDestroy, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
@@ -123,7 +124,7 @@
 
   // The filter lives in the fragment and in the saved query: a choice rewrites both in place (no history entry per choice).
   function persist(filter: TimelineFilter) {
-    window.history.replaceState(null, '', timelineHash(filter));
+    replaceHash(timelineHash(filter));
     saveTimeline(viewEnv.storage, filter);
   }
 
@@ -139,7 +140,7 @@
     turns.begin();
     turns.reading();
     forgetTimeline(viewEnv.storage);
-    window.history.replaceState(null, '', '#/timeline');
+    replaceHash('#/timeline');
     void store.setFilter(DEFAULT_TIMELINE_FILTER);
   }
 

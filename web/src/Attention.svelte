@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import AnswerForm from './AnswerForm.svelte';
   import Dialog from './Dialog.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
@@ -92,7 +93,7 @@
 
   // The filter lives in the fragment and in the saved query: a change rewrites both in place (no history entry per choice).
   function persist(filter: AttentionFilter) {
-    window.history.replaceState(null, '', attentionHash(filter));
+    replaceHash(attentionHash(filter));
     saveAttention(viewEnv.storage, filter);
   }
 
@@ -108,7 +109,7 @@
     turns.begin();
     turns.reading();
     forgetAttention(viewEnv.storage);
-    window.history.replaceState(null, '', '#/attention');
+    replaceHash('#/attention');
     void store.setFilter({ initiatives: [], tags: [] });
   }
 

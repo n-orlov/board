@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import Dialog from './Dialog.svelte';
   import KeyForm from './KeyForm.svelte';
   import SortHeader from './SortHeader.svelte';
@@ -33,7 +34,7 @@
   // A sort only reorders the keys the view holds: the fragment and the saved query follow it, and no request is made.
   function setSort(next: SortState) {
     sort = next;
-    window.history.replaceState(null, '', keysHash(next));
+    replaceHash(keysHash(next));
     saveViewQuery(viewEnv.storage, KEYS_VIEW, sortToQuery(next));
   }
 
