@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { installScrollRestore } from './historyEntry';
 import {
   clearAllViews,
   clearViewQuery,
@@ -92,6 +93,127 @@ describe('openView on a revisited entry', () => {
   it('the browser adapter asks the history entry on screen', () => {
     const e = currentViewEnv({ history: { state: { boardEntry: 'never-revisited' }, replaceState: vi.fn() } });
     expect(e.revisited?.()).toBe(false);
+  });
+});
+
+/**
+ * A browser with a real history stack, driven through the real adapters (historyEntry + currentViewEnv): every entry
+ * has a fragment and a state, a link adds one (no key yet), Back and Forward move between them and fire popstate.
+ */
+function browser(initialHash: string) {
+  const stack: { hash: string; state: unknown }[] = [{ hash: initialHash, state: null }];
+  let at = 0;
+  const listeners: Record<string, (() => void)[]> = {};
+  const local = fakeStorage();
+  const session = fakeStorage();
+  const history = {
+    get state() {
+      return stack[at].state;
+    },
+    scrollRestoration: 'auto',
+    replaceState(data: unknown, _unused: string, url?: string) {
+      stack[at] = { state: data, hash: url ?? stack[at].hash };
+    },
+  };
+  const win = {
+    history,
+    localStorage: local,
+    sessionStorage: session,
+    scrollY: 0,
+    innerHeight: 800,
+    document: { documentElement: { scrollHeight: 800 } },
+    addEventListener: (name: string, fn: () => void) => (listeners[name] ??= []).push(fn),
+    removeEventListener: () => undefined,
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame: () => undefined,
+    scrollTo: () => undefined,
+  };
+  const pop = () => (listeners.popstate ?? []).forEach((fn) => fn());
+  const split = () => {
+    const [path, query = ''] = stack[at].hash.split('?');
+    return { path, query };
+  };
+  return {
+    local,
+    install: () => installScrollRestore(win as unknown as Window),
+    /** The view on screen opens (as the router does on every route change) and the fragment it ends with. */
+    open(view: string) {
+      const { path, query } = split();
+      const shown = openView(currentViewEnv(win), view, path, query);
+      return { shown, hash: stack[at].hash };
+    },
+    /** A link to `hash` is followed: a new entry with no key yet. */
+    follow(hash: string) {
+      stack.length = at + 1;
+      stack.push({ hash, state: null });
+      at++;
+      pop();
+    },
+    back() {
+      at--;
+      pop();
+    },
+    forward() {
+      at++;
+      pop();
+    },
+  };
+}
+
+describe('Back and Forward restore the entry revisited, not a later visit', () => {
+  it.each([
+    ['tasks', 'status=done&sort=title&dir=desc'],
+    ['actors', 'kind=agent'],
+    ['archive', 'sort=updated&dir=asc'],
+  ])('%s: a default entry, an intervening visit with other preferences, then both entries again', (view, prefs) => {
+    const page = browser(`#/${view}`);
+    page.install();
+    expect(page.open(view)).toEqual({ shown: '', hash: `#/${view}` }); // the default entry, bare
+    page.follow(`#/${view}?${prefs}`);
+    expect(page.open(view).shown).toBe(prefs); // the later visit saves its own preferences
+    expect(page.local.data[`board.view.v1.${view}`]).toBe(stored(prefs));
+
+    page.back();
+    expect(page.open(view)).toEqual({ shown: '', hash: `#/${view}` }); // the default entry stays default
+    expect(page.local.data[`board.view.v1.${view}`]).toBe(stored(prefs)); // and the saved view is untouched
+
+    page.forward();
+    expect(page.open(view)).toEqual({ shown: prefs, hash: `#/${view}?${prefs}` });
+    page.back();
+    expect(page.open(view).shown).toBe('');
+  });
+
+  it('a new bare link after the walk still restores the saved view preferences', () => {
+    const page = browser('#/tasks');
+    page.install();
+    page.open('tasks');
+    page.follow('#/tasks?status=done');
+    page.open('tasks');
+    page.back();
+    expect(page.open('tasks').shown).toBe('');
+    page.follow('#/tasks'); // a genuinely new bare navigation
+    expect(page.open('tasks')).toEqual({ shown: 'status=done', hash: '#/tasks?status=done' });
+  });
+
+  it('a reload of a default entry shows the defaults although a later visit saved preferences', () => {
+    const page = browser('#/tasks');
+    page.install();
+    page.open('tasks');
+    page.follow('#/tasks?sort=title');
+    page.open('tasks');
+    page.back();
+    page.install(); // the page is reloaded on the default entry, which already has its key
+    expect(page.open('tasks')).toEqual({ shown: '', hash: '#/tasks' });
+  });
+
+  it('an entry left with an explicit query keeps that query when a later visit saved another', () => {
+    const page = browser('#/tasks?kind=watch');
+    page.install();
+    expect(page.open('tasks').shown).toBe('kind=watch');
+    page.follow('#/tasks?status=done');
+    page.open('tasks');
+    page.back();
+    expect(page.open('tasks')).toEqual({ shown: 'kind=watch', hash: '#/tasks?kind=watch' });
   });
 });
 
