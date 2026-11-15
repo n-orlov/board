@@ -17,7 +17,8 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // and force-done confirm, and the phone Sort select.
 const test = base;
 
-const SELECTOR = 'a, button, input, select, textarea, [role=button]';
+// The one exemption (R13): a Timeline bar (planned, actual or lease) is a data mark sized by its time span, so it can be a few px wide; its task's 44 px row label opens the same preview (timeline-equivalent.spec.ts).
+const SELECTOR = 'a, button, input, select, textarea, [role=button]:not(.vis-item:is(.tl-planned, .tl-actual, .tl-lease))'; // exempts only the chart's task and lease bars: WCAG 2.5.8 equivalent control
 const MIN_HIT = 44;
 const MIN_FONT = 16;
 // Layout snaps to 1/64 px, so a 44 px box can measure 43.99997.
