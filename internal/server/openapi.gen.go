@@ -793,6 +793,24 @@ func (e ListTasksParamsKind) Valid() bool {
 	}
 }
 
+// Defines values for GetTimelineParamsRows.
+const (
+	GetTimelineParamsRowsAll    GetTimelineParamsRows = "all"
+	GetTimelineParamsRowsWindow GetTimelineParamsRows = "window"
+)
+
+// Valid indicates whether the value is a known member of the GetTimelineParamsRows enum.
+func (e GetTimelineParamsRows) Valid() bool {
+	switch e {
+	case GetTimelineParamsRowsAll:
+		return true
+	case GetTimelineParamsRowsWindow:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActorAsk An open ask of an actor.
 type ActorAsk struct {
 	Blocking  bool      `json:"blocking"`
@@ -2556,7 +2574,13 @@ type GetTimelineParams struct {
 
 	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Adds the tasks closed that recently.
 	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
+
+	// Rows `window` (the default) keeps the tasks in the window; `all` keeps them wherever their spans fall.
+	Rows *GetTimelineParamsRows `form:"rows,omitempty" json:"rows,omitempty"`
 }
+
+// GetTimelineParamsRows defines parameters for GetTimeline.
+type GetTimelineParamsRows string
 
 // PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
 type PutProtocolSeenJSONRequestBody = ProtocolSeenRequest
@@ -4261,6 +4285,10 @@ func (siw *ServerInterfaceWrapper) GetTimeline(w http.ResponseWriter, r *http.Re
 	// ------------- Optional query parameter "closed_within" -------------
 
 	bind.check("closed_within", runtime.BindQueryParameterWithOptions("form", true, false, "closed_within", r.URL.Query(), &params.ClosedWithin, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "rows" -------------
+
+	bind.check("rows", runtime.BindQueryParameterWithOptions("form", true, false, "rows", r.URL.Query(), &params.Rows, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	if bind.failed {
 		return

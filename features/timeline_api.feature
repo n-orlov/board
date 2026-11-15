@@ -244,3 +244,50 @@ Feature: Timeline over HTTP
     When I request the timeline with "closed_within=soon" as actor "operator@laptop"
     Then the response status is 400
     And the problem has a next field containing "7d"
+
+  Scenario: rows=window keeps only the tasks in the window and is the default
+    When I request the timeline for the window from -45 to -25 days with "" as actor "operator@laptop"
+    Then the timeline tasks have ref ""
+    When I request the timeline for the window from -45 to -25 days with "rows=window" as actor "operator@laptop"
+    Then the response status is 200
+    And the timeline tasks have ref ""
+
+  Scenario: rows=all keeps the tasks wherever their spans fall and the window picks the leases and markers
+    When I request the timeline for the window from -45 to -25 days with "rows=all" as actor "operator@laptop"
+    Then the response status is 200
+    And the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
+    And the timeline initiatives have slug "aa,bb"
+    And the timeline leases have ref ""
+    And the timeline markers are ""
+    When I request the timeline for the window from -22 to -14 days with "rows=all" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
+    And the timeline leases have ref "L1"
+    When I request the timeline for the window from -10 to 5 days with "rows=all" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
+    And the timeline leases have ref "L2,L3,L4"
+    When I request the timeline for the window from -45 to -25 days with "rows=all&closed_within=90d" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1,bb-2,cc-1"
+
+  Scenario: rows=all with an actor keeps the tasks the actor ever leased
+    When I request the timeline for the window from -8 to 5 days with "actor=claude@laptop" as actor "operator@laptop"
+    Then the timeline tasks have ref ""
+    When I request the timeline for the window from -8 to 5 days with "rows=all&actor=claude@laptop" as actor "operator@laptop"
+    Then the response status is 200
+    And the timeline tasks have ref "aa-1"
+    And the timeline leases have ref ""
+    When I request the timeline for the window from -8 to 5 days with "rows=all&actor=codex@laptop" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-2,bb-1"
+    When I request the timeline for the window from -8 to 5 days with "rows=all&actor=nobody@laptop" as actor "operator@laptop"
+    Then the timeline tasks have ref ""
+
+  Scenario: a rows that is neither window nor all is 400 and changes nothing
+    When I request the timeline for the window from -10 to 5 days with "" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
+    When I request the timeline for the window from -10 to 5 days with "rows=some" as actor "operator@laptop"
+    Then the response status is 400
+    And the problem detail contains "rows"
+    And the problem has a next field containing "window"
+    When I request the timeline for the window from -10 to 5 days with "" as actor "operator@laptop"
+    Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
+    And the timeline leases have ref "L2,L3,L4"
+    And the timeline markers are "aa-1:milestone,aa-2:ask,bb-1:check,aa-4:done"

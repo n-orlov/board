@@ -31,7 +31,7 @@ func (o timelineOps) ready() (problemResponse, bool) {
 func timelineQuery(p GetTimelineParams) timeline.Query {
 	return timeline.Query{
 		From: text(p.From), To: text(p.To), Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag),
-		Actor: text(p.Actor), ClosedWithin: text(p.ClosedWithin),
+		Actor: text(p.Actor), ClosedWithin: text(p.ClosedWithin), Rows: rowsText(p.Rows),
 	}
 }
 
@@ -107,4 +107,12 @@ func apiTimelineTask(t timeline.Task) TimelineTask {
 		Ref: t.Ref, Initiative: t.Initiative, Title: t.Title, Status: TimelineTaskStatus(t.Status), Kind: TimelineTaskKind(t.Kind),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CreatedAt: t.CreatedAt, ClosedAt: t.ClosedAt, Deps: t.Deps,
 	}
+}
+
+// rowsText is the text of the rows parameter, empty when it is left out.
+func rowsText(r *GetTimelineParamsRows) string {
+	if r == nil {
+		return ""
+	}
+	return string(*r)
 }

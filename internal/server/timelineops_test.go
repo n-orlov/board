@@ -100,7 +100,7 @@ func TestGetTimelineRefusesWhatItCannotRead(t *testing.T) {
 	s.create("aa", "")
 	for q, want := range map[string]int{
 		"from=yesterday": 400, "to=2000-01-01T00:00:00Z": 400, "from=2030-01-01T00:00:00Z&to=2030-01-01T00:00:00Z": 400,
-		"from=2030-01-01T00:00:00Z&to=2035-01-01T00:00:00Z": 400, "closed_within=soon": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404,
+		"from=2030-01-01T00:00:00Z&to=2035-01-01T00:00:00Z": 400, "closed_within=soon": 400, "rows=some": 400, "rows=ALL": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404,
 	} {
 		rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host")
 		doc := decode(t, rec)
@@ -114,5 +114,89 @@ func TestGetTimelineRefusesWhatItCannotRead(t *testing.T) {
 	}
 	if rec := s.send(http.MethodGet, "/api/v1/timeline?from=x", "", "claude@host"); !strings.Contains(rec.Body.String(), "RFC 3339") {
 		t.Errorf("400 body = %s", rec.Body)
+	}
+}
+
+func TestGetTimelineWithAllRowsKeepsTasksOutsideTheWindow(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"made now"}`)
+	past := url.Values{"from": {"2020-01-01T00:00:00Z"}, "to": {"2020-02-01T00:00:00Z"}}
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 0 {
+		t.Errorf("the default window = %d %v, want no tasks", code, doc["tasks"])
+	}
+	past.Set("rows", "window")
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 0 {
+		t.Errorf("rows=window = %d %v, want no tasks", code, doc["tasks"])
+	}
+	past.Set("rows", "all")
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 1 {
+		t.Errorf("rows=all = %d %v, want the task", code, doc["tasks"])
+	}
+}
+
+func TestGetTimelineWithAllRowsAndAnActorKeepsTheTasksTheActorEverLeased(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"leased"}`)
+	s.task(`{"initiative":"aa","title":"never leased"}`)
+	if rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work"}`, "codex@host"); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("start lease = %d %s", rec.Code, rec.Body)
+	}
+	past := url.Values{"from": {"2020-01-01T00:00:00Z"}, "to": {"2020-02-01T00:00:00Z"}, "actor": {"codex@host"}}
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 0 {
+		t.Errorf("the window with the actor = %d %v, want no tasks", code, doc["tasks"])
+	}
+	past.Set("rows", "all")
+	code, doc := timelineAt(s, past)
+	tasks, _ := doc["tasks"].([]any)
+	if code != http.StatusOK || len(tasks) != 1 || tasks[0].(map[string]any)["ref"] != "aa-1" {
+		t.Errorf("rows=all with the actor = %d %v, want aa-1 only", code, doc["tasks"])
+	}
+	if leases, _ := doc["leases"].([]any); len(leases) != 0 {
+		t.Errorf("leases = %v, want none: the window still picks the leases", leases)
+	}
+}
+
+func TestGetTimelineWithABadRowsChangesNothing(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	count := func() (n int) {
+		row := s.st.Writer().QueryRow(`SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM tasks) + (SELECT COUNT(*) FROM leases)`)
+		if err := row.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := count()
+	rec := s.send(http.MethodGet, "/api/v1/timeline?rows=some", "", "claude@host")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "window") {
+		t.Errorf("rows=some = %d %s, want 400 naming the values", rec.Code, rec.Body)
+	}
+	if after := count(); after != before {
+		t.Errorf("rows before and after the refusal = %d and %d, want the same", before, after)
+	}
+}
+
+func TestTimelineRowsAcceptOnlyTheDeclaredValues(t *testing.T) {
+	t.Parallel()
+	for _, v := range []GetTimelineParamsRows{GetTimelineParamsRowsWindow, GetTimelineParamsRowsAll} {
+		if !v.Valid() {
+			t.Errorf("%v is declared but reported invalid", v)
+		}
+	}
+	if GetTimelineParamsRows("some").Valid() {
+		t.Error("an undeclared rows value is valid")
+	}
+	if got := rowsText(nil); got != "" {
+		t.Errorf("no rows = %q, want empty", got)
+	}
+	all := GetTimelineParamsRowsAll
+	if got := rowsText(&all); got != "all" {
+		t.Errorf("rows all = %q", got)
 	}
 }

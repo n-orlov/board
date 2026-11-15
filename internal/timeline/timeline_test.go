@@ -223,6 +223,7 @@ func TestAWindowThatIsWrongIsInvalid(t *testing.T) {
 		"to is not a time":     {timeline.Query{To: "2030-02-01"}, `to "2030-02-01"`},
 		"a bad closed_within":  {timeline.Query{ClosedWithin: "soon"}, "closed_within"},
 		"a bad tag":            {timeline.Query{Tags: []string{"No Good"}}, "tag"},
+		"a bad rows":           {timeline.Query{Rows: "some"}, `rows "some"`},
 		"from default past to": {timeline.Query{From: "2040-01-01T00:00:00Z"}, "after from"},
 	} {
 		_, err := e.tl.Read(ctx, c.q)
@@ -280,6 +281,34 @@ func TestTasksAreInTheWindowByTheirActualOrPlannedSpan(t *testing.T) {
 	if planned.PlannedStart != nil || planned.PlannedEnd == nil || !planned.PlannedEnd.Equal(from) {
 		t.Errorf("task aa-5 = %+v", planned)
 	}
+}
+
+func TestAllRowsKeepsTheTasksWhereverTheirSpansFall(t *testing.T) {
+	e := newEnv(t)
+	e.initiative(t, "aa")
+	day := 24 * time.Hour
+	e.task(t, "aa", "in the window", from.Add(day), time.Time{})                       // aa-1
+	e.task(t, "aa", "created after to", to.Add(day), time.Time{})                      // aa-2
+	p3 := e.task(t, "aa", "plan starts after to", to.Add(day), time.Time{})            // aa-3
+	e.plan(t, p3, ptr(to.Add(2*day)), ptr(to.Add(3*day)))                              //
+	e.task(t, "aa", "closed before from", from.Add(-5*day), from.Add(-day))            // aa-4
+	e.task(t, "aa", "closed long before from", from.Add(-200*day), from.Add(-100*day)) // aa-5
+	e.task(t, "aa", "open, held before the window", from.Add(-10*day), time.Time{})    // aa-6
+	h := time.Hour
+	e.lease(t, "aa-6", "codex@host", "before the window", "ended", from.Add(-3*day), from.Add(-3*day+h))
+	inside := e.lease(t, "aa-1", "claude@host", "inside", "ended", from.Add(h), from.Add(2*h))
+	e.event(t, p3, "milestone", "after the window", "", to.Add(2*day))
+
+	is(t, "the window", refs(e.read(t, timeline.Query{Rows: timeline.RowsWindow})), []string{"aa-1", "aa-6"})
+	got := e.read(t, timeline.Query{Rows: timeline.RowsAll})
+	is(t, "all rows", refs(got), []string{"aa-1", "aa-2", "aa-3", "aa-6"})
+	is(t, "leases stay in the window", leaseRefs(got), []string{inside})
+	is(t, "markers stay in the window", markers(got), []string{})
+	is(t, "all rows with closed_within", refs(e.read(t, timeline.Query{Rows: timeline.RowsAll, ClosedWithin: "30d"})), []string{"aa-1", "aa-2", "aa-3", "aa-4", "aa-6"})
+	got = e.read(t, timeline.Query{Rows: timeline.RowsAll, ClosedWithin: "30d", Actor: "codex@host"})
+	is(t, "the tasks the actor ever held", refs(got), []string{"aa-6"})
+	is(t, "and only its leases in the window", leaseRefs(got), []string{})
+	is(t, "the actor in the window", refs(e.read(t, timeline.Query{ClosedWithin: "30d", Actor: "codex@host"})), []string{})
 }
 
 func TestClosedWithinKeepsTheTasksClosedThatRecently(t *testing.T) {
