@@ -92,7 +92,7 @@ interface Route {
   sortColumn?: string;
   /** Leaves the page, for a route whose rows hold no link (the API keys table): the page is left by the navigation. */
   leave?: (page: Page) => Promise<void>;
-  /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table). */
+  /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table, the Attention view its chips). */
   scrollTo?: (page: Page) => Promise<number>;
 }
 
@@ -161,6 +161,9 @@ for (const vp of viewports) {
         },
         links: (p) => p.getByTestId('item-link'),
         landing: /#\/t\//,
+        // Every spec's tags and initiatives are chips above the cards: on a grown store they push the cards below the fold.
+        scrollTo: async (p) =>
+          Math.max(SCROLL_TO, await p.getByTestId('item-link').first().evaluate((link) => Math.round(link.getBoundingClientRect().top + window.scrollY) - 300)),
       };
       await leaveAndReturn(page, route, phone);
     });
