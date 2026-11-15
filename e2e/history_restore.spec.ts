@@ -2,7 +2,8 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
-// (scroll only) and the Actors view (sort only) each come back with the scroll position
+// (scroll only), the Actors view (sort only), the Archive view (window and sort), the Notes view (filter and scroll) and
+// Settings -> API keys (sort only) each come back with the scroll position
 // of the history entry, the filters in the fragment, the sort column and direction (the header's aria-sort at desktop,
 // the Sort select at phone, the fragment's `sort` and `dir`) and the row order they had when a link was followed. Forward
 // and then Back again restores the same. Every test seeds rows of its own (slugs start with `e2e-hr-`) and reads only those.
@@ -66,6 +67,12 @@ async function followVisibleLink(page: Page, links: Locator): Promise<number> {
   return before;
 }
 
+async function leaveBy(page: Page, leave: (page: Page) => Promise<void>): Promise<number> {
+  const before = await scrollY(page);
+  await leave(page);
+  return before;
+}
+
 interface Left {
   scrollY: number;
   fragment: string;
@@ -83,6 +90,8 @@ interface Route {
   /** Where the link followed lands. */
   landing: RegExp;
   sortColumn?: string;
+  /** Leaves the page, for a route whose rows hold no link (the API keys table): the page is left by the navigation. */
+  leave?: (page: Page) => Promise<void>;
   /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table). */
   scrollTo?: (page: Page) => Promise<number>;
 }
@@ -114,7 +123,7 @@ async function leaveAndReturn(page: Page, route: Route, phone: boolean) {
   const rows = await route.rows(page);
   const sort = route.sortColumn === undefined ? undefined : await shownSort(page, phone, route.sortColumn);
   const left: Left = { scrollY: await scrollY(page), fragment: fragment(page), rows, sort };
-  const before = await followVisibleLink(page, route.links(page));
+  const before = route.leave === undefined ? await followVisibleLink(page, route.links(page)) : await leaveBy(page, route.leave);
   expect(Math.abs(before - left.scrollY)).toBeLessThanOrEqual(2);
   await expect(page).toHaveURL(route.landing, FIVE_SECONDS);
   await backAndForward(page, route, left, phone);
@@ -327,6 +336,99 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('lease-task'),
         landing: /#\/t\//,
         sortColumn: 'actor',
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+
+    test('the Archive view comes back with its window, sort, row order and scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-hr-arc-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `History restore archive ${vp.name}` }, 201);
+      // Closed in this order, newest last: the default order (newest closed first) is the reverse of it, and no title sort gives either.
+      const titles = ['Mango', 'apple', 'Zebra', 'cherry', 'Lemon', 'banana', 'Quince', 'date', 'Fig', 'grape', 'Kiwi', 'olive', 'Pear', 'jam', 'Nut', 'ice'];
+      const refs: string[] = [];
+      for (const title of titles) {
+        const ref = (await post(api, '/api/v1/tasks', { initiative: slug, title: `${title} ${slug}` }, 201)).ref;
+        await post(api, `/api/v1/tasks/${ref}/close`, { resolution: 'completed' }, 200);
+        refs.push(ref);
+      }
+      const own = async (p: Page) =>
+        (await p.getByTestId('archive-row').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-ref') ?? ''))).filter((ref) => refs.includes(ref));
+
+      await page.goto('/#/archive');
+      await page.getByTestId('archive-window').selectOption('90');
+      await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(titles.length);
+      const byDefault = await own(page);
+      await sortBy(page, phone, 'item', 'desc');
+      await expect(page).toHaveURL((url) => url.hash === '#/archive?window=90&sort=item&dir=desc');
+      const sorted = await own(page);
+      expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
+      expect(sorted).toEqual([...refs].sort((a, b) => titles[refs.indexOf(b)].toLowerCase().localeCompare(titles[refs.indexOf(a)].toLowerCase())));
+
+      const route: Route = {
+        rows: own,
+        shown: async (p) => {
+          await expect(p.getByTestId('archive-window')).toHaveValue('90', FIVE_SECONDS);
+          expect(queryOf(p).get('window')).toBe('90');
+        },
+        links: (p) => p.getByTestId('archive-link'),
+        landing: /#\/t\//,
+        sortColumn: 'item',
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+
+    test('the Notes view comes back with its filter and scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-hr-notes-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `History restore notes ${vp.name}` }, 201);
+      const ref = (await post(api, '/api/v1/tasks', { initiative: slug, title: 'The task the notes are on' }, 201)).ref;
+      for (let i = 0; i < 22; i++) await post(api, '/api/v1/notes', { task: ref, summary: `Note ${String(i).padStart(2, '0')} of ${slug}` }, 201);
+
+      await page.goto('/#/notes');
+      await page.getByLabel('Initiative').fill(slug);
+      await page.getByTestId('apply-filters').click();
+      await expect(page).toHaveURL((url) => url.hash === `#/notes?initiative=${slug}`);
+      await expect.poll(() => page.getByTestId('note').count(), FIVE_SECONDS).toBe(20);
+
+      const route: Route = {
+        rows: (p) => p.getByTestId('note-summary').allTextContents(),
+        shown: async (p) => {
+          await expect(p.getByLabel('Initiative')).toHaveValue(slug, FIVE_SECONDS);
+        },
+        links: (p) => p.getByTestId('note-scope'),
+        landing: /#\/t\//,
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+
+    test('Settings -> API keys comes back with its sort, row order and scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const prefix = `e2e-hr-key-${vp.name}-`;
+      // Created in this order, so the default order (the oldest key first) is this one; no name sort gives it.
+      const names = ['mango', 'apple', 'zebra', 'cherry', 'lemon', 'banana', 'quince', 'date', 'fig', 'grape', 'kiwi', 'olive', 'pear', 'jam', 'nut', 'ice', 'rye', 'oat', 'tea', 'bean', 'yam', 'plum', 'sage', 'leek'];
+      const keys = names.map((name) => `${prefix}${name}`);
+      for (const key of keys) await post(api, '/api/v1/keys', { name: key }, 201);
+      const own = async (p: Page) =>
+        (await p.getByTestId('key-row').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-name') ?? ''))).filter((name) => name.startsWith(prefix));
+
+      await page.goto('/#/settings/keys');
+      await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(names.length);
+      const byDefault = await own(page);
+      await sortBy(page, phone, 'name', 'desc');
+      await expect(page).toHaveURL((url) => url.hash === '#/settings/keys?sort=name&dir=desc');
+      const sorted = await own(page);
+      expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
+      expect(sorted).toEqual([...keys].sort().reverse());
+
+      const route: Route = {
+        rows: own,
+        shown: async () => undefined, // the view has no filter
+        // The table holds no link: the page is left by the navigation (a fixed bar, so nothing scrolls on the way).
+        links: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }),
+        leave: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }).click(),
+        landing: /#\/attention/,
+        sortColumn: 'name',
       };
       await leaveAndReturn(page, route, phone);
     });
