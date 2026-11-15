@@ -216,11 +216,18 @@ for (const vp of viewports) {
       await expect.poll(() => span(page)).toBeGreaterThan(closer);
 
       // A plain wheel over the chart never zooms: a sideways one pans the range, a vertical one scrolls the rows.
-      const centre = (await page.locator('.vis-panel.vis-center').boundingBox())!;
-      await page.mouse.move(centre.x + centre.width / 2, centre.y + centre.height / 2);
+      const centre = page.locator('.vis-panel.vis-center');
+      const aim = async () => {
+        const box = (await centre.boundingBox())!;
+        const top = Math.max(box.y, 0);
+        const bottom = Math.min(box.y + box.height, page.viewportSize()!.height);
+        await page.mouse.move(box.x + box.width / 2, (top + bottom) / 2);
+      };
+      await aim();
       const before = await span(page);
       const range = () => page.evaluate(() => location.hash);
       await page.mouse.wheel(0, 400);
+      await aim(); // the vertical wheel may have scrolled the page under the pointer
       await page.mouse.wheel(300, 0);
       await expect.poll(range).toContain('from='); // the pan settled into the fragment
       expect(Math.abs((await span(page)) - before)).toBeLessThan(1000);

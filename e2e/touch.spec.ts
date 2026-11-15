@@ -17,7 +17,9 @@ import { expect, test as base, type APIRequestContext, type Page, type Playwrigh
 // and force-done confirm, and the phone Sort select.
 const test = base;
 
-const SELECTOR = 'a, button, input, select, textarea, [role=button]';
+// A timeline bar is a data mark sized by its time span, so it can be a few px wide. It is exempt as WCAG 2.5.8's
+// equivalent control: the task's row label opens the same preview and is a 44 px target (timeline.spec.ts).
+const SELECTOR = 'a, button, input, select, textarea, [role=button]:not(.vis-item[data-task])';
 const MIN_HIT = 44;
 const MIN_FONT = 16;
 // Layout snaps to 1/64 px, so a 44 px box can measure 43.99997.
