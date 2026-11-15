@@ -36,7 +36,8 @@ async function seedTask(api: APIRequestContext, slug: string, extra: object = {}
 
 // Runs a lease out the way the Go scenarios do: its expiry is moved into the past in the e2e store, then an API read
 // expires the leases that are due (the page's own read would race the timeline), so nothing sleeps.
-async function expireLease(api: APIRequestContext, ref: string) {
+// The read is filtered to the task: the shared store holds hundreds of expired leases and a list is paged at 100.
+async function expireLease(api: APIRequestContext, ref: string, task: string) {
   const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
   try {
     db.exec('PRAGMA busy_timeout = 5000');
@@ -45,7 +46,7 @@ async function expireLease(api: APIRequestContext, ref: string) {
   } finally {
     db.close();
   }
-  const listed = await api.get('/api/v1/leases?state=expired');
+  const listed = await api.get(`/api/v1/leases?state=expired&task=${task}`);
   expect(listed.status()).toBe(200);
   expect(JSON.stringify(await listed.json())).toContain(`"${ref}"`);
 }
@@ -493,7 +494,7 @@ for (const vp of viewports) {
       const api = await apiContext(playwright, baseURL);
       const ref = await seedTask(api, `e2e-tp-ack-${vp.name}`);
       const lease = (await post(api, '/api/v1/leases', { task: ref, intent: 'forgotten work' }, 201).then((l) => (l as unknown as { lease: { ref: string } }).lease)).ref;
-      await expireLease(api, lease);
+      await expireLease(api, lease, ref);
       await page.goto(`/#/t/${ref}`);
 
       await expect(page.getByTestId('no-leases')).toBeVisible();

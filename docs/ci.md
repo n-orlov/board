@@ -459,7 +459,8 @@ Scripts, each run through `ci/run.sh` unless noted:
   shortens no spec or bound. The config starts the
   real binary on a free port against a freshly migrated SQLite store
   (`e2e/serve.sh`) and never retries (`retries: 0`). It has two projects over
-  that one store, `chromium-early` first: `shell.spec.ts`, the `timeline*.spec.ts`
+  that one store, `chromium-early` first: `dialogs.spec.ts` (it Tabs to a button below the
+  Initiatives list, 150 presses at most), `shell.spec.ts`, the `timeline*.spec.ts`
   specs and `wide.spec.ts`, which load the unfiltered Timeline again and again, then
   `chromium` with every other spec. The store only grows, and an unfiltered Timeline
   takes seconds to draw once it holds thousands of tasks; run last, those specs failed

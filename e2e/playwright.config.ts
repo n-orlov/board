@@ -27,8 +27,9 @@ const work = process.env.E2E_WORK ?? (process.env.E2E_WORK = mkdtempSync(join(tm
 // test artifacts live under it.
 const out = process.env.E2E_OUT ?? 'out';
 
-// The specs that load the unfiltered Timeline or every view in turn: see `projects` below.
-const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];
+// The specs that load the unfiltered Timeline or every view in turn, or that Tab through a list the store's
+// volume lengthens (dialogs.spec.ts reaches a button below the Initiatives list): see `projects` below.
+const earlySpecs = ['dialogs.spec.ts', 'shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];
 
 export default defineConfig({
   testDir: '.',
@@ -72,6 +73,8 @@ export default defineConfig({
   // that view again and again. Run last, they took 25 of their 30 s on the workstation and over 30 s on the Jenkins
   // agent, which failed the first run and doubled the Suite past its 45-minute bound. They test the Timeline and the
   // navigation chrome, not store volume, so they run first, on a store that only the specs before them have filled.
+  // dialogs.spec.ts is in the early project for the same reason from the other side: it reaches a button by Tab alone
+  // (150 presses at most) and on a phone that button sits below the whole Initiatives list, so it needs the list short.
   // No test, assertion, timeout or retry changes; the project name only appears in a test's title.
   projects: [
     { name: 'chromium-early', testMatch: earlySpecs, use: { browserName: 'chromium' } },

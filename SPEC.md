@@ -3314,8 +3314,8 @@ nothing with them, and the script waits for it before it merges the JUnit files,
 a failed run is repeated once as a whole (every spec runs again, not only the failed ones), a
 pass on the repeat is written to `flaky-playwright.txt`, a second failure fails the suite; the JUnit file is `junit-playwright.xml`.
 `ci/suitecheck` fails if the config's `retries` is not 0.
-The config has two projects over the one server and store, `chromium-early` first: it runs `shell.spec.ts`, the `timeline*.spec.ts` specs and
-`wide.spec.ts`, which load the unfiltered Timeline or every view in turn, and `chromium` runs the rest. The store only grows during a run, and an
+The config has two projects over the one server and store, `chromium-early` first: it runs `dialogs.spec.ts`, `shell.spec.ts`, the `timeline*.spec.ts` specs and
+`wide.spec.ts`, which load the unfiltered Timeline or every view in turn or reach a button by Tab alone below a list that only grows, and `chromium` runs the rest. The store only grows during a run, and an
 unfiltered Timeline takes seconds to draw once it holds thousands of tasks, so run last those specs failed the first run on the Jenkins agent and the
 whole-run repeat took the Suite past its 45-minute bound. No spec, assertion or timeout changes. `ci/suitecheck` fails if that order is lost.
 

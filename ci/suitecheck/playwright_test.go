@@ -53,7 +53,8 @@ func TestPlaywrightConfigNeverRetries(t *testing.T) {
 var earlySpecsList = regexp.MustCompile(`(?s)const earlySpecs = \[([^\]]*)\]`)
 
 // playwrightEarlyProblem returns "" when the config runs the volume-sensitive
-// specs (the navigation chrome, every Timeline spec and the wide layout) in a
+// specs (the navigation chrome, every Timeline spec, the wide layout and the
+// dialogs spec, which Tabs past a list that only grows) in a
 // project listed before the project that runs every other spec, and keeps
 // those specs out of the second one, otherwise what is wrong. The shared e2e
 // store only grows, an unfiltered Timeline takes seconds to draw at the end
@@ -65,7 +66,7 @@ func playwrightEarlyProblem(cfg string) string {
 	if list == nil {
 		return "no `const earlySpecs = [...]` list"
 	}
-	for _, want := range []string{"shell.spec.ts", "timeline*.spec.ts", "wide.spec.ts"} {
+	for _, want := range []string{"dialogs.spec.ts", "shell.spec.ts", "timeline*.spec.ts", "wide.spec.ts"} {
 		if !strings.Contains(list[1], "'"+want+"'") {
 			return "earlySpecs does not name " + want
 		}
@@ -100,7 +101,7 @@ func TestPlaywrightRunsTheVolumeSensitiveSpecsFirst(t *testing.T) {
 }
 
 func TestPlaywrightEarlyProblemFlagsALostOrdering(t *testing.T) {
-	const good = "const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n" +
+	const good = "const earlySpecs = ['dialogs.spec.ts', 'shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n" +
 		"projects: [\n{ name: 'chromium-early', testMatch: earlySpecs },\n{ name: 'chromium', testMatch: '*.spec.ts', testIgnore: earlySpecs },\n]"
 	if got := playwrightEarlyProblem(good); got != "" {
 		t.Fatalf("a correct config was flagged: %s", got)
@@ -109,7 +110,8 @@ func TestPlaywrightEarlyProblemFlagsALostOrdering(t *testing.T) {
 		"no list":           strings.Replace(good, "const earlySpecs", "const other", 1),
 		"timeline dropped":  strings.Replace(good, " 'timeline*.spec.ts',", "", 1),
 		"shell dropped":     strings.Replace(good, "'shell.spec.ts', ", "", 1),
-		"order swapped":     "const earlySpecs = ['shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n{ name: 'chromium', testIgnore: earlySpecs },\n{ name: 'chromium-early', testMatch: earlySpecs },",
+		"dialogs dropped":   strings.Replace(good, "'dialogs.spec.ts', ", "", 1),
+		"order swapped":     "const earlySpecs = ['dialogs.spec.ts', 'shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];\n{ name: 'chromium', testIgnore: earlySpecs },\n{ name: 'chromium-early', testMatch: earlySpecs },",
 		"early not matched": strings.Replace(good, "testMatch: earlySpecs", "testMatch: '*.spec.ts'", 1),
 		"main not ignoring": strings.Replace(good, "testIgnore: earlySpecs", "testMatch: '*.spec.ts'", 1),
 	} {
