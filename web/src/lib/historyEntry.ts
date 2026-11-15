@@ -5,7 +5,8 @@
 //
 // - The browser's own scroll restoration is off (`history.scrollRestoration = 'manual'`): the views draw after their
 //   data loads, which is too late for it. `installScrollRestore` saves the page's scroll per entry as it moves and puts
-//   it back once the page is tall enough, unless the user scrolls first. A new entry (a link followed) starts at the top.
+//   it back once the page is tall enough, holding it while the view draws, unless the user scrolls first. A new entry
+//   (a link followed) starts at the top.
 // - Every fragment rewrite must keep the entry's state: use `replaceHash`, never `history.replaceState(null, …)`.
 // - A storage or history that throws means "nothing to restore": navigation never breaks on it.
 
@@ -13,7 +14,10 @@
 export const ENTRY_KEY_FAMILY = 'board.entry.';
 /** At most this many entries are remembered; older ones are dropped first. */
 export const ENTRY_LIMIT = 200;
-/** How long a restore waits for the page to grow tall enough before it gives up and scrolls as far as it can. */
+/**
+ * How long a restore holds the saved position while the page draws: it waits this long for the page to grow tall
+ * enough (then scrolls as far as it can), and puts the position back whenever the page redraws meanwhile.
+ */
 export const RESTORE_WAIT_MS = 4000;
 
 /** The slice of `History` this module uses: tests pass a fake. */
@@ -178,42 +182,57 @@ export function installScrollRestore(win: Window = window): () => void {
     if (frame === 0) frame = win.requestAnimationFrame(save);
   };
 
-  // Scrolls to `y` once the page is tall enough for it (the view's data has landed), or after RESTORE_WAIT_MS as far
-  // as it can. Anything the user does to scroll meanwhile wins and ends the wait.
+  // Scrolls to `y` once the page is tall enough for it, and keeps it there for RESTORE_WAIT_MS: Back and Forward land
+  // while the view left may still be drawn (tall enough at once), and the view shown next first draws short while its
+  // data loads, which pulls the scroll up. So whenever the page's height changes, `y` is put back as soon as the page
+  // is tall enough again; a page that never gets tall enough ends as far down as it goes. Anything the user does to
+  // scroll meanwhile wins and ends it. A restore cut short by navigating away (`stopRestore`) saves nothing: the entry
+  // keeps the position it was restoring.
   const restore = (y: number) => {
     stopRestore();
     const started = Date.now();
     let raf = 0;
+    let placedAt = -1; // the page height when the scroll was last put at `y`
     const tick = () => {
-      const room = win.document.documentElement.scrollHeight - win.innerHeight;
-      if (room >= y || Date.now() - started > RESTORE_WAIT_MS) {
-        win.scrollTo(0, Math.min(y, Math.max(0, room)));
-        finish();
+      const height = win.document.documentElement.scrollHeight;
+      const room = height - win.innerHeight;
+      if (room >= y && height !== placedAt) {
+        win.scrollTo(0, y);
+        placedAt = height;
+      }
+      if (Date.now() - started > RESTORE_WAIT_MS) {
+        if (placedAt !== height) win.scrollTo(0, Math.max(0, room));
+        done();
         return;
       }
       raf = win.requestAnimationFrame(tick);
     };
-    const userMoved = () => finish();
     const events = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
-    const finish = () => {
+    const end = () => {
       win.cancelAnimationFrame(raf);
-      for (const e of events) win.removeEventListener(e, userMoved, true);
-      if (restoring === finish) restoring = undefined;
+      for (const e of events) win.removeEventListener(e, done, true);
+      if (restoring === end) restoring = undefined;
+    };
+    const done = () => {
+      end();
       save();
     };
-    for (const e of events) win.addEventListener(e, userMoved, { capture: true, passive: true });
-    restoring = finish;
+    for (const e of events) win.addEventListener(e, done, { capture: true, passive: true });
+    restoring = end;
     raf = win.requestAnimationFrame(tick);
   };
 
-  // A hashchange is a link followed (a new entry, no key yet: start at the top) or Back/Forward to an entry that has
-  // one (go back to where it was).
+  // A popstate is a link followed (a new entry, no key yet: start at the top) or Back/Forward to an entry that has
+  // one (go back to where it was). The entry being left first keeps the scroll it has now: a scroll whose frame has
+  // not come yet must neither be lost nor land under the next entry's key.
   const onNavigate = () => {
+    win.cancelAnimationFrame(frame);
+    save();
+    stopRestore();
     const had = keyOf(win.history.state);
     key = ensureKey(win.history);
     const saved = had === undefined ? undefined : scrollOf(loadEntry(sessionStore(win), key, SCROLL));
     if (saved === undefined) {
-      stopRestore();
       win.scrollTo(0, 0);
     } else {
       restore(saved);

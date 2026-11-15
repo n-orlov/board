@@ -320,7 +320,51 @@ describe('installScrollRestore', () => {
     page.popTo({ boardEntry: 'b' });
     expect(page.listening('wheel')).toBe(1);
     page.frame();
+    expect(page.scrolls).toEqual([100]);
+    expect(page.listening('wheel')).toBe(1); // still holding the position while the view draws
+    vi.setSystemTime(RESTORE_WAIT_MS + 1);
+    page.frame();
     expect(page.listening('wheel')).toBe(0);
+    page.frame();
+    expect(page.scrolls).toEqual([100]);
+  });
+
+  it('puts the position back when the view shown next draws short first and then grows', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.height = 4000; // the view left is still drawn, and tall enough
+    page.popTo({ boardEntry: 'b' });
+    page.frame();
+    expect(page.scrolls).toEqual([1200]);
+    page.height = 900; // the next view draws short while its data loads: the browser pulls the scroll up
+    page.scrollY = 100;
+    page.emit('scroll');
+    page.frame();
+    expect(page.scrolls).toEqual([1200]);
+    expect(loadEntry(page.storage, 'b', SCROLL)).toBe(1200);
+    page.height = 3000; // its rows land
+    page.frame();
+    expect(page.scrolls).toEqual([1200, 1200]);
+    expect(page.scrollY).toBe(1200);
+    vi.setSystemTime(RESTORE_WAIT_MS + 1);
+    page.frame();
+    expect(page.scrolls).toEqual([1200, 1200]);
+    expect(loadEntry(page.storage, 'b', SCROLL)).toBe(1200);
+  });
+
+  it('leaves a page that kept its height where it is once the position is reached', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.popTo({ boardEntry: 'b' });
+    page.frame();
+    page.scrollY = 500; // moved by a means no gesture event reports (the scrollbar)
+    page.frame();
+    vi.setSystemTime(RESTORE_WAIT_MS + 1);
+    page.frame();
+    expect(page.scrolls).toEqual([1200]);
+    expect(loadEntry(page.storage, 'b', SCROLL)).toBe(500);
   });
 
   it('starts a followed link at the top and gives the new entry a key', () => {
@@ -352,6 +396,42 @@ describe('installScrollRestore', () => {
     page.height = 5000;
     page.frame();
     expect(page.scrolls).toEqual([0]);
+  });
+
+  it('keeps the scroll of the entry left when a link is followed before the next frame', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    page.scrollY = 640;
+    page.emit('scroll'); // its frame has not come yet
+    page.popTo(null);
+    const next = keyOf(page.history.state)!;
+    expect(loadEntry(page.storage, 'a', SCROLL)).toBe(640);
+    page.frame();
+    expect(loadEntry(page.storage, next, SCROLL)).not.toBe(640);
+    page.popTo({ boardEntry: 'a' });
+    page.frame();
+    expect(page.scrollY).toBe(640);
+  });
+
+  it('keeps the scroll of the entry left even when no scroll event came for it', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    page.scrollY = 480;
+    page.popTo(null);
+    expect(loadEntry(page.storage, 'a', SCROLL)).toBe(480);
+  });
+
+  it('a link followed during a restore keeps the position the entry was waiting for, under its own key only', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.height = 900;
+    page.popTo({ boardEntry: 'b' });
+    page.scrollY = 37;
+    page.popTo(null);
+    const next = keyOf(page.history.state)!;
+    expect(loadEntry(page.storage, 'b', SCROLL)).toBe(1200);
+    expect(loadEntry(page.storage, next, SCROLL)).toBeUndefined();
   });
 
   it('does not save a scroll while a restore is still waiting', () => {
