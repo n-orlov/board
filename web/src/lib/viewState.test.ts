@@ -190,6 +190,13 @@ describe('the browser adapter', () => {
     expect(replaceState).toHaveBeenCalledWith(null, '', '#/tasks?a=b');
   });
 
+  it('keeps the history entry state when it rewrites the fragment', () => {
+    const replaceState = vi.fn();
+    const e = currentViewEnv({ history: { state: { boardEntry: 'k' }, replaceState } });
+    e.replaceHash('#/tasks?a=b');
+    expect(replaceState).toHaveBeenCalledWith({ boardEntry: 'k' }, '', '#/tasks?a=b');
+  });
+
   it('has no storage where reading it throws', () => {
     const win = {
       get localStorage(): never {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import { taskHref } from './lib/taskPage';
   import FilterSelect from './FilterSelect.svelte';
   import NeedsAttention from './NeedsAttention.svelte';
@@ -69,7 +70,7 @@
 
   // Rewrites the fragment in place (no history entry per choice) and saves the query under the view's key.
   function persist(state: TasksViewState) {
-    window.history.replaceState(null, '', viewHash(state));
+    replaceHash(viewHash(state));
     saveViewQuery(viewEnv.storage, TASKS_VIEW, viewToQuery(state));
   }
 
@@ -128,7 +129,7 @@
     turns.reading();
     sort = null;
     clearViewQuery(viewEnv.storage, TASKS_VIEW);
-    window.history.replaceState(null, '', '#/tasks');
+    replaceHash('#/tasks');
     void store.setFilter(DEFAULT_TASKS_FILTER);
     void reloadNeeds();
   }

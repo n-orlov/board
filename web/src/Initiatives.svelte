@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import { untrack } from 'svelte';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
@@ -51,7 +52,7 @@
 
   // The filter and the sort live in the fragment and in the saved query: a change rewrites it in place (no history entry per choice).
   function persist(state: InitiativesViewState) {
-    window.history.replaceState(null, '', viewHash(state));
+    replaceHash(viewHash(state));
     saveViewQuery(viewEnv.storage, INITIATIVES_VIEW, viewToQuery(state));
   }
 
@@ -70,7 +71,7 @@
   function clear() {
     sort = null;
     clearViewQuery(viewEnv.storage, INITIATIVES_VIEW);
-    window.history.replaceState(null, '', '#/initiatives');
+    replaceHash('#/initiatives');
     void store.setFilter(DEFAULT_INITIATIVE_FILTER);
   }
 

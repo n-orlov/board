@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import AnswerForm from './AnswerForm.svelte';
   import AskList from './AskList.svelte';
   import NoteForm from './NoteForm.svelte';
@@ -66,7 +67,7 @@
 
   // Rewrites the fragment in place (no history entry per choice) and saves the query under the shared key.
   function persist(state: PageViewState) {
-    window.history.replaceState(null, '', viewHash(slug, state));
+    replaceHash(viewHash(slug, state));
     saveViewQuery(viewEnv.storage, INITIATIVE_VIEW, viewToQuery(state));
   }
 
@@ -85,7 +86,7 @@
   function clear() {
     sort = null;
     clearViewQuery(viewEnv.storage, INITIATIVE_VIEW);
-    window.history.replaceState(null, '', pagePath(slug));
+    replaceHash(pagePath(slug));
     store.setFilter(DEFAULT_TASK_FILTER);
   }
 

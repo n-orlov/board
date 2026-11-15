@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { replaceHash } from './lib/historyEntry';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
@@ -50,7 +51,7 @@
 
   // A change rewrites the fragment in place (no history entry per choice) and saves the query.
   function remember(next: ArchiveViewState) {
-    window.history.replaceState(null, '', archiveViewHash(next));
+    replaceHash(archiveViewHash(next));
     saveViewQuery(viewEnv.storage, ARCHIVE_VIEW, viewToQuery(next));
   }
 
