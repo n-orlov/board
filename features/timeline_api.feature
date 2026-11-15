@@ -297,6 +297,38 @@ Feature: Timeline over HTTP
     Then the response status is 200
     And the timeline leases have ref "L2,L3,L4"
 
+  Scenario Outline: any refused query leaves a lease that is due live, whichever parameter is bad
+    When I note the lease rows
+    And I request the timeline with "<query>" as actor "operator@laptop"
+    Then the response status is <status>
+    And the lease rows are unchanged
+
+    Examples:
+      | query                                                       | status |
+      | from=yesterday                                              | 400    |
+      | to=tomorrow                                                 | 400    |
+      | from=2030-01-02T00:00:00Z&to=2030-01-01T00:00:00Z           | 400    |
+      | from=2030-01-01T00:00:00Z&to=2030-01-01T00:00:00Z           | 400    |
+      | from=2030-01-01T00:00:00Z&to=2031-02-05T00:00:01Z           | 400    |
+      | closed_within=soon                                          | 400    |
+      | tag=Not%20A%20Tag                                           | 400    |
+      | rows=all&tag=Not%20A%20Tag                                  | 400    |
+      | initiative=nope                                             | 404    |
+      | rows=all&initiative=nope                                    | 404    |
+      | rows=some&initiative=nope                                   | 400    |
+
+  Scenario: a refused request that carries a valid filter changes nothing, and the accepted one then expires the due lease
+    When I note the lease rows
+    And I request the timeline for the window from -10 to 5 days with "actor=claude@laptop&closed_within=soon" as actor "operator@laptop"
+    Then the response status is 400
+    And the lease rows are unchanged
+    When I request the timeline for the window from -10 to 5 days with "initiative=aa&rows=" as actor "operator@laptop"
+    Then the response status is 400
+    And the lease rows are unchanged
+    When I request the timeline for the window from -10 to 5 days with "initiative=aa" as actor "operator@laptop"
+    Then the response status is 200
+    And the timeline leases have ref "L2,L4"
+
   Scenario: a rows that is neither window nor all is 400 and changes nothing
     When I request the timeline for the window from -10 to 5 days with "" as actor "operator@laptop"
     Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
