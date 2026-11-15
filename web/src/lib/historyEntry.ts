@@ -195,6 +195,18 @@ export function saveCurrent(name: string, value: unknown, win: Window = window):
   saveEntry(sessionStore(win), ensureKey(win.history), name, value);
 }
 
+// The entry a Back, a Forward or a reload has put on screen (it already had a key), or undefined while the page shows
+// an entry reached by a link. A view opening on a bare fragment asks: a revisited entry is shown as it was left.
+let revisitedKey: string | undefined;
+
+/**
+ * Whether the current entry is one being revisited (Back, Forward or reload) rather than reached by a new navigation.
+ * A revisited entry's own fragment is its state: a bare one means the defaults, not whatever a later visit saved.
+ */
+export function entryRevisited(history: { readonly state?: unknown } = window.history): boolean {
+  return revisitedKey !== undefined && keyOf(history.state) === revisitedKey;
+}
+
 /** The name the page's scroll position is saved under. */
 export const SCROLL = 'scroll';
 
@@ -213,6 +225,7 @@ export function installScrollRestore(win: Window = window): () => void {
   } catch {
     // Not settable here: the browser's own restoration stays, which is no worse than before.
   }
+  revisitedKey = keyOf(win.history.state);
   let key = ensureKey(win.history);
   let restoring: (() => void) | undefined;
   let frame = 0;
@@ -279,6 +292,7 @@ export function installScrollRestore(win: Window = window): () => void {
     stopRestore();
     const had = keyOf(win.history.state);
     key = ensureKey(win.history);
+    revisitedKey = had === undefined ? undefined : key;
     const saved = had === undefined ? undefined : scrollOf(loadEntry(sessionStore(win), key, SCROLL));
     if (saved === undefined) {
       win.scrollTo(0, 0);

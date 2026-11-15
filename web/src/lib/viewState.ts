@@ -4,9 +4,13 @@
 // - A route opened WITH a query uses it and saves it (a shared link wins).
 // - A bare route restores the saved query by rewriting the fragment in place (`history.replaceState`, no history
 //   entry, no hashchange) before the view's first fetch, so only one request is made.
+// - A bare fragment on an entry revisited by Back, Forward or reload is that entry's own state: the defaults. It
+//   never imports what a later visit saved (historyEntry.ts `entryRevisited`).
 // - Clear filters removes the key; signing out removes every `board.view.*` key.
 // - A missing, malformed, foreign-version or unreadable value, and a storage that throws, mean "defaults": the view
 //   never breaks on its storage.
+
+import { entryRevisited } from './historyEntry';
 
 /** The version of the stored value; a stored value of another version is ignored. */
 export const VIEW_STATE_VERSION = 1;
@@ -29,6 +33,8 @@ export interface ViewEnv {
   storage: ViewStorage | undefined;
   /** Rewrites the page's fragment in place (history.replaceState): no history entry, no hashchange. */
   replaceHash: (hash: string) => void;
+  /** Whether the entry on screen is one revisited by Back, Forward or reload; absent means a new navigation. */
+  revisited?: () => boolean;
 }
 
 /** The storage key of a view. */
@@ -100,7 +106,8 @@ export function clearAllViews(storage: ViewStorage | undefined): void {
  * Opens a view and returns the query it starts with. `path` is the view's fragment without a query (`#/tasks`),
  * `query` the one the fragment carries now. With a query, that query wins and is saved. Without one, the saved
  * query (if usable) is written into the fragment by `replaceHash` and returned; else the view starts at its
- * defaults (the empty string). Call it before the view's first fetch.
+ * defaults (the empty string); so does a bare fragment on an entry revisited by Back, Forward or reload, whose own
+ * fragment is its state. Call it before the view's first fetch.
  */
 export function openView(env: ViewEnv, view: string, path: string, query: string): string {
   const q = bare(query);
@@ -108,6 +115,7 @@ export function openView(env: ViewEnv, view: string, path: string, query: string
     saveViewQuery(env.storage, view, q);
     return q;
   }
+  if (env.revisited?.() === true) return '';
   const saved = loadViewQuery(env.storage, view);
   if (saved === null) return '';
   env.replaceHash(`${path}?${saved}`);
@@ -134,6 +142,7 @@ export function currentViewEnv(win: ViewWindow = window): ViewEnv {
   return {
     storage: pageStorage(win),
     replaceHash: (hash) => win.history.replaceState(win.history.state ?? null, '', hash),
+    revisited: () => entryRevisited(win.history),
   };
 }
 

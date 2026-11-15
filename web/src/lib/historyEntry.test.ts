@@ -3,6 +3,7 @@ import {
   ENTRY_KEY_FAMILY,
   ENTRY_LIMIT,
   ensureKey,
+  entryRevisited,
   installScrollRestore,
   RESTORE_WAIT_MS,
   SCROLL,
@@ -311,6 +312,39 @@ describe('installScrollRestore', () => {
     install(page);
     page.frame();
     expect(page.scrollY).toBe(900);
+  });
+
+  describe('entryRevisited', () => {
+    it('is true on Back or Forward to an entry that has a key, and for that entry only', () => {
+      const page = fakePage({ boardEntry: 'a' });
+      install(page);
+      page.popTo({ boardEntry: 'b' });
+      expect(entryRevisited(page.history)).toBe(true);
+      page.popTo({ boardEntry: 'c' });
+      expect(entryRevisited(page.history)).toBe(true);
+      // Another entry of the same history is not the one revisited.
+      (page.history as { state: unknown }).state = { boardEntry: 'd' };
+      expect(entryRevisited(page.history)).toBe(false);
+    });
+
+    it('is false on a followed link (a new entry with no key yet), even right after a revisit', () => {
+      const page = fakePage({ boardEntry: 'a' });
+      install(page);
+      page.popTo({ boardEntry: 'b' });
+      expect(entryRevisited(page.history)).toBe(true);
+      page.popTo(null);
+      expect(keyOf(page.history.state)).toBeDefined();
+      expect(entryRevisited(page.history)).toBe(false);
+    });
+
+    it('is true on a reload of an entry that has a key and false on the first load of a tab', () => {
+      const reloaded = fakePage({ boardEntry: 'a' });
+      install(reloaded);
+      expect(entryRevisited(reloaded.history)).toBe(true);
+      const fresh = fakePage();
+      install(fresh);
+      expect(entryRevisited(fresh.history)).toBe(false);
+    });
   });
 
   it('waits until the page is tall enough before scrolling', () => {

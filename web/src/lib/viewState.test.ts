@@ -57,6 +57,44 @@ describe('viewKey', () => {
   });
 });
 
+describe('openView on a revisited entry', () => {
+  const revisitedEnv = (storage: ViewStorage, revisited: boolean) => {
+    const replaceHash = vi.fn<(hash: string) => void>();
+    const e: ViewEnv = { storage, replaceHash, revisited: () => revisited };
+    return { e, replaceHash };
+  };
+
+  it('shows the defaults for a bare fragment and imports nothing a later visit saved', () => {
+    const storage = fakeStorage({ [KEY]: stored('status=done&sort=title&dir=desc') });
+    const { e, replaceHash } = revisitedEnv(storage, true);
+    expect(openView(e, 'tasks', '#/tasks', '')).toBe('');
+    expect(replaceHash).not.toHaveBeenCalled();
+    expect(storage.data[KEY]).toBe(stored('status=done&sort=title&dir=desc'));
+  });
+
+  it('still uses and saves the query its own fragment carries', () => {
+    const storage = fakeStorage({ [KEY]: stored('status=done') });
+    const { e, replaceHash } = revisitedEnv(storage, true);
+    expect(openView(e, 'tasks', '#/tasks', 'kind=watch')).toBe('kind=watch');
+    expect(replaceHash).not.toHaveBeenCalled();
+    expect(storage.data[KEY]).toBe(stored('kind=watch'));
+  });
+
+  it('restores the saved query for a bare link that is a new navigation, for any view', () => {
+    for (const [view, path] of [['tasks', '#/tasks'], ['actors', '#/actors']] as const) {
+      const storage = fakeStorage({ [`board.view.v1.${view}`]: stored('sort=x&dir=desc') });
+      const { e, replaceHash } = revisitedEnv(storage, false);
+      expect(openView(e, view, path, '')).toBe('sort=x&dir=desc');
+      expect(replaceHash).toHaveBeenCalledWith(`${path}?sort=x&dir=desc`);
+    }
+  });
+
+  it('the browser adapter asks the history entry on screen', () => {
+    const e = currentViewEnv({ history: { state: { boardEntry: 'never-revisited' }, replaceState: vi.fn() } });
+    expect(e.revisited?.()).toBe(false);
+  });
+});
+
 describe('openView', () => {
   it('uses the query the fragment carries and saves it, whatever was saved before', () => {
     const storage = fakeStorage({ [KEY]: stored('status=done') });
