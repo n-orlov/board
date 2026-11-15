@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
-// list (status filter and sort) and the initiative page (task filter and sort) each come back with the scroll position
+// list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
+// (scroll only) and the Actors view (sort only) each come back with the scroll position
 // of the history entry, the filters in the fragment, the sort column and direction (the header's aria-sort at desktop,
 // the Sort select at phone, the fragment's `sort` and `dir`) and the row order they had when a link was followed. Forward
 // and then Back again restores the same. Every test seeds rows of its own (slugs start with `e2e-hr-`) and reads only those.
@@ -20,6 +21,9 @@ async function post<T = { ref: string }>(api: APIRequestContext, path: string, d
 
 const apiContext = (playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined) =>
   playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'playwright' } });
+
+const actorContext = (playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, handle: string) =>
+  playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': handle } });
 
 const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
 const chip = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
@@ -43,11 +47,11 @@ async function shownSort(page: Page, phone: boolean, column: string): Promise<st
 }
 
 /** Scrolls the page and waits until it stays there. */
-async function scrollDown(page: Page) {
+async function scrollDown(page: Page, to: number) {
   const room = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
-  expect(room, 'the seeded rows must make the page scroll').toBeGreaterThan(SCROLL_TO);
-  await page.evaluate((y) => window.scrollTo(0, y), SCROLL_TO);
-  await expect.poll(() => scrollY(page)).toBe(SCROLL_TO);
+  expect(room, 'the seeded rows must make the page scroll').toBeGreaterThan(to);
+  await page.evaluate((y) => window.scrollTo(0, y), to);
+  await expect.poll(() => scrollY(page)).toBe(to);
 }
 
 /** Follows the first link of `links` that is fully inside the viewport, clear of the fixed bars: no scroll happens on the way. */
@@ -79,6 +83,8 @@ interface Route {
   /** Where the link followed lands. */
   landing: RegExp;
   sortColumn?: string;
+  /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table). */
+  scrollTo?: (page: Page) => Promise<number>;
 }
 
 /** Back, then Forward and Back again: both returns must show `left`. */
@@ -104,7 +110,7 @@ async function backAndForward(page: Page, route: Route, left: Left, phone: boole
 
 /** Fills the route in, records how it looks, follows a link away and checks both returns. */
 async function leaveAndReturn(page: Page, route: Route, phone: boolean) {
-  await scrollDown(page);
+  await scrollDown(page, (await route.scrollTo?.(page)) ?? SCROLL_TO);
   const rows = await route.rows(page);
   const sort = route.sortColumn === undefined ? undefined : await shownSort(page, phone, route.sortColumn);
   const left: Left = { scrollY: await scrollY(page), fragment: fragment(page), rows, sort };
@@ -216,6 +222,111 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('task-ref').locator('a'),
         landing: /#\/t\//,
         sortColumn: 'title',
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+    test('the Tasks view comes back with its filters, sort, row order and scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-hr-tasks-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `History restore tasks ${vp.name}` }, 201);
+      const titles = ['Mango', 'apple', 'Zebra', 'cherry', 'Lemon', 'banana', 'Quince', 'date', 'Fig', 'grape', 'Kiwi', 'olive', 'Pear', 'jam', 'Nut', 'ice', 'Rye', 'oat', 'Tea', 'bean'];
+      const refs: string[] = [];
+      for (const title of titles) refs.push((await post(api, '/api/v1/tasks', { initiative: slug, title: `${title} ${slug}` }, 201)).ref);
+      // Closed tasks only show under the All status filter (a closed task needs no review, so none sits in Needs attention).
+      for (const ref of refs.slice(2, 4)) {
+        await post(api, `/api/v1/tasks/${ref}/done`, {}, 200);
+        await post(api, `/api/v1/tasks/${ref}/close`, { resolution: 'completed' }, 200);
+      }
+      const own = (p: Page) => p.getByTestId('task-title').allTextContents();
+
+      await page.goto('/#/tasks');
+      await page.getByTestId('initiative-filter').selectOption(slug);
+      await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(18);
+      const byDefault = await own(page);
+      await page.getByTestId('status-filter').selectOption('all');
+      await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(20);
+      await sortBy(page, phone, 'title', 'desc');
+      await expect(page).toHaveURL((url) => new URLSearchParams(url.hash.split('?')[1] ?? '').get('sort') === 'title');
+      const sorted = await own(page);
+      expect(sorted, 'the picked sort must reorder the rows').not.toEqual([...byDefault, ...titles.slice(2, 4).map((t) => `${t} ${slug}`)]);
+      expect(sorted).toEqual([...titles].map((t) => `${t} ${slug}`).sort((a, b) => b.toLowerCase().localeCompare(a.toLowerCase())));
+
+      const route: Route = {
+        rows: own,
+        shown: async (p) => {
+          await expect(p.getByTestId('initiative-filter')).toHaveValue(slug, FIVE_SECONDS);
+          await expect(p.getByTestId('status-filter')).toHaveValue('all');
+          expect(queryOf(p).get('status')).toBe('all');
+          expect(queryOf(p).get('initiative')).toBe(slug);
+        },
+        links: (p) => p.getByTestId('task-ref').locator('a'),
+        landing: /#\/t\//,
+        sortColumn: 'title',
+        // The first row sits 300 px below the top of the window, clear of the bars, wherever the Now panel above it ends.
+        scrollTo: (p) => p.getByTestId('task-row').first().evaluate((row) => Math.round(row.getBoundingClientRect().top + window.scrollY) - 300),
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+
+    test('the task page comes back with its scroll', async ({ page, playwright, baseURL }) => {
+      const api = await apiContext(playwright, baseURL);
+      const slug = `e2e-hr-task-${vp.name}`;
+      await post(api, '/api/v1/initiatives', { slug, title: `History restore task ${vp.name}` }, 201);
+      const task = async (title: string) => (await post(api, '/api/v1/tasks', { initiative: slug, title }, 201)).ref;
+      const ref = await task('The task under test');
+      // Tasks that block it and that it blocks: the page's links to other tasks.
+      for (let i = 0; i < 3; i++) {
+        await post(api, `/api/v1/tasks/${ref}/deps/${await task(`Blocker ${i}`)}`, {}, 200);
+        await post(api, `/api/v1/tasks/${await task(`Blocked ${i}`)}/deps/${ref}`, {}, 200);
+      }
+      for (let i = 0; i < 25; i++) await post(api, '/api/v1/notes', { task: ref, summary: `Note ${String(i).padStart(2, '0')} of the history restore` }, 201);
+
+      await page.goto(`/#/t/${ref}`);
+      await expect(page.getByTestId('task-title')).toHaveText('The task under test', FIVE_SECONDS);
+      await expect.poll(() => page.getByTestId('event').count(), FIVE_SECONDS).toBeGreaterThanOrEqual(25);
+
+      const route: Route = {
+        rows: (p) => p.getByTestId('event-summary').allTextContents(),
+        shown: async (p) => {
+          await expect(p.getByTestId('task-title')).toHaveText('The task under test', FIVE_SECONDS);
+        },
+        links: (p) => p.locator('[data-testid=task-deps] a, [data-testid=task-blocking] a'),
+        landing: /#\/t\//,
+      };
+      await leaveAndReturn(page, route, phone);
+    });
+
+    test('the Actors view comes back with its sort, row order and scroll', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-hr-act-${vp.name}`;
+      const prefix = `zzhr-${vp.name}-`;
+      // Seen in this order, so neither the default order nor its reverse is the order by handle.
+      const names = ['mike', 'bob', 'tess', 'amy', 'zed', 'carl', 'olga', 'dan', 'pam', 'eve', 'ivan', 'nina', 'ken', 'lou'];
+      const handles = names.map((name) => `${prefix}${name}`);
+      for (const [i, handle] of handles.entries()) {
+        const api = await actorContext(playwright, baseURL, handle);
+        if (i === 0) await post(api, '/api/v1/initiatives', { slug, title: `History restore actors ${vp.name}` }, 201);
+        const task = (await post(api, '/api/v1/tasks', { initiative: slug, title: `Held by ${names[i]}` }, 201)).ref;
+        await post(api, '/api/v1/leases', { task, intent: `work of ${names[i]}`, resources: [`repo:${prefix}${names[i]}`] }, 201);
+        await api.dispose();
+      }
+      const own = async (p: Page) =>
+        (await p.getByTestId('actor-row').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-handle') ?? ''))).filter((h) => h.startsWith(prefix));
+
+      await page.goto('/#/actors');
+      await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(names.length);
+      const byDefault = await own(page);
+      await sortBy(page, phone, 'actor', 'desc');
+      await expect(page).toHaveURL((url) => url.hash === '#/actors?sort=actor&dir=desc');
+      const sorted = await own(page);
+      expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
+      expect(sorted).toEqual([...handles].sort().reverse());
+
+      const route: Route = {
+        rows: own,
+        shown: async () => undefined, // the view has no filter
+        links: (p) => p.getByTestId('lease-task'),
+        landing: /#\/t\//,
+        sortColumn: 'actor',
       };
       await leaveAndReturn(page, route, phone);
     });
