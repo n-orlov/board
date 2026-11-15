@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -43,6 +44,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	fs := flag.NewFlagSet("fake-oidc", flag.ContinueOnError)
 	clientID := fs.String("client-id", "board", "the client ID the provider serves")
 	email := fs.String("email", "", "the verified email the provider signs in")
+	listen := fs.String("listen", "", "serve on this address (host:port) instead of a free loopback port")
+	issuer := fs.String("issuer", "", "with -listen: the URL browsers reach the provider at (for example behind a TLS proxy)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,7 +53,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	if secret == "" || *email == "" {
 		return errors.New("FAKE_OIDC_CLIENT_SECRET and -email are required")
 	}
-	p, err := oidctest.New(*clientID, secret)
+	p, err := provider(*clientID, secret, *listen, *issuer)
 	if err != nil {
 		return err
 	}
@@ -61,4 +64,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}
 	<-ctx.Done()
 	return nil
+}
+
+// provider starts the mock provider on a free loopback port, or on listen announcing issuer.
+func provider(clientID, secret, listen, issuer string) (*oidctest.Provider, error) {
+	if listen == "" {
+		return oidctest.New(clientID, secret)
+	}
+	if issuer == "" {
+		issuer = "http://" + listen
+	}
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, err
+	}
+	return oidctest.NewAt(clientID, secret, l, issuer)
 }
