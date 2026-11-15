@@ -1236,6 +1236,56 @@ describe('mountChart', () => {
       expect(c.left.scrollTop).toBe(0);
     });
 
+    it('reports a collapse and the rows scroll in one flush, and a destroy right after reports the collapse no second time', () => {
+      const { lib, made } = fakeLib();
+      const c = fakeContainer();
+      const collapsed: string[][] = [];
+      const scrolled: number[] = [];
+      const chart = mountChart(lib, c.container, two(), initialWindow(NOW), { ...hooks().h, onCollapse: (ids) => collapsed.push(ids), onRowScroll: (px) => scrolled.push(px) });
+      (made[0]!.groups.rows[0] as { showNested?: boolean }).showNested = false;
+      c.left.scrollTop = 260;
+      chart.flush();
+      expect([collapsed, scrolled]).toEqual([[['i:a']], [260]]);
+      chart.destroy();
+      expect(collapsed).toEqual([['i:a']]); // what the entry holds is already what the chart shows
+    });
+
+    it('leaves the saved rows scroll alone when it is left while a shown entry\'s scroll is still being waited for, and still saves its collapse', () => {
+      vi.useFakeTimers();
+      try {
+        const { lib, made } = fakeLib();
+        const c = fakeContainer();
+        const collapsed: string[][] = [];
+        const scrolled: number[] = [];
+        const chart = mountChart(lib, c.container, two(), initialWindow(NOW), { ...hooks().h, onCollapse: (ids) => collapsed.push(ids), onRowScroll: (px) => scrolled.push(px) });
+        chart.showEntry({ collapsed: [], rows: 900 }); // the rows are too short for it yet
+        (made[0]!.groups.rows[1] as { showNested?: boolean }).showNested = false;
+        chart.flush();
+        expect(scrolled).toEqual([]); // the panel reads 0, which is not where the entry was left
+        expect(collapsed).toEqual([['i:b']]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('makes the labels vis-timeline draws for a shown entry operable at once, without waiting for its redraw', () => {
+      const { lib, made } = fakeLib();
+      const attrs = new Map<string, string>();
+      const label = {
+        tabIndex: -1,
+        classList: { contains: (name: string) => name === 'vis-nesting-group' || name === 'collapsed' },
+        hasAttribute: (name: string) => (name === 'tabindex' ? label.tabIndex >= 0 : attrs.has(name)),
+        setAttribute: (name: string, value: string) => attrs.set(name, value),
+      };
+      const c = fakeContainer([], false, [label]);
+      const chart = mountChart(lib, c.container, two(), initialWindow(NOW), hooks().h);
+      made[0]!.itemSet = { groups: {}, toggleGroupShowNested: () => undefined };
+      chart.showEntry({ collapsed: ['i:a'], rows: 0 });
+      expect(label.tabIndex).toBe(0);
+      expect(attrs.get('role')).toBe('button');
+      expect(attrs.get('aria-expanded')).toBe('false');
+    });
+
     it('shows an entry for a chart with no rows panel yet, and never toggles a row that is not an initiative', () => {
       const { lib, made } = fakeLib();
       const empty = { addEventListener: () => undefined, removeEventListener: () => undefined, querySelector: () => null } as unknown as HTMLElement;
