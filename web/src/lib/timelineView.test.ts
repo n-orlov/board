@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Browser } from './session';
 import type { ArrowPath, ArrowSurface, Box } from './timelineArrows';
 import { apiQuery, DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
+import { RESTORE_WAIT_MS } from './historyEntry';
 import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 import {
   canZoomIn,
@@ -653,6 +654,8 @@ describe('mountChart', () => {
   /** A chart container; with `hitTest`, it sits in a document whose hit test answers `under` (set by `lift`). */
   function fakeContainer(bars: unknown[] = [], hitTest = false, labels: unknown[] = []) {
     const listeners = new Map<string, (e: unknown) => void>();
+    // Several listeners may hold one event type (the chart's and the rows' own): `listeners` answers with all of them.
+    const held = new Map<string, ((e: unknown) => void)[]>();
     const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
     const left = { scrollTop: 0, scrollHeight: 0, clientHeight: 400 };
     let under: unknown = null;
@@ -665,8 +668,17 @@ describe('mountChart', () => {
     };
     const container = {
       ...(hitTest ? { ownerDocument } : {}),
-      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
-      removeEventListener: (type: string) => listeners.delete(type),
+      addEventListener: (type: string, fn: (e: unknown) => void) => {
+        const all = [...(held.get(type) ?? []), fn];
+        held.set(type, all);
+        listeners.set(type, (e) => all.forEach((one) => one(e)));
+      },
+      removeEventListener: (type: string, fn?: (e: unknown) => void) => {
+        const rest = (held.get(type) ?? []).filter((one) => one !== fn);
+        held.set(type, rest);
+        if (rest.length === 0) listeners.delete(type);
+        else listeners.set(type, (e) => rest.forEach((one) => one(e)));
+      },
       querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
       querySelectorAll: (sel: string) => (sel.startsWith('.vis-item[data-task]') ? bars : sel === '.vis-label' ? labels : []),
     };
@@ -768,6 +780,148 @@ describe('mountChart', () => {
     chart.scrollRows(0); // nothing to restore
     made[0]!.emit('changed');
     expect(c.left.scrollTop).toBe(10);
+  });
+
+  /** A mounted chart whose rows are asked to restore `px`; the rows draw `rowsHeight` tall. */
+  function restoring(px: number, rowsHeight = 0) {
+    const { lib, made } = fakeLib();
+    const c = fakeContainer();
+    const rowsSeen: number[] = [];
+    const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), { ...hooks().h, onRowScroll: (n) => rowsSeen.push(n) });
+    c.left.scrollHeight = rowsHeight;
+    chart.scrollRows(px);
+    const redraw = (height: number) => {
+      c.left.scrollHeight = height;
+      made[0]!.emit('changed');
+    };
+    /** The user leaves the rows at `top`: a scroll event that the report follows. */
+    const userScrolls = (top: number) => {
+      c.left.scrollTop = top;
+      c.listeners.get('scroll')?.({});
+      vi.advanceTimersByTime(150);
+    };
+    return { c, chart, rowsSeen, redraw, userScrolls };
+  }
+
+  describe.each([
+    ['a vertical wheel', 'wheel', { deltaY: 40 }],
+    ['a touch', 'touchstart', {}],
+    ['a key', 'keydown', { key: 'ArrowDown' }],
+    ['a press on the scrollbar', 'mousedown', {}],
+  ] as const)('the rows restore, then %s', (_name, type, event) => {
+    it('cancels it before the rows are tall enough: a later redraw does not put the stale offset back', () => {
+      vi.useFakeTimers();
+      try {
+        const r = restoring(900);
+        r.redraw(500); // 100 px of room: held as far as it goes
+        expect(r.c.left.scrollTop).toBe(100);
+        r.c.listeners.get(type)?.(event);
+        r.c.left.scrollTop = 40; // where the user leaves them
+        r.redraw(3000);
+        expect(r.c.left.scrollTop).toBe(40);
+        r.userScrolls(60);
+        expect(r.rowsSeen).toEqual([60]); // reported again, as the user leaves it
+        vi.advanceTimersByTime(10_000); // the deadline of the cancelled restore does nothing
+        expect(r.c.left.scrollTop).toBe(60);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('a rows restore that gives up', () => {
+    it('settles as far as the rows allow after four seconds and leaves every later redraw alone', () => {
+      vi.useFakeTimers();
+      try {
+        const r = restoring(900, 700); // 300 px of room
+        vi.advanceTimersByTime(RESTORE_WAIT_MS - 1);
+        r.redraw(700);
+        expect(r.c.left.scrollTop).toBe(300); // still holding
+        r.c.left.scrollTop = 0;
+        vi.advanceTimersByTime(1); // the deadline: as far as the rows go
+        expect(r.c.left.scrollTop).toBe(300);
+        r.userScrolls(120);
+        r.redraw(5000); // tall enough now, but too late
+        expect(r.c.left.scrollTop).toBe(120);
+        expect(r.rowsSeen).toEqual([120]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('gives up with no redraw at all and reports what the rows end at', () => {
+      vi.useFakeTimers();
+      try {
+        const r = restoring(900, 700);
+        r.c.left.scrollTop = 0;
+        r.c.listeners.get('scroll')?.({});
+        vi.advanceTimersByTime(150);
+        expect(r.rowsSeen).toEqual([]); // pending: the position is not the user's yet
+        vi.advanceTimersByTime(RESTORE_WAIT_MS);
+        expect(r.c.left.scrollTop).toBe(300);
+        r.userScrolls(300); // the scroll the settling caused
+        expect(r.rowsSeen).toEqual([300]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('moves nothing when the rows never got any room, and a redraw after it stays where it is', () => {
+      vi.useFakeTimers();
+      try {
+        const r = restoring(900, 0);
+        vi.advanceTimersByTime(RESTORE_WAIT_MS);
+        expect(r.c.left.scrollTop).toBe(0);
+        r.redraw(2000);
+        expect(r.c.left.scrollTop).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it('keeps restoring through a sideways wheel, which pans the time axis rather than scrolling the rows', () => {
+    vi.useFakeTimers();
+    try {
+      const r = restoring(900);
+      r.c.listeners.get('wheel')?.({ deltaX: 80, deltaY: 0, preventDefault: vi.fn(), stopPropagation: vi.fn(), clientX: 100 });
+      r.redraw(2000);
+      expect(r.c.left.scrollTop).toBe(900);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts a new four-second wait for a second restore and drops the first one', () => {
+    vi.useFakeTimers();
+    try {
+      const r = restoring(900);
+      vi.advanceTimersByTime(3000);
+      r.chart.scrollRows(500);
+      vi.advanceTimersByTime(3000); // the first deadline has passed; the second has not
+      r.redraw(2000);
+      expect(r.c.left.scrollTop).toBe(500);
+      r.userScrolls(10);
+      r.chart.scrollRows(0); // nothing to restore also drops a pending one
+      r.redraw(4000);
+      expect(r.c.left.scrollTop).toBe(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the wait when the chart goes away', () => {
+    vi.useFakeTimers();
+    try {
+      const r = restoring(900, 700);
+      r.chart.destroy();
+      expect(r.c.listeners.size).toBe(0);
+      r.c.left.scrollTop = 7;
+      vi.advanceTimersByTime(RESTORE_WAIT_MS * 2);
+      expect(r.c.left.scrollTop).toBe(7);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('pans on a sideways wheel, leaving a vertical wheel to vis-timeline', () => {

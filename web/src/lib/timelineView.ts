@@ -3,6 +3,7 @@
 // `mountChart` hands that model to vis-timeline. vis-timeline is bundled with the app (an npm dependency, no CDN); the
 // view imports its classes and passes them in as `ChartLib`, so this module stays testable without a DOM.
 import { errorText, Fetches } from './fetches';
+import { RESTORE_WAIT_MS } from './historyEntry';
 import { ThreadApi } from './threads';
 import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
@@ -868,14 +869,21 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
 /** How long the rows' scroll settles before it is reported: a drag of the scrollbar is one report, not hundreds. */
 const ROW_SCROLL_REPORT_MS = 100;
 
+/** The input that moves the rows (a wheel, a touch, a key, a press on the scrollbar): the user's own scroll, which wins over a restore. */
+const ROW_SCROLL_INPUT = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+
 /**
  * The rows' scroll: vis-timeline keeps it as the label panel's scrollTop (and follows that panel's scroll events), so
- * reading it there reports it and writing it there moves the rows. A restore waits for a redraw tall enough to hold it.
+ * reading it there reports it and writing it there moves the rows. A restore is bounded and the user's to override,
+ * like the page's (historyEntry.ts): it waits for a redraw tall enough to hold it, for at most RESTORE_WAIT_MS, then
+ * settles as far as the rows allow; input that scrolls the rows meanwhile cancels it, so no later redraw puts the stale
+ * offset back. After a cancel or the give-up the scroll is reported as the user leaves it.
  */
 function rowScroll(container: ChartDom, hooks: ChartHooks) {
   const panel = () => container.querySelector?.('.vis-panel.vis-left') ?? null;
   let pending: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   const report = () => {
     timer = undefined;
     const p = panel();
@@ -884,23 +892,48 @@ function rowScroll(container: ChartDom, hooks: ChartHooks) {
   const onScroll = () => {
     timer ??= setTimeout(report, ROW_SCROLL_REPORT_MS);
   };
-  if (typeof container.addEventListener === 'function') container.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  /** Puts the pending offset as far as the rows allow; true once they hold all of it. */
+  const place = () => {
+    const p = panel();
+    if (pending === undefined || p === null) return false;
+    const room = p.scrollHeight - p.clientHeight;
+    if (room <= 0) return false;
+    p.scrollTop = Math.min(pending, room);
+    return room >= pending;
+  };
+  const end = () => {
+    pending = undefined;
+    if (deadline !== undefined) clearTimeout(deadline);
+    deadline = undefined;
+  };
+  const giveUp = () => {
+    deadline = undefined;
+    place();
+    end();
+  };
+  /** A sideways wheel pans the time axis, not the rows: only the rest of the input is the user scrolling them. */
+  const onWheel = (event: Event) => {
+    if ((event as WheelEvent).deltaY !== 0) end();
+  };
+  const inputs = ROW_SCROLL_INPUT.map((type) => [type, type === 'wheel' ? onWheel : end] as const);
+  container.addEventListener?.('scroll', onScroll, { capture: true, passive: true });
+  for (const [type, fn] of inputs) container.addEventListener?.(type, fn, { capture: true, passive: true });
   return {
     restore(px: number) {
-      pending = px > 0 ? px : undefined;
+      end();
+      if (px <= 0) return;
+      pending = px;
+      deadline = setTimeout(giveUp, RESTORE_WAIT_MS);
     },
     /** After a redraw: apply a pending restore once the rows are tall enough for it. */
     settle() {
-      const p = panel();
-      if (pending === undefined || p === null) return;
-      const room = p.scrollHeight - p.clientHeight;
-      if (room <= 0) return;
-      p.scrollTop = Math.min(pending, room);
-      if (room >= pending) pending = undefined;
+      if (place()) end();
     },
     stop() {
+      end();
       if (timer !== undefined) clearTimeout(timer);
       container.removeEventListener?.('scroll', onScroll, { capture: true });
+      for (const [type, fn] of inputs) container.removeEventListener?.(type, fn, { capture: true });
     },
   };
 }
