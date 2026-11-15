@@ -199,6 +199,8 @@ export interface ChartTimeline {
   on(event: 'click', listener: (props: ChartClick) => void): void;
   on(event: 'changed' | 'rangechange' | 'rangechanged', listener: () => void): void;
   getWindow(): { start: Date; end: Date };
+  setWindow(start: Date | number, end: Date | number, options: { animation: boolean }): void;
+  setOptions(options: Partial<ChartOptions>): void;
   redraw(): void;
   zoomIn(percentage: number, options: { animation: boolean }): void;
   zoomOut(percentage: number, options: { animation: boolean }): void;
@@ -220,10 +222,25 @@ export interface ChartOptions {
   stackSubgroups: boolean;
   groupOrder: 'order';
   selectable: boolean;
+  /** Rows scroll inside the chart (so the time axis stays in view), by wheel, drag and the side scrollbar. */
+  verticalScroll: boolean;
+  /** The chart's tallest; past it the rows scroll. */
+  maxHeight: number;
+  /** vis-timeline's own wheel zoom needs this key held: the view's wheel handler takes Shift first, so it never does. */
+  zoomKey: 'shiftKey';
 }
 
-/** The vis-timeline options of the view for a window. The wheel zooms (vis-timeline's default), a pinch zooms, a drag pans. */
-export function chartOptions(window: TimeWindow): ChartOptions {
+/** The chart's height when the view does not give one. */
+export const DEFAULT_CHART_HEIGHT = 480;
+/** The chart is never squeezed below this, however little room the screen leaves under the filters. */
+export const MIN_CHART_HEIGHT = 300;
+
+/**
+ * The vis-timeline options of the view for a window. Navigation (PRD R1): the wheel and a one-finger drag pan on both
+ * axes, Shift+wheel, Ctrl+wheel and a two-finger pinch zoom. vis-timeline itself does the drag, the pinch and the
+ * vertical wheel (it scrolls the rows); `listenWheel` does the sideways wheel and the wheel zooms.
+ */
+export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHART_HEIGHT): ChartOptions {
   return {
     start: window.from,
     end: window.to,
@@ -234,6 +251,172 @@ export function chartOptions(window: TimeWindow): ChartOptions {
     stackSubgroups: true,
     groupOrder: 'order',
     selectable: false,
+    verticalScroll: true,
+    maxHeight,
+    zoomKey: 'shiftKey',
+  };
+}
+
+/** Where the filters leave the chart little room (a phone), it still gets this share of the screen, a scroll down. */
+export const CHART_SCREEN_SHARE = 0.7;
+
+/**
+ * The chart's tallest: the screen below its top, less what the page keeps below it (the phone tab bar), so the time axis
+ * stays in view while the rows scroll. Where that is short (the filters wrap on a phone) the chart takes
+ * CHART_SCREEN_SHARE of the screen instead, which leaves a strip of page to drag the page by.
+ */
+export function chartHeight(viewportHeight: number, topOnPage: number, belowOnPage: number): number {
+  const fits = viewportHeight - topOnPage - belowOnPage;
+  const share = (viewportHeight - belowOnPage) * CHART_SCREEN_SHARE;
+  return Math.floor(Math.max(MIN_CHART_HEIGHT, fits, share));
+}
+
+// --- wheel ---
+
+/** The slice of a WheelEvent the gesture reads. */
+export interface WheelInput {
+  deltaX: number;
+  deltaY: number;
+  /** 0 pixels, 1 lines, 2 pages. */
+  deltaMode: number;
+  shiftKey: boolean;
+  /** Set by a trackpad pinch in Chromium, Firefox and Safari. */
+  ctrlKey: boolean;
+}
+
+/** One wheel step in line or page mode, in pixels. */
+const LINE_PX = 40;
+const PAGE_PX = 800;
+/** A zoom of e^(px x rate): one notch of a mouse wheel (100 px) scales the range by about 1.22. */
+export const WHEEL_ZOOM_RATE = 0.002;
+
+/**
+ * What a wheel event over the chart does. Shift (or a trackpad pinch, which arrives as Ctrl+wheel) zooms by the larger
+ * of the two deltas (browsers turn Shift+wheel into deltaX); otherwise a mostly horizontal delta pans the time axis, and
+ * a mostly vertical one is left to vis-timeline (it scrolls the rows, and the page once the rows are at an end). A plain
+ * wheel never zooms.
+ */
+export function wheelGesture(e: WheelInput): { kind: 'zoom'; px: number } | { kind: 'pan'; px: number } | { kind: 'rows' } {
+  const scale = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? PAGE_PX : 1;
+  const dx = e.deltaX * scale;
+  const dy = e.deltaY * scale;
+  if (e.shiftKey || e.ctrlKey) return { kind: 'zoom', px: Math.abs(dy) >= Math.abs(dx) ? dy : dx };
+  if (Math.abs(dx) > Math.abs(dy)) return { kind: 'pan', px: dx };
+  return { kind: 'rows' };
+}
+
+/** A range in milliseconds. */
+export interface MsRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * `range` zoomed by `factor` (above 1 out, below 1 in) around `anchor`, which keeps its place on screen. The length is
+ * held between ZOOM_MIN_MS and ZOOM_MAX_MS.
+ */
+export function zoomAround(range: MsRange, anchor: number, factor: number): MsRange {
+  const span = range.end - range.start;
+  const next = Math.min(ZOOM_MAX_MS, Math.max(ZOOM_MIN_MS, span * factor));
+  const at = span > 0 ? (anchor - range.start) / span : 0.5;
+  const start = anchor - at * next;
+  return { start, end: start + next };
+}
+
+/** `range` moved by `px` pixels of a chart `width` pixels wide (positive is later). */
+export function panBy(range: MsRange, px: number, width: number): MsRange {
+  const shift = width > 0 ? ((range.end - range.start) * px) / width : 0;
+  return { start: range.start + shift, end: range.end + shift };
+}
+
+/** The time under `x` pixels from the left edge of a chart `width` pixels wide. */
+export function timeAt(range: MsRange, x: number, width: number): number {
+  return width > 0 ? range.start + ((range.end - range.start) * x) / width : (range.start + range.end) / 2;
+}
+
+/** The part of the DOM the wheel handler and the gesture tracker read: vis-timeline's container and its centre panel. */
+interface ChartDom {
+  addEventListener?: HTMLElement['addEventListener'];
+  removeEventListener?: HTMLElement['removeEventListener'];
+  querySelector?: HTMLElement['querySelector'];
+}
+
+/** Takes the chart's wheel events before vis-timeline sees them, for the sideways pan and the zooms. */
+function listenWheel(container: ChartDom, timeline: ChartTimeline): () => void {
+  if (typeof container.addEventListener !== 'function') return () => undefined;
+  const onWheel = (event: WheelEvent) => {
+    const gesture = wheelGesture(event);
+    if (gesture.kind === 'rows') return; // vis-timeline scrolls the rows
+    const centre = container.querySelector?.('.vis-panel.vis-center')?.getBoundingClientRect();
+    if (centre === undefined || centre.width <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { start, end } = timeline.getWindow();
+    const range = { start: start.getTime(), end: end.getTime() };
+    const next =
+      gesture.kind === 'pan'
+        ? panBy(range, gesture.px, centre.width)
+        : zoomAround(range, timeAt(range, event.clientX - centre.left, centre.width), Math.exp(gesture.px * WHEEL_ZOOM_RATE));
+    timeline.setWindow(next.start, next.end, NO_ANIMATION);
+  };
+  container.addEventListener('wheel', onWheel, { capture: true, passive: false });
+  return () => container.removeEventListener?.('wheel', onWheel, { capture: true });
+}
+
+// --- touch and pointer gestures ---
+
+/** How far (px) a pointer may move between going down and coming up and still count as a tap: past it, it was a drag. */
+export const TAP_SLOP_PX = 10;
+
+/** A gesture on the chart so far: how many pointers took part and the farthest any of them moved from where it went down. */
+export interface Gesture {
+  pointers: number;
+  moved: number;
+}
+
+/** What a gesture was: a tap (at most one pointer, moved at most the slop; none seen is a synthetic click), a one-finger drag or a pinch. */
+export function gestureKind(gesture: Gesture, slop: number = TAP_SLOP_PX): 'tap' | 'drag' | 'pinch' {
+  if (gesture.pointers > 1) return 'pinch';
+  return gesture.moved <= slop ? 'tap' : 'drag';
+}
+
+/**
+ * Follows the pointers on the chart, so a drag or a pinch that ends over a bar does not open it (vis-timeline pans and
+ * pinches by itself; this only says afterwards which it was). A gesture starts when the first pointer goes down: one that
+ * is primary (no other pointer of its kind is down) or none other is known to be.
+ *
+ * A pointer can leave without its pointerup or pointercancel reaching the chart: on Chrome for Android a swipe on a row
+ * label lost its capture and never ended. Were it still counted, every later tap would look like a pinch and open
+ * nothing until a reload; so a primary pointer starts afresh, and losing the capture ends a pointer too.
+ */
+export function gestureTracker(container: ChartDom) {
+  const down = new Map<number, { x: number; y: number }>();
+  let gesture: Gesture = { pointers: 0, moved: 0 };
+  const ondown = (e: PointerEvent) => {
+    if (e.isPrimary) down.clear();
+    if (down.size === 0) gesture = { pointers: 0, moved: 0 };
+    down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    gesture.pointers += 1;
+  };
+  const onmove = (e: PointerEvent) => {
+    const at = down.get(e.pointerId);
+    if (at !== undefined) gesture.moved = Math.max(gesture.moved, Math.hypot(e.clientX - at.x, e.clientY - at.y));
+  };
+  const onup = (e: PointerEvent) => down.delete(e.pointerId);
+  const listeners = [
+    ['pointerdown', ondown],
+    ['pointermove', onmove],
+    ['pointerup', onup],
+    ['pointercancel', onup],
+    ['lostpointercapture', onup],
+  ] as const;
+  const options = { capture: true, passive: true };
+  if (typeof container.addEventListener === 'function') for (const [name, fn] of listeners) container.addEventListener(name, fn, options);
+  return {
+    kind: () => gestureKind(gesture),
+    stop: () => {
+      for (const [name, fn] of listeners) container.removeEventListener?.(name, fn, options);
+    },
   };
 }
 
@@ -252,12 +435,16 @@ export interface ChartHooks {
   onSpan(spanMs: number): void;
   /** The visible range, once it stops moving (a drag or a zoom ended). */
   onRange(range: TimeWindow): void;
+  /** The visible range, after every redraw and while it moves. */
+  onWindow?(range: TimeWindow): void;
 }
 
 /** A mounted chart: `show` replaces what it draws, `zoom` steps the range, `destroy` takes it off the page. */
 export interface Chart {
   show(model: TimelineModel): void;
   zoom(direction: 'in' | 'out'): void;
+  /** Sets the chart's tallest (the screen changed size). */
+  setHeight(px: number): void;
   destroy(): void;
 }
 
@@ -288,22 +475,27 @@ function replaceRows<T extends { id: string }>(data: ChartData<unknown>, rows: r
 }
 
 /** Draws `model` with vis-timeline into `container`. */
-export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks): Chart {
+export function mountChart(lib: ChartLib, container: HTMLElement, model: TimelineModel, window: TimeWindow, hooks: ChartHooks, height?: number): Chart {
   const items = new lib.DataSet<unknown>(model.items);
   const groups = new lib.DataSet<unknown>(model.groups);
-  const timeline = new lib.Timeline(container, items, groups, chartOptions(window));
+  const timeline = new lib.Timeline(container, items, groups, chartOptions(window, height));
+  const unlistenWheel = listenWheel(container, timeline);
+  const gestures = gestureTracker(container);
   let current = model;
   const heldGroups: Held = new Map(model.groups.map((g) => [g.id, JSON.stringify(g)]));
   const heldItems: Held = new Map(model.items.map((i) => [i.id, JSON.stringify(i)]));
   const byId = (id: string) => current.items.find((item) => item.id === id);
   timeline.on('click', (click) => {
+    if (gestures.kind() !== 'tap') return; // a drag or a pinch that ended over a bar opens nothing
     const ref = clickedTask(click, byId);
     if (ref !== undefined) hooks.open(ref);
   });
   // vis-timeline fires `changed` after a redraw (a collapse, new data) and `rangechange` and `rangechanged` while the
   // range moves (a zoom, a pan). The span readout and the arrows follow all three.
   const sync = () => {
-    hooks.onSpan(spanOf(timeline.getWindow()));
+    const shown = timeline.getWindow();
+    hooks.onSpan(spanOf(shown));
+    hooks.onWindow?.({ from: shown.start, to: shown.end });
     drawArrows(hooks.arrows, current.dependencies);
   };
   timeline.on('changed', sync);
@@ -326,7 +518,12 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
       if (direction === 'in') timeline.zoomIn(ZOOM_FACTOR, NO_ANIMATION);
       else timeline.zoomOut(ZOOM_FACTOR, NO_ANIMATION);
     },
+    setHeight(px: number) {
+      timeline.setOptions({ maxHeight: px });
+    },
     destroy() {
+      unlistenWheel();
+      gestures.stop();
       timeline.destroy();
     },
   };

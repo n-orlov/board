@@ -30,6 +30,7 @@
   import {
     canZoomIn,
     canZoomOut,
+    chartHeight,
     mountChart,
     spanLabel,
     forgetTimeline,
@@ -63,6 +64,9 @@
   let shown: TimelineModel | undefined;
   /** The visible range's length in milliseconds, 0 until the chart has drawn. */
   let span = $state(0);
+  /** The visible window, for the readout's data attributes (the range the wheel, a pinch and a drag moved to). */
+  let shownFrom = $state(0);
+  let shownTo = $state(0);
 
   // The arrows go on whatever chart the frame holds now; the frame is bound before the chart is mounted.
   const arrows: ArrowSurface = {
@@ -171,17 +175,32 @@
         arrows,
         onSpan: (ms: number) => (span = ms),
         onRange: (range: TimeWindow) => store.panTo(range),
+        onWindow: (range: TimeWindow) => {
+          shownFrom = range.from.getTime();
+          shownTo = range.to.getTime();
+        },
       };
-      if (chart === undefined) chart = mountChart(lib, target, model, view.window, hooks);
+      if (chart === undefined) chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
       else if (model !== shown) chart.show(model);
       shown = model;
     });
   });
 
+  /** The chart's tallest: the screen below the chart's top, less the phone's tab bar, so the axis stays in view as rows scroll. */
+  function heightFor(target: HTMLElement): number {
+    const top = target.getBoundingClientRect().top + window.scrollY;
+    const tabBar = window.matchMedia('(min-width: 768px)').matches ? 16 : 80;
+    return chartHeight(window.innerHeight, top, tabBar);
+  }
+
+  function resized() {
+    if (chart !== undefined && frame !== undefined) chart.setHeight(heightFor(frame));
+  }
+
   const button = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text enabled:hover:bg-surface disabled:opacity-60';
 </script>
 
-<svelte:window onhashchange={hashChanged} />
+<svelte:window onhashchange={hashChanged} onresize={resized} />
 
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
@@ -212,7 +231,8 @@
     <div class="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Zoom">
       <button type="button" class={button} data-testid="zoom-out" aria-label="Zoom out" disabled={span !== 0 && !canZoomOut(span)} onclick={() => chart?.zoom('out')}>−</button>
       <button type="button" class={button} data-testid="zoom-in" aria-label="Zoom in" disabled={span !== 0 && !canZoomIn(span)} onclick={() => chart?.zoom('in')}>+</button>
-      <span class="text-sm text-text-muted" data-testid="timeline-span" data-span-ms={span}>{span === 0 ? '' : `Showing ${spanLabel(span)}`}</span>
+      <span class="text-sm text-text-muted" data-testid="timeline-span" data-span-ms={span} data-from-ms={shownFrom} data-to-ms={shownTo}>{span === 0 ? '' : `Showing ${spanLabel(span)}`}</span>
+      <span class="hidden text-xs text-text-muted md:inline" data-testid="timeline-hint">Scroll to pan · Shift+scroll to zoom</span>
     </div>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
     <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" bind:this={frame}></div>
@@ -222,7 +242,9 @@
 <style>
   /* vis-timeline's own sheet is light-only and sized for a desktop: map it onto the design tokens and make rows and
      labels fit a phone. The bars carry the task's status; lease bars, markers and arrows keep their own look. */
+  /* The chart takes its own touch gestures (a one-finger drag pans both ways, a pinch zooms); the page scrolls outside it. */
   .timeline-frame :global(.vis-timeline) {
+    touch-action: none;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface-raised);

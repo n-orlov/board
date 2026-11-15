@@ -2687,8 +2687,22 @@ tokens, light and dark, over vis-timeline's own sheet; at phone the label column
 
 *Zoom and open.* Two buttons, **Zoom out** (`zoom-out`) and **Zoom in** (`zoom-in`), both 44 px, halve and double the
 visible range without animation; the readout `timeline-span` says it in words ("Showing 3 weeks", `data-span-ms` holds
-the milliseconds) and each button is disabled at its limit (an hour in, 92 days out). The wheel over the chart and a pinch
-zoom the same range and a drag pans it (vis-timeline's own handling, `zoomMin` and `zoomMax` bound all of them). A click on
+the milliseconds, `data-from-ms` and `data-to-ms` the window shown) and each button is disabled at its limit (an hour in,
+92 days out).
+
+*Navigation (R1, `web/src/lib/timelineView.ts`).* Over the chart a **sideways wheel pans** the time axis and a **vertical
+wheel scrolls the rows** inside the chart (the chart is at most as tall as the screen below its top, `chartHeight`, and
+scrolls its rows past that, so the time axis stays in view; a phone gives it at least 70 % of the screen). **A plain wheel
+never zooms.** **Shift+wheel and Ctrl+wheel** (a trackpad pinch arrives as Ctrl+wheel) **zoom around the pointer**: the
+instant under the pointer stays under it (`wheelGesture` classifies the event, `zoomAround` moves the window; one 100 px
+notch scales the range by about 1.22). A **two-finger pinch zooms** and a **one-finger drag pans on both axes**
+(vis-timeline's own touch handling, with `touch-action: none` on the chart; the page scrolls outside it). Every zoom, by
+button, wheel or pinch, stays between an hour and 92 days (`zoomMin` and `zoomMax`). `gestureTracker` follows the pointers
+on the chart (a primary `pointerdown` starts a gesture afresh and `lostpointercapture` ends a pointer, so a pointer whose
+end never arrived cannot leave a stuck gesture) and says whether it was a tap, a one-finger drag or a pinch: a drag or a
+pinch that ends over a bar opens nothing. Desktop shows the hint "Scroll to pan · Shift+scroll to zoom".
+
+*Open.* A click on
 a task bar, a lease bar, a marker or a task row's label opens that task's page (`#/t/<ref>`); a click on an initiative
 row collapses it instead.
 
@@ -2728,8 +2742,11 @@ time axis. Each path carries `data-from` and `data-to` (the two refs). `mountCha
 only while both bars are drawn: a collapsed row, or a bar outside the visible range, has none. After the first
 `rangechanged` the chart is redrawn once, because vis-timeline counts its first draw done only then and until it does
 its loading cover swallows the wheel. `e2e/timeline.spec.ts` reads all of this through the DOM at phone and desktop on a
-seeded board: the rows, bars and markers, collapse and expand, the buttons and the wheel (and the readout at both
-limits), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
+seeded board: the rows, bars and markers, collapse and expand, the buttons and Shift+wheel (and the readout at both
+limits), the wheel navigation at desktop (a vertical wheel leaves the span, a sideways wheel moves the window, Shift+wheel and
+Ctrl+wheel zoom both ways with the instant under the pointer kept within 2 % of the span, and stop at an hour and 92 days),
+the touch navigation at phone (CDP `Input.dispatchTouchEvent`: a pinch out zooms in, a pinch in zooms out, a one-finger
+horizontal drag moves the window without zooming), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
 end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows.
 
 **Actors view** (`#/actors`, `web/src/Actors.svelte`, R7). The route table holds it as the entry `actors` (nav label Actors, after Timeline).

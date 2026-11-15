@@ -6,14 +6,21 @@ import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 import {
   canZoomIn,
   canZoomOut,
+  CHART_SCREEN_SHARE,
+  chartHeight,
   chartOptions,
+  DEFAULT_CHART_HEIGHT,
   dropUnknown,
   forgetTimeline,
   clickedTask,
   DAY_MS,
   HOUR_MS,
+  gestureKind,
+  gestureTracker,
   initialWindow,
+  MIN_CHART_HEIGHT,
   mountChart,
+  panBy,
   openTimeline,
   PAN_DEBOUNCE_MS,
   sameRange,
@@ -21,9 +28,14 @@ import {
   spanLabel,
   spanOf,
   startFilter,
+  TAP_SLOP_PX,
+  timeAt,
   TIMELINE_VIEW,
   TimelineApi,
   TimelineViewStore,
+  WHEEL_ZOOM_RATE,
+  wheelGesture,
+  zoomAround,
   ZOOM_FACTOR,
   ZOOM_MAX_MS,
   ZOOM_MIN_MS,
@@ -207,9 +219,196 @@ describe('chartOptions', () => {
       stackSubgroups: true,
       groupOrder: 'order',
       selectable: false,
+      verticalScroll: true,
+      maxHeight: DEFAULT_CHART_HEIGHT,
+      zoomKey: 'shiftKey',
     });
+    expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
     expect(ZOOM_MAX_MS).toBe(92 * DAY_MS);
+  });
+});
+
+describe('chartHeight', () => {
+  it('is the screen below the chart less what the page keeps under it, else a share of the screen, never below the minimum', () => {
+    expect(chartHeight(900, 200, 80)).toBe(620);
+    expect(chartHeight(900.6, 200, 0)).toBe(700);
+    expect(chartHeight(844, 600, 80)).toBe(Math.floor(764 * CHART_SCREEN_SHARE)); // a phone: a share of the screen
+    expect(chartHeight(380, 300, 0)).toBe(MIN_CHART_HEIGHT);
+  });
+});
+
+describe('wheelGesture', () => {
+  const wheel = (over: Partial<Parameters<typeof wheelGesture>[0]>) => ({ deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, ...over });
+
+  it('leaves a vertical wheel to vis-timeline, which scrolls the rows, and never zooms on a plain wheel', () => {
+    expect(wheelGesture(wheel({ deltaY: 100 }))).toEqual({ kind: 'rows' });
+    expect(wheelGesture(wheel({ deltaY: -100, deltaX: 30 }))).toEqual({ kind: 'rows' });
+    for (const [deltaX, deltaY, deltaMode] of [[0, 400, 0], [300, 0, 0], [0, -3, 1], [5, 120, 0], [-9, 1, 2]]) {
+      expect(wheelGesture(wheel({ deltaX, deltaY, deltaMode })).kind).not.toBe('zoom');
+    }
+  });
+  it('pans the time axis on a mostly horizontal wheel', () => {
+    expect(wheelGesture(wheel({ deltaX: 50, deltaY: 10 }))).toEqual({ kind: 'pan', px: 50 });
+    expect(wheelGesture(wheel({ deltaX: -2, deltaMode: 1 }))).toEqual({ kind: 'pan', px: -80 });
+  });
+  it('zooms on Shift, by the larger delta (Shift turns the wheel sideways)', () => {
+    expect(wheelGesture(wheel({ deltaY: 100, shiftKey: true }))).toEqual({ kind: 'zoom', px: 100 });
+    expect(wheelGesture(wheel({ deltaX: -100, shiftKey: true }))).toEqual({ kind: 'zoom', px: -100 });
+    expect(wheelGesture(wheel({ deltaY: 1, deltaMode: 2, shiftKey: true }))).toEqual({ kind: 'zoom', px: 800 });
+  });
+  it('zooms on Ctrl, which is how a trackpad pinch arrives', () => {
+    expect(wheelGesture(wheel({ deltaY: 3, ctrlKey: true }))).toEqual({ kind: 'zoom', px: 3 });
+    expect(wheelGesture(wheel({ deltaY: -40, deltaX: 2, ctrlKey: true }))).toEqual({ kind: 'zoom', px: -40 });
+  });
+});
+
+describe('zoomAround, panBy and timeAt', () => {
+  const range = { start: 0, end: 10 * DAY_MS };
+
+  it('zooms around the anchor, which keeps its place', () => {
+    expect(zoomAround(range, 2 * DAY_MS, 0.5)).toEqual({ start: DAY_MS, end: 6 * DAY_MS });
+    expect(zoomAround(range, 0, 2)).toEqual({ start: 0, end: 20 * DAY_MS });
+    const out = zoomAround(range, 7 * DAY_MS, 1.7);
+    expect((7 * DAY_MS - out.start) / (out.end - out.start)).toBeCloseTo(0.7, 10);
+  });
+  it('zooms an empty range around its middle', () => {
+    expect(zoomAround({ start: 5 * DAY_MS, end: 5 * DAY_MS }, 5 * DAY_MS, 1)).toEqual({ start: 5 * DAY_MS - ZOOM_MIN_MS / 2, end: 5 * DAY_MS + ZOOM_MIN_MS / 2 });
+  });
+  it('holds the length between an hour and 92 days', () => {
+    const tiny = zoomAround(range, 5 * DAY_MS, 1e-9);
+    expect(tiny.end - tiny.start).toBe(ZOOM_MIN_MS);
+    const huge = zoomAround(range, 5 * DAY_MS, 1e9);
+    expect(huge.end - huge.start).toBe(ZOOM_MAX_MS);
+  });
+  it('zooms one wheel notch by about a fifth', () => {
+    expect(Math.exp(100 * WHEEL_ZOOM_RATE)).toBeCloseTo(1.22, 2);
+  });
+  it('pans by the pixels as a share of the width', () => {
+    expect(panBy(range, 100, 1000)).toEqual({ start: DAY_MS, end: 11 * DAY_MS });
+    expect(panBy(range, -50, 1000)).toEqual({ start: -DAY_MS / 2, end: 9.5 * DAY_MS });
+    expect(panBy(range, 100, 0)).toEqual(range);
+  });
+  it('finds the time under a point', () => {
+    expect(timeAt(range, 250, 1000)).toBe(2.5 * DAY_MS);
+    expect(timeAt(range, 250, 0)).toBe(5 * DAY_MS);
+  });
+});
+
+describe('gestureKind', () => {
+  it('is a tap for one pointer, or none (a synthetic click), that moved at most the slop', () => {
+    expect(gestureKind({ pointers: 1, moved: 0 })).toBe('tap');
+    expect(gestureKind({ pointers: 0, moved: 0 })).toBe('tap');
+    expect(gestureKind({ pointers: 1, moved: TAP_SLOP_PX })).toBe('tap');
+  });
+  it('is a one-finger drag once the pointer moved past the slop, on either axis', () => {
+    expect(gestureKind({ pointers: 1, moved: TAP_SLOP_PX + 1 })).toBe('drag');
+  });
+  it('is a pinch once a second pointer took part', () => {
+    expect(gestureKind({ pointers: 2, moved: 0 })).toBe('pinch');
+    expect(gestureKind({ pointers: 3, moved: 80 })).toBe('pinch');
+  });
+});
+
+describe('gestureTracker', () => {
+  function track() {
+    const listeners = new Map<string, (e: unknown) => void>();
+    const container = { addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn), removeEventListener: (type: string) => listeners.delete(type) };
+    const tracker = gestureTracker(container as unknown as HTMLElement);
+    // The first finger of a gesture is the primary pointer, as in a browser.
+    const pointer = (type: string, pointerId: number, clientX = 0, clientY = 0, isPrimary = pointerId === 1) =>
+      listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary });
+    return { tracker, listeners, pointer };
+  }
+
+  it('sees a tap that stays within the slop as a tap', () => {
+    const { tracker, pointer } = track();
+    expect(tracker.kind()).toBe('tap'); // nothing seen yet: a synthetic click
+    pointer('pointerdown', 1, 50, 50);
+    pointer('pointermove', 1, 54, 47);
+    pointer('pointerup', 1, 54, 47);
+    expect(tracker.kind()).toBe('tap');
+  });
+
+  it('sees a one-finger drag as a drag on the horizontal axis, on the vertical axis, and when it ends where it began', () => {
+    const { tracker, pointer } = track();
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointermove', 1, 60, 3);
+    pointer('pointerup', 1, 60, 3);
+    expect(tracker.kind()).toBe('drag');
+
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointermove', 1, 2, 90);
+    pointer('pointerup', 1, 2, 90);
+    expect(tracker.kind()).toBe('drag');
+
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointermove', 1, 40, 0);
+    pointer('pointermove', 1, 0, 0);
+    pointer('pointerup', 1, 0, 0);
+    expect(tracker.kind()).toBe('drag');
+  });
+
+  it('sees two fingers as a pinch, whether they move or not, and the next gesture starts afresh', () => {
+    const { tracker, pointer } = track();
+    pointer('pointerdown', 1, 100, 100);
+    pointer('pointerdown', 2, 200, 100);
+    pointer('pointermove', 1, 60, 100);
+    pointer('pointermove', 2, 240, 100);
+    pointer('pointerup', 1);
+    pointer('pointerup', 2);
+    expect(tracker.kind()).toBe('pinch');
+
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointerup', 1, 0, 0);
+    expect(tracker.kind()).toBe('tap');
+  });
+
+  it('ignores a pointer that is not down, and moves of one that has left', () => {
+    const { tracker, pointer } = track();
+    pointer('pointermove', 5, 900, 900);
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointerup', 1, 0, 0);
+    pointer('pointermove', 1, 500, 0);
+    expect(tracker.kind()).toBe('tap');
+  });
+
+  it('starts afresh at a primary pointerdown when the end of an earlier pointer never arrived', () => {
+    const { tracker, pointer } = track();
+    pointer('pointerdown', 1, 0, 0); // a swipe whose pointerup and pointercancel were lost (seen on Chrome for Android)
+    pointer('pointermove', 1, 200, 0);
+    expect(tracker.kind()).toBe('drag');
+    pointer('pointerdown', 7, 10, 10, true); // the next touch is primary: no other finger can be down
+    pointer('pointerup', 7, 10, 10);
+    expect(tracker.kind()).toBe('tap');
+  });
+
+  it('ends a pointer on lostpointercapture, and counts a later non-primary pointer on its own', () => {
+    const { tracker, pointer } = track();
+    pointer('pointerdown', 3, 0, 0, false);
+    pointer('pointermove', 3, 300, 0);
+    pointer('lostpointercapture', 3); // with no pointerup after it
+    pointer('pointerdown', 4, 0, 0, false); // not primary, but nothing else is down: a gesture of its own
+    pointer('pointerup', 4);
+    expect(tracker.kind()).toBe('tap');
+  });
+
+  it('ends a pointer on pointercancel and listens no more after stop', () => {
+    const { tracker, listeners, pointer } = track();
+    pointer('pointerdown', 1, 0, 0);
+    pointer('pointerdown', 2, 50, 0);
+    pointer('pointercancel', 1);
+    pointer('pointercancel', 2);
+    pointer('pointerdown', 3, 0, 0, false);
+    expect(tracker.kind()).toBe('tap'); // 3 started a fresh gesture: the cancelled pair no longer counts
+    tracker.stop();
+    expect(listeners.size).toBe(0);
+  });
+
+  it('does nothing on a container that cannot listen', () => {
+    const tracker = gestureTracker({});
+    expect(tracker.kind()).toBe('tap');
+    expect(() => tracker.stop()).not.toThrow();
   });
 });
 
@@ -297,6 +496,8 @@ describe('mountChart', () => {
       zoomIn = vi.fn();
       zoomOut = vi.fn();
       redraw = vi.fn();
+      setWindow = vi.fn();
+      setOptions = vi.fn();
       window = { start: new Date(0), end: new Date(2 * DAY_MS) };
       listeners = new Map<string, Listener>();
       constructor(
@@ -357,6 +558,133 @@ describe('mountChart', () => {
     expect(made[0]!.destroy).not.toHaveBeenCalled();
     chart.destroy();
     expect(made[0]!.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  function fakeContainer() {
+    const listeners = new Map<string, (e: unknown) => void>();
+    const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
+    const container = {
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      removeEventListener: (type: string) => listeners.delete(type),
+      querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : null),
+    };
+    const wheel = (over: object) => {
+      const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
+      listeners.get('wheel')?.(e);
+      return e;
+    };
+    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0) =>
+      listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary: pointerId === 1 });
+    return { container: container as unknown as HTMLElement, listeners, wheel, pointer };
+  }
+
+  it('pans on a sideways wheel, leaving a vertical wheel to vis-timeline', () => {
+    const { lib, made } = fakeLib();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+    const t = made[0]!; // window 0 .. 2 days
+
+    const down = c.wheel({ deltaY: 100 });
+    expect(down.preventDefault).not.toHaveBeenCalled();
+    expect(t.setWindow).not.toHaveBeenCalled();
+
+    const side = c.wheel({ deltaX: 100 });
+    expect(side.preventDefault).toHaveBeenCalled();
+    expect(side.stopPropagation).toHaveBeenCalled();
+    const [panStart, panEnd, options] = t.setWindow.mock.lastCall as [number, number, object];
+    expect(panStart).toBeCloseTo(0.2 * DAY_MS);
+    expect(panEnd).toBeCloseTo(2.2 * DAY_MS);
+    expect(options).toEqual({ animation: false });
+  });
+
+  it('zooms around the pointer on Shift+wheel and on Ctrl+wheel, in one direction and out the other, within the bounds', () => {
+    const { lib, made } = fakeLib();
+    const c = fakeContainer();
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hooks().h);
+    const t = made[0]!; // window 0 .. 2 days, drawn 1000 px wide from x = 100
+    const span = 2 * DAY_MS;
+
+    for (const key of ['shiftKey', 'ctrlKey']) {
+      t.setWindow.mockClear();
+      const left = c.wheel({ deltaY: -100, [key]: true, clientX: 100 }); // the pointer at the left edge: it stays put
+      expect(left.stopPropagation).toHaveBeenCalled();
+      const [start, end] = t.setWindow.mock.lastCall as [number, number];
+      expect(start).toBe(0);
+      expect(end).toBeCloseTo(span * Math.exp(-100 * WHEEL_ZOOM_RATE)); // in
+
+      c.wheel({ deltaY: 100, [key]: true, clientX: 600 }); // out, the pointer in the middle
+      const [outStart, outEnd] = t.setWindow.mock.lastCall as [number, number];
+      expect(outEnd - outStart).toBeCloseTo(span * Math.exp(100 * WHEEL_ZOOM_RATE));
+      expect((DAY_MS - outStart) / (outEnd - outStart)).toBeCloseTo(0.5, 10); // the instant under the pointer stays under it
+    }
+
+    t.window = { start: new Date(0), end: new Date(ZOOM_MAX_MS) };
+    c.wheel({ deltaY: 1000, shiftKey: true });
+    const [maxStart, maxEnd] = t.setWindow.mock.lastCall as [number, number];
+    expect(maxEnd - maxStart).toBe(ZOOM_MAX_MS);
+    t.window = { start: new Date(0), end: new Date(ZOOM_MIN_MS) };
+    c.wheel({ deltaY: -1000, ctrlKey: true });
+    const [minStart, minEnd] = t.setWindow.mock.lastCall as [number, number];
+    expect(minEnd - minStart).toBe(ZOOM_MIN_MS);
+  });
+
+  it('leaves the wheel to vis-timeline while the chart has no width', () => {
+    const { lib, made } = fakeLib();
+    const listeners = new Map<string, (e: unknown) => void>();
+    const container = {
+      addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
+      removeEventListener: (type: string) => listeners.delete(type),
+      querySelector: () => ({ getBoundingClientRect: () => ({ left: 0, width: 0 }) }),
+    };
+    mountChart(lib, container as unknown as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h);
+    const e = { deltaX: 0, deltaY: 100, deltaMode: 0, shiftKey: true, ctrlKey: false, clientX: 0, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    listeners.get('wheel')?.(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(made[0]!.setWindow).not.toHaveBeenCalled();
+  });
+
+  it('opens a task for a tap but not for a drag or a pinch that ended over its bar, and stops listening on destroy', () => {
+    const { lib, made } = fakeLib();
+    const h = hooks();
+    const c = fakeContainer();
+    const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    const click = () => made[0]!.emit('click', { what: 'item', item: 'act:A1' });
+
+    c.pointer('pointerdown', 1, 0);
+    c.pointer('pointerup', 1, 0);
+    click();
+    expect(h.opened).toEqual(['A1']);
+
+    c.pointer('pointerdown', 1, 0);
+    c.pointer('pointermove', 1, 80);
+    c.pointer('pointerup', 1, 80);
+    click(); // a drag
+    c.pointer('pointerdown', 1, 0);
+    c.pointer('pointerdown', 2, 100);
+    c.pointer('pointerup', 1, 0);
+    c.pointer('pointerup', 2, 100);
+    click(); // a pinch
+    expect(h.opened).toEqual(['A1']);
+
+    c.pointer('pointerdown', 1, 0); // a stuck gesture does not stop later taps
+    c.pointer('pointerdown', 1, 0);
+    c.pointer('pointerup', 1, 0);
+    click();
+    expect(h.opened).toEqual(['A1', 'A1']);
+
+    chart.destroy();
+    expect(c.listeners.size).toBe(0);
+  });
+
+  it('sets the chart height and reports the shown window after every redraw', () => {
+    const { lib, made } = fakeLib();
+    const shown: TimeWindow[] = [];
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), { ...hooks().h, onWindow: (r) => shown.push(r) }, 640);
+    expect((made[0]!.options as { maxHeight: number }).maxHeight).toBe(640);
+    chart.setHeight(500);
+    expect(made[0]!.setOptions).toHaveBeenCalledWith({ maxHeight: 500 });
+    made[0]!.emit('rangechange');
+    expect(shown).toEqual([{ from: new Date(0), to: new Date(2 * DAY_MS) }]);
   });
 
   it('zooms in and out by the factor, without animation', () => {

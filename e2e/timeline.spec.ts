@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // The Timeline view at #/timeline (PRD R6, SPEC 11), read through the DOM vis-timeline draws: the initiative group and
 // its task rows, the planned, actual and lease bars and the markers, collapsing the initiative, the zoom buttons and
-// the wheel, a click on a task or a lease opening the task page, and one SVG arrow per dependency from the blocking
+// Shift+wheel, a click on a task or a lease opening the task page, and one SVG arrow per dependency from the blocking
 // task's bar to the dependent task's bar (end points inside the two bars, so the spec fails when none is drawn).
 // The board is shared with the other specs, so each test seeds an initiative of its own and filters the view to it.
 const viewports = [
@@ -98,6 +98,32 @@ const open = async (page: Page, s: Seed) => {
 const labels = (page: Page) => page.locator('.vis-labelset .vis-label');
 const bar = (page: Page, ref: string) => page.locator(`.vis-item.tl-id-act-${ref}`);
 const span = async (page: Page) => Number(await page.getByTestId('timeline-span').getAttribute('data-span-ms'));
+/** The window the chart shows and the length of it, read in one go from the readout the view keeps. */
+const shown = (page: Page) =>
+  page.getByTestId('timeline-span').evaluate((el) => {
+    const from = Number(el.getAttribute('data-from-ms'));
+    const to = Number(el.getAttribute('data-to-ms'));
+    return { from, to, span: to - from };
+  });
+
+/** Puts the pointer over the middle of the part of the chart that is on screen, and returns the chart's own geometry. */
+async function aimAtChart(page: Page, fx = 0.5) {
+  const frame = page.getByTestId('timeline-chart');
+  await frame.scrollIntoViewIfNeeded();
+  const box = (await page.locator('.vis-panel.vis-center').boundingBox())!;
+  const top = Math.max(box.y, 0);
+  const bottom = Math.min(box.y + box.height, page.viewportSize()!.height);
+  const at = { x: box.x + box.width * fx, y: (top + bottom) / 2, left: box.x, width: box.width };
+  await page.mouse.move(at.x, at.y);
+  return at;
+}
+
+/** The instant under x pixels from the left of the chart's centre panel, in the window now shown. */
+async function instantAt(page: Page, x: number, left: number, width: number) {
+  const w = await shown(page);
+  return { instant: w.from + ((x - left) / width) * w.span, span: w.span };
+}
+
 const arrows = (page: Page) => page.locator('svg.tl-arrows path.tl-arrow');
 
 interface Pt {
@@ -202,7 +228,7 @@ for (const vp of viewports) {
       await s.api.dispose();
     });
 
-    test('the zoom buttons and the wheel change the range between an hour and a quarter', async ({ page, playwright, baseURL }) => {
+    test('the zoom buttons and Shift+wheel change the range between an hour and a quarter, a plain wheel never zooms', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `zoom-${vp.name}`);
       await open(page, s);
       await expect(page.getByTestId('timeline-span')).toContainText('Showing 3 weeks');
@@ -215,15 +241,20 @@ for (const vp of viewports) {
       await page.getByTestId('zoom-out').click();
       await expect.poll(() => span(page)).toBeGreaterThan(closer);
 
-      // The wheel over the chart zooms (one direction in, the other out), the same range the buttons move.
-      const centre = (await page.locator('.vis-panel.vis-center').boundingBox())!;
-      await page.mouse.move(centre.x + centre.width / 2, centre.y + centre.height / 2);
+      // Shift+wheel over the chart zooms (one direction in, the other out), the same range the buttons move; a plain
+      // wheel leaves the span alone (the navigation tests below read the window the wheel moves).
+      await aimAtChart(page);
       const before = await span(page);
+      await page.mouse.wheel(0, 400);
+      await page.mouse.wheel(300, 0);
+      expect(Math.abs((await span(page)) - before)).toBeLessThan(1000);
+      await page.keyboard.down('Shift');
       await page.mouse.wheel(0, 400);
       await expect.poll(() => span(page)).not.toBe(before);
       const wheeled = await span(page);
       await page.mouse.wheel(0, -400);
       await expect.poll(() => span(page)).not.toBe(wheeled);
+      await page.keyboard.up('Shift');
       expect(Math.sign(wheeled - before) * Math.sign((await span(page)) - wheeled)).toBe(-1); // back the other way
 
       for (let i = 0; i < 20 && (await page.getByTestId('zoom-in').isEnabled()); i++) await page.getByTestId('zoom-in').click();
@@ -310,3 +341,110 @@ for (const vp of viewports) {
     });
   });
 }
+
+// PRD R1: the wheel, a pinch and a drag navigate the chart. vis-timeline pans and pinches by itself; the view takes the
+// wheel (a sideways one pans, Shift or Ctrl zoom around the pointer, a vertical one scrolls the rows).
+test.describe('desktop wheel navigation', () => {
+  test.use({ viewport: viewports[1].size });
+
+  test('a vertical wheel leaves the span alone, a sideways wheel moves the window, Shift+wheel and Ctrl+wheel zoom around the pointer', async ({ page, playwright, baseURL }) => {
+    const s = await seed(playwright, baseURL, 'wheel-desktop');
+    await open(page, s);
+    const pointer = await aimAtChart(page, 0.3);
+
+    // A vertical wheel scrolls the rows (or the page): the window does not move and the span does not change.
+    const start = await shown(page);
+    await page.mouse.wheel(0, 400);
+    await page.mouse.wheel(0, -400);
+    await aimAtChart(page, 0.3); // the page may have scrolled under the pointer
+    const vertical = await shown(page);
+    expect(vertical.span).toBe(start.span);
+    expect(vertical.from).toBe(start.from);
+
+    // A sideways wheel moves the window, later for a positive delta and earlier for a negative one, without zooming.
+    await page.mouse.wheel(300, 0);
+    await expect.poll(async () => (await shown(page)).from).toBeGreaterThan(start.from);
+    const later = await shown(page);
+    expect(Math.abs(later.span - start.span)).toBeLessThan(1000);
+    await page.mouse.wheel(-600, 0);
+    await expect.poll(async () => (await shown(page)).from).toBeLessThan(later.from);
+    expect(Math.abs((await shown(page)).span - start.span)).toBeLessThan(1000);
+
+    // Shift+wheel and Ctrl+wheel each zoom in one direction and out the other, the instant under the pointer staying put.
+    for (const key of ['Shift', 'Control']) {
+      await aimAtChart(page, 0.3);
+      await page.keyboard.down(key);
+      for (const delta of [-300, 300, 300, -300]) {
+        const before = await shown(page);
+        const anchor = await instantAt(page, pointer.x, pointer.left, pointer.width);
+        await page.mouse.wheel(0, delta);
+        await expect.poll(async () => (await shown(page)).span).not.toBe(before.span);
+        const after = await shown(page);
+        expect(Math.sign(after.span - before.span)).toBe(Math.sign(delta)); // a positive delta zooms out, a negative one in
+        const kept = await instantAt(page, pointer.x, pointer.left, pointer.width);
+        expect(Math.abs(kept.instant - anchor.instant)).toBeLessThanOrEqual(0.02 * kept.span);
+      }
+      await page.keyboard.up(key);
+    }
+    await s.api.dispose();
+  });
+
+  test('zooming by the wheel stops at an hour in and 92 days out', async ({ page, playwright, baseURL }) => {
+    const s = await seed(playwright, baseURL, 'wheelbounds-desktop');
+    await open(page, s);
+    await aimAtChart(page);
+    await page.keyboard.down('Shift');
+    for (let i = 0; i < 30; i++) await page.mouse.wheel(0, -400);
+    await expect.poll(() => span(page)).toBeLessThanOrEqual(HOUR * 1.02);
+    expect(await span(page)).toBeGreaterThanOrEqual(HOUR);
+    await expect(page.getByTestId('zoom-in')).toBeDisabled();
+    for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 400);
+    await expect.poll(() => span(page)).toBeGreaterThanOrEqual(92 * DAY * 0.98);
+    expect(await span(page)).toBeLessThanOrEqual(92 * DAY);
+    await expect(page.getByTestId('zoom-out')).toBeDisabled();
+    await page.keyboard.up('Shift');
+    await s.api.dispose();
+  });
+});
+
+// A touch is a CDP Input.dispatchTouchEvent: chromium turns it into pointer and touch events like a finger would.
+test.describe('phone touch navigation', () => {
+  test.use({ viewport: viewports[0].size, hasTouch: true });
+
+  type Finger = { x: number; y: number };
+  async function gesture(page: Page, steps: Finger[][]) {
+    const cdp = await page.context().newCDPSession(page);
+    const points = (fingers: Finger[]) => fingers.map((f, id) => ({ x: f.x, y: f.y, id }));
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(steps[0]!) });
+    for (const step of steps.slice(1)) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(step) });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+  }
+  /** Fingers `from` px apart moving to `to` px apart, level, about the point (x, y), in ten steps (both ends inside the chart, which a phone draws about 235 px wide). */
+  const pinch = (x: number, y: number, from: number, to: number): Finger[][] =>
+    Array.from({ length: 11 }, (_, i) => {
+      const half = (from + ((to - from) * i) / 10) / 2;
+      return [{ x: x - half, y }, { x: x + half, y }];
+    });
+
+  test('a pinch out zooms in, a pinch in zooms out, and a one-finger horizontal drag moves the window without zooming', async ({ page, playwright, baseURL }) => {
+    const s = await seed(playwright, baseURL, 'touch-phone');
+    await open(page, s);
+    const at = await aimAtChart(page);
+    const start = await shown(page);
+
+    await gesture(page, pinch(at.x, at.y, 40, 160));
+    await expect.poll(() => span(page)).toBeLessThan(start.span);
+    const closer = await shown(page);
+
+    await gesture(page, pinch(at.x, at.y, 160, 40));
+    await expect.poll(() => span(page)).toBeGreaterThan(closer.span);
+
+    const settled = await shown(page);
+    await gesture(page, Array.from({ length: 11 }, (_, i) => [{ x: at.x - 100 + i * 20, y: at.y }]));
+    await expect.poll(async () => (await shown(page)).from).toBeLessThan(settled.from); // dragged right: earlier times come into view
+    const dragged = await shown(page);
+    expect(Math.abs(dragged.span - settled.span)).toBeLessThanOrEqual(0.005 * settled.span);
+    await s.api.dispose();
+  });
+});
