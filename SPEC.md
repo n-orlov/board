@@ -2802,11 +2802,16 @@ that opened it. The preview's state is `task=<ref>` in the fragment, after the f
 (`#/timeline?initiative=aa&from=…&to=…&task=aa-3`, `timelineViewHash`, `taskFromQuery`; a blank or over-128-character value
 names no task); like the window it is never saved. Opening pushes a history entry of its own (`pushHash`, which copies the
 entry's saved scroll and announces popstate and hashchange): **Back closes the preview and a second Back leaves the view**.
-Closing from the button or Escape goes Back when the preview opened its own entry; a preview that came with the page (a link
-or a reload) is dropped from the fragment in place instead, so Back still leaves the view. A deep link or a reload with
+Closing from the button or Escape depends on who owns the entry the preview is on. A preview the page opened itself (a click or
+Enter) is on an entry of its own that `pushHash` flagged `preview` in `history.state`; closing it goes Back to the view's own
+entry under it. The flag lives in `history.state`, which a reload keeps, so a reloaded script-pushed preview still closes by
+Back (the entry and its key are those the reload kept, and the view's entry is the one shown after the close), and the browser's
+Back from it does the same. A preview that came with the page as a deep link (a pasted or followed `#/timeline?...&task=<ref>`, so
+its entry carries no flag) is dropped from the fragment in place instead: the entry and its key stay, and Back still leaves the
+view. A reload of a view whose entry has no flag keeps that in-place behaviour. A deep link or a reload with
 `task=<ref>` opens the preview again over the window the fragment names. `e2e/timeline.spec.ts` covers it at phone and
 desktop: one case for each of the four ways in, no action buttons, the scroll lock and the idle wheel, Escape and Close
-each returning the focus, Back twice, a deep link and a reload, the live milestone and Open full page.
+each returning the focus, Back twice, a deep link and a reload, the live milestone and Open full page; `e2e/timeline-preview-history.spec.ts` measures the entry key and the `preview` flag for a deep-linked preview (closed in place) and a reloaded script-pushed preview (closed by Back), by Close, Escape and the browser's Back.
 
 *Phone layout (R10).* At 390 x 844, opening `#/timeline` shows the first task row of the chart in full, above the tab bar, with the page
 not scrolled, whether the filters are at their defaults or all four are set (and wrapped over the most lines, by names as long as the

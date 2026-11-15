@@ -231,8 +231,8 @@
     pushHash(timelineViewHash(view.filter, windowInHash ? view.window : undefined, ref), { preview: true });
   }
 
-  // Closing goes Back when the preview opened its own entry; a preview that came with the page (a reload, a link) is
-  // dropped from the fragment in place, so Back still leaves the view.
+  // Closing goes Back when the preview is on an entry the page pushed for it (its history.state flag, which a reload keeps);
+  // a deep-linked preview, whose entry has no flag, is dropped from the fragment in place, so Back still leaves the view.
   function closePreview() {
     const state: unknown = window.history.state;
     if (typeof state === 'object' && state !== null && (state as { preview?: unknown }).preview === true) {
