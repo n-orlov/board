@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,6 +41,7 @@ type issued struct {
 // with no login page: the authorization endpoint redirects straight back.
 type Provider struct {
 	server       *httptest.Server
+	issuer       string
 	key          *rsa.PrivateKey
 	clientID     string
 	clientSecret string
@@ -56,6 +58,27 @@ type Provider struct {
 
 // New starts a provider that serves clientID with clientSecret. Close stops it.
 func New(clientID, clientSecret string) (*Provider, error) {
+	return serveWith(clientID, clientSecret, httptest.NewServer)
+}
+
+// NewAt starts a provider on the listener l and announces issuer as its URL: the address a browser
+// reaches it at (say, behind a TLS proxy on another host), which may differ from l's own. Close stops
+// it and closes l. fake-oidc uses it to sign in a phone to a local instance.
+func NewAt(clientID, clientSecret string, l net.Listener, issuer string) (*Provider, error) {
+	p, err := serveWith(clientID, clientSecret, func(h http.Handler) *httptest.Server {
+		s := httptest.NewUnstartedServer(h)
+		_ = s.Listener.Close()
+		s.Listener = l
+		s.Start()
+		return s
+	})
+	if err == nil {
+		p.issuer = strings.TrimRight(issuer, "/")
+	}
+	return p, err
+}
+
+func serveWith(clientID, clientSecret string, serve func(http.Handler) *httptest.Server) (*Provider, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
@@ -66,12 +89,17 @@ func New(clientID, clientSecret string) (*Provider, error) {
 	mux.HandleFunc("GET /jwks", p.jwks)
 	mux.HandleFunc("GET /authorize", p.authorize)
 	mux.HandleFunc("POST /token", p.token)
-	p.server = httptest.NewServer(mux)
+	p.server = serve(mux)
 	return p, nil
 }
 
-// URL is the issuer URL.
-func (p *Provider) URL() string { return p.server.URL }
+// URL is the issuer URL: the one NewAt was given, else the listener's own.
+func (p *Provider) URL() string {
+	if p.issuer != "" {
+		return p.issuer
+	}
+	return p.server.URL
+}
 
 // Close stops the provider.
 func (p *Provider) Close() { p.server.Close() }
