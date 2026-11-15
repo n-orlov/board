@@ -117,6 +117,12 @@ describe('saveEntry and loadEntry', () => {
     expect(loadEntry(s, 'a', 'scroll')).toBeUndefined();
     s.setItem(`${ENTRY_KEY_FAMILY}a`, JSON.stringify({ t: 'x', values: {} }));
     expect(loadEntry(s, 'a', 'scroll')).toBeUndefined();
+    for (const raw of ['null', '7', '"text"', JSON.stringify({ t: 1, values: null }), JSON.stringify({ t: 1, values: 3 }), JSON.stringify({ values: {} })]) {
+      s.setItem(`${ENTRY_KEY_FAMILY}a`, raw);
+      expect(loadEntry(s, 'a', 'scroll'), raw).toBeUndefined();
+    }
+    s.setItem(`${ENTRY_KEY_FAMILY}a`, JSON.stringify({ t: 1, values: { scroll: 5 } }));
+    expect(loadEntry(s, 'a', 'scroll')).toBe(5);
   });
   it('drop the oldest entries past the limit', () => {
     const s = fakeStorage();

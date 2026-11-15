@@ -67,15 +67,19 @@ export function replaceHash(hash: string, history: EntryHistory = window.history
   history.replaceState(history.state ?? null, '', hash);
 }
 
+/** Whether a parsed value is a record this module wrote. */
+function isRecord(value: unknown): value is EntryRecord {
+  if (typeof value !== 'object' || value === null) return false;
+  const { t, values } = value as Partial<EntryRecord>;
+  return typeof t === 'number' && typeof values === 'object' && values !== null;
+}
+
 function readRecord(storage: EntryStorage | undefined, key: string): EntryRecord | undefined {
   try {
-    const raw = storage?.getItem(ENTRY_KEY_FAMILY + key);
-    if (raw === null || raw === undefined) return undefined;
+    const raw = storage?.getItem(ENTRY_KEY_FAMILY + key) ?? null;
+    if (raw === null) return undefined;
     const value: unknown = JSON.parse(raw);
-    if (typeof value !== 'object' || value === null) return undefined;
-    const { t, values } = value as Partial<EntryRecord>;
-    if (typeof t !== 'number' || typeof values !== 'object' || values === null) return undefined;
-    return { t, values };
+    return isRecord(value) ? { t: value.t, values: value.values } : undefined;
   } catch {
     return undefined;
   }
