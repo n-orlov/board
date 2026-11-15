@@ -380,9 +380,12 @@ export function filterFromHash(hash: string): TimelineFilter {
   return filterFromQuery(at < 0 ? '' : hash.slice(at + 1));
 }
 
-/** The query of `GET /timeline` for a filter and the visible window. */
+/**
+ * The query of `GET /timeline` for a filter and the visible window. The rows are every task the filter keeps
+ * (`rows=all`), so panning or zooming never adds, drops or reorders a row; the window picks the leases and markers.
+ */
 export function apiQuery(filter: TimelineFilter, from: Date, to: Date): URLSearchParams {
-  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), rows: 'all' });
   for (const value of clean(filter.initiatives)) params.append('initiative', value);
   for (const value of clean(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());

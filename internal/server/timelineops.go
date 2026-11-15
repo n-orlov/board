@@ -31,7 +31,7 @@ func (o timelineOps) ready() (problemResponse, bool) {
 func timelineQuery(p GetTimelineParams) timeline.Query {
 	return timeline.Query{
 		From: text(p.From), To: text(p.To), Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag),
-		Actor: text(p.Actor), ClosedWithin: text(p.ClosedWithin),
+		Actor: text(p.Actor), ClosedWithin: text(p.ClosedWithin), Rows: text(p.Rows),
 	}
 }
 

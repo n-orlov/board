@@ -314,7 +314,7 @@ describe('filter round trip', () => {
   it('builds the query of GET /timeline from the filter and the window', () => {
     const from = new Date('2026-02-24T12:00:00Z');
     const to = new Date('2026-03-17T12:00:00Z');
-    expect(apiQuery(DEFAULT_TIMELINE_FILTER, from, to).toString()).toBe('from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z');
+    expect(apiQuery(DEFAULT_TIMELINE_FILTER, from, to).toString()).toBe('from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&rows=all');
     const params = apiQuery(full, from, to);
     expect(params.getAll('initiative')).toEqual(['alpha', 'beta']);
     expect(params.getAll('tag')).toEqual(['work', 'home']);

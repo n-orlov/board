@@ -941,7 +941,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | PUT | `/cursors/{stream}` | ack read position |
 | GET | `/actors`, `/actors/{handle}` | the actors with `way_back`, `last_seen`, live leases and open asks (filter: alive; §6.11) |
 | GET | `/notifications` | the alert outbox, newest first (filter: state; paging: limit, after; §6.9) |
-| GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` (filters: initiative, tag, actor, closed_within; §6.10) |
+| GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` (filters: initiative, tag, actor, closed_within, rows; §6.10) |
 | GET | `/stream` | SSE live feed (§7.1) |
 | POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
 | GET | `/meta` | server version, agent protocol version (§8.6), the caller's principal and actor |
@@ -1404,6 +1404,10 @@ their `lease_expired` events, then reads; it writes nothing else.
   are still listed. `closed_within` (`7d`, `30d`, `90d` or a number of days, as for tasks; anything else is **400**)
   adds the tasks closed within that many days of now. Without it closed tasks are left out, and with it open and done
   tasks are still kept: it adds, it does not narrow.
+- **Rows.** `rows` is `window` (the default) or `all`; anything else is **400**. `window` keeps the tasks that are in
+  the window (below). `all` keeps the tasks the filters keep wherever their spans fall, so a view that pans or zooms
+  keeps the same rows: the window then picks only the leases and markers, and `actor` keeps the tasks on which that
+  actor ever held a lease.
 - **In the window.** A task is in it when its actual span, `created_at` to `closed_at` (open-ended while it is not
   closed), or its planned span, `planned_start` to `planned_end` (either end alone stands for both), overlaps
   `[from, to]`, the ends included; a lease when it started by `to` and is live or ended (or expired) at `from` or

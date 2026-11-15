@@ -2556,6 +2556,9 @@ type GetTimelineParams struct {
 
 	// ClosedWithin `7d`, `30d`, `90d` or an integer of days. Adds the tasks closed that recently.
 	ClosedWithin *string `form:"closed_within,omitempty" json:"closed_within,omitempty"`
+
+	// Rows `window` (the default) keeps the tasks in the window; `all` keeps them wherever their spans fall.
+	Rows *string `form:"rows,omitempty" json:"rows,omitempty"`
 }
 
 // PutProtocolSeenJSONRequestBody defines body for PutProtocolSeen for application/json ContentType.
@@ -4261,6 +4264,10 @@ func (siw *ServerInterfaceWrapper) GetTimeline(w http.ResponseWriter, r *http.Re
 	// ------------- Optional query parameter "closed_within" -------------
 
 	bind.check("closed_within", runtime.BindQueryParameterWithOptions("form", true, false, "closed_within", r.URL.Query(), &params.ClosedWithin, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "rows" -------------
+
+	bind.check("rows", runtime.BindQueryParameterWithOptions("form", true, false, "rows", r.URL.Query(), &params.Rows, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	if bind.failed {
 		return

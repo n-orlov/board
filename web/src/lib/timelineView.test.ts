@@ -115,7 +115,7 @@ describe('TimelineApi', () => {
     expect(got.tasks.map((t) => t.ref)).toEqual(['T1']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const [url, init] = fetchFn.mock.calls[0]!;
-    expect(url).toBe('/board/api/v1/timeline?from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&actor=ada&closed_within=30d');
+    expect(url).toBe('/board/api/v1/timeline?from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&rows=all&actor=ada&closed_within=30d');
     expect(init?.credentials).toBe('same-origin');
     expect(init?.headers).toEqual({ Accept: 'application/json' });
   });

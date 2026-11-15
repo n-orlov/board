@@ -1160,10 +1160,13 @@ paths:
         integer of days) keeps those closed that recently; the leases and markers of a task that is left out are left
         out with it. `initiative` (by slug or ULID, repeatable) and `tag` (repeatable; the initiative must carry every
         tag given) keep tasks as they do for `GET /api/v1/tasks`; `actor` (a handle) keeps the tasks on which that actor
-        held a lease in the window. Each task's `attention` list is the one of `GET /api/v1/tasks`. Leases that ran out
+        held a lease in the window. `rows` `all` keeps the tasks wherever their spans fall, so the window picks only the
+        leases and markers and the rows of a view stay the same as it pans or zooms; `actor` then keeps the tasks on
+        which that actor ever held a lease. `rows` `window` (the default) keeps the tasks in the window. Each task's
+        `attention` list is the one of `GET /api/v1/tasks`. Leases that ran out
         are expired before the read. Everything is in stable order: initiatives in board order, tasks by initiative
         then number, leases by number, markers by time then event. An unreadable time, `to` not after `from`, a window
-        over 400 days, a bad `closed_within` or tag is 400; an initiative that names nothing is 404.
+        over 400 days, a bad `closed_within`, `rows` or tag is 400; an initiative that names nothing is 404.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -1210,6 +1213,12 @@ paths:
           in: query
           required: false
           description: "`7d`, `30d`, `90d` or an integer of days. Adds the tasks closed that recently."
+          schema:
+            type: string
+        - name: rows
+          in: query
+          required: false
+          description: "`window` (the default) keeps the tasks in the window; `all` keeps them wherever their spans fall."
           schema:
             type: string
       responses:

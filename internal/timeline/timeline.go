@@ -28,14 +28,24 @@ const (
 // end. Initiatives are slugs or ULIDs; Tags are initiative tags that all must be
 // carried; Actor is a handle that must have held a lease on the task in the
 // window; ClosedWithin (7d, 30d, 90d or days) adds the tasks closed that
-// recently, and without it closed tasks are left out.
+// recently, and without it closed tasks are left out. Rows is RowsWindow (or
+// empty) to keep the tasks in the window, RowsAll to keep them wherever their
+// spans fall: the window then picks only the leases and markers, and Actor
+// keeps the tasks the actor ever held a lease on.
 type Query struct {
 	From, To     string
 	Initiatives  []string
 	Tags         []string
 	Actor        string
 	ClosedWithin string
+	Rows         string
 }
+
+// The values of Query.Rows.
+const (
+	RowsWindow = "window"
+	RowsAll    = "all"
+)
 
 // Initiative is an initiative that holds a task of the window.
 type Initiative struct {
@@ -144,7 +154,13 @@ const leaseOverlap = `l.started_at <= ? AND (l.state = 'live' OR COALESCE(l.ende
 // then the initiative, tag and actor filters.
 func (s Store) scope(ctx context.Context, q Query, now, from, to time.Time) (*filter, error) {
 	f := &filter{}
-	f.span(from, to)
+	all, err := allRows(q)
+	if err != nil {
+		return nil, err
+	}
+	if !all {
+		f.span(from, to)
+	}
 	if err := f.closed(q, now); err != nil {
 		return nil, err
 	}
@@ -154,11 +170,29 @@ func (s Store) scope(ctx context.Context, q Query, now, from, to time.Time) (*fi
 	if err := f.tagFilter(q.Tags); err != nil {
 		return nil, err
 	}
-	if q.Actor != "" {
+	switch {
+	case q.Actor == "":
+	case all:
+		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ?)`, q.Actor)
+	default:
 		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ? AND `+leaseOverlap+`)`,
 			q.Actor, store.EncodeTime(to), store.EncodeTime(from))
 	}
 	return f, nil
+}
+
+const nextRows = "Send rows as window (the tasks in the window, the default) or all (the tasks wherever their spans fall), or leave it out."
+
+// allRows is whether the query keeps its tasks wherever their spans fall
+// (rows=all) rather than only those in the window.
+func allRows(q Query) (bool, error) {
+	switch q.Rows {
+	case "", RowsWindow:
+		return false, nil
+	case RowsAll:
+		return true, nil
+	}
+	return false, InvalidError{Msg: fmt.Sprintf("rows %q is neither window nor all", q.Rows), Next: nextRows}
 }
 
 // span keeps the tasks whose actual span (created to closed, open while it is not

@@ -100,7 +100,7 @@ func TestGetTimelineRefusesWhatItCannotRead(t *testing.T) {
 	s.create("aa", "")
 	for q, want := range map[string]int{
 		"from=yesterday": 400, "to=2000-01-01T00:00:00Z": 400, "from=2030-01-01T00:00:00Z&to=2030-01-01T00:00:00Z": 400,
-		"from=2030-01-01T00:00:00Z&to=2035-01-01T00:00:00Z": 400, "closed_within=soon": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404,
+		"from=2030-01-01T00:00:00Z&to=2035-01-01T00:00:00Z": 400, "closed_within=soon": 400, "rows=some": 400, "tag=Bad%20Tag": 400, "initiative=nope": 404,
 	} {
 		rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host")
 		doc := decode(t, rec)
@@ -114,5 +114,20 @@ func TestGetTimelineRefusesWhatItCannotRead(t *testing.T) {
 	}
 	if rec := s.send(http.MethodGet, "/api/v1/timeline?from=x", "", "claude@host"); !strings.Contains(rec.Body.String(), "RFC 3339") {
 		t.Errorf("400 body = %s", rec.Body)
+	}
+}
+
+func TestGetTimelineWithAllRowsKeepsTasksOutsideTheWindow(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"made now"}`)
+	past := url.Values{"from": {"2020-01-01T00:00:00Z"}, "to": {"2020-02-01T00:00:00Z"}}
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 0 {
+		t.Errorf("the window = %d %v, want no tasks", code, doc["tasks"])
+	}
+	past.Set("rows", "all")
+	if code, doc := timelineAt(s, past); code != http.StatusOK || len(doc["tasks"].([]any)) != 1 {
+		t.Errorf("all rows = %d %v, want the task", code, doc["tasks"])
 	}
 }
