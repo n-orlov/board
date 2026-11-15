@@ -2,9 +2,10 @@
 // encodes the view's filters in the URL fragment's query (`#/timeline?initiative=aa&tag=work&actor=ada&closed=30`) and
 // in the query of `GET /timeline`.
 //
-// Groups are initiatives (collapsible, holding their tasks as `nestedGroups`) and tasks. A task row carries, as items
-// in three subgroups: a light planned bar, the actual span (created, to closed or now), and one bar per lease coloured
-// by state, stacked; markers are points. Dependencies come out as pairs of actual-span item ids for an arrow drawer.
+// Groups are initiatives (collapsible, holding their tasks as `nestedGroups`) and tasks. A task row carries a light
+// planned bar, the actual span (created, to closed or now), one bar per lease coloured by state, and markers as points.
+// Each kind keeps a lane of its own at a fixed place in a row of fixed height (Timeline.svelte), never stacked, so a
+// row is as tall wherever the chart is scrolled to. Dependencies come out as pairs of actual-span item ids for an arrow drawer.
 // Text that vis-timeline renders as HTML (`content`, `title`) is escaped here.
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
@@ -31,9 +32,6 @@ export interface TimelineGroup {
   /** An initiative lists its task groups here; it can be collapsed. */
   nestedGroups?: string[];
   showNested?: boolean;
-  /** A task row's own subgroups: planned and actual overlap, lease bars stack. */
-  subgroupOrder?: string;
-  subgroupStack?: Record<string, boolean>;
   /** The ref of a task row, or the slug of an initiative row. */
   ref: string;
   /** The R2 attention label of a task row (the badges' texts joined); empty when the task needs nothing. */
@@ -44,7 +42,6 @@ export interface TimelineGroup {
 export interface TimelineItem {
   id: string;
   group: string;
-  subgroup: string;
   kind: ItemKind;
   type: 'range' | 'point';
   /** The text drawn on the item, as HTML. */
@@ -136,6 +133,35 @@ export function actualItemId(ref: string): string {
   return `act:${ref}`;
 }
 
+/** The height of a task row and of an initiative row, in px: fixed, so a row is as tall wherever the chart is scrolled to. */
+export const TASK_ROW_PX = 52;
+export const INITIATIVE_ROW_PX = 44;
+
+/** A lane of a task row: the item's top offset in the row and its height, in px. */
+export interface Lane {
+  top: number;
+  height: number;
+}
+
+/**
+ * Each kind of item keeps a lane of its own in a task row, from the top down: the planned strip, the actual span (the
+ * markers sit on its lane) and the leases (overlapping leases share theirs). Items are never stacked, so no lane moves.
+ */
+export const LANES: Record<'planned' | 'actual' | 'marker' | 'lease', Lane> = {
+  planned: { top: 4, height: 6 },
+  actual: { top: 12, height: 20 },
+  marker: { top: 12, height: 20 },
+  lease: { top: 34, height: 14 },
+};
+
+/** The lanes and row heights as the CSS custom properties Timeline.svelte's rules read. */
+export function laneStyle(): string {
+  const lanes = (Object.keys(LANES) as (keyof typeof LANES)[]).map(
+    (k) => `--tl-${k}-top:${LANES[k].top}px;--tl-${k}-h:${LANES[k].height}px`,
+  );
+  return [`--tl-task-row:${TASK_ROW_PX}px`, `--tl-initiative-row:${INITIATIVE_ROW_PX}px`, ...lanes].join(';');
+}
+
 /** The CSS class that names an item in the DOM (vis-timeline draws no id attribute), for the dependency arrows. */
 export function itemClass(itemId: string): string {
   return `tl-id-${itemId.replace(/[^A-Za-z0-9_-]/g, '-')}`;
@@ -165,8 +191,6 @@ function taskGroup(task: TimelineTask, order: number): TimelineGroup {
     order,
     className: label === '' ? 'tl-task' : 'tl-task tl-needs-attention',
     title: escapeHtml(label === '' ? text : `${text} (needs attention: ${label})`),
-    subgroupOrder: 'subgroupOrder',
-    subgroupStack: { planned: false, actual: false, lease: true },
     ref: task.ref,
     attentionLabel: label,
   };
@@ -180,7 +204,6 @@ function plannedItem(task: TimelineTask): TimelineItem | undefined {
   return {
     id: plannedItemId(task.ref),
     group: taskGroupId(task.ref),
-    subgroup: 'planned',
     kind: 'planned',
     type: 'range',
     content: '',
@@ -199,7 +222,6 @@ function actualItem(task: TimelineTask, nowIso: string): TimelineItem {
   return {
     id,
     group: taskGroupId(task.ref),
-    subgroup: 'actual',
     kind: 'actual',
     type: 'range',
     content: escapeHtml(task.title),
@@ -221,7 +243,6 @@ function leaseItem(lease: TimelineLease, nowIso: string): TimelineItem {
   return {
     id: leaseItemId(lease.ref),
     group: taskGroupId(lease.task),
-    subgroup: 'lease',
     kind: 'lease',
     type: 'range',
     content: escapeHtml(lease.holder),
@@ -238,7 +259,6 @@ function markerItem(marker: TimelineMarker, index: number): TimelineItem {
   return {
     id: `marker:${marker.task}:${marker.type}:${marker.at}:${index}`,
     group: taskGroupId(marker.task),
-    subgroup: 'marker',
     kind: 'marker',
     type: 'point',
     content: MARKER_GLYPHS[marker.type],
@@ -380,9 +400,12 @@ export function filterFromHash(hash: string): TimelineFilter {
   return filterFromQuery(at < 0 ? '' : hash.slice(at + 1));
 }
 
-/** The query of `GET /timeline` for a filter and the visible window. */
+/**
+ * The query of `GET /timeline` for a filter and the visible window. The rows are every task the filter keeps
+ * (`rows=all`), so panning or zooming never adds, drops or reorders a row; the window picks the leases and markers.
+ */
 export function apiQuery(filter: TimelineFilter, from: Date, to: Date): URLSearchParams {
-  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), rows: 'all' });
   for (const value of clean(filter.initiatives)) params.append('initiative', value);
   for (const value of clean(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());

@@ -114,7 +114,7 @@ describe('TimelineApi', () => {
     expect(got.tasks.map((t) => t.ref)).toEqual(['T1']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const [url, init] = fetchFn.mock.calls[0]!;
-    expect(url).toBe('/board/api/v1/timeline?from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&actor=ada&closed_within=30d');
+    expect(url).toBe('/board/api/v1/timeline?from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&rows=all&actor=ada&closed_within=30d');
     expect(init?.credentials).toBe('same-origin');
     expect(init?.headers).toEqual({ Accept: 'application/json' });
   });
@@ -219,7 +219,7 @@ describe('TimelineViewStore', () => {
 });
 
 describe('chartOptions', () => {
-  it('opens on the window, zooms from an hour to a quarter, stacks lease bars and orders rows by the mapping', () => {
+  it('opens on the window, zooms from an hour to a quarter, never stacks and orders rows by the mapping', () => {
     const w = initialWindow(NOW);
     expect(chartOptions(w)).toEqual({
       start: w.from,
@@ -228,7 +228,7 @@ describe('chartOptions', () => {
       zoomMax: 92 * DAY_MS,
       orientation: 'top',
       stack: false,
-      stackSubgroups: true,
+      margin: { item: { horizontal: 10, vertical: 0 } },
       groupOrder: 'order',
       selectable: false,
       verticalScroll: true,

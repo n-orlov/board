@@ -1432,13 +1432,16 @@ their `lease_expired` events, then reads; it writes nothing else.
 **The Timeline view's mapping** (`web/src/lib/timeline.ts`, vis-timeline bundled with the app, no CDN) turns that answer
 into rows and items. Initiatives are collapsible groups holding their tasks as nested groups. A task row carries a light
 planned bar (`planned_start` to `planned_end`, one end alone standing for both), the actual span (`created_at` to
-`closed_at`, or to now while it is open), one bar per lease in the stacked lease subgroup coloured by its state (`live`,
+`closed_at`, or to now while it is open), one bar per lease in the lease lane coloured by its state (`live`,
 `ended`, `expired`, the bar of a live lease running to now) with the lease's ref, state, holder, intent and times in its
 tooltip, and one point per marker with a class and glyph of its type. A task that needs attention shows its R2 badge text
 on the row label. A dependency is a pair from the blocking task's actual span to the blocked task's, left out when the
 blocking task is not in the window. The view's filters live in the URL fragment's query as `initiative` and `tag`
 (repeated), `actor` and `closed` (`7`, `30` or `90`; absent is off), and `GET /timeline` gets them as `initiative`, `tag`,
-`actor` and `closed_within=<n>d` with the visible window as `from` and `to`.
+`actor` and `closed_within=<n>d` with the visible window as `from` and `to` and `rows=all`, so the rows are every task
+the filters keep and panning or zooming never adds, drops, reorders or resizes a row: every row has a fixed height and
+each kind of item a fixed lane in it (planned on top, the actual span with the markers, the leases below, overlapping
+leases sharing their lane), with no stacking.
 
 ### 6.11 Actors
 
@@ -2323,7 +2326,7 @@ operator. Live via SSE (§7.1).
 | view | content |
 |---|---|
 | **Attention** (default, `#/attention`; `#/` lands on it) | the five §5.3 sections; inline actions: answer ask, close task (with resolution), acknowledge expired lease, record check, open the actor's way back (copyable). |
-| **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans as stacked sub-bars coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters (shipped): initiative, tag, actor, "show closed within N days"; they live in the fragment and survive reload. |
+| **Timeline** | Gantt-style, `vis-timeline`: groups = initiatives (collapsible) → tasks; per task a planned bar (light) and actual span (created → closed), lease spans in a lane of their own coloured by state (live / ended / expired), markers for milestones, asks, checks, done, close; dependency arrows. Zoom hour → quarter. Filters (shipped): initiative, tag, actor, "show closed within N days"; they live in the fragment and survive reload. |
 | **Initiatives** (`#/initiatives`) | list with tags, open/done/closed counts, live-lease count and a status filter; initiative page (`#/i/<slug>`) with its tasks table (the page's own timeline is a later phase). |
 | **Task** | details, deps, live leases, asks, notes, full event timeline, external links. |
 | **Notes** | the public board: newest first, summaries with expand-to-body, filters (broadcast only, task, initiative, resource, author, mention). Post a note as operator. |
@@ -2674,16 +2677,25 @@ newer one is dropped, and a refusal shows as an alert above what was drawn. vis-
 dependencies bundled into the app (the view imports `vis-timeline/peer`, `vis-data/peer` and vis-timeline's stylesheet;
 nothing is loaded from a CDN), and `mountChart` hands the groups and items to vis-timeline inside a frame with
 `overflow: hidden`, so the page never scrolls sideways; the chart pans and zooms inside it (`chartOptions`: zoom from an
-hour to a quarter, lease bars stacked in their subgroup, rows in the mapping's order). Until the first read lands it says
+hour to a quarter, no stacking and no subgroups, rows in the mapping's order). Until the first read lands it says
 it is loading; a window with no task says so.
 
 *Rows and bars.* An initiative is a row whose label is a collapsible toggle (a click on it hides and shows its task rows);
 a task is a row below it (label `<ref> <title>`, with the attention badge). On a task row the planned bar is dashed
 (`tl-planned`), the actual span is the bar named by its status (`tl-actual tl-open|done|closed`), each lease is a bar
-stacked below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
+in the lane below it coloured by state (`tl-lease tl-lease-live|ended|expired`, text = holder) and each marker is a point
 (`tl-marker tl-marker-<type>`, glyph from the mapping). The bars, rows and the toggle take their colours from the design
 tokens, light and dark, over vis-timeline's own sheet; at phone the label column is capped at the smaller of 10 rem and
 28 vw (longer labels are ellipsised, the full text is the tooltip) and every label row is at least 44 px high.
+
+*Fixed rows and lanes (R4).* The view asks `GET /timeline` for `rows=all` on every read (a pan, a zoom, a filter), so the
+rows are the tasks the filters keep wherever their spans fall and the window picks only the leases and markers drawn: no
+row appears, vanishes or changes place as the window moves. A task row is 52 px high and an initiative row 44 px, in every
+window, and each kind of item keeps a lane in the task row, measured from its top (`LANES` in `web/src/lib/timeline.ts`,
+handed to the CSS as custom properties by `laneStyle`): the planned strip on top (4 px down, 6 px high), the actual span
+with the markers on its lane (12 px down, 20 px high) and the leases below (34 px down, 14 px high; leases that overlap in
+time share the lane, drawn see-through). Items are never stacked and sit in no subgroup, so vis-timeline never sizes a row
+by the items in view, and nothing on the chart moves vertically on a pan or a zoom.
 
 *Colours and legend (R2).* Each item sets `--tl` to a design token by its class, and draws itself from it (bars a light
 wash of the token with a solid edge, markers the token itself), so both themes read through the tokens' own values:
@@ -2784,7 +2796,10 @@ limits), the wheel navigation at desktop (a vertical wheel leaves the span, a si
 Ctrl+wheel zoom both ways with the instant under the pointer kept within 2 % of the span, and stop at an hour and 92 days),
 the touch navigation at phone (CDP `Input.dispatchTouchEvent`: a pinch out zooms in, a pinch in zooms out, a one-finger
 horizontal drag moves the window without zooming), the click-through from a task bar, a lease bar and a row, exactly two arrow paths for two seeded pairs with their
-end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows.
+end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows. `timeline-rows.spec.ts` seeds an initiative whose tasks' spans lie inside and
+outside the opening window (two closed tasks dated months back, a planned strip ahead of it), records the row labels in order
+and each row's offset, and finds them unchanged within 1 px after a pan far past every span, a zoom in and a zoom out, with every
+`GET /timeline` carrying `rows=all`; it also reads the row heights (52 px and 44 px) and the lane order from the DOM, at phone and desktop.
 
 **Actors view** (`#/actors`, `web/src/Actors.svelte`, R7). The route table holds it as the entry `actors` (nav label Actors, after Timeline).
 It reads `GET /actors` (`ActorsApi`, a `ThreadApi`, in `web/src/lib/actorsView.ts`) and draws one row per actor the board has

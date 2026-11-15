@@ -16,6 +16,7 @@
     CLOSED_WITHIN_OPTIONS,
     DEFAULT_TIMELINE_FILTER,
     TIMELINE_LEGEND,
+    laneStyle,
     affectsTimeline,
     choiceOptions,
     isFiltered,
@@ -267,7 +268,7 @@
       {/each}
     </ul>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
-    <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" bind:this={frame}></div>
+    <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" style={laneStyle()} bind:this={frame}></div>
   {/if}
 </section>
 
@@ -299,11 +300,10 @@
     border-color: var(--border);
   }
   /* The label column: the rows' own colours (vis-timeline paints them light), a cap so a long title cannot take the width
-     of a phone, and 44 px rows to tap. */
+     of a phone. */
   .timeline-frame :global(.vis-labelset .vis-label) {
     display: flex;
     align-items: center;
-    min-height: 2.75rem;
     background: var(--surface-raised);
     color: var(--text);
     border-color: var(--border);
@@ -312,13 +312,58 @@
   .timeline-frame :global(.vis-labelset .vis-label.vis-nested-group) {
     background: var(--surface);
   }
+  /* Rows of fixed height: vis-timeline makes a row as tall as its label's inner box or its items, whichever is taller,
+     and every item sits at the row's top inside it (lib/timelineView.ts chartOptions: no stacking, no item margin), so
+     a row is as tall wherever the chart is panned or zoomed to. An initiative row is 44 px to tap, a task row 52 px. */
   .timeline-frame :global(.vis-label .vis-inner) {
     display: block;
+    box-sizing: border-box;
+    height: var(--tl-row);
+    line-height: var(--tl-row);
     max-width: min(10rem, 28vw);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0.25rem 0.5rem;
+    padding: 0 0.5rem;
+  }
+  .timeline-frame :global(.vis-label) {
+    --tl-row: var(--tl-task-row);
+  }
+  .timeline-frame :global(.vis-label.tl-initiative) {
+    --tl-row: var(--tl-initiative-row);
+  }
+  /* Each kind keeps its lane in a task row, placed by a top margin (vis-timeline measures an item without its margin, so
+     the lanes never grow the row): the planned strip on top, the actual span with its title, the leases below it
+     (overlapping leases share the lane, see-through), the markers on the actual span's lane. */
+  .timeline-frame :global(.vis-item.tl-planned),
+  .timeline-frame :global(.vis-item.tl-actual),
+  .timeline-frame :global(.vis-item.tl-lease),
+  .timeline-frame :global(.vis-item.tl-marker:not(.vis-dot)) {
+    box-sizing: border-box;
+    font-size: 0.75rem;
+  }
+  .timeline-frame :global(.vis-item.tl-planned) {
+    margin-top: var(--tl-planned-top);
+    height: var(--tl-planned-h);
+  }
+  .timeline-frame :global(.vis-item.tl-actual),
+  .timeline-frame :global(.vis-item.tl-marker:not(.vis-dot)) {
+    margin-top: var(--tl-actual-top);
+    height: var(--tl-actual-h);
+    line-height: calc(var(--tl-actual-h) - 2px);
+  }
+  .timeline-frame :global(.vis-item.tl-lease) {
+    margin-top: var(--tl-lease-top);
+    height: var(--tl-lease-h);
+    line-height: calc(var(--tl-lease-h) - 2px);
+    font-size: 0.6875rem;
+    opacity: 0.85;
+  }
+  .timeline-frame :global(.vis-item.tl-planned .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-actual .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-lease .vis-item-content),
+  .timeline-frame :global(.vis-item.tl-marker .vis-item-content) {
+    padding: 0 0.25rem;
   }
   .timeline-frame :global(.vis-group-level-unknown-but-gte1) {
     border: 0;

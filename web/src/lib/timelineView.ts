@@ -219,8 +219,9 @@ export interface ChartOptions {
   zoomMin: number;
   zoomMax: number;
   orientation: 'top';
+  /** No stacking: every item sits at the top of its row and its lane's CSS places it, so rows keep one height. */
   stack: boolean;
-  stackSubgroups: boolean;
+  margin: { item: { horizontal: number; vertical: number } };
   groupOrder: 'order';
   selectable: boolean;
   /** Rows scroll inside the chart (so the time axis stays in view), by wheel, drag and the side scrollbar. */
@@ -249,7 +250,7 @@ export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHA
     zoomMax: ZOOM_MAX_MS,
     orientation: 'top',
     stack: false,
-    stackSubgroups: true,
+    margin: { item: { horizontal: 10, vertical: 0 } },
     groupOrder: 'order',
     selectable: false,
     verticalScroll: true,
