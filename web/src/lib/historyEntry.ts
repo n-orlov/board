@@ -85,22 +85,24 @@ export interface PushWindow {
  * as they would to a link.
  */
 export function pushHash(hash: string, extra: Record<string, unknown> = {}, win: PushWindow = window, make: () => string = newKey, now: () => number = Date.now): void {
-  const storage = sessionStore(win);
-  const from = keyOf(win.history.state);
   const key = make();
-  const copied = from === undefined ? undefined : readRecord(storage, from);
-  if (copied !== undefined) {
-    try {
-      storage?.setItem(ENTRY_KEY_FAMILY + key, JSON.stringify({ t: now(), values: copied.values }));
-      if (storage !== undefined) trim(storage);
-    } catch {
-      // A full quota: the new entry starts with nothing saved.
-    }
-  }
+  copyEntry(sessionStore(win), keyOf(win.history.state), key, now);
   win.history.pushState({ ...extra, boardEntry: key }, '', hash);
   // Plain events: the listeners here read `history.state` and `location`, not the event's fields.
   win.dispatchEvent(new Event('popstate'));
   win.dispatchEvent(new Event('hashchange'));
+}
+
+/** Starts the entry `key` with a copy of the values saved for the entry `from` (when there are any). */
+function copyEntry(storage: EntryStorage | undefined, from: string | undefined, key: string, now: () => number): void {
+  const copied = from === undefined ? undefined : readRecord(storage, from);
+  if (copied === undefined) return;
+  try {
+    storage?.setItem(ENTRY_KEY_FAMILY + key, JSON.stringify({ t: now(), values: copied.values }));
+    if (storage !== undefined) trim(storage);
+  } catch {
+    // A full quota: the new entry starts with nothing saved.
+  }
 }
 
 /** Whether a parsed value is a record this module wrote. */

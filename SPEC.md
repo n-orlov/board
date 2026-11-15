@@ -2737,6 +2737,20 @@ on the chart (a primary `pointerdown` starts a gesture afresh and `lostpointerca
 end never arrived cannot leave a stuck gesture) and says whether it was a tap, a one-finger drag or a pinch: a drag or a
 pinch that ends over a bar opens nothing. Desktop shows the hint "Scroll to pan · Shift+scroll to zoom".
 
+*Taps (R6, `web/src/lib/timelineView.ts`: `gestureTracker`, `pressOf`, `pressOpens`, `nearestBar`).* **A tap acts only on
+what it went down on.** What a press is on is decided at `pointerdown`, before vis-timeline acts on it (it collapses an
+initiative on its own tap, ahead of the click): a task's bar (any kind), a task row's label, the empty part of a task row
+(the nearest bar of that row within 16 px, `TAP_REACH_PX`, so a 2 px bar or a marker can be hit with a finger), or an
+initiative's label. The chart opens a task on the browser's **DOM click** (vis-timeline's own `click` fires twice for a tap
+and is not heard), and only when the click is on the same task and the same element as the press, that element has not
+moved more than 1 px since, and the gesture was a tap. So exactly: (1) a press and release on a task's bar, label or row
+opens that task; (2) a press on one task's bar released over another task's row opens nothing; (3) a drag past the 10 px
+slop (`TAP_SLOP_PX`) that ends on a bar pans and opens nothing; (4) a tap on an initiative label only collapses or expands
+it, and never opens a task, even when the collapse moves another task's row under the pointer before the click; (5) a tap
+on the empty part of a task row opens the nearest bar in that row within 16 px; (6) after a pointer was lost without
+`pointerup` or `pointercancel`, the next tap opens normally. (A finger's tap is aimed by the browser at where it went down,
+so on a phone case 2 never opens the second task.)
+
 *Preview (R5).* A click on a task bar, a lease bar, a marker or a task row's label opens a **read-only preview** of that
 task over the chart (`web/src/TaskPreview.svelte`) and does not leave the Timeline; a click on an initiative row collapses
 it instead. The preview is the one `Dialog` (a bottom sheet on a phone, `wide` from 768 px) around `TaskBody` without its

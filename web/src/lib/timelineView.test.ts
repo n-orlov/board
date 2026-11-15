@@ -17,6 +17,10 @@ import {
   HOUR_MS,
   gestureKind,
   gestureTracker,
+  nearestBar,
+  pressOpens,
+  TAP_REACH_PX,
+  type Press,
   initialWindow,
   MIN_CHART_HEIGHT,
   mountChart,
@@ -235,7 +239,7 @@ describe('chartOptions', () => {
       verticalScroll: true,
       maxHeight: DEFAULT_CHART_HEIGHT,
       zoomKey: 'shiftKey',
-      dataAttributes: ['task'],
+      dataAttributes: ['task', 'id'],
     });
     expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);
@@ -470,6 +474,47 @@ describe('zoom', () => {
   });
 });
 
+describe('nearestBar', () => {
+  const bar = (task: string, group: string | undefined, left: number, right: number) => ({ task, group, left, right, top: 10, bottom: 46 });
+
+  it('finds the nearest bar of the same row within the reach, the first drawn on a tie', () => {
+    const bars = [bar('A', 't:1', 100, 102), bar('B', 't:1', 130, 140), bar('C', 't:2', 105, 200), bar('D', 't:1', 90, 98)];
+    expect(nearestBar(bars, 110, 30, 't:1')?.task).toBe('A'); // 8 px from A, 20 from B
+    expect(nearestBar(bars, 101, 30, 't:1')?.task).toBe('A'); // inside A
+    expect(nearestBar(bars, 116, 50, 't:1')?.task).toBe('A'); // 14 px right, 4 px below: within 16
+    expect(nearestBar(bars, 99, 30, 't:1')?.task).toBe('A'); // 1 px from A and from D: the first drawn wins
+    expect(nearestBar(bars, 160, 30, 't:1')).toBeUndefined(); // 20 px from B
+    expect(nearestBar(bars, 150, 30, 't:2')?.task).toBe('C');
+    expect(nearestBar(bars, 110, 30, 't:3')).toBeUndefined();
+    expect(nearestBar(bars, 110, 30, 't:1', 5)).toBeUndefined();
+    expect(TAP_REACH_PX).toBe(16);
+  });
+});
+
+describe('pressOpens', () => {
+  const el = {} as Element;
+  const at = (key: string, e: Element | null = el, top = 10): Press => ({ key, el: e, top });
+
+  it('opens the task of a click that ends the press it began on, and one with no press seen', () => {
+    expect(pressOpens(at('t:A1'), at('t:A1'))).toBe('A1');
+    expect(pressOpens(at('t:A1'), at('t:A1', el, 11))).toBe('A1'); // 1 px of layout shift is none
+    expect(pressOpens(undefined, at('t:A1'))).toBe('A1'); // a synthetic click
+  });
+
+  it('opens nothing when the press began elsewhere, on another element, or the element moved', () => {
+    expect(pressOpens(at('t:A1'), at('t:A2'))).toBeUndefined();
+    expect(pressOpens(at('g:i:alpha'), at('t:A1'))).toBeUndefined();
+    expect(pressOpens(at(''), at('t:A1'))).toBeUndefined();
+    expect(pressOpens(at('t:A1'), at('t:A1', {} as Element))).toBeUndefined();
+    expect(pressOpens(at('t:A1'), at('t:A1', el, 12))).toBeUndefined();
+  });
+
+  it('opens nothing on an initiative row or on nothing', () => {
+    expect(pressOpens(at('g:i:alpha'), at('g:i:alpha'))).toBeUndefined();
+    expect(pressOpens(undefined, at(''))).toBeUndefined();
+  });
+});
+
 describe('clickedTask', () => {
   const items = new Map([
     ['act:T1', { id: 'act:T1', task: 'T1' }],
@@ -544,6 +589,10 @@ describe('mountChart', () => {
       getWindow() {
         return this.window;
       }
+      /** A test's fake event carries what vis-timeline would find under it. */
+      getEventProperties(event: { props?: ChartClick }) {
+        return event.props ?? { what: null };
+      }
       emit(event: string, props?: ChartClick) {
         this.listeners.get(event)?.(props);
       }
@@ -590,7 +639,7 @@ describe('mountChart', () => {
     expect(made[0]!.destroy).toHaveBeenCalledTimes(1);
   });
 
-  function fakeContainer() {
+  function fakeContainer(bars: unknown[] = []) {
     const listeners = new Map<string, (e: unknown) => void>();
     const centre = { getBoundingClientRect: () => ({ left: 100, width: 1000 }) };
     const left = { scrollTop: 0, scrollHeight: 0, clientHeight: 400 };
@@ -598,15 +647,18 @@ describe('mountChart', () => {
       addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
       removeEventListener: (type: string) => listeners.delete(type),
       querySelector: (sel: string) => (sel === '.vis-panel.vis-center' ? centre : sel === '.vis-panel.vis-left' ? left : null),
+      querySelectorAll: (sel: string) => (sel.startsWith('.vis-item[data-task]') ? bars : []),
     };
     const wheel = (over: object) => {
       const e = { deltaX: 0, deltaY: 0, deltaMode: 0, shiftKey: false, ctrlKey: false, clientX: 100, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over };
       listeners.get('wheel')?.(e);
       return e;
     };
-    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0) =>
-      listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary: pointerId === 1 });
-    return { container: container as unknown as HTMLElement, listeners, wheel, pointer, left };
+    const pointer = (type: string, pointerId: number, clientX: number, clientY = 0, over: object = {}) =>
+      listeners.get(type)?.({ pointerId, clientX, clientY, isPrimary: pointerId === 1, ...over });
+    /** A DOM click on the chart that vis-timeline reads as `props`, on `target`. */
+    const click = (props: ChartClick, over: object = {}) => listeners.get('click')?.({ props, target: null, clientX: 0, clientY: 0, ...over });
+    return { container: container as unknown as HTMLElement, listeners, wheel, pointer, click, left };
   }
 
   it('reports the rows scrolling and puts a saved scroll back once the rows are tall enough', () => {
@@ -751,31 +803,33 @@ describe('mountChart', () => {
   });
 
   it('opens a task for a tap but not for a drag or a pinch that ended over its bar, and stops listening on destroy', () => {
-    const { lib, made } = fakeLib();
+    const { lib } = fakeLib();
     const h = hooks();
     const c = fakeContainer();
     const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
-    const click = () => made[0]!.emit('click', { what: 'item', item: 'act:A1' });
+    const props = { what: 'item', item: 'act:A1' };
+    const click = () => c.click(props);
+    const pointer = (type: string, id: number, x: number) => c.pointer(type, id, x, 0, { props });
 
-    c.pointer('pointerdown', 1, 0);
-    c.pointer('pointerup', 1, 0);
+    pointer('pointerdown', 1, 0);
+    pointer('pointerup', 1, 0);
     click();
     expect(h.opened).toEqual(['A1']);
 
-    c.pointer('pointerdown', 1, 0);
-    c.pointer('pointermove', 1, 80);
-    c.pointer('pointerup', 1, 80);
+    pointer('pointerdown', 1, 0);
+    pointer('pointermove', 1, 80);
+    pointer('pointerup', 1, 80);
     click(); // a drag
-    c.pointer('pointerdown', 1, 0);
-    c.pointer('pointerdown', 2, 100);
-    c.pointer('pointerup', 1, 0);
-    c.pointer('pointerup', 2, 100);
+    pointer('pointerdown', 1, 0);
+    pointer('pointerdown', 2, 100);
+    pointer('pointerup', 1, 0);
+    pointer('pointerup', 2, 100);
     click(); // a pinch
     expect(h.opened).toEqual(['A1']);
 
-    c.pointer('pointerdown', 1, 0); // a stuck gesture does not stop later taps
-    c.pointer('pointerdown', 1, 0);
-    c.pointer('pointerup', 1, 0);
+    pointer('pointerdown', 1, 0); // a stuck gesture does not stop later taps
+    pointer('pointerdown', 1, 0);
+    pointer('pointerup', 1, 0);
     click();
     expect(h.opened).toEqual(['A1', 'A1']);
 
@@ -805,18 +859,21 @@ describe('mountChart', () => {
     expect(made[0]!.zoomIn).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the task of a click on a bar or a task row, from the model last shown', () => {
+  it('opens the task of a DOM click on a bar or a task row, from the model last shown, and ignores vis-timeline\'s own click', () => {
     const { lib, made } = fakeLib();
     const h = hooks();
-    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), h.h);
-    made[0]!.emit('click', { what: 'item', item: 'act:A1' });
-    made[0]!.emit('click', { what: 'group-label', group: 't:A7' });
-    made[0]!.emit('click', { what: 'group-label', group: 'i:alpha' });
-    made[0]!.emit('click', { what: 'background' });
+    const c = fakeContainer();
+    const chart = mountChart(lib, c.container, model(['A1']), initialWindow(NOW), h.h);
+    c.click({ what: 'item', item: 'act:A1' });
+    c.click({ what: 'group-label', group: 't:A7' });
+    c.click({ what: 'group-label', group: 'i:alpha' });
+    c.click({ what: 'background' });
+    expect(h.opened).toEqual(['A1', 'A7']);
+    made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // vis-timeline's click (its tap recogniser) is not heard
     expect(h.opened).toEqual(['A1', 'A7']);
     chart.show(model(['B1']));
-    made[0]!.emit('click', { what: 'item', item: 'act:A1' }); // no longer drawn
-    made[0]!.emit('click', { what: 'item', item: 'act:B1' });
+    c.click({ what: 'item', item: 'act:A1' }); // no longer drawn
+    c.click({ what: 'item', item: 'act:B1' });
     expect(h.opened).toEqual(['A1', 'A7', 'B1']);
   });
 
@@ -825,17 +882,26 @@ describe('mountChart', () => {
     const order: string[] = [];
     const h = hooks();
     const hk = { ...h.h, open: (ref: string) => order.push(`open ${ref}`) };
-    const bar = { focus: vi.fn(() => order.push('focus')), tabIndex: -1, dataset: { task: 'A1' }, textContent: ' Task A ', attrs: {} as Record<string, string>, setAttribute(k: string, v: string) { this.attrs[k] = v; } };
-    const container = {
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      querySelectorAll: () => [bar],
-    } as unknown as HTMLElement;
-    mountChart(lib, container, model(['A1']), initialWindow(NOW), hk);
-    made[0]!.emit('click', { what: 'item', item: 'act:A1', event: { target: { closest: () => bar } as unknown as EventTarget } });
+    const bar = {
+      focus: vi.fn(() => order.push('focus')),
+      tabIndex: 0,
+      dataset: { task: 'A1' },
+      textContent: ' Task A ',
+      attrs: {} as Record<string, string>,
+      setAttribute(k: string, v: string) {
+        this.attrs[k] = v;
+      },
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 10, bottom: 10 }),
+      closest() {
+        return this;
+      },
+    };
+    const c = fakeContainer([bar]);
+    mountChart(lib, c.container, model(['A1']), initialWindow(NOW), hk);
+    c.click({ what: 'item', item: 'act:A1' }, { target: { closest: () => bar } });
     expect(order).toEqual(['focus', 'open A1']);
     expect(bar.focus).toHaveBeenCalledWith({ preventScroll: true });
-    made[0]!.emit('click', { what: 'item', item: 'act:A1', event: { target: { closest: () => null } as unknown as EventTarget } });
+    c.click({ what: 'item', item: 'act:A1' }, { target: { closest: () => null } });
     expect(order).toEqual(['focus', 'open A1', 'open A1']);
     made[0]!.emit('changed');
     expect(bar.tabIndex).toBe(-1);
@@ -924,6 +990,146 @@ describe('mountChart', () => {
     expect(h.ranges).toEqual([]);
     made[0]!.emit('rangechanged');
     expect(h.ranges).toEqual([{ from: new Date(DAY_MS), to: new Date(3 * DAY_MS) }]);
+  });
+
+  /**
+   * The tap rule (R6): a tap's target is taken at pointerdown, and the click opens a task only when it lands on that same
+   * element. The fake chart reads a fake event's `props` as what vis-timeline finds under it and its `target` as the element
+   * hit, so each case drives pointer events and a click the way a browser delivers them.
+   */
+  describe('the tap rule', () => {
+    interface Fake {
+      closest(selector: string): Fake | null;
+      getBoundingClientRect(): { left: number; top: number; right: number; bottom: number };
+      dataset?: { id: string; task: string };
+      focus?: () => void;
+    }
+    const barEl = (task: string, left: number, top: number, width = 60): Fake => ({
+      dataset: { id: `act:${task}`, task },
+      focus: vi.fn(),
+      closest(selector) {
+        return selector === '.vis-item[data-task]' ? this : null;
+      },
+      getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + 36 }),
+    });
+    const labelEl = (top: number): Fake => ({
+      closest(selector) {
+        return selector === '.vis-label' ? this : null;
+      },
+      getBoundingClientRect: () => ({ left: 0, top, right: 80, bottom: top + 44 }),
+    });
+    const rowEl: Fake = { closest: () => null, getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0 }) };
+
+    function chart() {
+      const { lib } = fakeLib();
+      const h = hooks();
+      const bars = [barEl('A1', 200, 100), barEl('A2', 300, 160), barEl('A3', 200, 220, 2)];
+      const c = fakeContainer(bars);
+      const data: TimelineModel = {
+        groups: ['A1', 'A2', 'A3'].map((ref, order) => ({ id: `t:${ref}`, ref, order }) as TimelineModel['groups'][number]),
+        items: ['A1', 'A2', 'A3'].map((ref) => ({ id: `act:${ref}`, group: `t:${ref}`, task: ref }) as TimelineModel['items'][number]),
+        dependencies: [],
+      };
+      mountChart(lib, c.container, data, initialWindow(NOW), h.h);
+      /** A pointer goes down on `target` where vis-timeline finds `props`. */
+      const down = (target: Fake | null, props: ChartClick, x = 0, y = 0) => c.pointer('pointerdown', 1, x, y, { target, props });
+      const up = (x = 0, y = 0) => c.pointer('pointerup', 1, x, y, {});
+      /** The click that ends the press, on `target` where vis-timeline finds `props`. */
+      const clickOn = (target: Fake | null, props: ChartClick, x = 0, y = 0) => c.click(props, { target, clientX: x, clientY: y });
+      const tap = (target: Fake | null, props: ChartClick, x = 0, y = 0) => {
+        down(target, props, x, y);
+        up(x, y);
+        clickOn(target, props, x, y);
+      };
+      return { h, c, bars, down, up, clickOn, tap };
+    }
+    const onBar = (task: string): ChartClick => ({ what: 'item', item: `act:${task}`, group: `t:${task}` });
+    const onLabel = (group: string): ChartClick => ({ what: 'group-label', group });
+    const onRow = (group: string): ChartClick => ({ what: 'background', group });
+
+    it('case 1: a press and a release on a task\'s bar, label or row opens that task', () => {
+      const { h, bars, tap } = chart();
+      tap(bars[0]!, onBar('A1'));
+      tap(labelEl(100), onLabel('t:A2'));
+      tap(rowEl, onRow('t:A2'), 330, 175); // the empty part of A2's row, over its bar's box
+      expect(h.opened).toEqual(['A1', 'A2', 'A2']);
+      expect(bars[0]!.focus).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
+    it('case 2: a press on one task\'s bar released over another task\'s row opens nothing', () => {
+      const { h, bars, down, up, clickOn } = chart();
+      down(bars[0]!, onBar('A1'));
+      up();
+      clickOn(rowEl, onRow('t:A2'), 330, 175);
+      down(bars[0]!, onBar('A1'));
+      up();
+      clickOn(labelEl(100), onLabel('t:A2'));
+      down(bars[0]!, onBar('A1'));
+      up();
+      clickOn(bars[1]!, onBar('A2'));
+      expect(h.opened).toEqual([]);
+    });
+
+    it('case 3: a drag past the slop that ends on a bar pans and opens nothing', () => {
+      const { h, c, bars, down, clickOn } = chart();
+      down(bars[1]!, onBar('A2'), 0, 0);
+      c.pointer('pointermove', 1, TAP_SLOP_PX + 1, 0, {});
+      c.pointer('pointerup', 1, TAP_SLOP_PX + 1, 0, {});
+      clickOn(bars[0]!, onBar('A1'));
+      down(bars[0]!, onBar('A1'), 0, 0);
+      c.pointer('pointermove', 1, 0, 90, {});
+      c.pointer('pointerup', 1, 0, 90, {});
+      clickOn(bars[0]!, onBar('A1')); // back on the bar it started on: still a pan
+      expect(h.opened).toEqual([]);
+    });
+
+    it('case 4: a tap on an initiative label only toggles it, even when the collapse moves another row under the pointer', () => {
+      const { h, down, up, clickOn } = chart();
+      const initiative = labelEl(50);
+      down(initiative, onLabel('i:alpha'));
+      up();
+      clickOn(initiative, onLabel('i:alpha')); // vis-timeline toggles the group; the click is still on the initiative
+      expect(h.opened).toEqual([]);
+
+      const task = labelEl(50); // the collapse drew a task row's label where the initiative's was
+      down(initiative, onLabel('i:alpha'));
+      up();
+      clickOn(task, onLabel('t:A1'));
+      expect(h.opened).toEqual([]);
+
+      const same = { ...task, getBoundingClientRect: () => ({ left: 0, top: 200, right: 80, bottom: 244 }) };
+      down(same, onLabel('t:A1')); // the same label, but it has moved by the click
+      up();
+      clickOn({ ...same, getBoundingClientRect: () => ({ left: 0, top: 100, right: 80, bottom: 144 }) }, onLabel('t:A1'));
+      expect(h.opened).toEqual([]);
+    });
+
+    it('case 5: a tap on the empty part of a task row opens the nearest bar within reach in that row', () => {
+      const { h, tap } = chart();
+      tap(rowEl, onRow('t:A3'), 212, 236); // 10 px right of A3's 2 px bar
+      expect(h.opened).toEqual(['A3']);
+      tap(rowEl, onRow('t:A3'), 202 + TAP_REACH_PX + 2, 236); // out of reach
+      tap(rowEl, onRow('t:A1'), 330, 150); // A2's bar is near, but in the next row
+      tap(rowEl, onRow('t:A9'), 201, 236); // a row with no bar
+      expect(h.opened).toEqual(['A3']);
+    });
+
+    it('case 6: after a pointer lost without pointerup or pointercancel the next tap opens', () => {
+      const { h, c, bars, down, up, clickOn } = chart();
+      down(bars[0]!, onBar('A1'), 0, 0); // a swipe whose end never arrived (seen on Chrome for Android)
+      c.pointer('pointermove', 1, 200, 0, {});
+      down(bars[1]!, onBar('A2'), 5, 5); // the next touch is primary again
+      up(5, 5);
+      clickOn(bars[1]!, onBar('A2'), 5, 5);
+      expect(h.opened).toEqual(['A2']);
+
+      c.pointer('pointerdown', 3, 0, 0, { isPrimary: false, target: bars[0]!, props: onBar('A1') });
+      c.pointer('lostpointercapture', 3, 0, 0, {});
+      c.pointer('pointerdown', 4, 0, 0, { isPrimary: false, target: bars[0]!, props: onBar('A1') });
+      c.pointer('pointerup', 4, 0, 0, {});
+      clickOn(bars[0]!, onBar('A1'));
+      expect(h.opened).toEqual(['A2', 'A1']);
+    });
   });
 });
 
