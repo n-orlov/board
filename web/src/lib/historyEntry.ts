@@ -95,11 +95,12 @@ export function pushHash(hash: string, extra: Record<string, unknown> = {}, win:
 
 /** Starts the entry `key` with a copy of the values saved for the entry `from` (when there are any). */
 function copyEntry(storage: EntryStorage | undefined, from: string | undefined, key: string, now: () => number): void {
-  const copied = from === undefined ? undefined : readRecord(storage, from);
+  if (storage === undefined || from === undefined) return;
+  const copied = readRecord(storage, from);
   if (copied === undefined) return;
   try {
-    storage?.setItem(ENTRY_KEY_FAMILY + key, JSON.stringify({ t: now(), values: copied.values }));
-    if (storage !== undefined) trim(storage);
+    storage.setItem(ENTRY_KEY_FAMILY + key, JSON.stringify({ t: now(), values: copied.values }));
+    trim(storage);
   } catch {
     // A full quota: the new entry starts with nothing saved.
   }
@@ -112,15 +113,28 @@ function isRecord(value: unknown): value is EntryRecord {
   return typeof t === 'number' && typeof values === 'object' && values !== null;
 }
 
-function readRecord(storage: EntryStorage | undefined, key: string): EntryRecord | undefined {
+/** The stored text under `key`, or null where there is none or reading it throws. */
+function readRaw(storage: EntryStorage | undefined, key: string): string | null {
   try {
-    const raw = storage?.getItem(ENTRY_KEY_FAMILY + key) ?? null;
-    if (raw === null) return undefined;
-    const value: unknown = JSON.parse(raw);
-    return isRecord(value) ? { t: value.t, values: value.values } : undefined;
+    return storage?.getItem(ENTRY_KEY_FAMILY + key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The parsed value of `raw`, or undefined when it is not JSON. */
+function parseJSON(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
   } catch {
     return undefined;
   }
+}
+
+function readRecord(storage: EntryStorage | undefined, key: string): EntryRecord | undefined {
+  const raw = readRaw(storage, key);
+  const value = raw === null ? undefined : parseJSON(raw);
+  return isRecord(value) ? { t: value.t, values: value.values } : undefined;
 }
 
 /** What was saved under `name` for the entry `key`, or undefined. */
@@ -186,7 +200,7 @@ export const SCROLL = 'scroll';
 
 /** A saved scroll position, or undefined for anything else. */
 export function scrollOf(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+  return Number.isFinite(value) && (value as number) >= 0 ? (value as number) : undefined;
 }
 
 /**

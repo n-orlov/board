@@ -40,12 +40,12 @@ function fakeStorage() {
 }
 
 function fakeHistory(state: unknown = null) {
-  const calls: { data: unknown; url?: string }[] = [];
+  const calls: { data: unknown; unused: string; url?: string }[] = [];
   const history: EntryHistory & { calls: typeof calls } = {
     state,
     calls,
-    replaceState(data, _unused, url) {
-      calls.push({ data, url });
+    replaceState(data, unused, url) {
+      calls.push({ data, unused, url });
       (history as { state: unknown }).state = data;
     },
   };
@@ -61,6 +61,7 @@ describe('keyOf', () => {
     expect(keyOf('k1')).toBeUndefined();
     expect(keyOf({ boardEntry: 3 })).toBeUndefined();
     expect(keyOf({ boardEntry: '' })).toBeUndefined();
+    expect(keyOf(Object.assign(() => undefined, { boardEntry: 'k1' }))).toBeUndefined();
   });
 });
 
@@ -81,6 +82,12 @@ describe('ensureKey', () => {
     expect(ensureKey(h, () => 'new')).toBe('new');
     expect(h.state).toEqual({ other: 1, boardEntry: 'new' });
     expect(h.calls[0]?.url).toBeUndefined();
+    expect(h.calls[0]?.unused).toBe('');
+  });
+  it('starts from an empty state when the entry carries a state that is not an object', () => {
+    const h = fakeHistory('text');
+    expect(ensureKey(h, () => 'new')).toBe('new');
+    expect(h.state).toEqual({ boardEntry: 'new' });
   });
   it('still returns a key when the history refuses', () => {
     const h: EntryHistory = {
@@ -97,7 +104,7 @@ describe('replaceHash', () => {
   it('rewrites the fragment and keeps the entry key', () => {
     const h = fakeHistory({ boardEntry: 'k' });
     replaceHash('#/tasks?q=x', h);
-    expect(h.calls).toEqual([{ data: { boardEntry: 'k' }, url: '#/tasks?q=x' }]);
+    expect(h.calls).toEqual([{ data: { boardEntry: 'k' }, unused: '', url: '#/tasks?q=x' }]);
   });
 });
 
@@ -125,12 +132,40 @@ describe('saveEntry and loadEntry', () => {
     s.setItem(`${ENTRY_KEY_FAMILY}a`, JSON.stringify({ t: 1, values: { scroll: 5 } }));
     expect(loadEntry(s, 'a', 'scroll')).toBe(5);
   });
+  it('reads a record without a numeric time or without an object of values as nothing saved', () => {
+    const s = fakeStorage();
+    const bad = [JSON.stringify({ values: { scroll: 5 } }), JSON.stringify({ t: 'x', values: { scroll: 5 } }), JSON.stringify({ t: 1, values: 'abc' })];
+    for (const raw of bad) {
+      s.setItem(`${ENTRY_KEY_FAMILY}a`, raw);
+      expect(loadEntry(s, 'a', 'scroll'), raw).toBeUndefined();
+      expect(loadEntry(s, 'a', 'length'), raw).toBeUndefined();
+    }
+  });
   it('drop the oldest entries past the limit', () => {
     const s = fakeStorage();
     for (let i = 0; i <= ENTRY_LIMIT; i++) saveEntry(s, `k${i}`, 'scroll', i, () => i);
     expect(Object.keys(s.data)).toHaveLength(ENTRY_LIMIT);
     expect(loadEntry(s, 'k0', 'scroll')).toBeUndefined();
     expect(loadEntry(s, `k${ENTRY_LIMIT}`, 'scroll')).toBe(ENTRY_LIMIT);
+  });
+  it('drop the entry written longest ago whatever its place in the storage, and keep keys it does not own', () => {
+    const s = fakeStorage();
+    for (let i = 0; i < 100; i++) s.setItem(`other.${i}`, 'x');
+    for (let i = 0; i < ENTRY_LIMIT; i++) s.setItem(`${ENTRY_KEY_FAMILY}k${i}`, JSON.stringify({ t: 1000 - i, values: {} }));
+    saveEntry(s, 'new', 'scroll', 1, () => 5000);
+    expect(s.getItem(`${ENTRY_KEY_FAMILY}k${ENTRY_LIMIT - 1}`)).toBeNull();
+    expect(Object.keys(s.data).filter((k) => k.startsWith(ENTRY_KEY_FAMILY))).toHaveLength(ENTRY_LIMIT);
+    expect(Object.keys(s.data).filter((k) => k.startsWith('other.'))).toHaveLength(100);
+    expect(loadEntry(s, 'new', 'scroll')).toBe(1);
+  });
+  it('drop a record it cannot read before any it can', () => {
+    const s = fakeStorage();
+    for (let i = 0; i < ENTRY_LIMIT - 1; i++) s.setItem(`${ENTRY_KEY_FAMILY}k${i}`, JSON.stringify({ t: 1 + i, values: {} }));
+    s.setItem(`${ENTRY_KEY_FAMILY}bad`, '{not json');
+    saveEntry(s, 'new', 'scroll', 1, () => 5000);
+    expect(s.getItem(`${ENTRY_KEY_FAMILY}bad`)).toBeNull();
+    expect(s.getItem(`${ENTRY_KEY_FAMILY}k0`)).not.toBeNull();
+    expect(Object.keys(s.data)).toHaveLength(ENTRY_LIMIT);
   });
   it('ignore a missing or throwing storage', () => {
     const boom: EntryStorage = {
@@ -169,7 +204,15 @@ function fakePage(state: unknown = null) {
   let frames: { id: number; cb: () => void }[] = [];
   let nextId = 1;
   const scrolls: number[] = [];
+  const added: { name: string; options: unknown }[] = [];
+  const removed: { name: string; options: unknown }[] = [];
+  let requested = 0;
   const page = {
+    added,
+    removed,
+    get requested() {
+      return requested;
+    },
     scrollY: 0,
     height: 5000,
     innerHeight: 800,
@@ -184,13 +227,16 @@ function fakePage(state: unknown = null) {
       },
     },
     sessionStorage: storage,
-    addEventListener(name: string, fn: Listener) {
+    addEventListener(name: string, fn: Listener, options?: unknown) {
+      added.push({ name, options });
       (listeners[name] ??= []).push(fn);
     },
-    removeEventListener(name: string, fn: Listener) {
+    removeEventListener(name: string, fn: Listener, options?: unknown) {
+      removed.push({ name, options });
       listeners[name] = (listeners[name] ?? []).filter((f) => f !== fn);
     },
     requestAnimationFrame(cb: () => void) {
+      requested++;
       frames.push({ id: nextId, cb });
       return nextId++;
     },
@@ -408,7 +454,7 @@ describe('installScrollRestore', () => {
     const next = keyOf(page.history.state)!;
     expect(loadEntry(page.storage, 'a', SCROLL)).toBe(640);
     page.frame();
-    expect(loadEntry(page.storage, next, SCROLL)).not.toBe(640);
+    expect(loadEntry(page.storage, next, SCROLL)).toBeUndefined();
     page.popTo({ boardEntry: 'a' });
     page.frame();
     expect(page.scrollY).toBe(640);
@@ -445,6 +491,109 @@ describe('installScrollRestore', () => {
     page.emit('scroll');
     page.frame();
     expect(loadEntry(page.storage, 'b', SCROLL)).toBe(1200);
+  });
+
+  it('asks for one frame however many scroll events come before it', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    const before = page.requested;
+    page.emit('scroll');
+    page.emit('scroll');
+    page.emit('scroll');
+    expect(page.requested - before).toBe(1);
+    page.frame();
+    page.emit('scroll');
+    expect(page.requested - before).toBe(2);
+  });
+
+  it('listens to scrolling passively, and to the user\x27s gestures in the capture phase, passively', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 100);
+    page.popTo({ boardEntry: 'b' });
+    expect(page.added.filter((a) => a.name === 'scroll').map((a) => a.options)).toEqual([{ passive: true }]);
+    for (const gesture of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+      expect(page.added.filter((a) => a.name === gesture).map((a) => a.options), gesture).toEqual([{ capture: true, passive: true }]);
+    }
+    page.emit('wheel');
+    for (const gesture of ['wheel', 'touchstart', 'keydown', 'mousedown']) {
+      expect(page.removed.filter((r) => r.name === gesture).map((r) => r.options), gesture).toEqual([true]);
+    }
+  });
+
+  it('ends the restore it was holding when another entry is restored', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 100);
+    saveEntry(page.storage, 'c', SCROLL, 200);
+    page.popTo({ boardEntry: 'b' });
+    page.popTo({ boardEntry: 'c' });
+    expect(page.listening('wheel')).toBe(1);
+    page.frame();
+    expect(page.scrolls).toEqual([200]);
+  });
+
+  it('scrolls when the page has exactly the room the position needs', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.height = page.innerHeight + 1200;
+    page.popTo({ boardEntry: 'b' });
+    page.frame();
+    expect(page.scrolls).toEqual([1200]);
+  });
+
+  it('counts the 4 s from when the restore began, not from the epoch', () => {
+    vi.setSystemTime(100_000);
+    const page = fakePage({ boardEntry: 'a' });
+    install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.height = 900;
+    page.popTo({ boardEntry: 'b' });
+    page.frame();
+    vi.setSystemTime(100_000 + RESTORE_WAIT_MS);
+    page.frame();
+    expect(page.listening('wheel')).toBe(1);
+    vi.setSystemTime(100_000 + RESTORE_WAIT_MS + 1);
+    page.frame();
+    expect(page.listening('wheel')).toBe(0);
+  });
+
+  it('starts a followed link at the top even when a record is saved under the key it would get', () => {
+    const key = newKey(() => 0.5, () => 0);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const page = fakePage({ boardEntry: 'a' });
+      install(page);
+      saveEntry(page.storage, key, SCROLL, 900);
+      page.popTo(null);
+      expect(keyOf(page.history.state)).toBe(key);
+      expect(page.scrolls).toEqual([0]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('restores a reload only to a position past the top', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    saveEntry(page.storage, 'a', SCROLL, 0);
+    install(page);
+    page.frame();
+    expect(page.scrolls).toEqual([]);
+    expect(page.listening('wheel')).toBe(0);
+  });
+
+  it('ends a restore still waiting when its listeners are removed', () => {
+    const page = fakePage({ boardEntry: 'a' });
+    const off = install(page);
+    saveEntry(page.storage, 'b', SCROLL, 1200);
+    page.height = 900;
+    page.popTo({ boardEntry: 'b' });
+    off();
+    expect(page.listening('wheel')).toBe(0);
+    page.height = 5000;
+    page.frame();
+    expect(page.scrolls).toEqual([]);
   });
 
   it('removes its listeners when asked', () => {
@@ -523,6 +672,35 @@ describe('pushHash', () => {
     pushHash('#/x', {}, win, () => 'b');
     expect(storage.data).toEqual({});
     expect(keyOf(history.state)).toBe('b');
+  });
+
+  it('records what it pushes with an empty unused title', () => {
+    const { history, win } = fakeWindow({ boardEntry: 'a' });
+    const titles: string[] = [];
+    const push = history.pushState;
+    history.pushState = (data, unused, url) => {
+      titles.push(unused);
+      push(data, unused, url);
+    };
+    pushHash('#/x', {}, win, () => 'b');
+    expect(titles).toEqual(['']);
+  });
+
+  it('copies nothing from a keyless entry, whatever is saved under the word undefined', () => {
+    const { storage, win } = fakeWindow(null);
+    storage.setItem(`${ENTRY_KEY_FAMILY}undefined`, JSON.stringify({ t: 1, values: { scroll: 3 } }));
+    pushHash('#/x', {}, win, () => 'b');
+    expect(loadEntry(storage, 'b', 'scroll')).toBeUndefined();
+  });
+
+  it('forgets the oldest entry once the copy takes the storage past the limit', () => {
+    const { storage, win } = fakeWindow({ boardEntry: 'a' });
+    for (let i = 0; i < ENTRY_LIMIT - 1; i++) storage.setItem(`${ENTRY_KEY_FAMILY}k${i}`, JSON.stringify({ t: 1 + i, values: {} }));
+    storage.setItem(`${ENTRY_KEY_FAMILY}a`, JSON.stringify({ t: 9000, values: { scroll: 420 } }));
+    pushHash('#/x', {}, win, () => 'b', () => 9500);
+    expect(Object.keys(storage.data)).toHaveLength(ENTRY_LIMIT);
+    expect(storage.getItem(`${ENTRY_KEY_FAMILY}k0`)).toBeNull();
+    expect(loadEntry(storage, 'b', 'scroll')).toBe(420);
   });
 
   it('still pushes when the storage throws', () => {
