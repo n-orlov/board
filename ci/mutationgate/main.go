@@ -23,6 +23,8 @@
 //	mutationgate -config ci/quality.json -unmeasured
 //	                                               # application files changed since phase_base
 //	                                               # that no unit measures (exit 1 if any)
+//	                                               # (import-path-only rewrites board/ to village-hall/
+//	                                               # and the cmd/board/ to cmd/vh/ move are not changes)
 //	mutationgate -config ci/quality.json -excludes internal/server
 //	                                               # one gremlins -E regexp per out-of-scope file
 //	                                               # (a part: internal/server#ops)
@@ -719,13 +721,77 @@ func unmeasured(cfg config, root string) ([]string, error) {
 }
 
 // needsUnit reports whether a changed file is handwritten application code
-// (a non-test, non-generated .go file) that no unit of cfg measures.
+// (a non-test, non-generated .go file) that no unit of cfg measures and that
+// differs from phase_base by more than the rename (import paths, and the
+// cmd/board/ to cmd/vh/ move).
 func needsUnit(cfg config, root, f string) (bool, error) {
 	if !strings.HasSuffix(f, ".go") || strings.HasSuffix(f, "_test.go") || cfg.measures(f) {
 		return false, nil
 	}
+	if same, err := unchangedModuloRename(root, cfg.PhaseBase, f); err != nil || same {
+		return false, err
+	}
 	generated, err := isGenerated(filepath.Join(root, filepath.FromSlash(f)))
 	return !generated, err
+}
+
+// importLineRE matches one import spec line of a Go file that names a package
+// of the module, under its old path or its new one: an optional "import ", an
+// optional alias, the quoted path, an optional trailing comment.
+var importLineRE = regexp.MustCompile(`^(\s*import\s+|\s*)([\w.]+\s+)?"github\.com/n-orlov/(?:board|village-hall)/([^"]*)"(\s*//.*)?$`)
+
+// renamedModule is the module path every import is normalised to: the one the
+// phase started with.
+const renamedModule = "github.com/n-orlov/board/"
+
+// oldCmdDir and newCmdDir are the one directory move the rename makes.
+const (
+	oldCmdDir = "cmd/board/"
+	newCmdDir = "cmd/vh/"
+)
+
+// normaliseImports rewrites each import spec line of src to the module path
+// the phase started with, so a file that differs only by the rename reads the
+// same as its base. A line that is not an import spec is left as it is.
+func normaliseImports(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, l := range lines {
+		if m := importLineRE.FindStringSubmatch(l); m != nil {
+			lines[i] = m[1] + m[2] + "\"" + renamedModule + m[3] + "\"" + m[4]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// baseCounterpart is the path f had at the phase base: the same path, except
+// that a file under cmd/vh/ was under cmd/board/.
+func baseCounterpart(f string) string {
+	if rest, ok := strings.CutPrefix(f, newCmdDir); ok {
+		return oldCmdDir + rest
+	}
+	return f
+}
+
+// unchangedModuloRename reports whether the working-tree file f is, at the
+// phase base, the same file apart from its import paths (board/ to
+// village-hall/) and the cmd/board/ to cmd/vh/ move. A file the base does not
+// hold at that counterpart path is a change.
+func unchangedModuloRename(root, base, f string) (bool, error) {
+	cur, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f))) //nolint:gosec // G304: a path git diff listed inside the repository
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.Command("git", "show", base+":"+baseCounterpart(f)) //nolint:gosec // G204: the base commit the repository's own config names and a path git diff listed
+	cmd.Dir = root
+	old, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) { // git show exits non-zero when the base has no such file: the file is new
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return normaliseImports(string(cur)) == normaliseImports(string(old)), nil
 }
 
 // isGenerated reports whether the Go file at path carries the generated-code

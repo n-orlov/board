@@ -791,3 +791,79 @@ func TestDiffFlagSelectsAndJudgesOnlyTheChangedUnits(t *testing.T) {
 		t.Fatalf("unknown ref: exit %d:\n%s", c, out)
 	}
 }
+
+const (
+	oldImport = `import "github.com/n-orlov/board/internal/domain"`
+	newImport = `import "github.com/n-orlov/village-hall/internal/domain"`
+)
+
+func goFile(imp, body string) *string {
+	return src("package x\n\n" + imp + "\n\n" + body + "\n")
+}
+
+// unmeasuredAfterRename lists the unmeasured files of a fixture phase; no unit
+// of the config measures anything, so every file the rule does not discount is
+// reported.
+func unmeasuredAfterRename(t *testing.T, before, after map[string]*string) []string {
+	t.Helper()
+	root, base := phaseRepo(t, before, after)
+	got, err := unmeasured(config{Packages: []string{"internal/other"}, PhaseBase: base}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// R15: a file whose only difference from phase_base is its import paths
+// (board/ to village-hall/) is not a change.
+func TestUnmeasuredIgnoresAnImportOnlyChange(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, "var V = domain.X")},
+		map[string]*string{"internal/a/a.go": goFile(newImport, "var V = domain.X")})
+	if len(got) != 0 {
+		t.Fatalf("an import-only change was flagged: %v", got)
+	}
+}
+
+// R15: the same import rewrite plus one changed code line is a change.
+func TestUnmeasuredFlagsAnImportChangePlusOneCodeLine(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, "var V = domain.X")},
+		map[string]*string{"internal/a/a.go": goFile(newImport, "var V = domain.Y")})
+	if want := []string{"internal/a/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
+
+// R15: a file moved from cmd/board/ to cmd/vh/ that is identical apart from
+// its imports is not a change.
+func TestUnmeasuredIgnoresTheCmdMoveWhenOnlyImportsDiffer(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"cmd/board/main.go": goFile(oldImport, "func main() {}")},
+		map[string]*string{"cmd/board/main.go": nil, "cmd/vh/main.go": goFile(newImport, "func main() {}")})
+	if len(got) != 0 {
+		t.Fatalf("the cmd/board to cmd/vh move was flagged: %v", got)
+	}
+}
+
+// R15: a file the base never held is a change.
+func TestUnmeasuredFlagsANewFile(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, "var V = domain.X")},
+		map[string]*string{"internal/a/a.go": goFile(newImport, "var V = domain.X"), "internal/b/b.go": goFile(newImport, "var W = 1")})
+	if want := []string{"internal/b/b.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
+
+// R15: only the cmd/board to cmd/vh move is discounted; any other move of an
+// identical file is a change.
+func TestUnmeasuredFlagsAnUnrelatedMove(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, "var V = domain.X"), "cmd/board/main.go": goFile(oldImport, "func main() {}")},
+		map[string]*string{"internal/a/a.go": nil, "internal/b/a.go": goFile(oldImport, "var V = domain.X"),
+			"cmd/board/main.go": nil, "cmd/other/main.go": goFile(oldImport, "func main() {}")})
+	if want := []string{"cmd/other/main.go", "internal/b/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
