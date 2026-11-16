@@ -8,6 +8,9 @@
 // For each old key the value is copied when the new key is absent, and then the old key is removed: a new key that is
 // already present wins and the old value is dropped. A value that cannot be copied (a full quota) leaves its old key
 // where it was. A storage that is absent or throws (private mode, blocked storage) leaves the app on its defaults.
+//
+// Signing out clears both names: `clearOwnKeys` removes every `board.*` and `vh.*` key of a storage (view state,
+// theme, entry state) and leaves every other key alone.
 
 /** The slice of `Storage` the migration uses: tests pass a fake. */
 export interface MigrationStorage {
@@ -78,4 +81,25 @@ function open(read: () => MigrationStorage | undefined): MigrationStorage | unde
 export function migrateBrowserStorage(win: { readonly localStorage?: MigrationStorage; readonly sessionStorage?: MigrationStorage } = window): void {
   migrateStorage(open(() => win.localStorage), LOCAL_FAMILIES);
   migrateStorage(open(() => win.sessionStorage), SESSION_FAMILIES);
+}
+
+/** The prefixes of every key the app owns: the earlier name and the current one. */
+export const OWN_KEY_PREFIXES: readonly string[] = ['board.', 'vh.'];
+
+/** The slice of `Storage` that clearing needs. */
+export type ClearableStorage = Pick<MigrationStorage, 'key' | 'removeItem' | 'length'>;
+
+/** Sign out: removes every `board.*` and `vh.*` key of `storage` and nothing else; a storage that throws is left as it is. */
+export function clearOwnKeys(storage: ClearableStorage | undefined): void {
+  try {
+    if (!storage) return;
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key !== null && OWN_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.push(key);
+    }
+    for (const key of keys) storage.removeItem(key);
+  } catch {
+    // Nothing more can be done with a storage that throws.
+  }
 }

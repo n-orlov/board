@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { installScrollRestore } from './historyEntry';
 import {
-  clearAllViews,
   clearViewQuery,
   currentViewEnv,
   FilterTurns,
@@ -311,37 +310,6 @@ describe('saveViewQuery and clearViewQuery', () => {
     expect(() => saveViewQuery(undefined, 'tasks', 'a=b')).not.toThrow();
     expect(loadViewQuery(throwingStorage(), 'tasks')).toBeNull();
     expect(loadViewQuery(undefined, 'tasks')).toBeNull();
-  });
-});
-
-describe('clearAllViews', () => {
-  it('removes every vh.view.* key of every version and nothing else', () => {
-    const storage = fakeStorage({
-      [KEY]: stored('a=b'),
-      'vh.view.v1.initiative': stored('c=d'),
-      'vh.view.v9.tasks': 'x',
-      'vh.theme': 'dark',
-      'other': 'y',
-    });
-    clearAllViews(storage);
-    expect(Object.keys(storage.data).sort()).toEqual(['other', 'vh.theme']);
-  });
-
-  it('removes the board.view.* keys of the earlier name too (R3)', () => {
-    const storage = fakeStorage({
-      'board.view.v1.tasks': stored('a=b'),
-      'board.view.v2.tasks': 'x',
-      [KEY]: stored('a=b'),
-      'board.theme': 'dark',
-      'other': 'y',
-    });
-    clearAllViews(storage);
-    expect(Object.keys(storage.data).sort()).toEqual(['board.theme', 'other']);
-  });
-
-  it('survives a throwing storage and a missing one', () => {
-    expect(() => clearAllViews(throwingStorage())).not.toThrow();
-    expect(() => clearAllViews(undefined)).not.toThrow();
   });
 });
 

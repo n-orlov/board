@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOCAL_FAMILIES, SESSION_FAMILIES, migrateBrowserStorage, migrateStorage, type MigrationStorage } from './storageMigration';
+import { LOCAL_FAMILIES, SESSION_FAMILIES, clearOwnKeys, migrateBrowserStorage, migrateStorage, type MigrationStorage } from './storageMigration';
 
 function memory(initial: Record<string, string> = {}) {
   const data = { ...initial };
@@ -138,5 +138,44 @@ describe('migrateBrowserStorage', () => {
 
   it('survives a window with no storage', () => {
     expect(() => migrateBrowserStorage({})).not.toThrow();
+  });
+});
+
+describe('clearOwnKeys', () => {
+  it('removes every vh.view.* key of every version, the theme and every other vh.* key, and nothing else', () => {
+    const storage = memory({
+      'vh.view.v1.tasks': '{"v":1,"query":"a=b"}',
+      'vh.view.v1.initiative': '{"v":1,"query":"c=d"}',
+      'vh.view.v9.tasks': 'x',
+      'vh.theme': 'dark',
+      'other': 'y',
+      'vhx.theme': 'not ours',
+    });
+    clearOwnKeys(storage);
+    expect(Object.keys(storage.data).sort()).toEqual(['other', 'vhx.theme']);
+  });
+
+  it('removes the board.* keys of the earlier name too: view state and theme (R3)', () => {
+    const storage = memory({
+      'board.view.v1.tasks': '{"v":1,"query":"a=b"}',
+      'board.view.v2.tasks': 'x',
+      'vh.view.v1.tasks': '{"v":1,"query":"a=b"}',
+      'board.theme': 'dark',
+      'other': 'y',
+      'boardx.theme': 'not ours',
+    });
+    clearOwnKeys(storage);
+    expect(Object.keys(storage.data).sort()).toEqual(['boardx.theme', 'other']);
+  });
+
+  it('removes the board.entry.* and vh.entry.* keys of a sessionStorage', () => {
+    const storage = memory({ 'board.entry.k1': '{}', 'vh.entry.k2': '{}', 'vh.entry.k3': '{}', 'other.entry.k': 'y' });
+    clearOwnKeys(storage);
+    expect(storage.data).toEqual({ 'other.entry.k': 'y' });
+  });
+
+  it('survives a throwing storage and a missing one', () => {
+    expect(() => clearOwnKeys(throwing())).not.toThrow();
+    expect(() => clearOwnKeys(undefined)).not.toThrow();
   });
 });

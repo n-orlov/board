@@ -149,6 +149,20 @@ describe('currentBrowser', () => {
     };
     expect(currentBrowser(blocked).storage).toBeUndefined();
   });
+
+  it('hands the window sessionStorage over, and none where reading it throws', () => {
+    const location = { assign: vi.fn(), pathname: '/', hash: '' };
+    const tab = memoryStorage({});
+    expect(currentBrowser({ fetch: vi.fn(), location, sessionStorage: tab }).sessionStorage).toBe(tab);
+    const blocked = {
+      fetch: vi.fn(),
+      location,
+      get sessionStorage(): never {
+        throw new Error('blocked');
+      },
+    };
+    expect(currentBrowser(blocked).sessionStorage).toBeUndefined();
+  });
 });
 
 describe('initialState', () => {
@@ -222,47 +236,54 @@ describe('SessionController', () => {
     expect(setHash).toHaveBeenCalledWith('#/signed-out');
   });
 
-  it('clears every vh.view.* key on Sign out and leaves the other keys (R16)', async () => {
+  it('clears every vh.view.* key on Sign out and leaves the keys that are not the app\'s (R16)', async () => {
     const storage = memoryStorage({
       'vh.view.v1.tasks': '{"v":1,"query":"status=done"}',
       'vh.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
       'vh.view.v2.tasks': 'a later version',
-      'vh.theme': 'dark',
+      'other': 'kept',
     });
     const { c, fetchFn, b } = controller(async () => Response.json(session));
     b.storage = storage;
     await c.start();
     fetchFn.mockImplementation(async () => new Response(null, { status: 204 }));
     expect(await c.signOut()).toBe('signed-out');
-    expect(Object.keys(storage.data)).toEqual(['vh.theme']);
+    expect(Object.keys(storage.data)).toEqual(['other']);
   });
 
-  it('clears both the board.view.* and the vh.view.* families on Sign out (R3)', async () => {
-    const storage = memoryStorage({
+  it('clears every board.* and vh.* key of both storages on Sign out: view state, theme and entry state (R3)', async () => {
+    const local = memoryStorage({
       'board.view.v1.tasks': '{"v":1,"query":"status=done"}',
       'board.view.v2.tasks': 'a later version',
+      'board.theme': 'light',
       'vh.view.v1.tasks': '{"v":1,"query":"status=done"}',
       'vh.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
       'vh.view.v2.tasks': 'a later version',
       'vh.theme': 'dark',
+      'other': 'kept',
     });
+    const tab = memoryStorage({ 'board.entry.test': '{"t":1}', 'vh.entry.test': '{"t":2}', 'other': 'kept' });
     const { c, fetchFn, b } = controller(async () => Response.json(session));
-    b.storage = storage;
+    b.storage = local;
+    b.sessionStorage = tab;
     await c.start();
     fetchFn.mockImplementation(async () => new Response(null, { status: 204 }));
     expect(await c.signOut()).toBe('signed-out');
-    expect(Object.keys(storage.data)).toEqual(['vh.theme']);
-    expect(Object.keys(storage.data).filter((k) => k.startsWith('board.') || k.startsWith('vh.view.'))).toEqual([]);
+    expect(Object.keys(local.data)).toEqual(['other']);
+    expect(Object.keys(tab.data)).toEqual(['other']);
   });
 
-  it('keeps the saved view state when the logout fails', async () => {
-    const storage = memoryStorage({ 'vh.view.v1.tasks': '{"v":1,"query":"status=done"}' });
+  it('keeps the saved view state, the theme and the entry state when the logout fails', async () => {
+    const storage = memoryStorage({ 'vh.view.v1.tasks': '{"v":1,"query":"status=done"}', 'vh.theme': 'dark' });
+    const tab = memoryStorage({ 'vh.entry.test': '{"t":2}' });
     const { c, fetchFn, b } = controller(async () => Response.json(session));
     b.storage = storage;
+    b.sessionStorage = tab;
     await c.start();
     fetchFn.mockImplementation(async () => new Response('{}', { status: 403 }));
     expect(await c.signOut()).toBe('failed');
-    expect(Object.keys(storage.data)).toEqual(['vh.view.v1.tasks']);
+    expect(Object.keys(storage.data)).toEqual(['vh.view.v1.tasks', 'vh.theme']);
+    expect(Object.keys(tab.data)).toEqual(['vh.entry.test']);
   });
 
   it('stays signed in when the logout fails', async () => {
