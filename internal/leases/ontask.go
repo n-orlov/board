@@ -138,6 +138,11 @@ func (s Store) RenewHeldIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, p
 	if err != nil {
 		return nil, err
 	}
+	return s.renewEach(ctx, tx, actorID, principal, held, now)
+}
+
+// renewEach renews each of the held leases in tx and returns them as renewed.
+func (s Store) renewEach(ctx context.Context, tx *sql.Tx, actorID string, principal string, held []Lease, now time.Time) ([]Lease, error) {
 	out := make([]Lease, len(held))
 	for i, l := range held {
 		task, err := s.lockTask(ctx, tx, l.TaskID)

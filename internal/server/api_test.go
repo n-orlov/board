@@ -638,6 +638,7 @@ func TestAFailingOperationAnswersAProblemDocument(t *testing.T) {
 		"POST /api/v1/tasks/aa-1/done", "POST /api/v1/tasks/aa-1/reopen", "POST /api/v1/tasks/aa-1/close",
 		"POST /api/v1/leases", "/api/v1/leases", "/api/v1/leases/L1", "POST /api/v1/leases/L1/renew", "POST /api/v1/leases/L1/end", "POST /api/v1/leases/L1/ack", "/api/v1/now",
 		"POST /api/v1/asks", "/api/v1/asks", "/api/v1/asks/A1", "POST /api/v1/asks/A1/answer", "POST /api/v1/asks/A1/withdraw",
+		"POST /api/v1/start", "POST /api/v1/finish", "POST /api/v1/ping", "POST /api/v1/catchup",
 		"/api/v1/meta", "PUT /api/v1/actors/me/protocol-seen", "/api/v1/stream",
 	}
 	for _, mode := range []string{"fails", "wrong type", "unwritable"} {
@@ -1038,5 +1039,41 @@ func TestAnUnreadableRequestAnswersAProblemDocument(t *testing.T) {
 	requestUnreadable(rec, httptest.NewRequest(http.MethodGet, "/", nil), errBroken)
 	if rec.Code != http.StatusBadRequest || rec.Header().Get("Content-Type") != "application/problem+json" {
 		t.Errorf("unreadable request = %d %q, want 400 application/problem+json", rec.Code, rec.Header().Get("Content-Type"))
+	}
+}
+
+// TestPingRefusesABodyThatIsNotJSONAndAcceptsNone: the ping body is optional,
+// so an empty one reaches the operation, but one that is not JSON is a 400
+// problem and never reaches it.
+func TestPingRefusesABodyThatIsNotJSONAndAcceptsNone(t *testing.T) {
+	t.Parallel()
+	called := 0
+	count := func(next StrictHandlerFunc, _ string) StrictHandlerFunc {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+			called++
+			return next(ctx, w, r, request)
+		}
+	}
+	mux := http.NewServeMux()
+	HandlerFromMux(strictOperations(stubOperations{mode: "fails"}, count), mux)
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		reached    int
+	}{
+		{"not JSON", `{"progress":`, http.StatusBadRequest, 0},
+		{"no body", ``, http.StatusInternalServerError, 1},
+	} {
+		called = 0
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/ping", strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != tc.status || called != tc.reached {
+			t.Errorf("%s: status %d, operation called %d times; want %d and %d", tc.name, rec.Code, called, tc.status, tc.reached)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
+			t.Errorf("%s: Content-Type = %q, want application/problem+json", tc.name, ct)
+		}
 	}
 }

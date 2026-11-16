@@ -47,6 +47,12 @@ func (o pingOps) Ping(ctx context.Context, req PingRequestObject) (PingResponseO
 		}
 		return nil, err
 	}
+	return Ping200JSONResponse(pingResult(res)), nil
+}
+
+// pingResult is the answer for what the ping renewed and wrote: the leases as
+// the API shows them and the milestones as a list, never null.
+func pingResult(res checkin.PingResult) PingResult {
 	out := PingResult{Leases: make([]Lease, len(res.Leases)), Milestones: res.Milestones}
 	if out.Milestones == nil {
 		out.Milestones = []string{}
@@ -54,5 +60,5 @@ func (o pingOps) Ping(ctx context.Context, req PingRequestObject) (PingResponseO
 	for i, l := range res.Leases {
 		out.Leases[i] = apiLease(l)
 	}
-	return Ping200JSONResponse(out), nil
+	return out
 }

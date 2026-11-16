@@ -54,16 +54,9 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	switch args[0] {
 	case "version":
-		if len(args) != 1 {
-			return usage(stderr)
-		}
-		_, _ = fmt.Fprintln(stdout, version.Line())
-		return ExitOK
+		return versionCmd(args[1:], stdout, stderr)
 	case "serve":
-		if len(args) != 1 {
-			return usage(stderr)
-		}
-		return serve(stderr, env)
+		return serveCmd(args[1:], stderr, env)
 	case "update":
 		return updateCmd(args[1:], stdout, stderr, env)
 	case "help":
@@ -73,6 +66,23 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 	default:
 		return runClient(args, stdout, stderr, env)
 	}
+}
+
+// versionCmd runs `vh version`, which takes no argument.
+func versionCmd(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		return usage(stderr)
+	}
+	_, _ = fmt.Fprintln(stdout, version.Line())
+	return ExitOK
+}
+
+// serveCmd runs `vh serve`, which takes no argument.
+func serveCmd(args []string, stderr io.Writer, env Env) int {
+	if len(args) != 0 {
+		return usage(stderr)
+	}
+	return serve(stderr, env)
 }
 
 // clientCommands are the subcommands that call the server at VH_URL.
