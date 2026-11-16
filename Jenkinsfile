@@ -327,7 +327,13 @@ pipeline {
           // and probed.
           units << [name: 'Image', minutes: 30, signal: 'Image',
                     body: {
-                      sh(returnStatus: true, script: 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"')
+                      int rc = sh(returnStatus: true, script: 'ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"')
+                      if (rc != 0) {
+                        return rc
+                      }
+                      // The release dry run (SPEC 12.5): every asset built at this commit and
+                      // checked, nothing published.
+                      sh(returnStatus: true, script: 'ci/release-check.sh "$BOARD_CI_OUT"')
                     },
                     extraStash: { stash name: 'image', includes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true }]
           units << [name: 'Allure smoke', minutes: 15,

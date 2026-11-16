@@ -3627,9 +3627,14 @@ network requests (all assets embedded).
 
 ### 12.5 Release artifacts
 
-Per release: `board_<os>_<arch>.tar.gz` for linux/darwin × amd64/arm64, `checksums.txt`
-(SHA-256), SBOMs, the multi-arch image, and `install.sh` / `INSTALL-AGENT.md` from the tagged
-commit. Releases are immutable (§8.5, §15.3).
+Per release: `vh_<os>_<arch>.tar.gz` for linux/darwin × amd64/arm64 (a `vh` at the archive root,
+built with `CGO_ENABLED=0` and `-trimpath`, the version and the revision stamped in), `checksums.txt`
+(`<sha256>  <file>` for every other asset), a CycloneDX SBOM per tarball and one for the image, the
+multi-arch image `village-hall` (linux/amd64 and linux/arm64, built as §12.4 builds it), and `install.sh` /
+`INSTALL-AGENT.md` from the tagged commit. `ci/release-build.sh <version> <outdir>` builds all of it and
+publishes nothing; every CI build runs it as a dry run (`ci/release-check.sh`, in the Image unit) and asserts the
+four tarballs, that `checksums.txt` verifies, that the linux/amd64 `vh version` prints the version, that
+every SBOM parses and that the OCI index lists both platforms. Releases are immutable (§8.5, §15.3).
 
 ---
 
@@ -3838,7 +3843,7 @@ there marks the build UNSTABLE), and an infrastructure failure gets another atte
 | Lint (Core) | `ci/run.sh ci/lint.sh`: gofmt, go vet, mod tidy drift, golangci-lint | plus ESLint, `svelte-check`, `tsc --noEmit`, OpenAPI lint, generated-code drift check, `install.sh` ↔ `INSTALL-AGENT.md` agreement (§8.5), shellcheck |
 | Suite (Core) | `ci/run.sh ci/suite.sh`: gotestsum, fail-once-retry-once, flaky list, JUnit, coverage merged from the unit pass and the Godog scenarios' `-cover` board binary (a leg that ran scenarios without leaving feature counters fails the suite) | adds the Postgres leg of the matrix, Vitest, Playwright (retry-once at the suite level: a failed run is repeated whole, every spec runs again, unlike the Go and Godog reruns, which select the failed tests by name) |
 | Allure smoke (Core) | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
-| Image (Core) | — (not in deck as a unit) | builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, never pushed); the amd64 tar feeds the image gates |
+| Image (Core) | — (not in deck as a unit) | builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, never pushed), then runs the release dry run (`ci/release-check.sh`, §12.5); the amd64 tar feeds the image gates |
 | Quality (Core) | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. It waits for Suite (the coverage) and Image (the tar) without holding an executor. The two mutation rows are reported as judged by the Mutation phase (`--mutation-deferred`), whose reports exist only after it and only when it ran |
 | Stability | `EXTENDED=true` or the nightly timer: three units, each `ci/stability.sh 1`, then the Perf unit (`ci/perf.sh`, §14, 30 minutes, alone on the agent, `perf.json` archived) | same |
 | Mutation | — (not in deck) | one unit, only with `MUTATION=true`, `MUTATION_FULL=true` or the nightly timer (`EXTENDED=true` alone runs no mutation, and a push build of `main` runs none), §15.4. Diff mode (`MUTATION=true`): only the lines changed since the merge base with `origin/<CHANGE_TARGET or main>` (`HEAD~1` on `main`), one 45-minute unit. Full mode (`MUTATION_FULL=true` or the nightly timer on `main`): every package plus Stryker in one unit (`ci/mutation.sh ... all`), `nproc / 2` gremlins workers at GOMAXPROCS 2, `nice 10`, one 6-hour limit and a single attempt, about 70 minutes. `ci/mutation.sh` judges efficacy and break against the same `ci/quality.json` thresholds and fails the build below them |

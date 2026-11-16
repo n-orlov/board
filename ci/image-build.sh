@@ -34,7 +34,12 @@ revision=${BOARD_IMAGE_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}
 
 tar_path=${1:-ci-results/board-image.tar}
 oci_path="$(dirname "$tar_path")/board-image-oci.tar"
-tag=board:ci
+# BOARD_IMAGE_TAG renames the amd64 image loaded into the daemon, and
+# BOARD_IMAGE_NAME names the image in the OCI layout (its ref.name annotation);
+# ci/release-build.sh sets both so the release image is village-hall:<version>
+# and never replaces board:ci.
+tag=${BOARD_IMAGE_TAG:-board:ci}
+oci_name=${BOARD_IMAGE_NAME:-}
 builder="board-image-$$"
 work=$(mktemp -d)
 cleanup() {
@@ -61,7 +66,7 @@ rm -f "$tar_path" "$oci_path"
 docker buildx build --builder "$builder" -f Dockerfile \
 	--platform linux/amd64,linux/arm64 --provenance=false --sbom=false \
 	--build-arg "VERSION=$version" --build-arg "REVISION=$revision" \
-	--output "type=oci,dest=$oci_path" .
+	--output "type=oci,dest=$oci_path${oci_name:+,name=$oci_name}" .
 # The amd64 image again, from the builder's cache: loaded and saved.
 docker buildx build --builder "$builder" -f Dockerfile \
 	--platform linux/amd64 --provenance=false --sbom=false \

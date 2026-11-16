@@ -120,7 +120,7 @@ passed):
 
 | phase | units | runs |
 |---|---|---|
-| Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
+| Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
 | Stability | three units, each `ci/stability.sh 1`, then the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes) | `EXTENDED=true` or the nightly timer |
 | Mutation | one unit, in one of two modes (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
 
@@ -230,6 +230,9 @@ provider, `/data` holding a SQLite file at the 0315466 schema) and checks `/heal
 the existing `brd_` key, the existing `board_session` cookie and the rows; a container
 of it must answer `GET /healthz` with 200. Both run in the Image unit of the Core
 phase, whose tar the Quality unit then scans with `ci/quality.sh`.
+
+The Image unit then runs the release dry run, `ci/release-check.sh` (below, "Release build"): it
+builds every release asset at the commit being built and asserts them, and publishes nothing.
 `ci/repocheck` fails when the final stage is not scratch or
 distroless static, has a `RUN`, runs as root or sets no user, lacks the CA
 certificates or tzdata, when a builder `FROM` lacks `--platform=$BUILDPLATFORM`, or
@@ -282,6 +285,27 @@ builds nothing, publishes nothing, creates no tag, holds no credential and
 behaves as a dry run whatever `DRY_RUN` says. `ci/repocheck/jenkinsfile_test.go`
 fails if it gains a Build or Publish stage, a credential, a push or `gh release`,
 or loses the validation.
+
+## Release build
+
+`ci/release-build.sh <version> <outdir>` (`<version>` is `vMAJOR.MINOR.PATCH[-pre]`; the revision is
+`BOARD_IMAGE_REVISION` or the checked-out commit) writes, at the top of `<outdir>`, the release's assets:
+`vh_{linux,darwin}_{amd64,arm64}.tar.gz` (a `vh` at the archive root, built with `CGO_ENABLED=0`,
+`-trimpath` and `-tags timetzdata`, the version and revision stamped in through `internal/version`,
+name-sorted root-owned entries with the commit's own time), one CycloneDX SBOM per tarball
+(`vh_<os>_<arch>.cdx.json`, Trivy `rootfs`), `village-hall-image.cdx.json` (Trivy `image` over the
+amd64 image), `install.sh` and `INSTALL-AGENT.md` from the commit, and `checksums.txt`, `<sha256>  <file>`
+for every other file at the top. The multi-arch image (linux/amd64 and linux/arm64, built by
+`ci/image-build.sh` with `BOARD_IMAGE_NAME=village-hall:<version>` and `BOARD_IMAGE_TAG`, so
+`board:ci` is untouched) is `<outdir>/image/board-image-oci.tar`: not an asset, it is what the publish
+step pushes.
+
+`ci/release-check.sh [dir]` is the dry run, in the Image unit after `ci/image-check.sh`: it builds
+`v0.0.0-dryrun` into `<dir>/release-dryrun`, runs `ci/repocheck`'s `TestReleaseBuild*` tests (build
+tag `releasebuild`; they assert the four tarballs, that `checksums.txt` verifies and covers every
+asset, that the linux/amd64 `vh version` prints the version, that every SBOM parses and that the OCI
+index lists both platforms) through `ci/run.sh`, writes their JUnit to `<dir>/junit-merged/junit-release-dryrun.xml`,
+keeps `<dir>/release-dryrun-checksums.txt` and removes the assets and the `village-hall:v0.0.0-dryrun` tag.
 
 ## Quality gates
 
@@ -555,6 +579,9 @@ Scripts, each run through `ci/run.sh` unless noted:
   `board version` and `GET /api/v1/meta`.
 - `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `vh version`,
   the deployed-configuration test and a `/healthz` probe against `board:ci`.
+- `ci/release-build.sh <version> <outdir>`: builds the release assets of SPEC 12.5 into
+  `<outdir>` (inside the checkout; on the agent, outside `ci/run.sh`) and pushes, uploads and tags
+  nothing; see "Release build" below. `ci/release-check.sh [dir]` is its dry run.
 - `ci/imagecheck`: the Go tool that reads the OCI layout (both manifests, user,
   entrypoint, title, compressed size, the ELF machine of `/vh`); its `imagedeploy`
   test (`deployed_test.go`) starts the loaded image as the deployment does.
