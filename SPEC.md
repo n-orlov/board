@@ -1658,14 +1658,14 @@ refuses a database that is not migrated (one stderr line ending `→ vh admin mi
   <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
   positive count of days (`90d`) or hours (`12h`), at most 36500 days in either unit (`36500d`, `876000h`), and the flag may come before or
   after the name; without it the key never expires. `created_by` is `admin-cli`. A name that already exists
-  exits 1 with the single stderr line `board: key "<name>" already exists → vh admin keys list`, and
+  exits 1 with the single stderr line `vh: key "<name>" already exists → vh admin keys list`, and
   stores nothing.
 - `vh admin keys list` prints one line per key, oldest first, and never the key:
   `<name> brd_<display prefix> <active|expired|revoked> created <YYYY-MM-DD>`, followed by ` exp <date>`,
   ` used <date>` and ` revoked <date>` for the dates the key has. No keys prints nothing (exit 0).
 - `vh admin keys revoke <name>` sets `revoked_at` and prints `ok key <name> revoked`. Revoking a
   revoked key prints `ok key <name> already revoked` (exit 0) and keeps the first `revoked_at`. An unknown
-  name exits 4 with `board: key "<name>" not found → vh admin keys list`.
+  name exits 4 with `vh: key "<name>" not found → vh admin keys list`.
 - A malformed command line (missing or extra arguments, an unknown flag) exits 2 with the single stderr line
   `usage: vh admin keys create <name> [--expires 90d] | list | revoke <name>`. An invalid name or
   `--expires` value exits 2 with one `vh: …` stderr line.
@@ -1807,7 +1807,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `created by`, `done by` and `closed (<resolution>) by` lines, `blocked by <ref> (<status>) <title>` per open or
   closed dependency, `blocking <ref> (<status>) <title>` per task it blocks, `lease L<n> by <handle>: <intent> (expires in
   …)` per live lease, an `attention: <markers>` line (the markers of `task ls`) after `initiative:` when the task
-  needs attention, and for a stranded task a line `stranded: L<n> by <holder>: "<intent>" expired <age> ago → board
+  needs attention, and for a stranded task a line `stranded: L<n> by <holder>: "<intent>" expired <age> ago → vh
   lease ack L<n>` after it (`<holder>` is the handle; `<age>` is `2m`, `3h` or `4d`), the description, then `events:`
   and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → vh task ls`.
 - `vh task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
@@ -1821,9 +1821,9 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `close` sends the resolution, `completed` when `--resolution` is not given. `--for operator` sends
   `Board-On-Behalf-Of: operator`, which the server stores as the `on_behalf_of` of the `task_closed` event; an agent
   uses it only when the operator told it to close. A resolution outside the four and a `--for` other than `operator` are
-  exit 2 with `board: --resolution: invalid resolution …` or `vh: --for: invalid actor …`, before any request is
+  exit 2 with `vh: --resolution: invalid resolution …` or `vh: --for: invalid actor …`, before any request is
   sent; `--resolution` and `--for` belong to `close` alone. A move the task's status does not allow (done on a done or
-  closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → board
+  closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → vh
   task show <ref>`; an unknown task exits 4 with `→ vh task ls`. Done and close end the live leases on the task (§4.3, §6.4).
   `done` takes an optional outcome after the ref and sends it as `outcome`; the caller's own live lease ends with it (`done`
   when none is given). `--force` sends `force: true`, which ends every live lease on the task, the caller's own too, with
@@ -1851,7 +1851,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   (listed from `GET /api/v1/leases?state=live&actor=<me>`), one `ok` line each in lease order, and `--json` then prints an array
   of `{lease, conflicts}`. `--ttl` and `--intent` are sent only when given. A lease that ran out exits 6 with
   `lease L7 expired 14m ago → vh lease start <task> "<intent>"` (the task is the lease's own; `<intent>` stays the
-  placeholder), a lease that ended exits 6 with the server's detail and the same start, an unknown lease exits 4 with `→ board
+  placeholder), a lease that ended exits 6 with the server's detail and the same start, an unknown lease exits 4 with `→ vh
   lease ls`, an unknown task with `→ vh task ls`, and no lease of mine on the task or no live lease with no argument exits 4
   (`you hold no live lease → vh lease ls`).
 - `vh lease end [<L…>|<task>] ["<outcome>"] [--json]` calls `POST /api/v1/leases/<ref>/end` and prints `ok lease L<n> ended`
@@ -1869,7 +1869,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   /api/v1/leases` and prints one line per lease, oldest first, `L<n>  <state>  <task>  <holder>  "<intent>"  res a,b  exp
   41m` (the `res` part only when it holds resources; `expired 14m ago` or `ended 3m ago` in place of `exp` for the other
   states). The state is `live` by default, `--mine` keeps the leases I hold, `--task` and `--res` filter by task and resource;
-  the cap is 20 as for the other lists with a `+K more → vh lease ls … --all` line, and an unknown task exits 4 with `→ board
+  the cap is 20 as for the other lists with a `+K more → vh lease ls … --all` line, and an unknown task exits 4 with `→ vh
   task ls`. A `--state` outside the four is exit 2.
 - **Conflicts.** `lease start` and `lease renew` print each conflict the server answers on its own line after the `ok` line,
   `CONFLICT <shared resources>: L<n> <holder> (<task>) "<intent>" exp <time left>` (resources joined by `,`, one line for
@@ -1953,7 +1953,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   the asks I raised, `--task` those on one task; the cap is 20 as for the other lists with a `+K more → vh ask ls … --all` line.
   An unknown task exits 4 with `→ vh task ls`; a `--state` outside the four is exit 2.
 - `vh ask withdraw <A…> ["<reason>"] [--json]` calls `POST /api/v1/asks/<ref>/withdraw` and prints `ok ask A<n> withdrawn`
-  (`--json`: the ask). An ask that is not open exits 6 with `<detail> → vh ask show A<n>`; an unknown ask exits 4 with `→ board
+  (`--json`: the ask). An ask that is not open exits 6 with `<detail> → vh ask show A<n>`; an unknown ask exits 4 with `→ vh
   ask ls`.
 - `vh answer <A…> "<answer>" [--relay] [--for <handle>] [--json]` calls `POST /api/v1/asks/<ref>/answer` and prints `ok ask A<n>
   answered` (`--json`: the ask). The channel is `api`; with `--relay` it is `relay`, and `--for` names the person the relayed answer
@@ -1986,7 +1986,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh check <task> "<summary>" [--next D] [--json]` calls `POST /api/v1/tasks/<task>/checks` and prints `ok task <ref>
   checked` (`--json`: the task). `--next` takes a duration (`24h`) and sends `next_check_at` as that long from now; without
   it the server moves the next check on by the task's cadence. A task that is not a watch task, or is closed, exits 6 with
-  `<detail> → vh task show <ref>`; an unknown task exits 4 with `→ vh task ls`; a bad `--next` is exit 2 with `board:
+  `<detail> → vh task show <ref>`; an unknown task exits 4 with `→ vh task ls`; a bad `--next` is exit 2 with `vh:
   --next: invalid duration …`, before any request is sent.
 - `vh task events <ref> [--limit N|--all] [--json]` and `vh events [--since S] [--task ref] [--initiative slug]
   [--type t]... [--actor handle] [--limit N|--all] [--json]` call `GET /api/v1/tasks/<ref>/events` and `GET /api/v1/events`
@@ -3419,7 +3419,7 @@ browser login is off and only API keys authenticate (§3.3); there is no unauthe
 and tests use a mock provider (§3.2, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
 proxy, since the session cookie is `Secure`. Register the redirect URI
 `<VH_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
-`board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
+`vh backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
 
 **Image version.** The root `Dockerfile` takes two build args, `VERSION` (default `devel`) and `REVISION`
 (default empty), and passes them to `go build` as the linker flags
@@ -3521,7 +3521,7 @@ frontend's coverage/CRAP/mutation gates.
 
 The Playwright layer lives in `e2e/` (own `package.json`, exact pins). `e2e/playwright.config.ts`
 sets `retries: 0` and the five reporters, picks a free port, and starts the real binary through
-`e2e/serve.sh`: it builds the checkout's `board`, migrates a fresh temporary SQLite store, seeds
+`e2e/serve.sh`: it builds the checkout's `vh` binary, migrates a fresh temporary SQLite store, seeds
 it with an API key, and serves on that port with the embedded UI. `E2E_OUT` moves every
 reporter's output (default `e2e/out/`). One spec runs: `smoke.spec.ts` loads `/` and asserts the
 shell rendered (the placeholder page fails it). Run one spec with

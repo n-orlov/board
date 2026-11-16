@@ -28,14 +28,14 @@ cd "$root"
 if [ ! -f internal/webui/dist/index.html ]; then
     (cd web && npm ci --no-audit --no-fund && npm run build) >&2
 fi
-go build -o "$work/board" ./cmd/vh
+go build -o "$work/vh" ./cmd/vh
 go build -o "$work/fake-oidc" ./cmd/fake-oidc
 
 # Only the variables this store needs: nothing from the caller's BOARD_* or VH_* leaks in.
 for v in $(env | sed -n -e 's/^\(BOARD_[A-Za-z0-9_]*\)=.*/\1/p' -e 's/^\(VH_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 export BOARD_DB_URL="sqlite://$work/board.db"
 
-"$work/board" admin migrate >&2
+"$work/vh" admin migrate >&2
 
 # The mock identity provider signs in $E2E_EMAIL. Its client secret is made up for
 # this run and handed to both processes through their environment, never a file.
@@ -59,6 +59,6 @@ BOARD_LISTEN="127.0.0.1:$port" \
     BOARD_OIDC_CLIENT_ID=board \
     BOARD_OIDC_CLIENT_SECRET="$secret" \
     BOARD_OIDC_ALLOWED_EMAILS="$E2E_EMAIL" \
-    "$work/board" serve &
+    "$work/vh" serve &
 pid=$!
 wait "$pid"

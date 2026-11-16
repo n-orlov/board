@@ -13,7 +13,7 @@ export default function globalSetup(): void {
     if (!name.startsWith('BOARD_')) env[name] = value;
   }
   env.BOARD_DB_URL = `sqlite://${join(work, 'board.db')}`;
-  const out = execFileSync(join(work, 'board'), ['admin', 'keys', 'create', 'e2e'], { env, encoding: 'utf8' });
+  const out = execFileSync(join(work, 'vh'), ['admin', 'keys', 'create', 'e2e'], { env, encoding: 'utf8' });
   const key = out.trim().split(/\s+/).pop() ?? '';
   if (!/^brd_[0-9a-z]{52}$/.test(key)) throw new Error('vh admin keys create did not print a key');
   process.env.E2E_API_KEY = key;
