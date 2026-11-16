@@ -657,7 +657,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -695,6 +695,25 @@ The outbox of alerts (§5.4). It is unique on `(event_id, kind)`, so one event n
 A row is only ever written by the transaction that appends its event (§5.4), so a refused or rolled-back write
 leaves none, and nothing deletes or cancels a row afterwards.
 
+### 4.12 `idempotency_keys`
+
+| column | type | notes |
+|---|---|---|
+| principal | text | who sent the key (§3.1); with `key_hash`, the primary key |
+| key_hash | text | SHA-256 (hex) of the principal and the `Idempotency-Key`; the key is never stored |
+| fingerprint | text | SHA-256 (hex) of the first request: method, path with query, actor and body |
+| state | text | `running` from the claim until the answer is stored, then `done` (a check constraint refuses any other) |
+| status | integer, null | the answer's status once `done` |
+| content_type | text, null | the answer's `Content-Type` once `done` |
+| body | text, null | the answer's body once `done`, sealed (base64 of the nonce and an AES-256-GCM ciphertext under a key derived from the principal and the key) |
+| created_at | timestamp | when the key was first used; a row older than 24 hours is stale |
+
+The Idempotency-Key rows (§6.1). A request claims its key with one insert that does nothing on a conflict, so two requests with
+one key never both run; the answer is stored, or the claim released, when the request ends. A row older than 24
+hours is replaced by the next use of its key and deleted by the sweeper (§5.1); the index on `created_at` is for that
+sweep. `00010_idempotency` creates it, with the same DDL on SQLite and Postgres, and is additive: no existing table
+changes.
+
 ---
 
 ## 5. Derived state
@@ -715,7 +734,7 @@ leaves none, and nothing deletes or cancels a row afterwards.
   its expiry even with the sweeper off. Expiry is idempotent and safe with several replicas (conditional
   update `WHERE state='live' AND expires_at < ?`: of two servers that race, one marks the lease and writes
   its one `lease_expired` event, the other finds it already expired). The same tick deletes expired
-  sessions (§4.9).
+  sessions (§4.9) and the Idempotency-Key rows older than 24 hours (§4.12).
 
 ### 5.2 Conflicts
 
@@ -898,8 +917,32 @@ event, the task, initiative, ask, lease and actor rows named above.
   the meta header are stored on the actor row by that upsert. `Board-On-Behalf-Of` names the actor a write is made for.
   `POST /api/v1/tasks/{ref}/close` records it as the `on_behalf_of` of the `task_closed` event (§6.4); every other
   operation accepts the header and ignores it. Session requests always act as the operator.
-- Idempotency: mutating `POST`s accept `Idempotency-Key`; a replay within 24 h returns the
-  original response. Agents retry safely.
+- Idempotency: every `POST` under `/api/v1` accepts `Idempotency-Key`, so agents retry safely (the OpenAPI
+  document lists the header on each of them, and a test reads that list from it). The header holds exactly one value of
+  1 to 255 printable ASCII characters (`0x20` to `0x7E`); anything else (empty, longer, a control or non-ASCII byte, or
+  two header rows) is 400 with a `next`. Keys are scoped per principal (§3.1): another principal sending the same key
+  makes a new request. The server remembers a key for 24 hours from its first use:
+  - The same method, path with query, actor and body sent again with the key is **replayed**: the original status and
+    body, the original `Content-Type`, plus `Idempotent-Replayed: true`. A replay runs no operation: it writes no row of any
+    task, lease, ask, note, event or actor, and wakes no stream. The one write it makes is authentication's own,
+    the key's `last_used_at`, as for any request that succeeds. A refusal below 500 (a 404, a 409) is the original answer
+    too and is replayed the same way.
+  - The same key with a different request (another method, path, query, actor or body) is 422 with a `next`, and
+    nothing is written.
+  - A duplicate that arrives while the first request with the key is still running is 409 with a `next` (send the
+    same request again shortly). The server holds a response back until its answer is stored, so a retry sent on
+    receiving it finds the answer, never a running request.
+  - A 5xx answer, or a request that panics, is not stored and releases the key: the retry runs the request again
+    (the CLI's retry on 502, 503 or 504 relies on this). A server that stops between starting a request and
+    storing its answer leaves the key running until it is 24 hours old.
+  - A key older than 24 hours counts as new, whether or not the sweeper has deleted its row yet. The sweeper
+    (§5.1) deletes the rows older than 24 hours on each `VH_SWEEP_INTERVAL` tick.
+  - A request without the header behaves as always. The header on a request that is not a `POST` under `/api/v1`
+    is ignored. A body over 1 MiB with the header is 413 (it is read in full to fingerprint the request). A server
+    that runs without the idempotency store answers a request that carries the header with 503.
+  - The stored row (§4.12) holds neither the key nor the answer in the clear: the key is stored as a hash, and the
+    answer is sealed with AES-256-GCM under a key derived from the principal and the key, so the one answer that holds
+    a secret (a created API key, §3.3) is never readable from the database.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
 - Path and query parameters accept the short ref (§8.2) or the ULID of an object; responses
   carry both (`id`, `ref`).
@@ -1047,7 +1090,7 @@ unknown task is **404**.
 - An initiative is `{id, ref, slug, title, description, status, tags, target_start?, target_end?,
   created_by, created_at, closed_at?, closed_by?}`: `ref` is the slug, `tags` are sorted, `created_by`
   is the creating actor's handle, absent fields are omitted.
-- Not yet served: `?view=compact` and `Idempotency-Key` replays (§6.1) for these operations. The
+- Not yet served: `?view=compact` (§6.1) for these operations. The
   server answers 503 problem documents when it runs without a store.
 
 ### 6.4 Tasks
@@ -3530,7 +3573,7 @@ also accepted (§13.1).
 | `VH_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
-| `VH_SWEEP_INTERVAL` | `15s` | how often `vh serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
+| `VH_SWEEP_INTERVAL` | `15s` | how often `vh serve` expires due leases and deletes expired sessions and Idempotency-Key rows older than 24 hours (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
 | `VH_SQLITE_CHECKPOINT` | `10m` | how often `vh serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
 | `VH_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `VH_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |

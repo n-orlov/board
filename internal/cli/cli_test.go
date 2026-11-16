@@ -16,6 +16,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the store registers, for the schema-version fixture
 
 	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/store"
 	"github.com/n-orlov/village-hall/internal/version"
 )
@@ -98,7 +99,7 @@ func TestAdminMigrateAppliesAndReportsTheVersion(t *testing.T) {
 	for i := 0; i < 2; i++ { // the second run is a no-op
 		var out, errb bytes.Buffer
 		if code := Run([]string{"admin", "migrate"}, &out, &errb, env); code != ExitOK ||
-			out.String() != "ok migrated, schema version 9\n" || errb.Len() != 0 {
+			out.String() != "ok migrated, schema version 10\n" || errb.Len() != 0 {
 			t.Fatalf("run %d: code=%d out=%q err=%q", i, code, out.String(), errb.String())
 		}
 	}
@@ -280,6 +281,50 @@ func TestSweeperDeletesExpiredSessionsAtTheConfiguredIntervalAndNotWhenOff(t *te
 			t.Errorf("interval %s: %d sessions left, want %d (stderr %q)", tc.interval, got, tc.want, errb.String())
 		}
 		_ = st.Close()
+	}
+}
+
+func TestSweeperDeletesIdempotencyRowsOlderThanADayAndKeepsTheRest(t *testing.T) {
+	st, err := store.Open(sqliteURL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for key, age := range map[string]time.Duration{"stale": 25 * time.Hour, "fresh": time.Hour} {
+		then := time.Now().Add(-age)
+		keys := idempotency.Store{Store: st, Now: func() time.Time { return then }}
+		if o, _, err := keys.Claim(context.Background(), idempotency.Request{Principal: "key:a", Key: key, Fingerprint: "f"}); err != nil || o != idempotency.Claimed {
+			t.Fatalf("claim %s = %v, %v", key, o, err)
+		}
+	}
+	left := func() (keys []string) {
+		rows, err := st.Reader().Query(`SELECT key_hash FROM idempotency_keys`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				t.Fatal(err)
+			}
+			keys = append(keys, k)
+		}
+		return keys
+	}
+	var errb bytes.Buffer
+	stop := startSweeper(context.Background(), &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "5ms"}), st)
+	deadline := time.Now().Add(3 * time.Second)
+	for len(left()) != 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	stop()
+	if got := left(); len(got) != 1 || errb.Len() != 0 {
+		t.Errorf("%d idempotency rows left, want the one fresh row (stderr %q)", len(got), errb.String())
 	}
 }
 

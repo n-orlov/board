@@ -250,7 +250,7 @@ func (h *harness) nextRequestCarries(header, value string) {
 	if h.api.headers == nil {
 		h.api.headers = map[string]string{}
 	}
-	h.api.headers[header] = jsonQuotes(value)
+	h.api.headers[header] = expandBody(value)
 }
 
 // jsonQuotes turns the single quotes a feature uses for JSON strings into double quotes.

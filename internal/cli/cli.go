@@ -17,6 +17,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/envvar"
 	"github.com/n-orlov/village-hall/internal/events"
 	"github.com/n-orlov/village-hall/internal/feed"
+	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/leases"
 	"github.com/n-orlov/village-hall/internal/notes"
@@ -223,7 +224,7 @@ func serveUntil(ctx context.Context, stderr io.Writer, env Env, url, addr string
 		return fail(stderr, err)
 	}
 	defer stopFeed()
-	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithNotifications(&notify.Store{Store: st}), server.WithAttention(&attention.Store{Store: st}), server.WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), server.WithActors(&roster.Store{Store: st, Leases: &leases.Store{Store: st}, Asks: &asks.Store{Store: st}}), server.WithCursors(&cursors.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Revision: version.Revision(), Protocol: ProtocolVersion()}, &actors.Store{Store: st}), stream); err != nil {
+	if err := server.Serve(ctx, addr, st.Ready, (&auth.Verifier{Store: st}).Verify, login, &auth.Keys{Store: st}, server.WithInitiatives(&initiatives.Store{Store: st}), server.WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), server.WithEvents(&events.Store{Store: st}), server.WithLeases(&leases.Store{Store: st}), server.WithAsks(&asks.Store{Store: st}), server.WithNotes(&notes.Store{Store: st}), server.WithNotifications(&notify.Store{Store: st}), server.WithAttention(&attention.Store{Store: st}), server.WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), server.WithActors(&roster.Store{Store: st, Leases: &leases.Store{Store: st}, Asks: &asks.Store{Store: st}}), server.WithCursors(&cursors.Store{Store: st}), server.WithIdempotency(&idempotency.Store{Store: st}), server.WithMeta(server.Build{Version: version.Current(), Revision: version.Revision(), Protocol: ProtocolVersion()}, &actors.Store{Store: st}), stream); err != nil {
 		return fail(stderr, err)
 	}
 	return ExitOK
@@ -366,7 +367,7 @@ func startSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Stor
 	return func() { cancel(); <-done }
 }
 
-// runSweeper expires due leases and deletes expired sessions every
+// runSweeper expires due leases and deletes expired sessions and stale idempotency rows every
 // VH_SWEEP_INTERVAL until ctx ends; "off" runs nothing. serve has already
 // checked the setting parses.
 func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store) {
@@ -374,10 +375,11 @@ func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store)
 	if err != nil {
 		return
 	}
-	ls, sessions := &leases.Store{Store: st}, &auth.Sessions{Store: st}
+	ls, sessions, idem := &leases.Store{Store: st}, &auth.Sessions{Store: st}, &idempotency.Store{Store: st}
 	sweep.Run(ctx, interval, func(err error) { _, _ = fmt.Fprintf(stderr, "vh: sweep: %v\n", err) },
 		func(ctx context.Context) error { _, err := ls.ExpireDue(ctx); return err },
-		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err })
+		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err },
+		func(ctx context.Context) error { _, err := idem.DeleteExpired(ctx); return err })
 }
 
 // startNotifier delivers the notifications outbox to VH_NOTIFY_URL every

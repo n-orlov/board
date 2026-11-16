@@ -223,6 +223,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -242,6 +244,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/keys/{name}/revoke:
@@ -263,6 +267,7 @@ paths:
           description: The key's name.
           schema:
             type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The key, revoked.
@@ -276,6 +281,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/initiatives:
@@ -357,6 +366,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -376,6 +387,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/initiatives/{slug}:
@@ -474,6 +487,7 @@ paths:
           description: The initiative's slug or ULID.
           schema:
             type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -495,6 +509,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/initiatives/{slug}/reopen:
@@ -515,6 +531,7 @@ paths:
           description: The initiative's slug or ULID.
           schema:
             type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The initiative after the reopen.
@@ -528,6 +545,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks:
@@ -664,6 +683,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -685,6 +706,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}:
@@ -773,6 +796,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -794,6 +818,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/reopen:
@@ -810,6 +836,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The task after the transition.
@@ -825,6 +852,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/close:
@@ -845,6 +874,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -866,6 +896,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/deps/{blockedByRef}:
@@ -885,6 +917,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/TaskRef"
         - $ref: "#/components/parameters/BlockedByRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The dependent task, with its `deps`, `blocking` and derived `blocked`.
@@ -900,6 +933,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
     delete:
@@ -945,6 +980,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -966,6 +1002,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/milestones:
@@ -982,6 +1020,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1001,6 +1040,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/events:
@@ -1313,6 +1356,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1320,14 +1365,14 @@ paths:
             schema:
               $ref: "#/components/schemas/LeaseStart"
       responses:
-        "201":
-          description: A new lease was started.
+        "200":
+          description: The actor already held a live lease on the task, and it was renewed.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LeaseResult"
-        "200":
-          description: The actor already held a live lease on the task, and it was renewed.
+        "201":
+          description: A new lease was started.
           content:
             application/json:
               schema:
@@ -1340,6 +1385,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
     get:
@@ -1443,6 +1490,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/LeaseRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1466,6 +1514,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "410":
           $ref: "#/components/responses/Gone"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/leases/{ref}/end:
@@ -1481,6 +1531,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/LeaseRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1502,6 +1553,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/leases/{ref}/ack:
@@ -1517,6 +1570,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/LeaseRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The result.
@@ -1532,6 +1586,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/asks:
@@ -1555,6 +1611,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1576,6 +1634,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
     get:
@@ -1709,6 +1769,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/AskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1730,6 +1791,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/asks/{ref}/withdraw:
@@ -1746,6 +1809,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/AskRef"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -1767,6 +1831,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/notes:
@@ -1785,6 +1851,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1804,6 +1872,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
     get:
@@ -2032,6 +2104,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2039,14 +2113,14 @@ paths:
             schema:
               $ref: "#/components/schemas/StartRequest"
       responses:
-        "201":
-          description: A new lease was started, on a new task or an existing one.
+        "200":
+          description: The caller already held a live lease on the task, and it was renewed.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StartResult"
-        "200":
-          description: The caller already held a live lease on the task, and it was renewed.
+        "201":
+          description: A new lease was started, on a new task or an existing one.
           content:
             application/json:
               schema:
@@ -2059,6 +2133,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/finish:
@@ -2078,6 +2154,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2099,6 +2177,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/ping:
@@ -2116,6 +2196,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -2135,6 +2217,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/catchup:
@@ -2154,6 +2238,8 @@ paths:
       security:
         - bearerAuth: []
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: The notes since the caller's cursor, now acknowledged, and the answers to its asks since the previous catch-up.
@@ -2163,6 +2249,10 @@ paths:
                 $ref: "#/components/schemas/CatchupResult"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "503":
           $ref: "#/components/responses/Unavailable"
   /api/v1/attention:
@@ -2486,6 +2576,21 @@ components:
       name: board_session
       description: The operator's browser session.
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the
+        caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is
+        answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes
+        nothing. The same key with a different request is 422. A duplicate that arrives while the first is still
+        running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs
+        again. Without the header the request runs as it always did.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
     TaskRef:
       name: ref
       in: path
@@ -2559,6 +2664,14 @@ components:
             $ref: "#/components/schemas/Problem"
     Conflict:
       description: The request conflicts with what exists, such as a name already taken.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unprocessable:
+      description: >-
+        The `Idempotency-Key` was first used with a different request (a different method, path, query, actor or
+        body). Send a new key for a different request.
       content:
         application/problem+json:
           schema:

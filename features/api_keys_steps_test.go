@@ -48,6 +48,10 @@ type apiState struct {
 	sentAt, answeredAt time.Time
 	// wait is the ask wait a scenario left running in the background.
 	wait *askWait
+	// respHeader is the header of the last answer; remembered is the body a
+	// scenario kept to compare a later answer with.
+	respHeader http.Header
+	remembered []byte
 }
 
 // sendKeyed sends one request to the running server with the given key and actor
@@ -80,6 +84,7 @@ func (h *harness) sendKeyed(ctx context.Context, method, path, key, actor string
 	}
 	defer resp.Body.Close()
 	h.status = resp.StatusCode
+	h.api.respHeader = resp.Header
 	h.api.body, err = io.ReadAll(resp.Body)
 	return err
 }

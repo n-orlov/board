@@ -82,7 +82,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	if ops.hub != nil {
 		h = wakeFeedAfterWrites(h, ops.hub.feed)
 	}
-	return withProblemNext(authenticated(h, verify, login)), ops
+	return withProblemNext(authenticated(idempotent(h, ops.idem), verify, login)), ops
 }
 
 // wakeFeedAfterWrites wakes the change feed once a request that may have

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/n-orlov/village-hall/api"
+	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/swaggerui"
 )
 
@@ -61,6 +62,9 @@ type operations struct {
 	cursorOps
 	metaOps
 	streamOps
+	// idem stores the answers of requests that carry an Idempotency-Key; nil means
+	// none are stored.
+	idem *idempotency.Store
 	// writeTimeout is the http.Server write timeout; 0 means none.
 	writeTimeout time.Duration
 	ready        Readiness

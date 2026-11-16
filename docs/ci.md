@@ -310,7 +310,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   (`internal/domain`, `internal/store`, and the application logic Phase 2
   introduced or changed: `internal/asks`, `internal/attention`,
   `internal/audit`, `internal/checkin`, `internal/cursors`, `internal/events`,
-  `internal/feed`, `internal/notes`, `internal/tasks`, `internal/server`,
+  `internal/feed`, `internal/idempotency`, `internal/notes`, `internal/tasks`, `internal/server`,
   `internal/cli`), writes one JSON report per package to
   `ci-results/mutation/` and then runs `mutationgate`, which reads the
   threshold from `ci/quality.json` and fails when

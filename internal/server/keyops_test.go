@@ -16,6 +16,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/auth"
 	"github.com/n-orlov/village-hall/internal/cursors"
 	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/leases"
 	"github.com/n-orlov/village-hall/internal/notes"
@@ -34,6 +35,8 @@ type keyServer struct {
 	keys  *auth.Keys
 	token string
 	st    *store.Store
+	// clock is the time the idempotency store reads; tests move it.
+	clock *testClock
 }
 
 // keyServerBuild is the build the key server reports, unless a test asks
@@ -48,15 +51,17 @@ func newKeyServer(t *testing.T) *keyServer {
 // newKeyServerOfBuild is newKeyServer reporting build b.
 func newKeyServerOfBuild(t *testing.T, b Build) *keyServer {
 	t.Helper()
-	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	return newKeyServerOn(t, "sqlite://"+filepath.Join(t.TempDir(), "b.db"), b)
+}
+
+// newKeyServerOn is newKeyServer over the empty database at url.
+func newKeyServerOn(t *testing.T, url string, b Build) *keyServer {
+	t.Helper()
+	st := openStore(t, url)
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	keys := &auth.Keys{Store: st}
+	keys, clock := &auth.Keys{Store: st}, newTestClock()
 	token, _, err := keys.Create(context.Background(), "caller", "admin-cli", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -64,8 +69,8 @@ func newKeyServerOfBuild(t *testing.T, b Build) *keyServer {
 	h := NewHandler(ok, (&auth.Verifier{Store: st}).Verify, nil, keys, WithInitiatives(&initiatives.Store{Store: st}),
 		WithTasks(&tasks.Store{Store: st}, &leases.Store{Store: st}), WithEvents(&events.Store{Store: st}), WithLeases(&leases.Store{Store: st}),
 		WithAsks(&asks.Store{Store: st}), WithNotes(&notes.Store{Store: st}), WithNotifications(&notify.Store{Store: st}), WithAttention(&attention.Store{Store: st}), WithTimeline(&timeline.Store{Store: st}, &leases.Store{Store: st}, &attention.Store{Store: st}), WithActors(&roster.Store{Store: st, Leases: &leases.Store{Store: st}, Asks: &asks.Store{Store: st}}), WithCursors(&cursors.Store{Store: st}),
-		WithMeta(b, &actors.Store{Store: st}))
-	return &keyServer{t: t, h: h, keys: keys, token: token, st: st}
+		WithMeta(b, &actors.Store{Store: st}), WithIdempotency(&idempotency.Store{Store: st, Now: clock.Now}))
+	return &keyServer{t: t, h: h, keys: keys, token: token, st: st, clock: clock}
 }
 
 func (s *keyServer) send(method, path, body, actor string) *httptest.ResponseRecorder {

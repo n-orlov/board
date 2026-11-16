@@ -2533,6 +2533,9 @@ type EventAfter = string
 // EventLimit defines model for EventLimit.
 type EventLimit = int
 
+// IdempotencyKey defines model for IdempotencyKey.
+type IdempotencyKey = string
+
 // LeaseRef defines model for LeaseRef.
 type LeaseRef = string
 
@@ -2566,6 +2569,9 @@ type Unauthorized = Problem
 // Unavailable An RFC 9457 problem document.
 type Unavailable = Problem
 
+// Unprocessable An RFC 9457 problem document.
+type Unprocessable = Problem
+
 // ListActorsParams defines parameters for ListActors.
 type ListActorsParams struct {
 	// Alive When true, keep only the actors that hold a live lease.
@@ -2593,6 +2599,12 @@ type ListAsksParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// RaiseAskParams defines parameters for RaiseAsk.
+type RaiseAskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // GetAskParams defines parameters for GetAsk.
 type GetAskParams struct {
 	// Wait Seconds to hold the request while the ask is open, 1 to 300.
@@ -2600,6 +2612,18 @@ type GetAskParams struct {
 
 	// Until The instant the hold ends at, if before `wait` runs out; the response is then the ask as it stood at that instant. Only with `wait`.
 	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+}
+
+// AnswerAskParams defines parameters for AnswerAsk.
+type AnswerAskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// WithdrawAskParams defines parameters for WithdrawAsk.
+type WithdrawAskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // GetAttentionParams defines parameters for GetAttention.
@@ -2612,6 +2636,12 @@ type GetAttentionParams struct {
 
 	// Fields `full` (the default) answers the sections and the counts, `counts` only the counts.
 	Fields *string `form:"fields,omitempty" json:"fields,omitempty"`
+}
+
+// CatchupParams defines parameters for Catchup.
+type CatchupParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListEventsParams defines parameters for ListEvents.
@@ -2638,6 +2668,12 @@ type ListEventsParams struct {
 	After *EventAfter `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// FinishParams defines parameters for Finish.
+type FinishParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListInitiativesParams defines parameters for ListInitiatives.
 type ListInitiativesParams struct {
 	// Tag Keep initiatives that carry this tag. Repeatable.
@@ -2659,6 +2695,36 @@ type ListInitiativesParams struct {
 // ListInitiativesParamsStatus defines parameters for ListInitiatives.
 type ListInitiativesParamsStatus string
 
+// CreateInitiativeParams defines parameters for CreateInitiative.
+type CreateInitiativeParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// CloseInitiativeParams defines parameters for CloseInitiative.
+type CloseInitiativeParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ReopenInitiativeParams defines parameters for ReopenInitiative.
+type ReopenInitiativeParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// CreateKeyParams defines parameters for CreateKey.
+type CreateKeyParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// RevokeKeyParams defines parameters for RevokeKey.
+type RevokeKeyParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListLeasesParams defines parameters for ListLeases.
 type ListLeasesParams struct {
 	// State live (default), ended, expired or all.
@@ -2678,6 +2744,30 @@ type ListLeasesParams struct {
 
 	// After A lease ref (`L<n>`) or id. The page starts after it.
 	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// StartLeaseParams defines parameters for StartLease.
+type StartLeaseParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// AckLeaseParams defines parameters for AckLease.
+type AckLeaseParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// EndLeaseParams defines parameters for EndLease.
+type EndLeaseParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// RenewLeaseParams defines parameters for RenewLease.
+type RenewLeaseParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // ListNotesParams defines parameters for ListNotes.
@@ -2716,6 +2806,12 @@ type ListNotesParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// PostNoteParams defines parameters for PostNote.
+type PostNoteParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListNotificationsParams defines parameters for ListNotifications.
 type ListNotificationsParams struct {
 	// State Keep the rows in this state.
@@ -2735,6 +2831,18 @@ type ListNotificationsParamsState string
 type GetNowParams struct {
 	// Resources Comma-separated resources to check for conflicts before starting.
 	Resources *string `form:"resources,omitempty" json:"resources,omitempty"`
+}
+
+// PingParams defines parameters for Ping.
+type PingParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// StartParams defines parameters for Start.
+type StartParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // GetStreamParams defines parameters for GetStream.
@@ -2797,6 +2905,36 @@ type ListTasksParamsStatus string
 // ListTasksParamsKind defines parameters for ListTasks.
 type ListTasksParamsKind string
 
+// CreateTaskParams defines parameters for CreateTask.
+type CreateTaskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// RecordTaskCheckParams defines parameters for RecordTaskCheck.
+type RecordTaskCheckParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// CloseTaskParams defines parameters for CloseTask.
+type CloseTaskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// AddTaskDepParams defines parameters for AddTaskDep.
+type AddTaskDepParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// DoneTaskParams defines parameters for DoneTask.
+type DoneTaskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListTaskEventsParams defines parameters for ListTaskEvents.
 type ListTaskEventsParams struct {
 	// Limit The page size, 1 to 1000. Default 100.
@@ -2804,6 +2942,18 @@ type ListTaskEventsParams struct {
 
 	// After An event id or `E<n>` ref. The page starts after it.
 	After *EventAfter `form:"after,omitempty" json:"after,omitempty"`
+}
+
+// RecordTaskMilestoneParams defines parameters for RecordTaskMilestone.
+type RecordTaskMilestoneParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ReopenTaskParams defines parameters for ReopenTask.
+type ReopenTaskParams struct {
+	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // GetTimelineParams defines parameters for GetTimeline.
@@ -2927,22 +3077,22 @@ type ServerInterface interface {
 	ListAsks(w http.ResponseWriter, r *http.Request, params ListAsksParams)
 	// RaiseAsk Raise an ask
 	// (POST /api/v1/asks)
-	RaiseAsk(w http.ResponseWriter, r *http.Request)
+	RaiseAsk(w http.ResponseWriter, r *http.Request, params RaiseAskParams)
 	// GetAsk Read an ask
 	// (GET /api/v1/asks/{ref})
 	GetAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params GetAskParams)
 	// AnswerAsk Answer an ask
 	// (POST /api/v1/asks/{ref}/answer)
-	AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params AnswerAskParams)
 	// WithdrawAsk Withdraw an ask
 	// (POST /api/v1/asks/{ref}/withdraw)
-	WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef)
+	WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params WithdrawAskParams)
 	// GetAttention What needs attention
 	// (GET /api/v1/attention)
 	GetAttention(w http.ResponseWriter, r *http.Request, params GetAttentionParams)
 	// Catchup Read what happened since the caller last caught up
 	// (POST /api/v1/catchup)
-	Catchup(w http.ResponseWriter, r *http.Request)
+	Catchup(w http.ResponseWriter, r *http.Request, params CatchupParams)
 	// PutCursor Set a read cursor
 	// (PUT /api/v1/cursors/{stream})
 	PutCursor(w http.ResponseWriter, r *http.Request, stream string)
@@ -2951,13 +3101,13 @@ type ServerInterface interface {
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
 	// Finish Finish working on a task
 	// (POST /api/v1/finish)
-	Finish(w http.ResponseWriter, r *http.Request)
+	Finish(w http.ResponseWriter, r *http.Request, params FinishParams)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams)
 	// CreateInitiative Create an initiative
 	// (POST /api/v1/initiatives)
-	CreateInitiative(w http.ResponseWriter, r *http.Request)
+	CreateInitiative(w http.ResponseWriter, r *http.Request, params CreateInitiativeParams)
 	// GetInitiative Read an initiative
 	// (GET /api/v1/initiatives/{slug})
 	GetInitiative(w http.ResponseWriter, r *http.Request, slug string)
@@ -2966,37 +3116,37 @@ type ServerInterface interface {
 	PatchInitiative(w http.ResponseWriter, r *http.Request, slug string)
 	// CloseInitiative Close an initiative
 	// (POST /api/v1/initiatives/{slug}/close)
-	CloseInitiative(w http.ResponseWriter, r *http.Request, slug string)
+	CloseInitiative(w http.ResponseWriter, r *http.Request, slug string, params CloseInitiativeParams)
 	// ReopenInitiative Reopen a closed initiative
 	// (POST /api/v1/initiatives/{slug}/reopen)
-	ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string)
+	ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string, params ReopenInitiativeParams)
 	// ListKeys List the API keys
 	// (GET /api/v1/keys)
 	ListKeys(w http.ResponseWriter, r *http.Request)
 	// CreateKey Create an API key
 	// (POST /api/v1/keys)
-	CreateKey(w http.ResponseWriter, r *http.Request)
+	CreateKey(w http.ResponseWriter, r *http.Request, params CreateKeyParams)
 	// RevokeKey Revoke an API key
 	// (POST /api/v1/keys/{name}/revoke)
-	RevokeKey(w http.ResponseWriter, r *http.Request, name string)
+	RevokeKey(w http.ResponseWriter, r *http.Request, name string, params RevokeKeyParams)
 	// ListLeases List leases
 	// (GET /api/v1/leases)
 	ListLeases(w http.ResponseWriter, r *http.Request, params ListLeasesParams)
 	// StartLease Start a lease
 	// (POST /api/v1/leases)
-	StartLease(w http.ResponseWriter, r *http.Request)
+	StartLease(w http.ResponseWriter, r *http.Request, params StartLeaseParams)
 	// GetLease Read a lease
 	// (GET /api/v1/leases/{ref})
 	GetLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
 	// AckLease Acknowledge an expired lease
 	// (POST /api/v1/leases/{ref}/ack)
-	AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params AckLeaseParams)
 	// EndLease End a lease
 	// (POST /api/v1/leases/{ref}/end)
-	EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params EndLeaseParams)
 	// RenewLease Renew a lease
 	// (POST /api/v1/leases/{ref}/renew)
-	RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef)
+	RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params RenewLeaseParams)
 	// GetMeta Describe the server and the caller
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
@@ -3005,7 +3155,7 @@ type ServerInterface interface {
 	ListNotes(w http.ResponseWriter, r *http.Request, params ListNotesParams)
 	// PostNote Post a note
 	// (POST /api/v1/notes)
-	PostNote(w http.ResponseWriter, r *http.Request)
+	PostNote(w http.ResponseWriter, r *http.Request, params PostNoteParams)
 	// GetNote Read a note
 	// (GET /api/v1/notes/{ref})
 	GetNote(w http.ResponseWriter, r *http.Request, ref NoteRef)
@@ -3017,10 +3167,10 @@ type ServerInterface interface {
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
 	// Ping Renew every live lease the caller holds
 	// (POST /api/v1/ping)
-	Ping(w http.ResponseWriter, r *http.Request)
+	Ping(w http.ResponseWriter, r *http.Request, params PingParams)
 	// Start Start working on a task, or on a new one
 	// (POST /api/v1/start)
-	Start(w http.ResponseWriter, r *http.Request)
+	Start(w http.ResponseWriter, r *http.Request, params StartParams)
 	// GetStream Stream events (server-sent events)
 	// (GET /api/v1/stream)
 	GetStream(w http.ResponseWriter, r *http.Request, params GetStreamParams)
@@ -3029,7 +3179,7 @@ type ServerInterface interface {
 	ListTasks(w http.ResponseWriter, r *http.Request, params ListTasksParams)
 	// CreateTask Create a task
 	// (POST /api/v1/tasks)
-	CreateTask(w http.ResponseWriter, r *http.Request)
+	CreateTask(w http.ResponseWriter, r *http.Request, params CreateTaskParams)
 	// GetTask Read a task
 	// (GET /api/v1/tasks/{ref})
 	GetTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
@@ -3038,28 +3188,28 @@ type ServerInterface interface {
 	PatchTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
 	// RecordTaskCheck Record a check on a watch task
 	// (POST /api/v1/tasks/{ref}/checks)
-	RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef, params RecordTaskCheckParams)
 	// CloseTask Close a task
 	// (POST /api/v1/tasks/{ref}/close)
-	CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params CloseTaskParams)
 	// RemoveTaskDep Remove a task's dependency on another
 	// (DELETE /api/v1/tasks/{ref}/deps/{blockedByRef})
 	RemoveTaskDep(w http.ResponseWriter, r *http.Request, ref TaskRef, blockedByRef BlockedByRef)
 	// AddTaskDep Make a task blocked by another
 	// (POST /api/v1/tasks/{ref}/deps/{blockedByRef})
-	AddTaskDep(w http.ResponseWriter, r *http.Request, ref TaskRef, blockedByRef BlockedByRef)
+	AddTaskDep(w http.ResponseWriter, r *http.Request, ref TaskRef, blockedByRef BlockedByRef, params AddTaskDepParams)
 	// DoneTask Mark a task done
 	// (POST /api/v1/tasks/{ref}/done)
-	DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params DoneTaskParams)
 	// ListTaskEvents List a task's events
 	// (GET /api/v1/tasks/{ref}/events)
 	ListTaskEvents(w http.ResponseWriter, r *http.Request, ref TaskRef, params ListTaskEventsParams)
 	// RecordTaskMilestone Record a milestone on a task
 	// (POST /api/v1/tasks/{ref}/milestones)
-	RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef, params RecordTaskMilestoneParams)
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
-	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef)
+	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params ReopenTaskParams)
 	// GetTimeline Read the timeline of a window
 	// (GET /api/v1/timeline)
 	GetTimeline(w http.ResponseWriter, r *http.Request, params GetTimelineParams)
@@ -3283,8 +3433,35 @@ func (siw *ServerInterfaceWrapper) ListAsks(w http.ResponseWriter, r *http.Reque
 // RaiseAsk operation middleware
 func (siw *ServerInterfaceWrapper) RaiseAsk(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RaiseAskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RaiseAsk(w, r)
+		siw.Handler.RaiseAsk(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3352,8 +3529,32 @@ func (siw *ServerInterfaceWrapper) AnswerAsk(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AnswerAskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AnswerAsk(w, r, ref)
+		siw.Handler.AnswerAsk(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3378,8 +3579,32 @@ func (siw *ServerInterfaceWrapper) WithdrawAsk(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params WithdrawAskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.WithdrawAsk(w, r, ref)
+		siw.Handler.WithdrawAsk(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3430,8 +3655,35 @@ func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.R
 // Catchup operation middleware
 func (siw *ServerInterfaceWrapper) Catchup(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CatchupParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Catchup(w, r)
+		siw.Handler.Catchup(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3524,8 +3776,35 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 // Finish operation middleware
 func (siw *ServerInterfaceWrapper) Finish(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FinishParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Finish(w, r)
+		siw.Handler.Finish(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3584,8 +3863,35 @@ func (siw *ServerInterfaceWrapper) ListInitiatives(w http.ResponseWriter, r *htt
 // CreateInitiative operation middleware
 func (siw *ServerInterfaceWrapper) CreateInitiative(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateInitiativeParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateInitiative(w, r)
+		siw.Handler.CreateInitiative(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3662,8 +3968,32 @@ func (siw *ServerInterfaceWrapper) CloseInitiative(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CloseInitiativeParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CloseInitiative(w, r, slug)
+		siw.Handler.CloseInitiative(w, r, slug, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3688,8 +4018,32 @@ func (siw *ServerInterfaceWrapper) ReopenInitiative(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReopenInitiativeParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReopenInitiative(w, r, slug)
+		siw.Handler.ReopenInitiative(w, r, slug, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3716,8 +4070,35 @@ func (siw *ServerInterfaceWrapper) ListKeys(w http.ResponseWriter, r *http.Reque
 // CreateKey operation middleware
 func (siw *ServerInterfaceWrapper) CreateKey(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateKeyParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateKey(w, r)
+		siw.Handler.CreateKey(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3742,8 +4123,32 @@ func (siw *ServerInterfaceWrapper) RevokeKey(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeKeyParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RevokeKey(w, r, name)
+		siw.Handler.RevokeKey(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3806,8 +4211,35 @@ func (siw *ServerInterfaceWrapper) ListLeases(w http.ResponseWriter, r *http.Req
 // StartLease operation middleware
 func (siw *ServerInterfaceWrapper) StartLease(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartLeaseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.StartLease(w, r)
+		siw.Handler.StartLease(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3858,8 +4290,32 @@ func (siw *ServerInterfaceWrapper) AckLease(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AckLeaseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AckLease(w, r, ref)
+		siw.Handler.AckLease(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3884,8 +4340,32 @@ func (siw *ServerInterfaceWrapper) EndLease(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params EndLeaseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.EndLease(w, r, ref)
+		siw.Handler.EndLease(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3910,8 +4390,32 @@ func (siw *ServerInterfaceWrapper) RenewLease(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RenewLeaseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RenewLease(w, r, ref)
+		siw.Handler.RenewLease(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4008,8 +4512,35 @@ func (siw *ServerInterfaceWrapper) ListNotes(w http.ResponseWriter, r *http.Requ
 // PostNote operation middleware
 func (siw *ServerInterfaceWrapper) PostNote(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostNoteParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostNote(w, r)
+		siw.Handler.PostNote(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4116,8 +4647,35 @@ func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request
 // Ping operation middleware
 func (siw *ServerInterfaceWrapper) Ping(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PingParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Ping(w, r)
+		siw.Handler.Ping(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4130,8 +4688,35 @@ func (siw *ServerInterfaceWrapper) Ping(w http.ResponseWriter, r *http.Request) 
 // Start operation middleware
 func (siw *ServerInterfaceWrapper) Start(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Start(w, r)
+		siw.Handler.Start(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4273,8 +4858,35 @@ func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Requ
 // CreateTask operation middleware
 func (siw *ServerInterfaceWrapper) CreateTask(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateTaskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateTask(w, r)
+		siw.Handler.CreateTask(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4351,8 +4963,32 @@ func (siw *ServerInterfaceWrapper) RecordTaskCheck(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RecordTaskCheckParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RecordTaskCheck(w, r, ref)
+		siw.Handler.RecordTaskCheck(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4377,8 +5013,32 @@ func (siw *ServerInterfaceWrapper) CloseTask(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CloseTaskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CloseTask(w, r, ref)
+		siw.Handler.CloseTask(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4447,8 +5107,32 @@ func (siw *ServerInterfaceWrapper) AddTaskDep(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AddTaskDepParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AddTaskDep(w, r, ref, blockedByRef)
+		siw.Handler.AddTaskDep(w, r, ref, blockedByRef, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4473,8 +5157,32 @@ func (siw *ServerInterfaceWrapper) DoneTask(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DoneTaskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DoneTask(w, r, ref)
+		siw.Handler.DoneTask(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4542,8 +5250,32 @@ func (siw *ServerInterfaceWrapper) RecordTaskMilestone(w http.ResponseWriter, r 
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RecordTaskMilestoneParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RecordTaskMilestone(w, r, ref)
+		siw.Handler.RecordTaskMilestone(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4568,8 +5300,32 @@ func (siw *ServerInterfaceWrapper) ReopenTask(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReopenTaskParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReopenTask(w, r, ref)
+		siw.Handler.ReopenTask(w, r, ref, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4916,6 +5672,8 @@ type NotFoundApplicationProblemPlusJSONResponse Problem
 type UnauthorizedApplicationProblemPlusJSONResponse Problem
 
 type UnavailableApplicationProblemPlusJSONResponse Problem
+
+type UnprocessableApplicationProblemPlusJSONResponse Problem
 
 type GetDocsRequestObject struct {
 }
@@ -5481,7 +6239,8 @@ func (response ListAsks503ApplicationProblemPlusJSONResponse) VisitListAsksRespo
 }
 
 type RaiseAskRequestObject struct {
-	Body *RaiseAskJSONRequestBody
+	Params RaiseAskParams
+	Body   *RaiseAskJSONRequestBody
 }
 
 type RaiseAskResponseObject interface {
@@ -5562,6 +6321,22 @@ func (response RaiseAsk409ApplicationProblemPlusJSONResponse) VisitRaiseAskRespo
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RaiseAsk422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response RaiseAsk422ApplicationProblemPlusJSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5670,8 +6445,9 @@ func (response GetAsk503ApplicationProblemPlusJSONResponse) VisitGetAskResponse(
 }
 
 type AnswerAskRequestObject struct {
-	Ref  AskRef `json:"ref"`
-	Body *AnswerAskJSONRequestBody
+	Ref    AskRef `json:"ref"`
+	Params AnswerAskParams
+	Body   *AnswerAskJSONRequestBody
 }
 
 type AnswerAskResponseObject interface {
@@ -5756,6 +6532,22 @@ func (response AnswerAsk409ApplicationProblemPlusJSONResponse) VisitAnswerAskRes
 	return err
 }
 
+type AnswerAsk422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response AnswerAsk422ApplicationProblemPlusJSONResponse) VisitAnswerAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type AnswerAsk503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -5773,8 +6565,9 @@ func (response AnswerAsk503ApplicationProblemPlusJSONResponse) VisitAnswerAskRes
 }
 
 type WithdrawAskRequestObject struct {
-	Ref  AskRef `json:"ref"`
-	Body *WithdrawAskJSONRequestBody
+	Ref    AskRef `json:"ref"`
+	Params WithdrawAskParams
+	Body   *WithdrawAskJSONRequestBody
 }
 
 type WithdrawAskResponseObject interface {
@@ -5855,6 +6648,22 @@ func (response WithdrawAsk409ApplicationProblemPlusJSONResponse) VisitWithdrawAs
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WithdrawAsk422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response WithdrawAsk422ApplicationProblemPlusJSONResponse) VisitWithdrawAskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5962,6 +6771,7 @@ func (response GetAttention503ApplicationProblemPlusJSONResponse) VisitGetAttent
 }
 
 type CatchupRequestObject struct {
+	Params CatchupParams
 }
 
 type CatchupResponseObject interface {
@@ -5994,6 +6804,38 @@ func (response Catchup401ApplicationProblemPlusJSONResponse) VisitCatchupRespons
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Catchup409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response Catchup409ApplicationProblemPlusJSONResponse) VisitCatchupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Catchup422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response Catchup422ApplicationProblemPlusJSONResponse) VisitCatchupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6188,7 +7030,8 @@ func (response ListEvents503ApplicationProblemPlusJSONResponse) VisitListEventsR
 }
 
 type FinishRequestObject struct {
-	Body *FinishJSONRequestBody
+	Params FinishParams
+	Body   *FinishJSONRequestBody
 }
 
 type FinishResponseObject interface {
@@ -6269,6 +7112,22 @@ func (response Finish409ApplicationProblemPlusJSONResponse) VisitFinishResponse(
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response Finish422ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6360,7 +7219,8 @@ func (response ListInitiatives503ApplicationProblemPlusJSONResponse) VisitListIn
 }
 
 type CreateInitiativeRequestObject struct {
-	Body *CreateInitiativeJSONRequestBody
+	Params CreateInitiativeParams
+	Body   *CreateInitiativeJSONRequestBody
 }
 
 type CreateInitiativeResponseObject interface {
@@ -6425,6 +7285,22 @@ func (response CreateInitiative409ApplicationProblemPlusJSONResponse) VisitCreat
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInitiative422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateInitiative422ApplicationProblemPlusJSONResponse) VisitCreateInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6619,8 +7495,9 @@ func (response PatchInitiative503ApplicationProblemPlusJSONResponse) VisitPatchI
 }
 
 type CloseInitiativeRequestObject struct {
-	Slug string `json:"slug"`
-	Body *CloseInitiativeJSONRequestBody
+	Slug   string `json:"slug"`
+	Params CloseInitiativeParams
+	Body   *CloseInitiativeJSONRequestBody
 }
 
 type CloseInitiativeResponseObject interface {
@@ -6705,6 +7582,22 @@ func (response CloseInitiative409ApplicationProblemPlusJSONResponse) VisitCloseI
 	return err
 }
 
+type CloseInitiative422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CloseInitiative422ApplicationProblemPlusJSONResponse) VisitCloseInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CloseInitiative503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -6722,7 +7615,8 @@ func (response CloseInitiative503ApplicationProblemPlusJSONResponse) VisitCloseI
 }
 
 type ReopenInitiativeRequestObject struct {
-	Slug string `json:"slug"`
+	Slug   string `json:"slug"`
+	Params ReopenInitiativeParams
 }
 
 type ReopenInitiativeResponseObject interface {
@@ -6787,6 +7681,22 @@ func (response ReopenInitiative409ApplicationProblemPlusJSONResponse) VisitReope
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenInitiative422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenInitiative422ApplicationProblemPlusJSONResponse) VisitReopenInitiativeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6877,7 +7787,8 @@ func (response ListKeys503ApplicationProblemPlusJSONResponse) VisitListKeysRespo
 }
 
 type CreateKeyRequestObject struct {
-	Body *CreateKeyJSONRequestBody
+	Params CreateKeyParams
+	Body   *CreateKeyJSONRequestBody
 }
 
 type CreateKeyResponseObject interface {
@@ -6946,6 +7857,22 @@ func (response CreateKey409ApplicationProblemPlusJSONResponse) VisitCreateKeyRes
 	return err
 }
 
+type CreateKey422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateKey422ApplicationProblemPlusJSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateKey503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -6963,7 +7890,8 @@ func (response CreateKey503ApplicationProblemPlusJSONResponse) VisitCreateKeyRes
 }
 
 type RevokeKeyRequestObject struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Params RevokeKeyParams
 }
 
 type RevokeKeyResponseObject interface {
@@ -7028,6 +7956,38 @@ func (response RevokeKey404ApplicationProblemPlusJSONResponse) VisitRevokeKeyRes
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey409ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeKey422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeKey422ApplicationProblemPlusJSONResponse) VisitRevokeKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7135,7 +8095,8 @@ func (response ListLeases503ApplicationProblemPlusJSONResponse) VisitListLeasesR
 }
 
 type StartLeaseRequestObject struct {
-	Body *StartLeaseJSONRequestBody
+	Params StartLeaseParams
+	Body   *StartLeaseJSONRequestBody
 }
 
 type StartLeaseResponseObject interface {
@@ -7230,6 +8191,22 @@ func (response StartLease409ApplicationProblemPlusJSONResponse) VisitStartLeaseR
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLease422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response StartLease422ApplicationProblemPlusJSONResponse) VisitStartLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7337,7 +8314,8 @@ func (response GetLease503ApplicationProblemPlusJSONResponse) VisitGetLeaseRespo
 }
 
 type AckLeaseRequestObject struct {
-	Ref LeaseRef `json:"ref"`
+	Ref    LeaseRef `json:"ref"`
+	Params AckLeaseParams
 }
 
 type AckLeaseResponseObject interface {
@@ -7422,6 +8400,22 @@ func (response AckLease409ApplicationProblemPlusJSONResponse) VisitAckLeaseRespo
 	return err
 }
 
+type AckLease422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response AckLease422ApplicationProblemPlusJSONResponse) VisitAckLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type AckLease503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -7439,8 +8433,9 @@ func (response AckLease503ApplicationProblemPlusJSONResponse) VisitAckLeaseRespo
 }
 
 type EndLeaseRequestObject struct {
-	Ref  LeaseRef `json:"ref"`
-	Body *EndLeaseJSONRequestBody
+	Ref    LeaseRef `json:"ref"`
+	Params EndLeaseParams
+	Body   *EndLeaseJSONRequestBody
 }
 
 type EndLeaseResponseObject interface {
@@ -7525,6 +8520,22 @@ func (response EndLease409ApplicationProblemPlusJSONResponse) VisitEndLeaseRespo
 	return err
 }
 
+type EndLease422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response EndLease422ApplicationProblemPlusJSONResponse) VisitEndLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type EndLease503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -7542,8 +8553,9 @@ func (response EndLease503ApplicationProblemPlusJSONResponse) VisitEndLeaseRespo
 }
 
 type RenewLeaseRequestObject struct {
-	Ref  LeaseRef `json:"ref"`
-	Body *RenewLeaseJSONRequestBody
+	Ref    LeaseRef `json:"ref"`
+	Params RenewLeaseParams
+	Body   *RenewLeaseJSONRequestBody
 }
 
 type RenewLeaseResponseObject interface {
@@ -7640,6 +8652,22 @@ func (response RenewLease410ApplicationProblemPlusJSONResponse) VisitRenewLeaseR
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenewLease422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response RenewLease422ApplicationProblemPlusJSONResponse) VisitRenewLeaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7784,7 +8812,8 @@ func (response ListNotes503ApplicationProblemPlusJSONResponse) VisitListNotesRes
 }
 
 type PostNoteRequestObject struct {
-	Body *PostNoteJSONRequestBody
+	Params PostNoteParams
+	Body   *PostNoteJSONRequestBody
 }
 
 type PostNoteResponseObject interface {
@@ -7849,6 +8878,38 @@ func (response PostNote404ApplicationProblemPlusJSONResponse) VisitPostNoteRespo
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote409ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PostNote422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response PostNote422ApplicationProblemPlusJSONResponse) VisitPostNoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8080,7 +9141,8 @@ func (response GetNow503ApplicationProblemPlusJSONResponse) VisitGetNowResponse(
 }
 
 type PingRequestObject struct {
-	Body *PingJSONRequestBody
+	Params PingParams
+	Body   *PingJSONRequestBody
 }
 
 type PingResponseObject interface {
@@ -8149,6 +9211,22 @@ func (response Ping409ApplicationProblemPlusJSONResponse) VisitPingResponse(w ht
 	return err
 }
 
+type Ping422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response Ping422ApplicationProblemPlusJSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Ping503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -8166,7 +9244,8 @@ func (response Ping503ApplicationProblemPlusJSONResponse) VisitPingResponse(w ht
 }
 
 type StartRequestObject struct {
-	Body *StartJSONRequestBody
+	Params StartParams
+	Body   *StartJSONRequestBody
 }
 
 type StartResponseObject interface {
@@ -8261,6 +9340,22 @@ func (response Start409ApplicationProblemPlusJSONResponse) VisitStartResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response Start422ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8432,7 +9527,8 @@ func (response ListTasks503ApplicationProblemPlusJSONResponse) VisitListTasksRes
 }
 
 type CreateTaskRequestObject struct {
-	Body *CreateTaskJSONRequestBody
+	Params CreateTaskParams
+	Body   *CreateTaskJSONRequestBody
 }
 
 type CreateTaskResponseObject interface {
@@ -8513,6 +9609,22 @@ func (response CreateTask409ApplicationProblemPlusJSONResponse) VisitCreateTaskR
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTask422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateTask422ApplicationProblemPlusJSONResponse) VisitCreateTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8723,8 +9835,9 @@ func (response PatchTask503ApplicationProblemPlusJSONResponse) VisitPatchTaskRes
 }
 
 type RecordTaskCheckRequestObject struct {
-	Ref  TaskRef `json:"ref"`
-	Body *RecordTaskCheckJSONRequestBody
+	Ref    TaskRef `json:"ref"`
+	Params RecordTaskCheckParams
+	Body   *RecordTaskCheckJSONRequestBody
 }
 
 type RecordTaskCheckResponseObject interface {
@@ -8809,6 +9922,22 @@ func (response RecordTaskCheck409ApplicationProblemPlusJSONResponse) VisitRecord
 	return err
 }
 
+type RecordTaskCheck422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskCheck422ApplicationProblemPlusJSONResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RecordTaskCheck503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -8826,8 +9955,9 @@ func (response RecordTaskCheck503ApplicationProblemPlusJSONResponse) VisitRecord
 }
 
 type CloseTaskRequestObject struct {
-	Ref  TaskRef `json:"ref"`
-	Body *CloseTaskJSONRequestBody
+	Ref    TaskRef `json:"ref"`
+	Params CloseTaskParams
+	Body   *CloseTaskJSONRequestBody
 }
 
 type CloseTaskResponseObject interface {
@@ -8908,6 +10038,22 @@ func (response CloseTask409ApplicationProblemPlusJSONResponse) VisitCloseTaskRes
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CloseTask422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CloseTask422ApplicationProblemPlusJSONResponse) VisitCloseTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -9018,6 +10164,7 @@ func (response RemoveTaskDep503ApplicationProblemPlusJSONResponse) VisitRemoveTa
 type AddTaskDepRequestObject struct {
 	Ref          TaskRef      `json:"ref"`
 	BlockedByRef BlockedByRef `json:"blockedByRef"`
+	Params       AddTaskDepParams
 }
 
 type AddTaskDepResponseObject interface {
@@ -9102,6 +10249,22 @@ func (response AddTaskDep409ApplicationProblemPlusJSONResponse) VisitAddTaskDepR
 	return err
 }
 
+type AddTaskDep422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskDep422ApplicationProblemPlusJSONResponse) VisitAddTaskDepResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type AddTaskDep503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -9119,8 +10282,9 @@ func (response AddTaskDep503ApplicationProblemPlusJSONResponse) VisitAddTaskDepR
 }
 
 type DoneTaskRequestObject struct {
-	Ref  TaskRef `json:"ref"`
-	Body *DoneTaskJSONRequestBody
+	Ref    TaskRef `json:"ref"`
+	Params DoneTaskParams
+	Body   *DoneTaskJSONRequestBody
 }
 
 type DoneTaskResponseObject interface {
@@ -9201,6 +10365,22 @@ func (response DoneTask409ApplicationProblemPlusJSONResponse) VisitDoneTaskRespo
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DoneTask422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response DoneTask422ApplicationProblemPlusJSONResponse) VisitDoneTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -9309,8 +10489,9 @@ func (response ListTaskEvents503ApplicationProblemPlusJSONResponse) VisitListTas
 }
 
 type RecordTaskMilestoneRequestObject struct {
-	Ref  TaskRef `json:"ref"`
-	Body *RecordTaskMilestoneJSONRequestBody
+	Ref    TaskRef `json:"ref"`
+	Params RecordTaskMilestoneParams
+	Body   *RecordTaskMilestoneJSONRequestBody
 }
 
 type RecordTaskMilestoneResponseObject interface {
@@ -9379,6 +10560,38 @@ func (response RecordTaskMilestone404ApplicationProblemPlusJSONResponse) VisitRe
 	return err
 }
 
+type RecordTaskMilestone409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone409ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RecordTaskMilestone422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response RecordTaskMilestone422ApplicationProblemPlusJSONResponse) VisitRecordTaskMilestoneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RecordTaskMilestone503ApplicationProblemPlusJSONResponse struct {
 	UnavailableApplicationProblemPlusJSONResponse
 }
@@ -9396,7 +10609,8 @@ func (response RecordTaskMilestone503ApplicationProblemPlusJSONResponse) VisitRe
 }
 
 type ReopenTaskRequestObject struct {
-	Ref TaskRef `json:"ref"`
+	Ref    TaskRef `json:"ref"`
+	Params ReopenTaskParams
 }
 
 type ReopenTaskResponseObject interface {
@@ -9477,6 +10691,22 @@ func (response ReopenTask409ApplicationProblemPlusJSONResponse) VisitReopenTaskR
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReopenTask422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ReopenTask422ApplicationProblemPlusJSONResponse) VisitReopenTaskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10431,8 +11661,10 @@ func (sh *strictHandler) ListAsks(w http.ResponseWriter, r *http.Request, params
 }
 
 // RaiseAsk operation middleware
-func (sh *strictHandler) RaiseAsk(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) RaiseAsk(w http.ResponseWriter, r *http.Request, params RaiseAskParams) {
 	var request RaiseAskRequestObject
+
+	request.Params = params
 
 	var body RaiseAskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10489,10 +11721,11 @@ func (sh *strictHandler) GetAsk(w http.ResponseWriter, r *http.Request, ref AskR
 }
 
 // AnswerAsk operation middleware
-func (sh *strictHandler) AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+func (sh *strictHandler) AnswerAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params AnswerAskParams) {
 	var request AnswerAskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body AnswerAskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10522,10 +11755,11 @@ func (sh *strictHandler) AnswerAsk(w http.ResponseWriter, r *http.Request, ref A
 }
 
 // WithdrawAsk operation middleware
-func (sh *strictHandler) WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef) {
+func (sh *strictHandler) WithdrawAsk(w http.ResponseWriter, r *http.Request, ref AskRef, params WithdrawAskParams) {
 	var request WithdrawAskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body WithdrawAskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10584,8 +11818,10 @@ func (sh *strictHandler) GetAttention(w http.ResponseWriter, r *http.Request, pa
 }
 
 // Catchup operation middleware
-func (sh *strictHandler) Catchup(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) Catchup(w http.ResponseWriter, r *http.Request, params CatchupParams) {
 	var request CatchupRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.Catchup(ctx, request.(CatchupRequestObject))
@@ -10667,8 +11903,10 @@ func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, para
 }
 
 // Finish operation middleware
-func (sh *strictHandler) Finish(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) Finish(w http.ResponseWriter, r *http.Request, params FinishParams) {
 	var request FinishRequestObject
+
+	request.Params = params
 
 	var body FinishJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10724,8 +11962,10 @@ func (sh *strictHandler) ListInitiatives(w http.ResponseWriter, r *http.Request,
 }
 
 // CreateInitiative operation middleware
-func (sh *strictHandler) CreateInitiative(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) CreateInitiative(w http.ResponseWriter, r *http.Request, params CreateInitiativeParams) {
 	var request CreateInitiativeRequestObject
+
+	request.Params = params
 
 	var body CreateInitiativeJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10814,10 +12054,11 @@ func (sh *strictHandler) PatchInitiative(w http.ResponseWriter, r *http.Request,
 }
 
 // CloseInitiative operation middleware
-func (sh *strictHandler) CloseInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+func (sh *strictHandler) CloseInitiative(w http.ResponseWriter, r *http.Request, slug string, params CloseInitiativeParams) {
 	var request CloseInitiativeRequestObject
 
 	request.Slug = slug
+	request.Params = params
 
 	var body CloseInitiativeJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10850,10 +12091,11 @@ func (sh *strictHandler) CloseInitiative(w http.ResponseWriter, r *http.Request,
 }
 
 // ReopenInitiative operation middleware
-func (sh *strictHandler) ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string) {
+func (sh *strictHandler) ReopenInitiative(w http.ResponseWriter, r *http.Request, slug string, params ReopenInitiativeParams) {
 	var request ReopenInitiativeRequestObject
 
 	request.Slug = slug
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ReopenInitiative(ctx, request.(ReopenInitiativeRequestObject))
@@ -10900,8 +12142,10 @@ func (sh *strictHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateKey operation middleware
-func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request, params CreateKeyParams) {
 	var request CreateKeyRequestObject
+
+	request.Params = params
 
 	var body CreateKeyJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -10931,10 +12175,11 @@ func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // RevokeKey operation middleware
-func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, name string) {
+func (sh *strictHandler) RevokeKey(w http.ResponseWriter, r *http.Request, name string, params RevokeKeyParams) {
 	var request RevokeKeyRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RevokeKey(ctx, request.(RevokeKeyRequestObject))
@@ -10983,8 +12228,10 @@ func (sh *strictHandler) ListLeases(w http.ResponseWriter, r *http.Request, para
 }
 
 // StartLease operation middleware
-func (sh *strictHandler) StartLease(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) StartLease(w http.ResponseWriter, r *http.Request, params StartLeaseParams) {
 	var request StartLeaseRequestObject
+
+	request.Params = params
 
 	var body StartLeaseJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11040,10 +12287,11 @@ func (sh *strictHandler) GetLease(w http.ResponseWriter, r *http.Request, ref Le
 }
 
 // AckLease operation middleware
-func (sh *strictHandler) AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+func (sh *strictHandler) AckLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params AckLeaseParams) {
 	var request AckLeaseRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.AckLease(ctx, request.(AckLeaseRequestObject))
@@ -11066,10 +12314,11 @@ func (sh *strictHandler) AckLease(w http.ResponseWriter, r *http.Request, ref Le
 }
 
 // EndLease operation middleware
-func (sh *strictHandler) EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+func (sh *strictHandler) EndLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params EndLeaseParams) {
 	var request EndLeaseRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body EndLeaseJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11102,10 +12351,11 @@ func (sh *strictHandler) EndLease(w http.ResponseWriter, r *http.Request, ref Le
 }
 
 // RenewLease operation middleware
-func (sh *strictHandler) RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef) {
+func (sh *strictHandler) RenewLease(w http.ResponseWriter, r *http.Request, ref LeaseRef, params RenewLeaseParams) {
 	var request RenewLeaseRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body RenewLeaseJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11188,8 +12438,10 @@ func (sh *strictHandler) ListNotes(w http.ResponseWriter, r *http.Request, param
 }
 
 // PostNote operation middleware
-func (sh *strictHandler) PostNote(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) PostNote(w http.ResponseWriter, r *http.Request, params PostNoteParams) {
 	var request PostNoteRequestObject
+
+	request.Params = params
 
 	var body PostNoteJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11297,8 +12549,10 @@ func (sh *strictHandler) GetNow(w http.ResponseWriter, r *http.Request, params G
 }
 
 // Ping operation middleware
-func (sh *strictHandler) Ping(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) Ping(w http.ResponseWriter, r *http.Request, params PingParams) {
 	var request PingRequestObject
+
+	request.Params = params
 
 	var body PingJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11331,8 +12585,10 @@ func (sh *strictHandler) Ping(w http.ResponseWriter, r *http.Request) {
 }
 
 // Start operation middleware
-func (sh *strictHandler) Start(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) Start(w http.ResponseWriter, r *http.Request, params StartParams) {
 	var request StartRequestObject
+
+	request.Params = params
 
 	var body StartJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11414,8 +12670,10 @@ func (sh *strictHandler) ListTasks(w http.ResponseWriter, r *http.Request, param
 }
 
 // CreateTask operation middleware
-func (sh *strictHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) CreateTask(w http.ResponseWriter, r *http.Request, params CreateTaskParams) {
 	var request CreateTaskRequestObject
+
+	request.Params = params
 
 	var body CreateTaskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11504,10 +12762,11 @@ func (sh *strictHandler) PatchTask(w http.ResponseWriter, r *http.Request, ref T
 }
 
 // RecordTaskCheck operation middleware
-func (sh *strictHandler) RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+func (sh *strictHandler) RecordTaskCheck(w http.ResponseWriter, r *http.Request, ref TaskRef, params RecordTaskCheckParams) {
 	var request RecordTaskCheckRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body RecordTaskCheckJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11537,10 +12796,11 @@ func (sh *strictHandler) RecordTaskCheck(w http.ResponseWriter, r *http.Request,
 }
 
 // CloseTask operation middleware
-func (sh *strictHandler) CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+func (sh *strictHandler) CloseTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params CloseTaskParams) {
 	var request CloseTaskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body CloseTaskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11600,11 +12860,12 @@ func (sh *strictHandler) RemoveTaskDep(w http.ResponseWriter, r *http.Request, r
 }
 
 // AddTaskDep operation middleware
-func (sh *strictHandler) AddTaskDep(w http.ResponseWriter, r *http.Request, ref TaskRef, blockedByRef BlockedByRef) {
+func (sh *strictHandler) AddTaskDep(w http.ResponseWriter, r *http.Request, ref TaskRef, blockedByRef BlockedByRef, params AddTaskDepParams) {
 	var request AddTaskDepRequestObject
 
 	request.Ref = ref
 	request.BlockedByRef = blockedByRef
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.AddTaskDep(ctx, request.(AddTaskDepRequestObject))
@@ -11627,10 +12888,11 @@ func (sh *strictHandler) AddTaskDep(w http.ResponseWriter, r *http.Request, ref 
 }
 
 // DoneTask operation middleware
-func (sh *strictHandler) DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+func (sh *strictHandler) DoneTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params DoneTaskParams) {
 	var request DoneTaskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body DoneTaskJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11690,10 +12952,11 @@ func (sh *strictHandler) ListTaskEvents(w http.ResponseWriter, r *http.Request, 
 }
 
 // RecordTaskMilestone operation middleware
-func (sh *strictHandler) RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+func (sh *strictHandler) RecordTaskMilestone(w http.ResponseWriter, r *http.Request, ref TaskRef, params RecordTaskMilestoneParams) {
 	var request RecordTaskMilestoneRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	var body RecordTaskMilestoneJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -11723,10 +12986,11 @@ func (sh *strictHandler) RecordTaskMilestone(w http.ResponseWriter, r *http.Requ
 }
 
 // ReopenTask operation middleware
-func (sh *strictHandler) ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef) {
+func (sh *strictHandler) ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params ReopenTaskParams) {
 	var request ReopenTaskRequestObject
 
 	request.Ref = ref
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ReopenTask(ctx, request.(ReopenTaskRequestObject))

@@ -477,6 +477,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerPingSteps(sc, h)
 	registerBlockSteps(sc, h)
 	registerCatchupSteps(sc, h)
+	registerIdempotencySteps(sc, h)
 	sc.Step(`^I run "([^"]*)"$`, h.run)
 	sc.Step(`^I run "([^"]*)" with (BOARD_[A-Z_]+)=(\w+)$`, h.runWithVar)
 	sc.Step(`^the exit code is (\d+)$`, func(want int) error {

@@ -1,0 +1,164 @@
+package idempotency
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"time"
+
+	"github.com/n-orlov/village-hall/internal/store"
+)
+
+// Retention is how long a key is remembered. A key older than this counts as
+// new, and DeleteExpired removes its row.
+const Retention = 24 * time.Hour
+
+// Outcome is what Claim found.
+type Outcome int
+
+// The four things a key can be.
+const (
+	// Claimed: the key is new, now held by the caller, who must Complete or
+	// Release it.
+	Claimed Outcome = iota
+	// Replay: the same request already has its answer; Claim returned it.
+	Replay
+	// Mismatch: the key came with a different request.
+	Mismatch
+	// InFlight: the first request with the key has not been answered yet.
+	InFlight
+)
+
+// Request names one use of a key: who sent it, the key, and the fingerprint of
+// the request it came with.
+type Request struct {
+	Principal   string
+	Key         string
+	Fingerprint string
+}
+
+// Answer is the response stored for a key.
+type Answer struct {
+	Status      int
+	ContentType string
+	Body        []byte
+}
+
+// Store reads and writes the idempotency rows of one database.
+type Store struct {
+	Store *store.Store
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
+}
+
+func (s Store) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// cutoff is the stored time before which a row is older than Retention.
+func (s Store) cutoff() int64 { return store.EncodeBound(s.now().Add(-Retention)) }
+
+// Fingerprint identifies a request: its method, target (path and query), actor
+// and body.
+func Fingerprint(method, target, actor string, body []byte) string {
+	h := sha256.New()
+	for _, part := range []string{method, target, actor} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// hash is the stored form of a key: the key itself is never written.
+func hash(principal, key string) string {
+	sum := sha256.Sum256([]byte("vh-idempotency-key\x00" + principal + "\x00" + key))
+	return hex.EncodeToString(sum[:])
+}
+
+// Claim takes the key for r when it is new (a key older than Retention is new:
+// its row is replaced). For a key already held it returns Mismatch when the
+// request differs, Replay with the stored answer when the first request is
+// answered, and InFlight when it is not.
+func (s Store) Claim(ctx context.Context, r Request) (Outcome, Answer, error) {
+	db, d := s.Store.Writer(), s.Store.Dialect()
+	id := hash(r.Principal, r.Key)
+	if _, err := db.ExecContext(ctx, d.Rebind(`DELETE FROM idempotency_keys WHERE principal = ? AND key_hash = ? AND created_at < ?`),
+		r.Principal, id, s.cutoff()); err != nil {
+		return 0, Answer{}, err
+	}
+	res, err := db.ExecContext(ctx, d.Rebind(`INSERT INTO idempotency_keys (principal, key_hash, fingerprint, state, created_at)
+		VALUES (?, ?, ?, 'running', ?) ON CONFLICT (principal, key_hash) DO NOTHING`),
+		r.Principal, id, r.Fingerprint, store.EncodeTime(s.now()))
+	if err != nil {
+		return 0, Answer{}, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 1 {
+		return Claimed, Answer{}, err
+	}
+	return s.existing(ctx, r, id)
+}
+
+// existing judges a key whose row is already there.
+func (s Store) existing(ctx context.Context, r Request, id string) (Outcome, Answer, error) {
+	var (
+		fingerprint, state string
+		status             sql.NullInt64
+		contentType, body  sql.NullString
+	)
+	err := s.Store.Writer().QueryRowContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT fingerprint, state, status, content_type, body FROM idempotency_keys WHERE principal = ? AND key_hash = ?`),
+		r.Principal, id).Scan(&fingerprint, &state, &status, &contentType, &body)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// Released between the insert and this read: the first request is gone.
+		return InFlight, Answer{}, nil
+	case err != nil:
+		return 0, Answer{}, err
+	case fingerprint != r.Fingerprint:
+		return Mismatch, Answer{}, nil
+	case state != "done":
+		return InFlight, Answer{}, nil
+	}
+	plain, err := open(r, body.String)
+	if err != nil {
+		return 0, Answer{}, err
+	}
+	return Replay, Answer{Status: int(status.Int64), ContentType: contentType.String, Body: plain}, nil
+}
+
+// Complete stores the answer to the request that holds the key.
+func (s Store) Complete(ctx context.Context, r Request, a Answer) error {
+	sealed, err := seal(r, a.Body)
+	if err != nil {
+		return err
+	}
+	_, err = s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
+		`UPDATE idempotency_keys SET state = 'done', status = ?, content_type = ?, body = ?
+		 WHERE principal = ? AND key_hash = ? AND state = 'running'`),
+		a.Status, a.ContentType, sealed, r.Principal, hash(r.Principal, r.Key))
+	return err
+}
+
+// Release gives the key up, for a request that failed before it answered: the
+// same key then starts again.
+func (s Store) Release(ctx context.Context, r Request) error {
+	_, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
+		`DELETE FROM idempotency_keys WHERE principal = ? AND key_hash = ? AND state = 'running'`),
+		r.Principal, hash(r.Principal, r.Key))
+	return err
+}
+
+// DeleteExpired removes the rows older than Retention and returns how many.
+func (s Store) DeleteExpired(ctx context.Context) (int64, error) {
+	res, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(`DELETE FROM idempotency_keys WHERE created_at < ?`), s.cutoff())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

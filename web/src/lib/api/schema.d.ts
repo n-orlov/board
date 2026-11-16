@@ -2195,6 +2195,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description The `Idempotency-Key` was first used with a different request (a different method, path, query, actor or body). Send a new key for a different request. */
+        Unprocessable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description The lease has expired. The problem carries `expired_at`. */
         Gone: {
             headers: {
@@ -2233,6 +2242,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+        IdempotencyKey: string;
         /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
         TaskRef: string;
         /** @description The ref or ULID, in either letter case, of the task that blocks. */
@@ -2424,7 +2435,10 @@ export interface operations {
     createKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -2446,13 +2460,17 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     revokeKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The key's name. */
                 name: string;
@@ -2473,6 +2491,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -2513,7 +2533,10 @@ export interface operations {
     createInitiative: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -2535,6 +2558,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -2599,7 +2623,10 @@ export interface operations {
     closeInitiative: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The initiative's slug or ULID. */
                 slug: string;
@@ -2625,13 +2652,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     reopenInitiative: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The initiative's slug or ULID. */
                 slug: string;
@@ -2652,6 +2683,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -2707,7 +2739,10 @@ export interface operations {
     createTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -2730,6 +2765,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -2795,7 +2831,10 @@ export interface operations {
     doneTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -2821,13 +2860,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     reopenTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -2849,13 +2892,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     closeTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -2881,13 +2928,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     addTaskDep: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -2911,6 +2962,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -2946,7 +2998,10 @@ export interface operations {
     recordTaskCheck: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -2972,13 +3027,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     recordTaskMilestone: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
                 ref: components["parameters"]["TaskRef"];
@@ -3003,6 +3062,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3215,7 +3276,10 @@ export interface operations {
     startLease: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3247,6 +3311,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3280,7 +3345,10 @@ export interface operations {
     renewLease: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
                 ref: components["parameters"]["LeaseRef"];
@@ -3307,13 +3375,17 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             410: components["responses"]["Gone"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     endLease: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
                 ref: components["parameters"]["LeaseRef"];
@@ -3339,13 +3411,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     ackLease: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
                 ref: components["parameters"]["LeaseRef"];
@@ -3367,6 +3443,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3410,7 +3487,10 @@ export interface operations {
     raiseAsk: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3433,6 +3513,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3471,7 +3552,10 @@ export interface operations {
     answerAsk: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
                 ref: components["parameters"]["AskRef"];
@@ -3497,13 +3581,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     withdrawAsk: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
                 ref: components["parameters"]["AskRef"];
@@ -3529,6 +3617,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3582,7 +3671,10 @@ export interface operations {
     postNote: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3604,6 +3696,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -3693,7 +3787,10 @@ export interface operations {
     start: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3725,13 +3822,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     finish: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3754,13 +3855,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     ping: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3782,13 +3887,17 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
     catchup: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -3804,6 +3913,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
