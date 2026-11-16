@@ -296,6 +296,7 @@ func TestEveryRefusalSaysWhyWithAnArrowAndLeavesTheBinaryUnchanged(t *testing.T)
 		{"dev build", "dev build", func(_ *testing.T, _ *stub, o *Options) { o.Current = "devel+0123456789ab" }, false},
 		{"dirty build", "dev build", func(_ *testing.T, _ *stub, o *Options) { o.Current = "v1.0.0-dirty" }, false},
 		{"no version at all", "dev build", func(_ *testing.T, _ *stub, o *Options) { o.Current = "devel" }, false},
+		{"clean checkout build", "dev build", func(_ *testing.T, _ *stub, o *Options) { o.Current = "v0.0.0-20261116131445-643cc29bf60f" }, false},
 		{"package-managed", "package manager owns", func(_ *testing.T, _ *stub, o *Options) { o.Exe = "/usr/bin/vh" }, false},
 		{"under nix", "package manager owns", func(_ *testing.T, _ *stub, o *Options) { o.Exe = "/nix/store/abc-vh/bin/vh" }, false},
 		{"symlink into a managed prefix", "package manager owns", func(t *testing.T, _ *stub, o *Options) {
@@ -553,6 +554,10 @@ func TestIsRelease(t *testing.T) {
 		"v1.2.3": true, "v0.0.1": true, "v10.20.30": true, "v1.2.3-rc.1": true,
 		"1.2.3": false, "v1.2": false, "v1.2.3.4": false, "devel": false, "devel+abc": false, "v1.2.3-dirty": false,
 		"": false, "v1.2.3+meta": false, "xv1.2.3": false, "v1.2.3\n": false,
+		// Pseudo-versions: what a clean checkout build of the module is stamped as.
+		"v0.0.0-20261116131445-643cc29bf60f": false, "v1.2.4-0.20261116131445-643cc29bf60f": false,
+		"v1.2.3-rc.1.0.20261116131445-643cc29bf60f": false, "v0.0.0-20261116131445-643cc29bf60f-dirty": false,
+		"v1.2.3-0.1": true, "v1.2.3-rc.20261116131445": true,
 	} {
 		if got := IsRelease(v); got != want {
 			t.Errorf("IsRelease(%q) = %v, want %v", v, got, want)

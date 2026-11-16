@@ -2311,7 +2311,8 @@ the directory of the running binary (symlinks resolved), set to mode 0755 and re
 - It refuses with exit 1, one stderr line that ends in a `→ <what to do>` hint, and the binary unchanged,
   in these six cases, plus a bad `VH_REPO`, `VH_API_URL` or `VH_DOWNLOAD_URL` and an unsupported platform:
   a **dev build** (the running version is not `vMAJOR.MINOR.PATCH` with an optional pre-release part: a
-  checkout build `devel+<commit>`, `devel`, and any `-dirty` build); a **package-managed install** (the
+  checkout build `devel+<commit>`, `devel`, the Go pseudo-version a clean checkout
+  build is stamped with (`v0.0.0-<time>-<commit>` and its kin), and any `-dirty` build); a **package-managed install** (the
   binary, before or after resolving symlinks, lies at or under `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
   `/usr/lib`, `/usr/libexec`, `/opt/homebrew`, `/usr/local/Cellar`, `/home/linuxbrew`, `/nix/store` or
   `/snap`, as in `deck update`; a bare `/usr` is not listed, so `/usr/local/bin` is updated); an

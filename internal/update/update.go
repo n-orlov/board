@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"github.com/n-orlov/village-hall/internal/version"
@@ -61,9 +62,11 @@ var (
 )
 
 // IsRelease reports whether v names a release: vMAJOR.MINOR.PATCH with an
-// optional pre-release part. A checkout build (devel+abc, -dirty) is not one.
+// optional pre-release part. A checkout build is not one, whichever way the
+// toolchain stamped it: devel+abc, a -dirty tree, or the pseudo-version a clean
+// checkout of a module gets (v0.0.0-20261116131445-643cc29bf60f).
 func IsRelease(v string) bool {
-	return tagPattern.MatchString(v) && !strings.HasSuffix(v, version.DirtySuffix)
+	return tagPattern.MatchString(v) && !strings.HasSuffix(v, version.DirtySuffix) && !module.IsPseudoVersion(v)
 }
 
 // Check reports which release a Run would install, and whether that differs

@@ -152,6 +152,7 @@ func TestUpdateRefusalsExitOneWithAnArrowAndLeaveTheBinary(t *testing.T) {
 	}{
 		{"dev build", "devel+0123456789ab", "true", nil, nil, "dev build"},
 		{"dev build with --check", "devel", "true", nil, []string{"--check"}, "dev build"},
+		{"clean checkout build with --check", "v0.0.0-20261116131445-643cc29bf60f", "true", nil, []string{"--check"}, "dev build"},
 		{"not immutable", "v1.0.0", "false", nil, nil, "not an immutable release"},
 		{"opt-out value 1 keeps the check", "v1.0.0", "false", map[string]string{"VH_REQUIRE_IMMUTABLE": "1"}, nil, "not an immutable release"},
 		{"opt-out value no keeps the check", "v1.0.0", "false", map[string]string{"VH_REQUIRE_IMMUTABLE": "no"}, nil, "not an immutable release"},
