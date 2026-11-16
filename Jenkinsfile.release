@@ -1,14 +1,19 @@
-// board release job on the homelab Jenkins: pipeline job board/release,
+// board release job on the homelab Jenkins: pipeline job <folder>/release,
 // started by hand, running this file from main (see docs/ci.md, "Release").
 //
-// This is a placeholder until the release phase (SPEC 16, phase 4). It
-// validates its parameters against the release candidate that a green
-// board/ci main build archived in ci-results/release-candidate.json (the last
-// fully green one, or CI_BUILD), checks that candidate commit out, and stops:
-// Candidate -> Checkout. It behaves as a dry run whatever DRY_RUN says: it
-// builds nothing, publishes nothing, creates no tag and holds no credential.
-// Every result posts a Telegram message (notifyTelegram, from the homelab
-// shared library github.com/n-orlov/jenkins-library).
+// It releases exactly the commit of a green <folder>/ci/main build, which
+// archived ci-results/release-candidate.json (the last fully green build, or
+// CI_BUILD): Candidate -> Checkout -> Version check -> Build -> Publish. Build
+// runs ci/release-build.sh and Publish runs ci/release-publish.sh, which draws
+// the release, uploads the assets, pushes the image and requires the release
+// to be immutable. DRY_RUN (default true) builds everything and publishes
+// nothing: the publish script then only reads.
+//
+// Nothing about the deployment is written here: the CI job lives next to this
+// one (its path comes from this job's own folder), the repository is the one
+// that was checked out, and the registry and both credential IDs are
+// parameters with no default. Every result posts a Telegram message
+// (notifyTelegram, from the homelab shared library).
 @Library('homelab') _
 
 pipeline {
@@ -19,7 +24,7 @@ pipeline {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '50'))
     disableConcurrentBuilds()
-    timeout(time: 15, unit: 'MINUTES')
+    timeout(time: 120, unit: 'MINUTES')
     skipDefaultCheckout()                 // the Checkout stage, once the commit is known
   }
 
@@ -27,37 +32,50 @@ pipeline {
     string(name: 'VERSION', defaultValue: '', trim: true,
            description: 'Release version, e.g. v1.4.0 or v1.5.0-rc.1 (required)')
     string(name: 'CI_BUILD', defaultValue: '', trim: true,
-           description: 'board/ci main build number to validate; empty = the last successful one')
+           description: 'ci main build number to release; empty = the last successful one')
     booleanParam(name: 'DRY_RUN', defaultValue: true,
-                 description: 'Dry run. The only behaviour in this phase: nothing is published whatever this says')
+                 description: 'Dry run: build every asset, publish nothing (the publish script only reads)')
+    string(name: 'REGISTRY', defaultValue: '', trim: true,
+           description: 'Registry the image is pushed to, host[:port][/path] (required unless DRY_RUN)')
+    string(name: 'IMAGE_NAME', defaultValue: 'village-hall', trim: true,
+           description: 'Repository name of the image in the registry')
+    string(name: 'REGISTRY_CREDENTIALS_ID', defaultValue: '', trim: true,
+           description: 'ID of the username/password credential that pushes to the registry (required unless DRY_RUN)')
+    string(name: 'GITHUB_CREDENTIALS_ID', defaultValue: '', trim: true,
+           description: 'ID of the username/password credential whose password is the GitHub token that creates the release (required unless DRY_RUN)')
   }
 
   environment {
     CANDIDATE = 'candidate/ci-results/release-candidate.json'
+    OUTDIR = 'release-out'
   }
 
   stages {
-    // Which commit: the release candidate of a green board/ci main build. A
-    // build that was not green has none, so the copy fails.
+    // Which commit: the release candidate of a green main build of the CI job
+    // that sits next to this one. A build that was not green has none, so the
+    // copy fails.
     stage('Candidate') {
       steps {
         script {
-          if (!(params.VERSION ==~ /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/)) {
-            error('VERSION "' + params.VERSION + '" is not vMAJOR.MINOR.PATCH[-pre]')
-          }
-          currentBuild.displayName = params.VERSION + ' (dry run)'
+          currentBuild.displayName = params.VERSION + (params.DRY_RUN ? ' (dry run)' : '')
           if (params.CI_BUILD && !(params.CI_BUILD ==~ /^[0-9]+$/)) {
             error('CI_BUILD "' + params.CI_BUILD + '" is not a build number')
           }
+          // <folder>/release -> /<folder>/ci/main, from this job's own folder.
+          int slash = env.JOB_NAME.lastIndexOf('/')
+          if (slash < 0) {
+            error('job ' + env.JOB_NAME + ' is not in a folder, so the CI job next to it cannot be found')
+          }
+          env.CI_JOB = '/' + env.JOB_NAME.substring(0, slash) + '/ci/main'
         }
         sh 'rm -rf candidate'
         script {
           try {
-            copyArtifacts projectName: '/board/ci/main', filter: 'ci-results/release-candidate.json',
+            copyArtifacts projectName: env.CI_JOB, filter: 'ci-results/release-candidate.json',
                           target: 'candidate', fingerprintArtifacts: true,
                           selector: params.CI_BUILD ? specific(params.CI_BUILD) : lastSuccessful(stable: true)
           } catch (err) {
-            error('no release candidate in board/ci main ' + (params.CI_BUILD ? '#' + params.CI_BUILD : 'last successful build') +
+            error('no release candidate in ' + env.CI_JOB + ' ' + (params.CI_BUILD ? '#' + params.CI_BUILD : 'last successful build') +
                   ': only a fully green main build is releasable (' + err.getMessage() + ')')
           }
           env.RELEASE_SHA = sh(returnStdout: true, script: '''
@@ -69,17 +87,84 @@ pipeline {
           if (!(env.RELEASE_SHA ==~ /^[0-9a-f]{40}$/)) {
             error('release candidate commit "' + env.RELEASE_SHA + '" is not a full sha')
           }
-          echo 'Validated ' + params.VERSION + ' against ' + env.RELEASE_SHA + ' from ' + env.CI_BUILD_URL
+          echo 'Candidate ' + env.RELEASE_SHA + ' from ' + env.CI_BUILD_URL
         }
       }
     }
 
-    // The candidate commit must be in the repository; then the job stops.
+    // The candidate commit must be in the repository, and is what gets built.
+    // The repository is whatever was checked out: owner/name from its remote.
     stage('Checkout') {
       steps {
         checkout scm
         sh 'git checkout --quiet --detach "$RELEASE_SHA"'
-        echo 'Dry run: ' + params.VERSION + ' would release ' + env.RELEASE_SHA + '. Nothing is built or published in this phase.'
+        script {
+          env.REPO = sh(returnStdout: true, script: '''
+            git remote get-url origin | awk -F'[:/]' '{ n = $NF; sub(/[.]git$/, "", n); print $(NF - 1) "/" n }'
+          ''').trim()
+          echo 'Releasing ' + env.REPO + ' at ' + env.RELEASE_SHA
+        }
+      }
+    }
+
+    // The version is well formed, is not taken, and a real release has what it
+    // needs to publish.
+    stage('Version check') {
+      steps {
+        script {
+          if (!(params.VERSION ==~ /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/)) {
+            error('VERSION "' + params.VERSION + '" is not vMAJOR.MINOR.PATCH[-pre]')
+          }
+          // 0: the tag exists; 2: no such ref; anything else: the remote could not be read.
+          int rc = sh(returnStatus: true, script: 'git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null')
+          if (rc == 0) {
+            error('the tag ' + params.VERSION + ' already exists in ' + env.REPO + ': releases are immutable, pick a new version')
+          }
+          if (rc != 2) {
+            error('could not read the tags of ' + env.REPO + ' (exit ' + rc + ')')
+          }
+          if (!params.DRY_RUN) {
+            if (!params.REGISTRY) {
+              error('REGISTRY is required unless DRY_RUN')
+            }
+            if (!params.REGISTRY_CREDENTIALS_ID || !params.GITHUB_CREDENTIALS_ID) {
+              error('REGISTRY_CREDENTIALS_ID and GITHUB_CREDENTIALS_ID are required unless DRY_RUN')
+            }
+          }
+        }
+      }
+    }
+
+    // Every asset and the multi-arch image, at the candidate commit.
+    stage('Build') {
+      steps {
+        sh 'ci/release-build.sh "$VERSION" "$OUTDIR"'
+      }
+    }
+
+    // The draft, the assets, the image and the immutable read-back are all
+    // ci/release-publish.sh's. A dry run holds no credential.
+    stage('Publish') {
+      environment {
+        VERSION = "${params.VERSION}"
+        CI_BUILD = "${params.CI_BUILD}"
+        REGISTRY = "${params.REGISTRY}"
+        IMAGE_NAME = "${params.IMAGE_NAME}"
+        DRY_RUN = "${params.DRY_RUN}"
+      }
+      steps {
+        script {
+          if (params.DRY_RUN) {
+            sh 'ci/release-publish.sh "$OUTDIR"'
+          } else {
+            withCredentials([usernamePassword(credentialsId: params.REGISTRY_CREDENTIALS_ID,
+                                              usernameVariable: 'REGISTRY_USER', passwordVariable: 'REGISTRY_PASSWORD'),
+                             usernamePassword(credentialsId: params.GITHUB_CREDENTIALS_ID,
+                                              usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+              sh 'ci/release-publish.sh "$OUTDIR"'
+            }
+          }
+        }
       }
     }
   }
@@ -91,14 +176,15 @@ pipeline {
           addSummary(icon: currentBuild.currentResult == 'SUCCESS' ? 'symbol-checkmark-circle-outline plugin-ionicons-api'
                                                                    : 'symbol-close-circle-outline plugin-ionicons-api',
                      text: params.VERSION + ' from ' + env.RELEASE_SHA +
-                           ' (<a href="' + env.CI_BUILD_URL + '">CI build</a>): dry run, not published')
+                           ' (<a href="' + env.CI_BUILD_URL + '">CI build</a>): ' +
+                           (params.DRY_RUN ? 'dry run, not published' : 'published'))
         }
       }
     }
     cleanup {
       script {
         notifyTelegram(notifyOn: 'ALL', silent: false, title: 'board release ' + params.VERSION,
-                       commit: env.RELEASE_SHA, extra: 'dry run, not published')
+                       commit: env.RELEASE_SHA, extra: params.DRY_RUN ? 'dry run, not published' : 'published')
       }
     }
   }

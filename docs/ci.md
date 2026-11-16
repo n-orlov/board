@@ -274,17 +274,19 @@ build.
 
 ## Release
 
-`Jenkinsfile.release` is the pipeline job `board/release`, started by hand, and
-a placeholder until the release phase. Its parameters are `VERSION`
-(`vMAJOR.MINOR.PATCH[-pre]`, required), `CI_BUILD` (a `board/ci` `main` build
-number, empty for the last successful one) and `DRY_RUN`. Candidate validates both
-against the release candidate that build archived in
-`ci-results/release-candidate.json` (a build that was not fully green has none, so
-the copy fails), Checkout checks the candidate commit out, and the job stops: it
-builds nothing, publishes nothing, creates no tag, holds no credential and
-behaves as a dry run whatever `DRY_RUN` says. `ci/repocheck/jenkinsfile_test.go`
-fails if it gains a Build or Publish stage, a credential, a push or `gh release`,
-or loses the validation.
+`Jenkinsfile.release` is the pipeline job `release`, in the same Jenkins folder as the CI job and started by
+hand. Its stages are Candidate, Checkout, Version check, Build and Publish (SPEC 12.5). Its parameters are
+`VERSION` (`vMAJOR.MINOR.PATCH[-pre]`, required), `CI_BUILD` (a `ci/main` build number, empty for the last
+successful one), `DRY_RUN` (default `true`), `REGISTRY` (no default), `IMAGE_NAME` (default `village-hall`) and the two
+credential IDs, `REGISTRY_CREDENTIALS_ID` and `GITHUB_CREDENTIALS_ID`.
+
+Candidate copies `ci-results/release-candidate.json` from the folder's `ci/main` job (the path is computed from
+the job's own `JOB_NAME`; a build that was not fully green has no candidate, so the copy fails). Checkout checks
+the candidate commit out and reads the repository from the remote. Version check refuses a malformed or taken
+version. Build runs `ci/release-build.sh`, and Publish runs `ci/release-publish.sh` (below). With `DRY_RUN` true
+everything is built and nothing is published. The job is never started by CI, and no file names a host.
+`ci/repocheck/jenkinsfile_test.go` fails if the stages, the dry-run default, the derived paths, the parameters
+or the single publish step change, or if a hostname appears in the file.
 
 ## Release build
 
@@ -628,11 +630,9 @@ ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
   `deck/` jobs to `board/`) and rewritten for its three phases (Core, Stability,
   Mutation) and parallel units. Board's pipeline adds Mutation and the image
   build, and drops the tmux-only parts. deck's release
-  assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is adapted to the
-  placeholder `Jenkinsfile.release` as
-  `TestJenkinsfileReleaseValidatesTheCandidateAndStops`: it asserts the `VERSION`
-  and `CI_BUILD` validation against the candidate, that the job has no behaviour
-  beyond a dry run and publishes nothing (no Build or Publish stage, no tag push,
-  no `gh release`, no credential), and that it fails if `Jenkinsfile.release`
-  publishes or drops that validation. deck's own Build, Publish, Version check
-  and `ci/release-build.sh` assertions arrive with the real release job.
+  assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is carried for board's
+  `Jenkinsfile.release` under the same name: it asserts the five stages in order, the
+  `DRY_RUN` default, the CI job path derived from the folder of `JOB_NAME`, the repository read
+  from the checkout's remote, the `REGISTRY`, `IMAGE_NAME` and two credential-ID parameters, no hostname
+  anywhere in the file, and that Publish's only shell step is `ci/release-publish.sh`, with planted violations
+  that each must be reported.

@@ -3643,6 +3643,29 @@ publishes nothing; every CI build runs it as a dry run (`ci/release-check.sh`, i
 four tarballs, that `checksums.txt` verifies, that the linux/amd64 `vh version` prints the version, that
 every SBOM parses and that the OCI index lists both platforms. Releases are immutable (§8.5, §15.3).
 
+The release job is `Jenkinsfile.release`, a pipeline job `<folder>/release` started by hand, with five stages in
+this order:
+
+1. **Candidate** validates `CI_BUILD` (empty = the last successful build) and copies
+   `ci-results/release-candidate.json` from the `ci/main` job of the same folder. The path is computed from
+   the job's own `JOB_NAME` (`<folder>/ci/main`), never written out. A build that was not fully green archived no
+   candidate, so the copy fails.
+2. **Checkout** checks out the candidate's commit, detached, and reads the repository (`owner/name`) from the
+   checkout's remote URL; no slug is written in the file.
+3. **Version check** requires `VERSION` to be `vMAJOR.MINOR.PATCH[-pre]` and the tag not to exist in the remote,
+   and, unless `DRY_RUN`, requires `REGISTRY` and both credential IDs.
+4. **Build** runs `ci/release-build.sh "$VERSION" release-out` at the candidate commit.
+5. **Publish** runs `ci/release-publish.sh release-out` (§15.3), and nothing else. Outside a dry run it runs
+   inside `withCredentials` for the two credentials below.
+
+Parameters: `VERSION`, `CI_BUILD`, `DRY_RUN` (default `true`: everything is built, the publish script only reads),
+`REGISTRY` (no default), `IMAGE_NAME` (default `village-hall`), `REGISTRY_CREDENTIALS_ID` (a username/password
+credential for the registry push) and `GITHUB_CREDENTIALS_ID` (a username/password credential whose password is the
+GitHub token that creates the release). No default names a host, and no hostname is anywhere in the file.
+`ci/repocheck` (`TestJenkinsfileReleasePublishesTheCandidate`) fails on a change that breaks any of these:
+the five stages in order, the `DRY_RUN` default, the folder-derived CI job path, the repository read from the
+remote, the parameters and their defaults, no hostname, and Publish's one shell step.
+
 ---
 
 ## 13. Configuration and deployment

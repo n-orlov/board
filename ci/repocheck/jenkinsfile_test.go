@@ -4,8 +4,8 @@
 // Mutation run in order on the one AMD agent label, the nightly lane is
 // scheduled on main, mutation runs in a diff or a full mode only when asked,
 // the quality gates and reports stay wired in, only a fully green main build
-// leaves a release candidate, and the release job is a placeholder that
-// validates against that candidate and publishes nothing. Each property is a
+// leaves a release candidate, and the release job validates against that
+// candidate, builds it and publishes it only through ci/release-publish.sh. Each property is a
 // pure function of the file text (a *Problems helper) that its test feeds the
 // committed Jenkinsfile and copies of it with the property removed or altered,
 // so the test fails if the property is lost. Plain text matching; both files
@@ -436,113 +436,126 @@ func TestJenkinsfileNeverReleases(t *testing.T) {
 	})
 }
 
-// TestJenkinsfileReleaseValidatesTheCandidateAndStops: board/release is a
-// placeholder. It validates VERSION and CI_BUILD against the release candidate
-// of a green board/ci main build, checks that commit out and stops: it has a
-// DRY_RUN parameter and no other behaviour, publishes nothing, creates no tag
-// and holds no credential. It fails if the file starts publishing or drops
-// the validation.
-func TestJenkinsfileReleaseValidatesTheCandidateAndStops(t *testing.T) {
-	jf := readRepoFile(t, "Jenkinsfile.release")
-	want := []string{"Candidate", "Checkout"}
-	if got := jenkinsStages(jf); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("release stages = %q, want %q", got, want)
+// releaseHostRE finds a hostname anywhere in text: a dotted name ending in a
+// well-known top-level domain, localhost, an IPv4 address, a scheme, or
+// host:port. A release job that names one has the deployment hard-coded.
+var releaseHostRE = regexp.MustCompile(`(?i)\b[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|app|cloud|local|lan|internal|home|corp|test|example|edu|gov|info|xyz|me|us|uk|de|ru)\b` +
+	`|\blocalhost\b|\b\d{1,3}(\.\d{1,3}){3}\b|://|\b[a-z0-9.-]+:\d{2,5}\b`)
+
+// releaseParamDefault returns the literal after `name: '<name>', defaultValue:`.
+func releaseParamDefault(jf, name string) (string, bool) {
+	m := regexp.MustCompile(`\(name: '` + regexp.QuoteMeta(name) + `',\s*defaultValue: ([^,)\s]+)`).FindStringSubmatch(jf)
+	if m == nil {
+		return "", false
 	}
-	for _, p := range []string{"VERSION", "CI_BUILD", "DRY_RUN"} {
-		if !strings.Contains(jf, "(name: '"+p+"'") {
-			t.Errorf("Jenkinsfile.release has no %s parameter", p)
-		}
-	}
-	checks := map[string][]string{
-		"Candidate": {
-			`params.VERSION ==~ /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/`,
-			`params.CI_BUILD ==~ /^[0-9]+$/`,
-			"projectName: '/board/ci/main', filter: 'ci-results/release-candidate.json'",
-			"specific(params.CI_BUILD) : lastSuccessful(stable: true)",
-			`env.RELEASE_SHA ==~ /^[0-9a-f]{40}$/`,
-		},
-		"Checkout": {"checkout scm", `git checkout --quiet --detach "$RELEASE_SHA"`},
-	}
-	for stage, wants := range checks {
-		body, ok := jenkinsStage(jf, stage)
-		if !ok {
-			t.Errorf("Jenkinsfile.release has no %s stage", stage)
-			continue
-		}
-		for _, w := range wants {
-			if !strings.Contains(body, w) {
-				t.Errorf("the %s stage lacks %q", stage, w)
-			}
-		}
-	}
-	for _, l := range jenkinsfileLines(jf) {
-		for _, bad := range []string{
-			"git push", "git tag", "gh release", "gh api", "docker push", "docker build", "release-build.sh",
-			"withCredentials", "GH_TOKEN", "credentialsId", "ci/run.sh", "when {", "stage('Build')", "stage('Publish')",
-		} {
-			if strings.Contains(l, bad) {
-				t.Errorf("Jenkinsfile.release line %q mentions %q: the placeholder validates and stops, it never builds or publishes", l, bad)
-			}
-		}
-		if strings.Contains(l, "params.DRY_RUN") {
-			t.Errorf("Jenkinsfile.release line %q branches on DRY_RUN: the placeholder is a dry run whatever it says", l)
-		}
-	}
+	return m[1], true
 }
 
-// TestJenkinsfileReleaseProbeCatchesAPublishingRelease: the release probe is
-// not vacuous, so a Jenkinsfile.release that publishes or drops the
-// validation fails it. It runs the probe's own checks over doctored copies.
-func TestJenkinsfileReleaseProbeCatchesAPublishingRelease(t *testing.T) {
-	good := readRepoFile(t, "Jenkinsfile.release")
-	if bad := releaseProblems(good); len(bad) != 0 {
-		t.Fatalf("the real Jenkinsfile.release has problems: %q", bad)
-	}
-	doctored := map[string]string{
-		"a Publish stage":          strings.Replace(good, "stage('Checkout') {", "stage('Publish') {\n      steps { sh 'gh release create v1' }\n    }\n    stage('Checkout') {", 1),
-		"a dropped VERSION check":  strings.Replace(good, `params.VERSION ==~`, `params.VERSION !=`, 1),
-		"a dropped CI_BUILD check": strings.Replace(good, `params.CI_BUILD ==~`, `params.CI_BUILD !=`, 1),
-		"no candidate copy":        strings.Replace(good, "copyArtifacts projectName", "echo projectName", 1),
-		"a pushed tag":             strings.Replace(good, "echo 'Dry run:", "sh 'git push origin v1'\n        echo 'Dry run:", 1),
-	}
-	for name, text := range doctored {
-		if name == "a Publish stage" || name == "a pushed tag" {
-			if text == good {
-				t.Fatalf("%s: the doctoring changed nothing", name)
-			}
-		}
-		if len(releaseProblems(text)) == 0 {
-			t.Errorf("%s was not caught by the release probe", name)
-		}
-	}
-}
-
-// releaseProblems is the placeholder's contract as a pure function of the
-// file text: it validates, copies the candidate, and does nothing else.
+// releaseProblems is the release job's contract as a pure function of the
+// file text. Each problem starts with the number of the property it breaks:
+//
+//	1 the stages Candidate, Checkout, Version check, Build, Publish in order
+//	2 DRY_RUN defaults to true
+//	3 the CI job path comes from the folder of JOB_NAME, never a literal
+//	4 the repository comes from the checkout's remote, never a literal slug
+//	5 REGISTRY (no default), IMAGE_NAME (default village-hall) and both
+//	  credential-ID parameters are declared
+//	6 no hostname anywhere in the file, defaults included
+//	7 Publish's only shell step is ci/release-publish.sh
 func releaseProblems(jf string) []string {
 	var problems []string
-	for _, must := range []string{
-		`params.VERSION ==~ /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/`,
-		`params.CI_BUILD ==~ /^[0-9]+$/`,
-		"copyArtifacts projectName: '/board/ci/main'",
-		"release-candidate.json",
-		`env.RELEASE_SHA ==~ /^[0-9a-f]{40}$/`,
-	} {
-		if !strings.Contains(jf, must) {
-			problems = append(problems, "lacks "+must)
+	add := func(n int, msg string) { problems = append(problems, strconv.Itoa(n)+": "+msg) }
+
+	if got := strings.Join(jenkinsStages(jf), ","); got != "Candidate,Checkout,Version check,Build,Publish" {
+		add(1, "stages are "+got)
+	}
+	if v, ok := releaseParamDefault(jf, "DRY_RUN"); !ok || v != "true" {
+		add(2, "DRY_RUN does not default to true (default "+v+")")
+	}
+
+	candidate, _ := jenkinsStage(jf, "Candidate")
+	if strings.Contains(jf, "/board/ci/main") {
+		add(3, "the literal /board/ci/main is in the file")
+	}
+	for _, want := range []string{"env.JOB_NAME.lastIndexOf('/')", "env.JOB_NAME.substring(0, slash)", "'/ci/main'", "projectName: env.CI_JOB"} {
+		if !strings.Contains(candidate, want) {
+			add(3, "the Candidate stage does not derive the CI job from JOB_NAME: lacks "+want)
 		}
 	}
-	if got := strings.Join(jenkinsStages(jf), ","); got != "Candidate,Checkout" {
-		problems = append(problems, "stages "+got)
+
+	checkout, _ := jenkinsStage(jf, "Checkout")
+	if !strings.Contains(checkout, "git remote get-url origin") || !strings.Contains(checkout, "env.REPO = sh(returnStdout: true") {
+		add(4, "the Checkout stage does not read the repository from the remote")
 	}
-	for _, l := range jenkinsfileLines(jf) {
-		for _, bad := range []string{"git push", "git tag", "gh release", "docker push", "withCredentials"} {
-			if strings.Contains(l, bad) {
-				problems = append(problems, l)
-			}
+	if strings.Contains(jf, "n-orlov/") || regexp.MustCompile(`REPO\s*=\s*['"]`).MatchString(jf) {
+		add(4, "a repository slug is hard-coded")
+	}
+
+	if v, ok := releaseParamDefault(jf, "REGISTRY"); !ok || v != "''" {
+		add(5, "REGISTRY is missing or has a default ("+v+")")
+	}
+	if v, ok := releaseParamDefault(jf, "IMAGE_NAME"); !ok || v != "'village-hall'" {
+		add(5, "IMAGE_NAME is missing or does not default to village-hall ("+v+")")
+	}
+	for _, p := range []string{"REGISTRY_CREDENTIALS_ID", "GITHUB_CREDENTIALS_ID"} {
+		if v, ok := releaseParamDefault(jf, p); !ok || v != "''" {
+			add(5, p+" is missing or has a default ("+v+")")
+		}
+	}
+
+	if hosts := releaseHostRE.FindAllString(jf, -1); len(hosts) != 0 {
+		add(6, "the file names a host: "+strings.Join(hosts, ", "))
+	}
+
+	publish, _ := jenkinsStage(jf, "Publish")
+	shells := regexp.MustCompile(`(?:^|[\s(])sh[ (]+(?:[a-zA-Z]+: ?)?'([^']*)'`).FindAllStringSubmatch(publish, -1)
+	if got := len(regexp.MustCompile(`(?:^|[\s(])sh[ (]`).FindAllString(publish, -1)); got != len(shells) || got == 0 {
+		add(7, "the Publish stage has a shell step this check cannot read")
+	}
+	for _, m := range shells {
+		if !strings.HasPrefix(m[1], "ci/release-publish.sh ") {
+			add(7, "the Publish stage runs "+m[1]+", not only ci/release-publish.sh")
 		}
 	}
 	return problems
+}
+
+// TestJenkinsfileReleasePublishesTheCandidate: board/release has the stages
+// Candidate, Checkout, Version check, Build and Publish; derives its CI job
+// and its repository instead of naming them; declares the registry, the image
+// name and both credential IDs as parameters with no host in any default;
+// defaults to a dry run; and publishes only through ci/release-publish.sh.
+// Each planted violation below must be reported under the property it breaks.
+func TestJenkinsfileReleasePublishesTheCandidate(t *testing.T) {
+	jf := readRepoFile(t, "Jenkinsfile.release")
+	for _, p := range releaseProblems(jf) {
+		t.Errorf("Jenkinsfile.release: %s", p)
+	}
+	for name, c := range map[string]struct {
+		text     string
+		property string
+	}{
+		"a hardcoded /board/ci/main": {replaceOnce(t, jf, "projectName: env.CI_JOB", "projectName: '/board/ci/main'"), "3:"},
+		"a hostname default for REGISTRY": {replaceOnce(t, jf, "(name: 'REGISTRY', defaultValue: ''",
+			"(name: 'REGISTRY', defaultValue: 'registry.example.com'"), "5:"},
+		"an IMAGE_NAME default other than village-hall": {replaceOnce(t, jf, "(name: 'IMAGE_NAME', defaultValue: 'village-hall'",
+			"(name: 'IMAGE_NAME', defaultValue: 'board'"), "5:"},
+		"a missing credential-ID parameter": {replaceOnce(t, jf, "(name: 'GITHUB_CREDENTIALS_ID'", "(name: 'GITHUB_TOKEN_ID'"), "5:"},
+		"a hardcoded repository slug": {replaceOnce(t, jf, "          echo 'Releasing ' + env.REPO",
+			"          env.REPO = 'n-orlov/board'\n          echo 'Releasing ' + env.REPO"), "4:"},
+	} {
+		if c.text == jf {
+			t.Errorf("%s: the doctoring changed nothing", name)
+			continue
+		}
+		var hit bool
+		for _, p := range releaseProblems(c.text) {
+			hit = hit || strings.HasPrefix(p, c.property)
+		}
+		if !hit {
+			t.Errorf("%s was not reported as a property %s violation: %q", name, c.property, releaseProblems(c.text))
+		}
+	}
 }
 
 // TestJenkinsfilePublishesReports: test results, the Allure report and the
