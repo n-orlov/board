@@ -1830,6 +1830,53 @@ type Session struct {
 	Principal string `json:"principal"`
 }
 
+// StartNewTask The task a start creates and starts on.
+type StartNewTask struct {
+	// Initiative The slug or ULID of an open initiative.
+	Initiative string `json:"initiative"`
+
+	// Title 1 to 200 characters.
+	Title string `json:"title"`
+}
+
+// StartRequest The lease to start, on an existing task (`task`) or on a task it creates (`new_task`).
+type StartRequest struct {
+	// Intent One line on what the actor is doing, 1 to 200 characters.
+	Intent string `json:"intent"`
+
+	// NewTask The task a start creates and starts on.
+	NewTask *StartNewTask `json:"new_task,omitempty"`
+
+	// Resources At most 20 strings of 1 to 100 characters, repeats dropped.
+	Resources *[]string `json:"resources,omitempty"`
+
+	// Task The existing task's ref or ULID. Not with `new_task`.
+	Task *string `json:"task,omitempty"`
+
+	// TtlSeconds Clamped to 60 to 43200. Default 7200.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
+// StartResult A lease with the live leases of others that conflict with it, the caller's check-in after the write, and the agent protocol versions.
+type StartResult struct {
+	Conflicts []LeaseConflict `json:"conflicts"`
+
+	// Lease A lease on a task, with its resources.
+	Lease Lease `json:"lease"`
+
+	// Now The caller's check-in.
+	Now Now `json:"now"`
+
+	// Protocol The agent protocol version the server binary embeds.
+	Protocol int `json:"protocol"`
+
+	// ProtocolSeen The highest agent protocol version the caller has read, 0 when it has recorded none.
+	ProtocolSeen int `json:"protocol_seen"`
+
+	// TaskCreated True when the request created the task (`new_task`).
+	TaskCreated bool `json:"task_created"`
+}
+
 // Task A task. `active`, `blocked` and `overdue` are derived.
 type Task struct {
 	// Active It has a live lease.
@@ -2621,6 +2668,9 @@ type RenewLeaseJSONRequestBody = LeaseRenew
 // PostNoteJSONRequestBody defines body for PostNote for application/json ContentType.
 type PostNoteJSONRequestBody = NotePost
 
+// StartJSONRequestBody defines body for Start for application/json ContentType.
+type StartJSONRequestBody = StartRequest
+
 // CreateTaskJSONRequestBody defines body for CreateTask for application/json ContentType.
 type CreateTaskJSONRequestBody = TaskCreate
 
@@ -2749,6 +2799,9 @@ type ServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
+	// Start Start working on a task, or on a new one
+	// (POST /api/v1/start)
+	Start(w http.ResponseWriter, r *http.Request)
 	// GetStream Stream events (server-sent events)
 	// (GET /api/v1/stream)
 	GetStream(w http.ResponseWriter, r *http.Request, params GetStreamParams)
@@ -3813,6 +3866,20 @@ func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// Start operation middleware
+func (siw *ServerInterfaceWrapper) Start(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Start(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStream operation middleware
 func (siw *ServerInterfaceWrapper) GetStream(w http.ResponseWriter, r *http.Request) {
 
@@ -4556,6 +4623,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/notes/{ref}", wrapper.GetNote)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/cursors/{stream}", wrapper.PutCursor)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/start", wrapper.Start)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -7592,6 +7660,122 @@ func (response GetNow503ApplicationProblemPlusJSONResponse) VisitGetNowResponse(
 	return err
 }
 
+type StartRequestObject struct {
+	Body *StartJSONRequestBody
+}
+
+type StartResponseObject interface {
+	VisitStartResponse(w http.ResponseWriter) error
+}
+
+type Start200JSONResponse StartResult
+
+func (response Start200JSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start201JSONResponse StartResult
+
+func (response Start201JSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response Start400ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response Start401ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response Start404ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response Start409ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Start503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response Start503ApplicationProblemPlusJSONResponse) VisitStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetStreamRequestObject struct {
 	Params GetStreamParams
 }
@@ -9421,6 +9605,9 @@ type StrictServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
+	// Start Start working on a task, or on a new one
+	// (POST /api/v1/start)
+	Start(ctx context.Context, request StartRequestObject) (StartResponseObject, error)
 	// GetStream Stream events (server-sent events)
 	// (GET /api/v1/stream)
 	GetStream(ctx context.Context, request GetStreamRequestObject) (GetStreamResponseObject, error)
@@ -10533,6 +10720,37 @@ func (sh *strictHandler) GetNow(w http.ResponseWriter, r *http.Request, params G
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetNowResponseObject); ok {
 		if err := validResponse.VisitGetNowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Start operation middleware
+func (sh *strictHandler) Start(w http.ResponseWriter, r *http.Request) {
+	var request StartRequestObject
+
+	var body StartJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Start(ctx, request.(StartRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Start")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartResponseObject); ok {
+		if err := validResponse.VisitStartResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

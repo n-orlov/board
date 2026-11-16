@@ -113,6 +113,7 @@
                 "noteops.go",
                 "notifyops.go",
                 "nowops.go",
+                "startops.go",
                 "server.go",
                 "streamattention.go",
                 "streamops.go",
@@ -139,6 +140,7 @@
                 "login.go",
                 "notes.go",
                 "now.go",
+                "start.go",
                 "taskattention.go",
                 "taskdeps.go",
                 "tasks.go",
@@ -177,6 +179,7 @@
                     "noteops.go",
                     "notifyops.go",
                     "nowops.go",
+                    "startops.go",
                     "timelineops.go",
                     "actorops.go"
                 ],
@@ -204,6 +207,7 @@
                     "initedit.go",
                     "initiatives.go",
                     "login.go",
+                    "start.go",
                     "taskdeps.go",
                     "tree.go",
                     "whoami.go"

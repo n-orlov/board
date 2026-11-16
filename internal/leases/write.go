@@ -99,27 +99,53 @@ const (
 // ErrInvalid for an intent or resource that is wrong (checked before anything is
 // read; a missing task is ErrInvalid too), ErrNotFound for an unknown task, and ErrConflict for a done or closed task, and writes nothing then.
 func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, in Start) (Result, error) {
-	if strings.TrimSpace(in.Task) == "" {
-		return Result{}, InvalidError{Msg: "a lease needs a task", Next: "Send the ref of the task the lease is on, such as aa-1."}
-	}
-	if err := domain.ValidateIntent(in.Intent); err != nil {
-		return Result{}, invalid(err, nextIntent)
-	}
-	resources, err := domain.NormalizeResources(in.Resources)
+	in, resources, err := normalizeStart(in)
 	if err != nil {
-		return Result{}, invalid(err, nextResources)
+		return Result{}, err
 	}
-	in.Intent = strings.TrimSpace(in.Intent)
 	var out Result
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		if _, err = s.expireDue(ctx, tx, s.now()); err != nil {
-			return err
-		}
-		out, err = s.start(ctx, tx, actor, principal, in, resources)
+		out, err = s.startChecked(ctx, tx, actor, principal, in, resources)
 		return err
 	})
 	return out, err
+}
+
+// StartIn is Start inside the caller's transaction: it commits nothing and rolls
+// nothing back, so the lease and its event stand or fall with tx. It is how a
+// start and the task it starts on are written together.
+func (s Store) StartIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in Start) (Result, error) {
+	in, resources, err := normalizeStart(in)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.startChecked(ctx, tx, actor, principal, in, resources)
+}
+
+// normalizeStart checks the task, intent and resources of a start and returns
+// the request with the intent trimmed and the resources normalized.
+func normalizeStart(in Start) (Start, []string, error) {
+	if strings.TrimSpace(in.Task) == "" {
+		return in, nil, InvalidError{Msg: "a lease needs a task", Next: "Send the ref of the task the lease is on, such as aa-1."}
+	}
+	if err := domain.ValidateIntent(in.Intent); err != nil {
+		return in, nil, invalid(err, nextIntent)
+	}
+	resources, err := domain.NormalizeResources(in.Resources)
+	if err != nil {
+		return in, nil, invalid(err, nextResources)
+	}
+	in.Intent = strings.TrimSpace(in.Intent)
+	return in, resources, nil
+}
+
+// startChecked expires the due leases and starts the checked request in tx.
+func (s Store) startChecked(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in Start, resources []string) (Result, error) {
+	if _, err := s.expireDue(ctx, tx, s.now()); err != nil {
+		return Result{}, err
+	}
+	return s.start(ctx, tx, actor, principal, in, resources)
 }
 
 func (s Store) start(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in Start, resources []string) (Result, error) {

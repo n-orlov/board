@@ -847,3 +847,59 @@ func TestExpiryEnqueuesNothingWhenAlertsAreOff(t *testing.T) {
 		t.Fatalf("notifications = %q", got)
 	}
 }
+
+func (e env) leaseCount(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := e.S.Store.Reader().QueryRowContext(ctx, `SELECT count(*) FROM leases`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestStartInWritesInTheCallersTransactionAndCommitsNothing(t *testing.T) {
+	e := newEnv(t)
+	tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.S.StartIn(ctx, tx, me, "key:x", leases.Start{Task: "aa-1", Intent: "  in a tx  ", Resources: []string{"b", "a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Lease.Ref != "L1" || r.Lease.Intent != "in a tx" || strings.Join(r.Lease.Resources, ",") != "a,b" || r.Renewed {
+		t.Errorf("StartIn = %+v", r)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.leaseCount(t); n != 0 {
+		t.Errorf("%d leases after the caller rolled back, want none", n)
+	}
+}
+
+func TestStartInCheckedLikeStart(t *testing.T) {
+	e := newEnv(t)
+	for name, in := range map[string]leases.Start{
+		"no task":      {Intent: "x"},
+		"no intent":    {Task: "aa-1"},
+		"bad resource": {Task: "aa-1", Intent: "x", Resources: []string{""}},
+	} {
+		tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.S.StartIn(ctx, tx, me, "key:x", in); !errors.Is(err, leases.ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+		}
+		_ = tx.Rollback()
+	}
+	tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := e.S.StartIn(ctx, tx, me, "key:x", leases.Start{Task: "aa-9", Intent: "x"}); !errors.Is(err, leases.ErrNotFound) {
+		t.Errorf("unknown task: err = %v, want ErrNotFound", err)
+	}
+}

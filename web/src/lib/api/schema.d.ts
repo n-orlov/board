@@ -800,6 +800,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start working on a task, or on a new one
+         * @description Starts the caller's lease and answers the lease, its `conflicts`, the caller's check-in as `now`, the server's agent `protocol` version and the caller's `protocol_seen`. Send `task` (a ref or ULID) to start or renew a lease on an existing task, or `new_task` (an `initiative` slug or ULID and a `title`) to create the task and start the lease on it; exactly one of the two. `intent`, `ttl_seconds` and `resources` are those of `POST /api/v1/leases`: the intent is 1 to 200 characters, `ttl_seconds` is clamped to 60 to 43200 and defaults to 7200, and `resources` is at most 20 strings of 1 to 100 characters. The task, the lease and their events (`task_created` with `lease_started`, or `lease_renewed` alone) are written in one transaction, and a request that is refused writes nothing. The answer is 201 for a new lease (and for a new task) and 200 when the caller already held a live lease on the task and it was renewed. A live lease of another actor that holds one of the resources is not a refusal: the lease is written and `conflicts` lists it. A done or closed task, and a `new_task` in a closed initiative, are 409 with nothing written. An unknown task or initiative is 404, and a request with both or neither of `task` and `new_task` is 400.
+         */
+        post: operations["start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/attention": {
         parameters: {
             query?: never;
@@ -1453,6 +1473,40 @@ export interface components {
         LeaseResult: {
             lease: components["schemas"]["Lease"];
             conflicts: components["schemas"]["LeaseConflict"][];
+        };
+        /** @description The task a start creates and starts on. */
+        StartNewTask: {
+            /** @description The slug or ULID of an open initiative. */
+            initiative: string;
+            /** @description 1 to 200 characters. */
+            title: string;
+        };
+        /** @description The lease to start, on an existing task (`task`) or on a task it creates (`new_task`). */
+        StartRequest: {
+            /** @description The existing task's ref or ULID. Not with `new_task`. */
+            task?: string;
+            new_task?: components["schemas"]["StartNewTask"];
+            /** @description One line on what the actor is doing, 1 to 200 characters. */
+            intent: string;
+            /**
+             * Format: int64
+             * @description Clamped to 60 to 43200. Default 7200.
+             */
+            ttl_seconds?: number;
+            /** @description At most 20 strings of 1 to 100 characters, repeats dropped. */
+            resources?: string[];
+        };
+        /** @description A lease with the live leases of others that conflict with it, the caller's check-in after the write, and the agent protocol versions. */
+        StartResult: {
+            lease: components["schemas"]["Lease"];
+            conflicts: components["schemas"]["LeaseConflict"][];
+            /** @description True when the request created the task (`new_task`). */
+            task_created: boolean;
+            now: components["schemas"]["Now"];
+            /** @description The agent protocol version the server binary embeds. */
+            protocol: number;
+            /** @description The highest agent protocol version the caller has read, 0 when it has recorded none. */
+            protocol_seen: number;
         };
         /** @description One of the caller's live leases, with the title of its task. */
         NowLease: components["schemas"]["Lease"] & {
@@ -3527,6 +3581,44 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRequest"];
+            };
+        };
+        responses: {
+            /** @description The caller already held a live lease on the task, and it was renewed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartResult"];
+                };
+            };
+            /** @description A new lease was started, on a new task or an existing one. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

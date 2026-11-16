@@ -66,6 +66,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 		ops.waits = ops.hub
 	}
 	ops.nowOps = newNowOps(ops)
+	ops.startOps = newStartOps(ops)
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})
 	ui := ops.ui

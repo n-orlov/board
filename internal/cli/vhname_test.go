@@ -61,7 +61,7 @@ func TestNoNextHintBeginsArrowBoard(t *testing.T) {
 			{"init", "show", "aa"}, {"init", "ls"}, {"init", "close", "aa"}, {"init", "reopen", "aa"}, {"init", "edit", "aa", "--title", "t"},
 			{"task", "show", "aa-1"}, {"task", "ls"}, {"task", "done", "aa-1"}, {"task", "reopen", "aa-1"}, {"task", "close", "aa-1"},
 			{"task", "add", "aa", "t"}, {"task", "dep", "add", "aa-2", "aa-1"},
-			{"lease", "start", "aa-1", "x"}, {"lease", "renew", "L1"}, {"lease", "end", "L1"}, {"lease", "ack", "L1"}, {"lease", "ls"},
+			{"lease", "start", "aa-1", "x"}, {"start", "aa-1", "x"}, {"new", "aa", "t", "--start", "x"}, {"lease", "renew", "L1"}, {"lease", "end", "L1"}, {"lease", "ack", "L1"}, {"lease", "ls"},
 			{"ask", "show", "A1"}, {"ask", "ls"}, {"ask", "aa-1", "q?"}, {"ask", "withdraw", "A1"}, {"answer", "A1", "a"},
 			{"note", "show", "N1"}, {"note", "x"}, {"notes"}, {"now"}, {"attention"}, {"events"}, {"milestone", "aa-1", "m"}, {"check", "aa-1", "c"},
 		} {

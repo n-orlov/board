@@ -45,6 +45,8 @@ tags:
     description: The live server-sent event stream the web UI refreshes from.
   - name: meta
     description: The server's versions, the caller, and the agent protocol the caller has read.
+  - name: composite
+    description: The shortcut operations the agent commands are built on, each one transaction.
 paths:
   /healthz:
     get:
@@ -2004,6 +2006,56 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/start:
+    post:
+      operationId: start
+      tags: [composite]
+      summary: Start working on a task, or on a new one
+      description: >-
+        Starts the caller's lease and answers the lease, its `conflicts`, the caller's check-in as `now`, the server's
+        agent `protocol` version and the caller's `protocol_seen`. Send `task` (a ref or ULID) to start or renew a lease
+        on an existing task, or `new_task` (an `initiative` slug or ULID and a `title`) to create the task and start
+        the lease on it; exactly one of the two. `intent`, `ttl_seconds` and `resources` are those of
+        `POST /api/v1/leases`: the intent is 1 to 200 characters, `ttl_seconds` is clamped to 60 to 43200 and defaults to
+        7200, and `resources` is at most 20 strings of 1 to 100 characters. The task, the lease and their events
+        (`task_created` with `lease_started`, or `lease_renewed` alone) are written in one transaction, and a request
+        that is refused writes nothing. The answer is 201 for a new lease (and for a new task) and 200 when the caller
+        already held a live lease on the task and it was renewed. A live lease of another actor that holds one of the
+        resources is not a refusal: the lease is written and `conflicts` lists it. A done or closed task, and a
+        `new_task` in a closed initiative, are 409 with nothing written. An unknown task or initiative is 404, and a
+        request with both or neither of `task` and `new_task` is 400.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRequest"
+      responses:
+        "201":
+          description: A new lease was started, on a new task or an existing one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartResult"
+        "200":
+          description: The caller already held a live lease on the task, and it was renewed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/attention:
     get:
       operationId: getAttention
@@ -3139,6 +3191,63 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LeaseConflict"
+    StartNewTask:
+      type: object
+      description: The task a start creates and starts on.
+      required: [initiative, title]
+      properties:
+        initiative:
+          type: string
+          description: The slug or ULID of an open initiative.
+        title:
+          type: string
+          description: 1 to 200 characters.
+    StartRequest:
+      type: object
+      description: The lease to start, on an existing task (`task`) or on a task it creates (`new_task`).
+      required: [intent]
+      properties:
+        task:
+          type: string
+          description: The existing task's ref or ULID. Not with `new_task`.
+        new_task:
+          $ref: "#/components/schemas/StartNewTask"
+        intent:
+          type: string
+          description: One line on what the actor is doing, 1 to 200 characters.
+        ttl_seconds:
+          type: integer
+          format: int64
+          description: Clamped to 60 to 43200. Default 7200.
+        resources:
+          type: array
+          description: At most 20 strings of 1 to 100 characters, repeats dropped.
+          items:
+            type: string
+    StartResult:
+      type: object
+      description: >-
+        A lease with the live leases of others that conflict with it, the caller's check-in after the write, and the
+        agent protocol versions.
+      required: [lease, conflicts, task_created, now, protocol, protocol_seen]
+      properties:
+        lease:
+          $ref: "#/components/schemas/Lease"
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaseConflict"
+        task_created:
+          type: boolean
+          description: True when the request created the task (`new_task`).
+        now:
+          $ref: "#/components/schemas/Now"
+        protocol:
+          type: integer
+          description: The agent protocol version the server binary embeds.
+        protocol_seen:
+          type: integer
+          description: The highest agent protocol version the caller has read, 0 when it has recorded none.
     NowLease:
       description: One of the caller's live leases, with the title of its task.
       allOf:

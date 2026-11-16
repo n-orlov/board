@@ -257,26 +257,56 @@ func (s Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
 // wrong, ErrNoInitiative for an unknown initiative and ErrInitiativeClosed for a
 // closed one, and leaves no row, event or actor behind in any of those cases.
 func (s Store) Create(ctx context.Context, actor audit.Actor, principal string, in New) (Task, error) {
+	p, err := s.prepare(ctx, in)
+	if err != nil {
+		return Task{}, err
+	}
+	err = s.inTx(ctx, func(tx *sql.Tx) error { return s.insert(ctx, tx, actor, principal, p.id, p.ini, p.now, p.in) })
+	if err != nil {
+		return Task{}, err
+	}
+	return s.Get(ctx, p.id)
+}
+
+// CreateIn is Create inside the caller's transaction: it commits nothing and
+// rolls nothing back, so the task and its events stand or fall with tx. The
+// task it returns is read from tx.
+func (s Store) CreateIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in New) (Task, error) {
+	p, err := s.prepare(ctx, in)
+	if err != nil {
+		return Task{}, err
+	}
+	if err := s.insert(ctx, tx, actor, principal, p.id, p.ini, p.now, p.in); err != nil {
+		return Task{}, err
+	}
+	return s.find(ctx, tx, p.id)
+}
+
+// prepared is a create request that has been checked: the normalized request,
+// its initiative, the new task's id and the instant it is written at.
+type prepared struct {
+	in  New
+	ini initiatives.Initiative
+	id  string
+	now time.Time
+}
+
+// prepare normalizes the request and reads its initiative and a new id, before
+// anything is written.
+func (s Store) prepare(ctx context.Context, in New) (prepared, error) {
 	now := s.now()
 	in, err := in.Normalize(now)
 	if err != nil {
-		return Task{}, err
+		return prepared{}, err
 	}
 	ini, err := initiatives.Store{Store: s.Store}.Get(ctx, in.Initiative)
 	if errors.Is(err, initiatives.ErrNotFound) {
-		return Task{}, fmt.Errorf("%w: %s", ErrNoInitiative, in.Initiative)
+		return prepared{}, fmt.Errorf("%w: %s", ErrNoInitiative, in.Initiative)
 	} else if err != nil {
-		return Task{}, err
+		return prepared{}, err
 	}
 	id, err := domain.NewULID(now)
-	if err != nil {
-		return Task{}, err
-	}
-	err = s.inTx(ctx, func(tx *sql.Tx) error { return s.insert(ctx, tx, actor, principal, id, ini, now, in) })
-	if err != nil {
-		return Task{}, err
-	}
-	return s.Get(ctx, id)
+	return prepared{in: in, ini: ini, id: id, now: now}, err
 }
 
 // nextSeq hands out the initiative's next task number. The one UPDATE both

@@ -1211,6 +1211,21 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   closing it ends its live leases (§4.3, §6.4): a done or closed task never holds one, and a lease ends otherwise by
   `/end` or by running out.
 
+- **`POST /api/v1/start`** (§8.4) starts the caller's lease and checks in, in one transaction. The body is `{task | new_task,
+  intent, ttl_seconds?, resources?}`: `task` is the ref or ULID of an existing task, `new_task` is `{initiative, title}` and
+  creates the task first; exactly one of the two, else **400** with a `next`. `intent`, `ttl_seconds` and `resources` are those
+  of `POST /api/v1/leases` and fail the same way. It answers `{lease, conflicts, task_created, now, protocol, protocol_seen}`:
+  `lease` and `conflicts` are the `LeaseResult` of `POST /api/v1/leases`, `task_created` is true when `new_task` created the
+  task, `now` is the caller's check-in (`GET /api/v1/now`, read after the commit, so it holds the new lease), `protocol` is the
+  agent protocol version the server embeds (§8.6) and `protocol_seen` is the highest version the caller has recorded through
+  `PUT /api/v1/actors/me/protocol-seen`, 0 when it has none. The status is **201** for a new lease (and always for a new
+  task) and **200** when the caller already held a live lease on the task and it was renewed (same lease, `lease_renewed`).
+  The task row, the lease and their events (`task_created` and `lease_started`, or `lease_renewed` alone) are one transaction.
+  The cases: a new lease; renewing the caller's own live lease; a resource shared with another live lease, which is not a
+  refusal (the lease is written and `conflicts` lists the holders); a done or closed task, **409** with nothing written; an
+  unknown task, **404**; a `new_task` in a closed initiative, **409**, no task created; a `new_task` in an unknown
+  initiative, **404**. A refused request writes no task, no lease, no event and no actor row.
+
 - **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller. It answers exactly `{actor, my_leases,
   others_leases, conflicts, my_asks, notes, notes_more, attention}`, every list `[]` when empty. Like every lease read it
   expires the due leases first, so a lease past its expiry is left out and its one `lease_expired` event is written, with the
@@ -1629,7 +1644,7 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|help|whoami|init|task|lease|start|new|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1647,7 +1662,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
@@ -2005,7 +2020,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 vh version | update [--check] [--version vX.Y.Z]
@@ -2081,6 +2096,21 @@ calls, the server has a composite endpoint doing it in **one round trip and one 
 
 Shortcuts print the same `ok …` lines as the primitives they replace (one per effect, so
 `vh finish --done` prints two lines) and follow the same exit codes.
+
+**Built: `vh start` and `vh new`.** Both send one `POST /api/v1/start` (§6.5) and print what the primitives they replace
+print, one line per effect, then the `now` summary of `vh now`:
+
+- `vh start <task> "<intent>" [--res r]… [--ttl D] [--json]` prints the `vh lease start` line `ok lease L<n> <task> exp <ttl>`
+  with a `CONFLICT` line for each live lease of another that holds one of its resources, and then the `now` summary.
+- `vh new <initiative> "<title>" --start "<intent>" [--res r]… [--ttl D] [--json]` prints the `vh task add` line
+  `ok task <ref> created`, then the same lease line and `CONFLICT` lines, then the `now` summary. `--start` is required.
+- `--json` prints the response as it came. The exit codes are those of the commands they replace: **0**; **7** when the
+  start succeeded and printed a `CONFLICT` line; **6** for a done or closed task (`→ vh task reopen <task> first` or
+  `→ vh task show <task>`) and for a closed initiative (`→ vh init show <initiative>`); **4** for an unknown task
+  (`→ vh task ls`) or initiative (`→ vh init ls`); **2** for a missing argument, an unreadable `--ttl`, a flag the
+  command does not have, or `--start` missing from `vh new` (one `usage:` line on stderr, nothing sent).
+- Both commands are in `cli.Commands()` with their flag tables (`start`: `--json --res --ttl`; `new`: `--json --res --start
+  --ttl`), so `vh help agent` text that names them resolves.
 
 Example `vh now` output:
 

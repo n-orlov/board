@@ -427,3 +427,46 @@ func TestCountsForCountsTheTasksOfEachInitiativeByStatus(t *testing.T) {
 		t.Errorf("one id = %+v, %v", got, err)
 	}
 }
+
+func TestCreateInWritesInTheCallersTransactionAndCommitsNothing(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.CreateIn(ctx, tx, who, "key:x", New{Initiative: "aa", Title: "  inside  "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "inside" || got.Ref == "" || got.CreatedBy != who.Handle {
+		t.Errorf("CreateIn = %+v", got)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, got.Ref); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the task is readable after the caller rolled back: %v", err)
+	}
+}
+
+func TestCreateInRefusesWhatCreateRefuses(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	for name, c := range map[string]struct {
+		in   New
+		want error
+	}{
+		"unknown initiative": {New{Initiative: "zz", Title: "t"}, ErrNoInitiative},
+		"empty title":        {New{Initiative: "aa", Title: ""}, ErrInvalid},
+	} {
+		tx, err := s.Store.Writer().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateIn(ctx, tx, who, "key:x", c.in); !errors.Is(err, c.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, c.want)
+		}
+		_ = tx.Rollback()
+	}
+}

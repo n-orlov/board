@@ -230,6 +230,7 @@ func (brokenResponse) VisitGetActorResponse(http.ResponseWriter) error          
 func (brokenResponse) VisitStartLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitGetNowResponse(http.ResponseWriter) error              { return errBroken }
+func (brokenResponse) VisitStartResponse(http.ResponseWriter) error               { return errBroken }
 func (brokenResponse) VisitGetLeaseResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitRenewLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitEndLeaseResponse(http.ResponseWriter) error            { return errBroken }
@@ -484,6 +485,12 @@ func (s stubOperations) GetAttention(context.Context, GetAttentionRequestObject)
 func (s stubOperations) GetNow(context.Context, GetNowRequestObject) (GetNowResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetNowResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) Start(context.Context, StartRequestObject) (StartResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(StartResponseObject)
 	return resp, err
 }
 
@@ -876,6 +883,11 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get now 400", 400, GetNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 401", 401, GetNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 503", 503, GetNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
+		{"start 400", 400, Start400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitStartResponse},
+		{"start 401", 401, Start401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitStartResponse},
+		{"start 404", 404, Start404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitStartResponse},
+		{"start 409", 409, Start409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitStartResponse},
+		{"start 503", 503, Start503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitStartResponse},
 		{"list leases 503", 503, ListLeases503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"get lease 400", 400, GetLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
 		{"get lease 401", 401, GetLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},

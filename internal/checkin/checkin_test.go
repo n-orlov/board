@@ -58,7 +58,7 @@ func newEnv(t *testing.T) env {
 	e := env{Now: &now, Notes: notes.Store{Store: st, Now: clock}, Asks: asks.Store{Store: st, Now: clock}, Cur: cursors.Store{Store: st, Now: clock}}
 	e.S = Store{
 		Leases: &leases.Store{Store: st, Now: clock}, Asks: &e.Asks, Notes: &e.Notes, Cursors: &e.Cur,
-		Attention: &attention.Store{Store: st, Now: clock}, Now: clock,
+		Attention: &attention.Store{Store: st, Now: clock}, Tasks: &tasks.Store{Store: st, Now: clock}, Now: clock,
 	}
 	return e
 }

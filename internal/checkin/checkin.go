@@ -9,6 +9,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/cursors"
 	"github.com/n-orlov/village-hall/internal/leases"
 	"github.com/n-orlov/village-hall/internal/notes"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 const (
@@ -27,7 +28,9 @@ type Store struct {
 	Notes     *notes.Store
 	Cursors   *cursors.Store
 	Attention *attention.Store
-	Now       func() time.Time
+	// Tasks is read by Start only: the store a new_task is created in.
+	Tasks *tasks.Store
+	Now   func() time.Time
 }
 
 // Result is a check-in: the lease and conflict parts, the actor's asks (open

@@ -51,6 +51,7 @@ type operations struct {
 	actorOps
 	leaseOps
 	nowOps
+	startOps
 	askOps
 	noteOps
 	attentionOps

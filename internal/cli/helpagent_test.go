@@ -77,9 +77,9 @@ func TestHelpAgentTextNamesOnlyCommandsAndFlagsThisBuildHas(t *testing.T) {
 }
 
 func TestUnknownReferencesFindsAnUnknownCommandAndAnUnknownFlag(t *testing.T) {
-	text := "run `vh start <task>` or `vh init ls --nope` or `vh whoami` or `vh init ls --all`"
+	text := "run `vh frobnicate <task>` or `vh init ls --nope` or `vh whoami` or `vh init ls --all`"
 	got := UnknownReferences(text, Commands())
-	if len(got) != 2 || !strings.Contains(got[0], `unknown command "vh start"`) || !strings.Contains(got[1], "unknown flag --nope") {
+	if len(got) != 2 || !strings.Contains(got[0], `unknown command "vh frobnicate"`) || !strings.Contains(got[1], "unknown flag --nope") {
 		t.Fatalf("got %v", got)
 	}
 }
