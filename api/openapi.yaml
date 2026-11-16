@@ -2137,6 +2137,34 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/catchup:
+    post:
+      operationId: catchup
+      tags: [composite]
+      summary: Read what happened since the caller last caught up
+      description: >-
+        Answers the notes after the caller's `notes` cursor (the notes `GET /api/v1/notes?since=cursor&ack=true` reads: every
+        note, summaries without bodies, oldest first, at most 100 of them) and moves the cursor to the last one returned,
+        plus the `answers`: the asks the caller raised that were answered since its previous catch-up, oldest first, each
+        with its answer (in the 24 hours before the call when the caller never caught up before). `notes_more` is how many
+        notes there are after the ones returned; the next call returns them. It is a POST because it moves a cursor. The
+        cursor move and the `catchup` event are one transaction; a call that returns nothing writes nothing, and a second
+        call straight after returns nothing. The `catchup` event (summary `catch-up: <n> notes, <m> answers`, `data`
+        `{notes, answers, answers_through}`) records the previous catch-up.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The notes since the caller's cursor, now acknowledged, and the answers to its asks since the previous catch-up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatchupResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/attention:
     get:
       operationId: getAttention
@@ -3355,6 +3383,24 @@ components:
         done:
           type: boolean
           description: True when the request marked the task done.
+    CatchupResult:
+      type: object
+      description: What a catch-up read, the notes it acknowledged and the answers it delivered.
+      required: [notes, notes_more, answers]
+      properties:
+        notes:
+          type: array
+          description: The notes after the caller's cursor, summaries without bodies, oldest first; the cursor now sits on the last one.
+          items:
+            $ref: "#/components/schemas/Note"
+        notes_more:
+          type: integer
+          description: How many notes there are after the ones returned, which the next call returns.
+        answers:
+          type: array
+          description: The caller's asks that were answered since its previous catch-up, oldest first, each with its answer.
+          items:
+            $ref: "#/components/schemas/Ask"
     PingRequest:
       type: object
       description: The progress to record on each leased task.

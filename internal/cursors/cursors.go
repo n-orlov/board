@@ -146,6 +146,16 @@ func (s Store) Ack(ctx context.Context, actor audit.Actor, name, id string) erro
 	return nil
 }
 
+// AckIn is Ack inside the caller's transaction: it records id as the actor's
+// position on the stream and leaves the commit or rollback to the caller. It
+// returns ErrNotFound for an unknown stream.
+func (s Store) AckIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, name, id string) error {
+	if _, err := lookup(name); err != nil {
+		return err
+	}
+	return s.write(ctx, tx, actor, name, id)
+}
+
 func (s Store) write(ctx context.Context, tx *sql.Tx, actor audit.Actor, name, id string) error {
 	d := s.Store.Dialect()
 	actorID, err := audit.UpsertActor(ctx, tx, d, actor, s.now())

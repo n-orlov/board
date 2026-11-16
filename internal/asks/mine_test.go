@@ -61,3 +61,61 @@ func TestMineListsMyOpenAsksAndMyAnswersSinceTheBound(t *testing.T) {
 		t.Errorf("Mine for another actor = %v", theirs)
 	}
 }
+
+func TestAnsweredBetweenAndSinceListMyAnswersByTheirEvents(t *testing.T) {
+	e := newEnv(t)
+	first := e.raise(t, New{Task: "aa-1", Question: "first"})
+	second := e.raise(t, New{Task: "aa-1", Question: "second"})
+	theirs, err := e.S.Raise(ctx, bob, "p", New{Task: "aa-1", Question: "theirs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.raise(t, New{Task: "aa-1", Question: "open"})
+	var (
+		through []int64
+		at      []time.Time
+	)
+	for _, k := range []Ask{first, theirs, second} {
+		e.Clock.now = e.Clock.now.Add(time.Hour)
+		if _, err := e.S.Answer(ctx, op, "p", k.Ref, Reply{Answer: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+		var n int64
+		if err := e.S.Store.Reader().QueryRowContext(ctx, `SELECT MAX(n) FROM events`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		through = append(through, n)
+		at = append(at, e.Clock.now)
+	}
+	list := func(items []Ask, err error) string {
+		t.Helper()
+		if err != nil || items == nil {
+			t.Fatalf("list = %v, %v", items, err)
+		}
+		return refs(items)
+	}
+	if got := list(e.S.AnsweredBetween(ctx, me.Handle, 0, through[2])); got != first.Ref+","+second.Ref {
+		t.Errorf("between 0 and the last = %s, want mine in order", got)
+	}
+	if got := list(e.S.AnsweredBetween(ctx, me.Handle, through[0], through[2])); got != second.Ref {
+		t.Errorf("after the first answer = %s, want only %s", got, second.Ref)
+	}
+	if got := list(e.S.AnsweredBetween(ctx, me.Handle, 0, through[1])); got != first.Ref {
+		t.Errorf("up to the middle answer = %s, want only %s", got, first.Ref)
+	}
+	if got := list(e.S.AnsweredBetween(ctx, me.Handle, through[2], through[2])); got != "" {
+		t.Errorf("after the last answer = %q, want none", got)
+	}
+	if got := list(e.S.AnsweredSince(ctx, me.Handle, at[1].Add(time.Millisecond), through[2])); got != second.Ref {
+		t.Errorf("since just after the middle answer = %s, want %s", got, second.Ref)
+	}
+	if got := list(e.S.AnsweredSince(ctx, me.Handle, at[2], through[2])); got != second.Ref {
+		t.Errorf("since the last answer's instant = %s, want %s", got, second.Ref)
+	}
+	if got := list(e.S.AnsweredSince(ctx, me.Handle, at[0], through[0])); got != first.Ref {
+		t.Errorf("since the first answer, up to it = %s, want %s", got, first.Ref)
+	}
+	if got := list(e.S.AnsweredSince(ctx, me.Handle, t0, through[2])); got != first.Ref+","+second.Ref {
+		t.Errorf("since the start = %s, want both of mine", got)
+	}
+}

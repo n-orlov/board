@@ -54,6 +54,7 @@ type operations struct {
 	startOps
 	finishOps
 	pingOps
+	catchupOps
 	askOps
 	noteOps
 	attentionOps

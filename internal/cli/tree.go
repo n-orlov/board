@@ -41,6 +41,7 @@ var commandTree = map[string][]flagSpec{
 	"finish":            finishFlags,
 	"block":             blockFlags,
 	"ping":              pingFlags,
+	"catchup":           catchupFlags,
 	"now":               nowFlags,
 	"milestone":         milestoneFlags,
 	"check":             checkFlags,

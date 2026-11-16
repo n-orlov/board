@@ -1288,6 +1288,18 @@ type AttentionWatch struct {
 	Title string         `json:"title"`
 }
 
+// CatchupResult What a catch-up read, the notes it acknowledged and the answers it delivered.
+type CatchupResult struct {
+	// Answers The caller's asks that were answered since its previous catch-up, oldest first, each with its answer.
+	Answers []Ask `json:"answers"`
+
+	// Notes The notes after the caller's cursor, summaries without bodies, oldest first; the cursor now sits on the last one.
+	Notes []Note `json:"notes"`
+
+	// NotesMore How many notes there are after the ones returned, which the next call returns.
+	NotesMore int `json:"notes_more"`
+}
+
 // CreatedKey A key just created. `key` is shown this once.
 type CreatedKey struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -2928,6 +2940,9 @@ type ServerInterface interface {
 	// GetAttention What needs attention
 	// (GET /api/v1/attention)
 	GetAttention(w http.ResponseWriter, r *http.Request, params GetAttentionParams)
+	// Catchup Read what happened since the caller last caught up
+	// (POST /api/v1/catchup)
+	Catchup(w http.ResponseWriter, r *http.Request)
 	// PutCursor Set a read cursor
 	// (PUT /api/v1/cursors/{stream})
 	PutCursor(w http.ResponseWriter, r *http.Request, stream string)
@@ -3403,6 +3418,20 @@ func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAttention(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Catchup operation middleware
+func (siw *ServerInterfaceWrapper) Catchup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Catchup(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4858,6 +4887,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/start", wrapper.Start)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/finish", wrapper.Finish)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/ping", wrapper.Ping)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/catchup", wrapper.Catchup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -5920,6 +5950,59 @@ type GetAttention503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetAttention503ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CatchupRequestObject struct {
+}
+
+type CatchupResponseObject interface {
+	VisitCatchupResponse(w http.ResponseWriter) error
+}
+
+type Catchup200JSONResponse CatchupResult
+
+func (response Catchup200JSONResponse) VisitCatchupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Catchup401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response Catchup401ApplicationProblemPlusJSONResponse) VisitCatchupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Catchup503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response Catchup503ApplicationProblemPlusJSONResponse) VisitCatchupResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9958,6 +10041,9 @@ type StrictServerInterface interface {
 	// GetAttention What needs attention
 	// (GET /api/v1/attention)
 	GetAttention(ctx context.Context, request GetAttentionRequestObject) (GetAttentionResponseObject, error)
+	// Catchup Read what happened since the caller last caught up
+	// (POST /api/v1/catchup)
+	Catchup(ctx context.Context, request CatchupRequestObject) (CatchupResponseObject, error)
 	// PutCursor Set a read cursor
 	// (PUT /api/v1/cursors/{stream})
 	PutCursor(ctx context.Context, request PutCursorRequestObject) (PutCursorResponseObject, error)
@@ -10490,6 +10576,30 @@ func (sh *strictHandler) GetAttention(w http.ResponseWriter, r *http.Request, pa
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAttentionResponseObject); ok {
 		if err := validResponse.VisitGetAttentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Catchup operation middleware
+func (sh *strictHandler) Catchup(w http.ResponseWriter, r *http.Request) {
+	var request CatchupRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Catchup(ctx, request.(CatchupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Catchup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CatchupResponseObject); ok {
+		if err := validResponse.VisitCatchupResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

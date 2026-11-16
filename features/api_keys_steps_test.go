@@ -35,6 +35,8 @@ type apiState struct {
 	blockCounts string
 	// finishCounts is the events, notes and live leases count a scenario noted.
 	finishCounts string
+	// catchupCounts is the events and cursors count a scenario noted.
+	catchupCounts string
 	// leaseRows is the leases table a scenario noted.
 	leaseRows string
 	// askCounts is the asks, events and actors count a scenario noted.

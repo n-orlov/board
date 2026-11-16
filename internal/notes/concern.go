@@ -24,6 +24,12 @@ func (s Store) Concerning(ctx context.Context, c Concern, limit int) ([]Note, in
 	if err != nil {
 		return nil, 0, err
 	}
+	return s.firstRows(ctx, f, limit)
+}
+
+// firstRows returns the first limit notes the filter selects, oldest first and
+// without bodies, and how many more it selects after them.
+func (s Store) firstRows(ctx context.Context, f *filter, limit int) ([]Note, int, error) {
 	items, err := s.rows(ctx, f, limit, false)
 	if err != nil {
 		return nil, 0, err
@@ -80,4 +86,17 @@ func (s Store) taskIDs(ctx context.Context, refs []string) ([]string, error) {
 		ids[i] = t.ID
 	}
 	return ids, nil
+}
+
+// After returns the first limit notes after the note cursor (a ULID; empty for
+// all of them), oldest first and without bodies, and how many more there are
+// after them. It is what a catch-up reads.
+func (s Store) After(ctx context.Context, cursor string, limit int) ([]Note, int, error) {
+	f := &filter{}
+	if cursor != "" {
+		if err := after(f, cursor); err != nil {
+			return nil, 0, err
+		}
+	}
+	return s.firstRows(ctx, f, limit)
 }

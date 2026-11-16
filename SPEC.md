@@ -542,7 +542,7 @@ Event types (closed set in v1, extended by migration):
 `dep_added`, `dep_removed`,
 `lease_started`, `lease_renewed`, `lease_ended`, `lease_expired`, `lease_acked`,
 `ask_raised`, `ask_answered`, `ask_withdrawn`, `ask_polling` (§7.2),
-`check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`.
+`check_recorded` (watch), `milestone` (an actor marks a notable point), `note_posted`, `catchup` (§6.5, §8.4).
 `key_created` and `key_revoked` record an API key being made or revoked over HTTP (§3.3); they have no
 `initiative_id` or `task_id`.
 
@@ -943,7 +943,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | GET | `/notifications` | the alert outbox, newest first (filter: state; paging: limit, after; §6.9) |
 | GET | `/timeline` | data shaped for the timeline view: initiatives, tasks (planned + actual span), lease spans, markers, in a window `from`/`to` (filters: initiative, tag, actor, closed_within, rows; §6.10) |
 | GET | `/stream` | SSE live feed (§7.1) |
-| POST | `/start`, `/finish`, `/ping`; GET `/catchup` | CLI shortcuts in one round trip (§8.4) |
+| POST | `/start`, `/finish`, `/ping`, `/catchup` | CLI shortcuts in one round trip (§8.4); `/catchup` is a POST because it moves a cursor |
 | GET | `/meta` | server version, agent protocol version (§8.6), the caller's principal and actor |
 | PUT | `/actors/me/protocol-seen` | record that the calling actor has read protocol version N (§8.6) |
 | GET | `/healthz` | liveness, **unauthenticated** |
@@ -1252,6 +1252,20 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   `progress`). The cases: no live lease, **409** (`you hold no live lease`, with a `next`), writing nothing and no actor row;
   one lease; three leases; each with and without `progress`. An expired lease is not live and is not renewed. Another
   actor's leases are never touched. A refused request writes no renewal, no milestone, no event and no actor row.
+
+- **`POST /api/v1/catchup`** (§8.4) answers what the caller missed, in one transaction: `{notes, notes_more, answers}`. `notes` are
+  the notes after the caller's `notes` cursor, every note and not only those that concern the caller (as `GET
+  /api/v1/notes?since=cursor&ack=true` reads them), as summaries without bodies, oldest first, at most 100; the cursor is moved to
+  the last one returned (the acknowledgement) and `notes_more` is how many notes remain after it, which the next call returns.
+  `answers` are the asks the caller raised that were answered since its previous catch-up, oldest first, each with its answer;
+  a caller that never caught up gets the answers of the last 24 hours. The previous catch-up is the caller's newest `catchup`
+  event, whose `data` is `{notes, answers, answers_through}`: `answers_through` is the number of the newest event when that
+  catch-up read, so every answer is delivered once and none is skipped. It is a POST because it moves a cursor. A call that
+  returns something (a note or an answer) moves the cursor and appends one `catchup` event (summary `catch-up: <n> notes, <m>
+  answers`) in one transaction; a call that returns nothing writes nothing, no event, no cursor and no actor row, so a second
+  call straight after a catch-up returns nothing. The cases: nothing new; notes only (cursor moved, one event); answers only
+  (cursor untouched, one event); both (one event); a second call straight after; each actor has its own cursor and previous
+  catch-up. Withdrawn asks and other actors' asks are never listed.
 
 - **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller. It answers exactly `{actor, my_leases,
   others_leases, conflicts, my_asks, notes, notes_more, attention}`, every list `[]` when empty. Like every lease read it
@@ -1678,7 +1692,7 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1696,7 +1710,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
@@ -1734,9 +1748,10 @@ The CLI is written for agents first: every line costs context.
   `no VH_API_KEY → export VH_API_KEY (this environment's key)`,
   `task phone-onboard-9 not found → vh task ls phone-onboard`.
   The server's problem documents carry a machine-readable `next` field the CLI renders.
-- **List caps**: each list section in `vh now`, `vh attention`, `vh notes` and
-  `vh catchup` shows at most **5** items, then `+K more → <command that shows them>`.
-  `--limit N` changes the cap, `--all` removes it. Plain list commands (`vh task ls`, …) cap
+- **List caps**: each list section in `vh now`, `vh attention` and `vh notes` shows at most **5**
+  items, then `+K more → <command that shows them>`. `--limit N` changes the cap, `--all` removes it.
+  `vh catchup` has no such cap: it acknowledges every note it returns, so it prints every one of
+  them (at most 100 a call, then `+K more → vh catchup`). Plain list commands (`vh task ls`, …) cap
   at 20 by the same rule.
 
 Exit codes:
@@ -2054,7 +2069,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 vh version | update [--check] [--version vX.Y.Z]
@@ -2126,7 +2141,7 @@ calls, the server has a composite endpoint doing it in **one round trip and one 
 | `vh new <initiative> "<title>" --start "<intent>" [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
 | `vh ping ["<progress>"]` | renew all my live leases; with text, also a milestone on each leased task | `lease renew` (all) + `milestone` | `POST /api/v1/ping` |
 | `vh block <task> "<question>" [--poll D \| --stop]` | raise an ask on the task; `--poll` keeps the lease and waits (renewing it while waiting); `--stop` ends the lease with outcome "blocked on A…" | `ask` + `lease end` (stop) | `POST /api/v1/asks` with `lease_action` |
-| `vh catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `GET /api/v1/catchup` |
+| `vh catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `POST /api/v1/catchup` (a POST: it moves the notes cursor) |
 
 Shortcuts print the same `ok …` lines as the primitives they replace (one per effect, so
 `vh finish --done` prints two lines) and follow the same exit codes.
@@ -2176,6 +2191,14 @@ ended on (with `--poll`), as it came. The other exit codes are **4** for an unkn
 closed task or initiative, and **2** for `--poll` together with `--stop`, a bad duration, a missing argument or a flag the
 command does not have (one `usage: vh block <task> "<question>" [--poll D | --stop] [--json]` line on stderr, nothing
 sent). `block` is in `cli.Commands()` with its flag table (`--poll --stop --json`).
+
+**Built: `vh catchup`.** `vh catchup [--json]` sends one `POST /api/v1/catchup` (§6.5) and prints one line per effect, the lines of
+the commands it replaces: the `vh notes` line (§8.2, `N<n>  <age>  <author>  <task|initiative|broadcast>  [<resource>]
+<summary>`, ending `  +` for a note with a body) of each note after the notes cursor, oldest first, which it acknowledges, then
+the `vh ask --poll` answer line `ok A<n> answered by <actor>: <answer>` of each answer to my asks since my previous catch-up. With
+nothing new it prints nothing and exits 0; with more than 100 notes waiting it ends with `+K more → vh catchup`. `--json`
+prints the response as it came. The exit code is **0**; **2** for an argument or a flag the command does not have (one `usage:
+vh catchup [--json]` line on stderr, nothing sent). `catchup` is in `cli.Commands()` with its flag table (`--json`).
 
 Example `vh now` output:
 

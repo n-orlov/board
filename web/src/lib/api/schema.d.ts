@@ -860,6 +860,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catchup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read what happened since the caller last caught up
+         * @description Answers the notes after the caller's `notes` cursor (the notes `GET /api/v1/notes?since=cursor&ack=true` reads: every note, summaries without bodies, oldest first, at most 100 of them) and moves the cursor to the last one returned, plus the `answers`: the asks the caller raised that were answered since its previous catch-up, oldest first, each with its answer (in the 24 hours before the call when the caller never caught up before). `notes_more` is how many notes there are after the ones returned; the next call returns them. It is a POST because it moves a cursor. The cursor move and the `catchup` event are one transaction; a call that returns nothing writes nothing, and a second call straight after returns nothing. The `catchup` event (summary `catch-up: <n> notes, <m> answers`, `data` `{notes, answers, answers_through}`) records the previous catch-up.
+         */
+        post: operations["catchup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/attention": {
         parameters: {
             query?: never;
@@ -1563,6 +1583,15 @@ export interface components {
             note: components["schemas"]["Note"];
             /** @description True when the request marked the task done. */
             done: boolean;
+        };
+        /** @description What a catch-up read, the notes it acknowledged and the answers it delivered. */
+        CatchupResult: {
+            /** @description The notes after the caller's cursor, summaries without bodies, oldest first; the cursor now sits on the last one. */
+            notes: components["schemas"]["Note"][];
+            /** @description How many notes there are after the ones returned, which the next call returns. */
+            notes_more: number;
+            /** @description The caller's asks that were answered since its previous catch-up, oldest first, each with its answer. */
+            answers: components["schemas"]["Ask"][];
         };
         /** @description The progress to record on each leased task. */
         PingRequest: {
@@ -3753,6 +3782,28 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    catchup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The notes since the caller's cursor, now acknowledged, and the answers to its asks since the previous catch-up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatchupResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["Unavailable"];
         };
     };

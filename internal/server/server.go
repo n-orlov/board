@@ -69,6 +69,7 @@ func newHandler(ready Readiness, verify KeyVerifier, login *Login, keys *auth.Ke
 	ops.startOps = newStartOps(ops)
 	ops.finishOps = newFinishOps(ops)
 	ops.pingOps = newPingOps(ops)
+	ops.catchupOps = newCatchupOps(ops)
 	ops.block = newStartOps(ops).checkin
 	mux := http.NewServeMux()
 	HandlerWithOptions(strictOperations(ops), StdHTTPServerOptions{BaseRouter: mux, ErrorHandlerFunc: parameterUnreadable})

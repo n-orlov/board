@@ -153,3 +153,39 @@ func TestADatabaseFailureIsNotAnInvalidPositionOrAnUnknownStream(t *testing.T) {
 		t.Errorf("get on a closed database = %v, want a plain failure", err)
 	}
 }
+
+func TestAckInMovesTheCursorOnlyWhenTheCallerCommits(t *testing.T) {
+	s, ns := newEnv(t)
+	for _, commit := range []bool{false, true} {
+		tx, err := s.Store.Writer().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AckIn(ctx, tx, me, StreamNotes, ns[1].ID); err != nil {
+			t.Fatal(err)
+		}
+		if commit {
+			err = tx.Commit()
+		} else {
+			err = tx.Rollback()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if commit {
+			want = ns[1].ID
+		}
+		if got, _ := s.Get(ctx, me.Handle, StreamNotes); got != want {
+			t.Errorf("after commit=%v the cursor is %q, want %q", commit, got, want)
+		}
+	}
+	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.AckIn(ctx, tx, me, "x", ns[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("AckIn on an unknown stream = %v, want ErrNotFound", err)
+	}
+}

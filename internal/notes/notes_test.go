@@ -502,3 +502,38 @@ func TestPostInWritesInTheCallersTransactionAndCommitsNothing(t *testing.T) {
 		t.Errorf("the note is readable after the caller rolled back: %v", err)
 	}
 }
+
+func TestAfterReadsEveryNoteAfterTheCursorWithTheCountOfTheRest(t *testing.T) {
+	e := newEnv(t)
+	seed(t, e)
+	all, err := e.S.List(ctx, Query{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := func(cursor string, limit int) (string, int) {
+		items, more, err := e.S.After(ctx, cursor, limit)
+		if err != nil {
+			t.Fatalf("After(%q, %d): %v", cursor, limit, err)
+		}
+		out := make([]string, len(items))
+		for i, k := range items {
+			if k.Body != "" {
+				t.Errorf("note %s carries its body", k.Ref)
+			}
+			out[i] = k.Ref
+		}
+		return strings.Join(out, " "), more
+	}
+	if refs, more := got("", 3); refs != "N1 N2 N3" || more != 4 {
+		t.Errorf("from the start, limit 3 = %s, %d more; want N1 N2 N3 and 4", refs, more)
+	}
+	if refs, more := got(all.Items[4].ID, 100); refs != "N6 N7" || more != 0 {
+		t.Errorf("after N5 = %s, %d more; want N6 N7 and 0", refs, more)
+	}
+	if refs, more := got(all.Items[6].ID, 100); refs != "" || more != 0 {
+		t.Errorf("after the last note = %q, %d more; want nothing", refs, more)
+	}
+	if _, _, err := e.S.After(ctx, "not-an-id", 5); !errors.Is(err, ErrInvalid) {
+		t.Errorf("After an unreadable cursor = %v, want ErrInvalid", err)
+	}
+}
