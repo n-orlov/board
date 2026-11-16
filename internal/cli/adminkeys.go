@@ -121,7 +121,7 @@ func keysArgError(stderr io.Writer, err error) int {
 	return ExitUsage
 }
 
-// withKeys opens the migrated database named by BOARD_DB_URL and runs f.
+// withKeys opens the migrated database named by VH_DB_URL and runs f.
 func withKeys(env Env, stderr io.Writer, f keysAction) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

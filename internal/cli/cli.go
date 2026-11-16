@@ -14,6 +14,7 @@ import (
 	"github.com/n-orlov/board/internal/attention"
 	"github.com/n-orlov/board/internal/auth"
 	"github.com/n-orlov/board/internal/cursors"
+	"github.com/n-orlov/board/internal/envvar"
 	"github.com/n-orlov/board/internal/events"
 	"github.com/n-orlov/board/internal/feed"
 	"github.com/n-orlov/board/internal/initiatives"
@@ -36,7 +37,7 @@ const (
 	ExitUsage = 2
 )
 
-// DefaultDBURL is the database when BOARD_DB_URL is unset.
+// DefaultDBURL is the database when VH_DB_URL is unset.
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
@@ -71,7 +72,7 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 }
 
-// clientCommands are the subcommands that call the server at BOARD_URL.
+// clientCommands are the subcommands that call the server at VH_URL.
 var clientCommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"whoami":    whoami,
 	"init":      initCmd,
@@ -134,7 +135,7 @@ func fail(stderr io.Writer, err error) int {
 }
 
 func dbURL(env Env) string {
-	if v := env("BOARD_DB_URL"); v != "" {
+	if v := envvar.DBURL.Get(env); v != "" {
 		return v
 	}
 	return DefaultDBURL
@@ -146,13 +147,13 @@ func usage(stderr io.Writer) int {
 }
 
 func serve(stderr io.Writer, env Env) int {
-	addr := env("BOARD_LISTEN")
+	addr := envvar.Listen.Get(env)
 	if addr == "" {
 		addr = server.DefaultListen
 	}
-	migrate := env("BOARD_MIGRATE")
+	migrate := envvar.Migrate.Get(env)
 	if migrate != "" && migrate != "auto" && migrate != "off" {
-		_, _ = fmt.Fprintf(stderr, "board: BOARD_MIGRATE=%q: want auto or off\n", migrate)
+		_, _ = fmt.Fprintf(stderr, "board: %s=%q: want auto or off\n", envvar.Migrate.Name(), migrate)
 		return ExitError
 	}
 	if err := validateSettings(env); err != nil {
@@ -166,26 +167,26 @@ func serve(stderr io.Writer, env Env) int {
 // validateSettings checks the settings serve reads at start-up parse, so a bad one
 // exits 1 before anything is opened.
 func validateSettings(env Env) error {
-	if _, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL")); err != nil {
+	if _, err := sweep.ParseInterval(envvar.SweepInterval.Get(env)); err != nil {
 		return err
 	}
 	if _, _, err := streamSettings(env); err != nil {
 		return err
 	}
-	if _, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT")); err != nil {
+	if _, err := store.ParseCheckpointInterval(envvar.SQLiteCheckpoint.Get(env)); err != nil {
 		return err
 	}
 	return validateNotifySettings(env)
 }
 
 func validateNotifySettings(env Env) error {
-	if _, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON")); err != nil {
+	if _, err := store.ParseNotifyOn(envvar.NotifyOn.Get(env)); err != nil {
 		return err
 	}
-	if _, err := notify.ParseTimeout(env("BOARD_NOTIFY_TIMEOUT")); err != nil {
+	if _, err := notify.ParseTimeout(envvar.NotifyTimeout.Get(env)); err != nil {
 		return err
 	}
-	_, err := notify.ParseHeader(env("BOARD_NOTIFY_HEADER"))
+	_, err := notify.ParseHeader(envvar.NotifyHeader.Get(env))
 	return err
 }
 
@@ -238,30 +239,30 @@ func startupSteps(ctx context.Context, st *store.Store, env Env, migrate bool) e
 	return bootstrapInbox(ctx, st, env)
 }
 
-// configureNotify turns on the alerts BOARD_NOTIFY_URL and BOARD_NOTIFY_ON ask for,
-// linking them to BOARD_PUBLIC_URL, which must then be an absolute http(s) URL when set
+// configureNotify turns on the alerts VH_NOTIFY_URL and VH_NOTIFY_ON ask for,
+// linking them to VH_PUBLIC_URL, which must then be an absolute http(s) URL when set
 // (SPEC 13): with no URL no write enqueues a notification.
 func configureNotify(st *store.Store, env Env) error {
-	kinds, err := store.ParseNotifyOn(env("BOARD_NOTIFY_ON"))
+	kinds, err := store.ParseNotifyOn(envvar.NotifyOn.Get(env))
 	if err != nil {
 		return err
 	}
-	if env("BOARD_NOTIFY_URL") != "" {
-		if err := validPublicURL(env("BOARD_PUBLIC_URL")); err != nil {
+	if envvar.NotifyURL.Get(env) != "" {
+		if err := validPublicURL(envvar.PublicURL.Get(env)); err != nil {
 			return err
 		}
-		st.SetPublicURL(env("BOARD_PUBLIC_URL"))
+		st.SetPublicURL(envvar.PublicURL.Get(env))
 		st.SetNotify(kinds)
 	}
 	return nil
 }
 
-// streamSettings reads BOARD_STREAM_POLL and BOARD_STREAM_HEARTBEAT.
+// streamSettings reads VH_STREAM_POLL and VH_STREAM_HEARTBEAT.
 func streamSettings(env Env) (poll, heartbeat time.Duration, err error) {
-	if poll, err = feed.ParseInterval(env("BOARD_STREAM_POLL")); err != nil {
+	if poll, err = feed.ParseInterval(envvar.StreamPoll.Get(env)); err != nil {
 		return 0, 0, err
 	}
-	if heartbeat, err = server.ParseHeartbeat(env("BOARD_STREAM_HEARTBEAT")); err != nil {
+	if heartbeat, err = server.ParseHeartbeat(envvar.StreamHeartbeat.Get(env)); err != nil {
 		return 0, 0, err
 	}
 	return poll, heartbeat, nil
@@ -284,7 +285,7 @@ func startFeed(ctx context.Context, stderr io.Writer, env Env, st *store.Store) 
 }
 
 // reopenLeased reopens the done tasks that hold a live lease (SPEC 4.3). A database that
-// does not carry every migration (BOARD_MIGRATE=off on a fresh or older one) has nothing to
+// does not carry every migration (VH_MIGRATE=off on a fresh or older one) has nothing to
 // reopen: serve reports it as not ready and this step waits for the next start.
 func reopenLeased(ctx context.Context, st *store.Store) error {
 	if st.Ready(ctx) != nil {
@@ -301,7 +302,7 @@ func bootstrapInbox(ctx context.Context, st *store.Store, env Env) error {
 	if st.Ready(ctx) != nil {
 		return nil
 	}
-	operator := env("BOARD_OPERATOR_HANDLE")
+	operator := envvar.OperatorHandle.Get(env)
 	if operator == "" {
 		operator = DefaultOperatorHandle
 	}
@@ -310,7 +311,7 @@ func bootstrapInbox(ctx context.Context, st *store.Store, env Env) error {
 }
 
 // prepareSchema refuses a database ahead of this binary whatever
-// BOARD_MIGRATE says, then migrates when asked to.
+// VH_MIGRATE says, then migrates when asked to.
 func prepareSchema(ctx context.Context, st *store.Store, migrate bool) error {
 	if err := st.CheckSchema(ctx); err != nil {
 		return err
@@ -322,12 +323,12 @@ func prepareSchema(ctx context.Context, st *store.Store, migrate bool) error {
 }
 
 // startCheckpointer checkpoints a SQLite write-ahead log every
-// BOARD_SQLITE_CHECKPOINT until ctx ends (`0` runs no timer), and returns the
+// VH_SQLITE_CHECKPOINT until ctx ends (`0` runs no timer), and returns the
 // function that stops the timer, waits for it and checkpoints once more. The
 // caller runs it on clean shutdown, after every other writer stopped. serve has
 // already checked the setting parses; Postgres is unaffected.
 func startCheckpointer(ctx context.Context, stderr io.Writer, env Env, st *store.Store) func() {
-	interval, err := store.ParseCheckpointInterval(env("BOARD_SQLITE_CHECKPOINT"))
+	interval, err := store.ParseCheckpointInterval(envvar.SQLiteCheckpoint.Get(env))
 	if err != nil {
 		return func() {}
 	}
@@ -360,10 +361,10 @@ func startSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Stor
 }
 
 // runSweeper expires due leases and deletes expired sessions every
-// BOARD_SWEEP_INTERVAL until ctx ends; "off" runs nothing. serve has already
+// VH_SWEEP_INTERVAL until ctx ends; "off" runs nothing. serve has already
 // checked the setting parses.
 func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store) {
-	interval, err := sweep.ParseInterval(env("BOARD_SWEEP_INTERVAL"))
+	interval, err := sweep.ParseInterval(envvar.SweepInterval.Get(env))
 	if err != nil {
 		return
 	}
@@ -373,14 +374,14 @@ func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store)
 		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err })
 }
 
-// startNotifier delivers the notifications outbox to BOARD_NOTIFY_URL every
+// startNotifier delivers the notifications outbox to VH_NOTIFY_URL every
 // notify.TickInterval until ctx ends, and returns the function that stops it and
 // waits for it. With the URL unset it runs nothing. serve has already checked
 // the timeout and the header parse.
 func startNotifier(ctx context.Context, stderr io.Writer, env Env, st *store.Store) func() {
-	url := env("BOARD_NOTIFY_URL")
-	timeout, err := notify.ParseTimeout(env("BOARD_NOTIFY_TIMEOUT"))
-	header, herr := notify.ParseHeader(env("BOARD_NOTIFY_HEADER"))
+	url := envvar.NotifyURL.Get(env)
+	timeout, err := notify.ParseTimeout(envvar.NotifyTimeout.Get(env))
+	header, herr := notify.ParseHeader(envvar.NotifyHeader.Get(env))
 	if url == "" || err != nil || herr != nil {
 		return func() {}
 	}

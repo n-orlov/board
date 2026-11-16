@@ -36,7 +36,7 @@ func TestIdentityFallsBackToTheHostAndParentPID(t *testing.T) {
 	}
 	id = resolveIdentity(envWith(map[string]string{"BOARD_WAY_BACK": "mine"}))
 	if id.Actor != "agent:box:4242" || id.WayBack != "mine" {
-		t.Fatalf("BOARD_WAY_BACK must win over the fallback way back, got %+v", id)
+		t.Fatalf("VH_WAY_BACK must win over the fallback way back, got %+v", id)
 	}
 }
 
@@ -59,11 +59,11 @@ func TestIdentityFallbackNeverReadsToolVariables(t *testing.T) {
 func TestNewClientNeedsKeyAndURL(t *testing.T) {
 	_, err := newClient(envWith(map[string]string{"BOARD_URL": "http://x"}))
 	var ae *apiError
-	if !errors.As(err, &ae) || ae.exitCode() != ExitAuth || err.Error() != "no BOARD_API_KEY → export BOARD_API_KEY (this environment's key)" {
+	if !errors.As(err, &ae) || ae.exitCode() != ExitAuth || err.Error() != "VH_API_KEY is unset (BOARD_API_KEY is also accepted) → export VH_API_KEY (this environment's key)" {
 		t.Fatalf("missing key: %v", err)
 	}
 	_, err = newClient(envWith(map[string]string{"BOARD_API_KEY": "brd_x"}))
-	if err == nil || err.Error() != "no BOARD_URL → export BOARD_URL (the address of the board server)" {
+	if err == nil || err.Error() != "VH_URL is unset (BOARD_URL is also accepted) → export VH_URL (the address of the board server)" {
 		t.Fatalf("missing url: %v", err)
 	}
 	c, err := newClient(envWith(map[string]string{"BOARD_API_KEY": "brd_x", "BOARD_URL": "http://x///"}))
@@ -184,7 +184,7 @@ func TestDoFailureModes(t *testing.T) {
 		t.Errorf("closed server: %v", err)
 	}
 	bad, _ := newClient(env("http://[::1"))
-	if err := bad.do(t.Context(), "GET", "/x", nil, nil, nil); err == nil || !strings.HasPrefix(err.Error(), "bad BOARD_URL") {
+	if err := bad.do(t.Context(), "GET", "/x", nil, nil, nil); err == nil || !strings.HasPrefix(err.Error(), "bad VH_URL") {
 		t.Errorf("bad url: %v", err)
 	}
 }

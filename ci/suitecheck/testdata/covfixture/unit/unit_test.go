@@ -7,7 +7,7 @@
 // genuinely empty coverage-merged.out without needing to fight go test's
 // own flags to get there.
 //
-// Its one test also records whether BOARD_SEED_PROBE -- a stand-in for a
+// Its one test also records whether BOARD_SEED_PROBE or VH_SEED_PROBE -- stand-ins for a
 // leaked BOARD_GODOG_PATHS/BOARD_HOME the caller's own shell happened to
 // still have set -- was visible inside the go test process, writing
 // whatever value it saw (even "", meaning unset) to the path named by
@@ -25,7 +25,7 @@ func TestFixtureRecordsSeededBoardEnvironment(t *testing.T) {
 	if out == "" {
 		t.Fatal("PROBE_OUT not set")
 	}
-	seen := os.Getenv("BOARD_SEED_PROBE")
+	seen := os.Getenv("BOARD_SEED_PROBE") + os.Getenv("VH_SEED_PROBE")
 	if err := os.WriteFile(out, []byte(seen), 0o644); err != nil {
 		t.Fatalf("write %s: %v", out, err)
 	}

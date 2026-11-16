@@ -26,7 +26,7 @@ import (
 	"github.com/n-orlov/board/internal/webui"
 )
 
-// DefaultListen is the listen address when BOARD_LISTEN is unset.
+// DefaultListen is the listen address when VH_LISTEN is unset.
 const DefaultListen = ":8080"
 
 // Readiness reports nil when the service can take traffic: the database is

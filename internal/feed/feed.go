@@ -3,7 +3,7 @@
 // order. The SSE stream and the ask long-poll are built on it, so that several
 // servers on one database each see every event, whichever server took the write.
 //
-// The feed polls every BOARD_STREAM_POLL and a local write wakes it at once
+// The feed polls every VH_STREAM_POLL and a local write wakes it at once
 // through Notify. On Postgres a lower `n` can commit after a higher one, so a
 // gap in `n` is held back until every transaction that could still commit the
 // missing number has ended; a number still missing after that rolled back.
@@ -23,7 +23,7 @@ import (
 	"github.com/n-orlov/board/internal/store"
 )
 
-// DefaultPoll is the poll interval when BOARD_STREAM_POLL is unset.
+// DefaultPoll is the poll interval when VH_STREAM_POLL is unset.
 const DefaultPoll = time.Second
 
 const (
@@ -35,7 +35,7 @@ const (
 // keep up. The subscriber has missed events and must resynchronise.
 var ErrOverflow = errors.New("feed: subscriber too slow")
 
-// ParseInterval reads BOARD_STREAM_POLL. An empty value is DefaultPoll and a Go
+// ParseInterval reads VH_STREAM_POLL. An empty value is DefaultPoll and a Go
 // duration above zero is that interval. Anything else is an error: a poll
 // interval of zero would spin.
 func ParseInterval(v string) (time.Duration, error) {
@@ -45,7 +45,7 @@ func ParseInterval(v string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("BOARD_STREAM_POLL=%q: want a duration above zero such as 1s", v)
+		return 0, fmt.Errorf("VH_STREAM_POLL=%q: want a duration above zero such as 1s", v)
 	}
 	return d, nil
 }
@@ -165,7 +165,7 @@ func New(ctx context.Context, src Source, opts Options) (*Feed, error) {
 
 // NewLazy returns a feed that is positioned at the newest event as of its first
 // successful read of the table, which Poll tries until it works. A server
-// started with BOARD_MIGRATE=off on a database that is not migrated yet, or
+// started with VH_MIGRATE=off on a database that is not migrated yet, or
 // that cannot be reached yet, serves and starts delivering once the table is
 // readable (GET /readyz says why it is not ready until then). A subscription
 // made before that has After 0 and carries the events from that read on.

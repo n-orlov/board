@@ -9,16 +9,17 @@ import (
 	"time"
 
 	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/board/internal/envvar"
 	"github.com/n-orlov/board/internal/oidc"
 	"github.com/n-orlov/board/internal/server"
 	"github.com/n-orlov/board/internal/store"
 )
 
 // DefaultOperatorHandle is the operator actor's handle when
-// BOARD_OPERATOR_HANDLE is unset.
+// VH_OPERATOR_HANDLE is unset.
 const DefaultOperatorHandle = "operator"
 
-// loginSettings are the BOARD_* variables of browser login (SPEC 13).
+// loginSettings are the VH_* variables of browser login (SPEC 13).
 type loginSettings struct {
 	issuer, clientID, secret, publicURL string
 	allowed                             map[string]bool
@@ -27,10 +28,10 @@ type loginSettings struct {
 }
 
 // loginFromEnv builds the browser login from the environment. With
-// BOARD_OIDC_ISSUER unset, browser login is off (nil, nil); with it set, every
+// VH_OIDC_ISSUER unset, browser login is off (nil, nil); with it set, every
 // other OIDC setting must be set too.
 func loginFromEnv(env Env, st *store.Store) (*server.Login, error) {
-	if env("BOARD_OIDC_ISSUER") == "" {
+	if envvar.OIDCIssuer.Get(env) == "" {
 		return nil, nil
 	}
 	cfg, err := readLoginSettings(env)
@@ -52,60 +53,60 @@ func loginFromEnv(env Env, st *store.Store) (*server.Login, error) {
 
 func readLoginSettings(env Env) (loginSettings, error) {
 	secret, secretErr := clientSecret(env)
-	ttl, ttlErr := duration(env, "BOARD_SESSION_TTL", auth.DefaultSessionTTL)
-	idle, idleErr := duration(env, "BOARD_SESSION_IDLE", auth.DefaultSessionIdle)
+	ttl, ttlErr := duration(env, envvar.SessionTTL, auth.DefaultSessionTTL)
+	idle, idleErr := duration(env, envvar.SessionIdle, auth.DefaultSessionIdle)
 	cfg := loginSettings{
-		issuer: env("BOARD_OIDC_ISSUER"), clientID: env("BOARD_OIDC_CLIENT_ID"), secret: secret,
-		publicURL: env("BOARD_PUBLIC_URL"), allowed: allowedEmails(env("BOARD_OIDC_ALLOWED_EMAILS")),
-		ttl: ttl, idle: idle, operator: env("BOARD_OPERATOR_HANDLE"),
+		issuer: envvar.OIDCIssuer.Get(env), clientID: envvar.OIDCClientID.Get(env), secret: secret,
+		publicURL: envvar.PublicURL.Get(env), allowed: allowedEmails(envvar.OIDCAllowedEmails.Get(env)),
+		ttl: ttl, idle: idle, operator: envvar.OperatorHandle.Get(env),
 	}
 	if cfg.operator == "" {
 		cfg.operator = DefaultOperatorHandle
 	}
-	err := errors.Join(secretErr, ttlErr, idleErr, requireSet(env, "BOARD_OIDC_CLIENT_ID", "BOARD_OIDC_ALLOWED_EMAILS", "BOARD_PUBLIC_URL"), validPublicURL(cfg.publicURL))
+	err := errors.Join(secretErr, ttlErr, idleErr, requireSet(env, envvar.OIDCClientID, envvar.OIDCAllowedEmails, envvar.PublicURL), validPublicURL(cfg.publicURL))
 	if len(cfg.allowed) == 0 && err == nil {
-		err = errors.New("BOARD_OIDC_ALLOWED_EMAILS names no email")
+		err = fmt.Errorf("%s names no email", envvar.OIDCAllowedEmails.Name())
 	}
 	return cfg, err
 }
 
 // requireSet fails for each of names that env leaves empty.
-func requireSet(env Env, names ...string) error {
+func requireSet(env Env, vars ...envvar.Var) error {
 	var errs []error
-	for _, name := range names {
-		if env(name) == "" {
-			errs = append(errs, fmt.Errorf("%s is required when BOARD_OIDC_ISSUER is set", name))
+	for _, v := range vars {
+		if v.Get(env) == "" {
+			errs = append(errs, fmt.Errorf("%s is required when %s is set", v.Name(), envvar.OIDCIssuer.Name()))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// validPublicURL checks BOARD_PUBLIC_URL, when set, is an absolute http(s) URL.
+// validPublicURL checks VH_PUBLIC_URL, when set, is an absolute http(s) URL.
 func validPublicURL(raw string) error {
 	if raw == "" {
 		return nil
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return fmt.Errorf("BOARD_PUBLIC_URL=%q: want an absolute http(s) URL", raw)
+		return fmt.Errorf("%s=%q: want an absolute http(s) URL", envvar.PublicURL.Name(), raw)
 	}
 	return nil
 }
 
-// clientSecret reads BOARD_OIDC_CLIENT_SECRET, or the file named by
-// BOARD_OIDC_CLIENT_SECRET_FILE.
+// clientSecret reads VH_OIDC_CLIENT_SECRET, or the file named by
+// VH_OIDC_CLIENT_SECRET_FILE.
 func clientSecret(env Env) (string, error) {
-	if path := env("BOARD_OIDC_CLIENT_SECRET_FILE"); path != "" {
-		raw, err := os.ReadFile(path) //nolint:gosec // G304: the path is operator configuration (BOARD_OIDC_CLIENT_SECRET_FILE), not request input
+	if path := envvar.OIDCClientSecretFile.Get(env); path != "" {
+		raw, err := os.ReadFile(path) //nolint:gosec // G304: the path is operator configuration (VH_OIDC_CLIENT_SECRET_FILE), not request input
 		if err != nil {
-			return "", fmt.Errorf("BOARD_OIDC_CLIENT_SECRET_FILE: %w", err)
+			return "", fmt.Errorf("%s: %w", envvar.OIDCClientSecretFile.Name(), err)
 		}
 		return strings.TrimSpace(string(raw)), nil
 	}
-	if v := env("BOARD_OIDC_CLIENT_SECRET"); v != "" {
+	if v := envvar.OIDCClientSecret.Get(env); v != "" {
 		return v, nil
 	}
-	return "", errors.New("BOARD_OIDC_CLIENT_SECRET (or BOARD_OIDC_CLIENT_SECRET_FILE) is required when BOARD_OIDC_ISSUER is set")
+	return "", fmt.Errorf("%s (or %s) is required when %s is set", envvar.OIDCClientSecret.Name(), envvar.OIDCClientSecretFile.Name(), envvar.OIDCIssuer.Name())
 }
 
 // allowedEmails parses the comma-separated list into lower-case emails.
@@ -120,14 +121,14 @@ func allowedEmails(list string) map[string]bool {
 }
 
 // duration reads a Go duration from name, or returns def when it is unset.
-func duration(env Env, name string, def time.Duration) (time.Duration, error) {
-	v := env(name)
+func duration(env Env, name envvar.Var, def time.Duration) (time.Duration, error) {
+	v := name.Get(env)
 	if v == "" {
 		return def, nil
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("%s=%q: want a positive duration such as 24h", name, v)
+		return 0, fmt.Errorf("%s=%q: want a positive duration such as 24h", name.Name(), v)
 	}
 	return d, nil
 }

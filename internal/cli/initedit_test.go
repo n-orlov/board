@@ -206,7 +206,7 @@ func TestInitWriteBadAnswerIsAnError(t *testing.T) {
 func TestInitWriteNeedsAKey(t *testing.T) {
 	for _, args := range [][]string{{"init", "edit", "ab", "--title", "T"}, {"init", "close", "ab"}, {"init", "reopen", "ab"}} {
 		code, out, errs := runEnv(envWith(map[string]string{"BOARD_URL": "http://127.0.0.1:1"}), args...)
-		if code != ExitAuth || out != "" || !strings.HasPrefix(errs, "no BOARD_API_KEY") {
+		if code != ExitAuth || out != "" || !strings.HasPrefix(errs, "VH_API_KEY is unset") {
 			t.Errorf("%v: %d %q %q", args, code, out, errs)
 		}
 	}

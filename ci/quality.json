@@ -55,7 +55,9 @@
             "internal/roster",
             "internal/timeline",
             "internal/server",
-            "internal/cli"
+            "internal/cli",
+            "internal/envvar",
+            "internal/sweep"
         ],
         "lanes": {
             "base": [
@@ -77,7 +79,9 @@
                 "internal/leases",
                 "internal/roster",
                 "internal/timeline",
-                "internal/version"
+                "internal/version",
+                "internal/envvar",
+                "internal/sweep"
             ],
             "server-ops": [
                 "internal/server#ops"
@@ -119,14 +123,17 @@
                 "actorops.go"
             ],
             "internal/cli": [
+                "adminkeys.go",
                 "args.go",
                 "askpoll.go",
                 "asks.go",
                 "attention.go",
                 "cli.go",
+                "client.go",
                 "initedit.go",
                 "initiatives.go",
                 "leases.go",
+                "login.go",
                 "notes.go",
                 "now.go",
                 "taskattention.go",
@@ -184,10 +191,13 @@
             },
             "internal/cli": {
                 "core": [
+                    "adminkeys.go",
                     "args.go",
                     "cli.go",
+                    "client.go",
                     "initedit.go",
                     "initiatives.go",
+                    "login.go",
                     "tree.go"
                 ],
                 "views": [

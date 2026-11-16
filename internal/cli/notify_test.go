@@ -20,8 +20,8 @@ func TestServeRejectsAWordOutsideStrandedAskingDone(t *testing.T) {
 	for _, v := range []string{"stranded,bogus", "all", "done,", ",done", "stranded;done", "Done"} {
 		for _, url := range []string{"", "http://receiver.invalid/hook"} {
 			code, errs := runServe(t, envWith(map[string]string{"BOARD_NOTIFY_ON": v, "BOARD_NOTIFY_URL": url}))
-			if code != ExitError || !strings.Contains(errs, "BOARD_NOTIFY_ON") {
-				t.Errorf("BOARD_NOTIFY_ON=%q url=%q: got code=%d err=%q", v, url, code, errs)
+			if code != ExitError || !strings.Contains(errs, "VH_NOTIFY_ON") {
+				t.Errorf("VH_NOTIFY_ON=%q url=%q: got code=%d err=%q", v, url, code, errs)
 			}
 		}
 	}
@@ -44,7 +44,7 @@ func TestConfigureNotifyIsOffWithoutAURL(t *testing.T) {
 	}
 	for _, k := range store.NotifyKinds {
 		if st.Notifies(k) {
-			t.Errorf("%s notifies with BOARD_NOTIFY_URL unset", k)
+			t.Errorf("%s notifies with VH_NOTIFY_URL unset", k)
 		}
 	}
 }
@@ -74,7 +74,7 @@ func TestConfigureNotifyTurnsOnTheKindsListed(t *testing.T) {
 
 func TestConfigureNotifyRefusesABadWord(t *testing.T) {
 	err := configureNotify(notifyStore(t), envWith(map[string]string{"BOARD_NOTIFY_ON": "later"}))
-	if err == nil || !strings.Contains(err.Error(), "BOARD_NOTIFY_ON") {
+	if err == nil || !strings.Contains(err.Error(), "VH_NOTIFY_ON") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -93,18 +93,18 @@ func TestConfigureNotifyLinksAlertsToThePublicURL(t *testing.T) {
 func TestConfigureNotifyRefusesAPublicURLThatIsNotAbsolute(t *testing.T) {
 	st := notifyStore(t)
 	env := envWith(map[string]string{"BOARD_NOTIFY_URL": "http://receiver.invalid/hook", "BOARD_PUBLIC_URL": "board.example"})
-	if err := configureNotify(st, env); err == nil || !strings.Contains(err.Error(), "BOARD_PUBLIC_URL") {
+	if err := configureNotify(st, env); err == nil || !strings.Contains(err.Error(), "VH_PUBLIC_URL") {
 		t.Fatalf("err = %v", err)
 	}
 	if st.Notifies("done") {
-		t.Fatal("alerts were turned on with a bad BOARD_PUBLIC_URL")
+		t.Fatal("alerts were turned on with a bad VH_PUBLIC_URL")
 	}
 }
 
 func TestServeRejectsABadNotifyTimeoutOrHeaderWithoutRepeatingTheValue(t *testing.T) {
 	for name, tc := range map[string]struct{ key, val string }{
-		"timeout zero": {"BOARD_NOTIFY_TIMEOUT", "0s"}, "timeout word": {"BOARD_NOTIFY_TIMEOUT", "soon"},
-		"header no value": {"BOARD_NOTIFY_HEADER", "X-Token"}, "header newline": {"BOARD_NOTIFY_HEADER", "X-Token: hunter2\nX-Other: 1"},
+		"timeout zero": {"VH_NOTIFY_TIMEOUT", "0s"}, "timeout word": {"VH_NOTIFY_TIMEOUT", "soon"},
+		"header no value": {"VH_NOTIFY_HEADER", "X-Token"}, "header newline": {"VH_NOTIFY_HEADER", "X-Token: hunter2\nX-Other: 1"},
 	} {
 		for _, url := range []string{"", "http://receiver.invalid/hook"} {
 			code, errs := runServe(t, envWith(map[string]string{tc.key: tc.val, "BOARD_NOTIFY_URL": url}))

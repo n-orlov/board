@@ -54,7 +54,7 @@ esac
 # scrub -- a stray BOARD_GODOG_PATHS/BOARD_HOME from the caller's shell
 # must never reach `go run ./ci/qualitycheck` or anything it spawns
 # (ci/crapgate, in turn, via `go run ./ci/crapgate`).
-for board_var in $(env | sed -n 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+for board_var in $(env | sed -n -e 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' -e 's/^\(VH_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
     unset "$board_var"
 done
 

@@ -1,8 +1,9 @@
 Feature: Initiatives from the command line
   An agent creates, lists and reads initiatives, and checks who it is, with the
-  board client commands. The client reads BOARD_URL, BOARD_API_KEY, BOARD_ACTOR
-  and BOARD_WAY_BACK from the environment (no flag takes the key), and with
-  BOARD_ACTOR unset it acts as agent:<hostname>:<ppid>.
+  board client commands. The client reads VH_URL, VH_API_KEY, VH_ACTOR
+  and VH_WAY_BACK from the environment, or the BOARD_ names still accepted
+  for each (no flag takes the key), and with the actor unset it acts as
+  agent:<hostname>:<ppid>.
 
   Background:
     Given a new database for the board commands
@@ -88,3 +89,13 @@ Feature: Initiatives from the command line
     When I run the client 'board whoami' with no actor
     Then the exit code is 0
     And stdout line 1 matches "^you: agent:[^:]+:[0-9]+ \(key workstation\)  way back: pid [0-9]+ on .+, cwd .+  server ok$"
+
+  Scenario: the BOARD_ names and the VH_ names answer whoami alike
+    When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only BOARD_ variables including a task "t-1"
+    Then the exit code is 0
+    And stdout is exactly "you: claude@laptop (key workstation)  way back: claude --resume abc  server ok"
+    And stderr is empty
+    When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only VH_ variables including a task "t-1"
+    Then the exit code is 0
+    And stdout is exactly "you: claude@laptop (key workstation)  way back: claude --resume abc  server ok"
+    And stderr is empty

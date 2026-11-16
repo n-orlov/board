@@ -60,7 +60,7 @@ func runCovFixture(t *testing.T, extraEnv ...string) covFixtureRun {
 
 	env := make([]string, 0, len(os.Environ())+6+len(extraEnv))
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "BOARD_") || strings.HasPrefix(kv, "GOWORK=") || strings.HasPrefix(kv, "GOCOVERDIR=") || strings.HasPrefix(kv, "EXTRA_PROBE_DIR=") {
+		if strings.HasPrefix(kv, "BOARD_") || strings.HasPrefix(kv, "VH_") || strings.HasPrefix(kv, "GOWORK=") || strings.HasPrefix(kv, "GOCOVERDIR=") || strings.HasPrefix(kv, "EXTRA_PROBE_DIR=") {
 			continue
 		}
 		env = append(env, kv)
@@ -84,12 +84,12 @@ func runCovFixture(t *testing.T, extraEnv ...string) covFixtureRun {
 	return run
 }
 
-func TestSuiteScriptScrubsBoardEnvironmentAndFailsOnEmptyMergedCoverage(t *testing.T) {
+func TestSuiteScriptScrubsBoardAndVHEnvironmentAndFailsOnEmptyMergedCoverage(t *testing.T) {
 	// The seeded leak this test exists to catch: a BOARD_* variable present
 	// in the CALLER's own environment for a reason that has nothing to do
 	// with this run (BOARD_SEED_PROBE stands in for a real one like
 	// BOARD_GODOG_PATHS/BOARD_HOME).
-	run := runCovFixture(t, "BOARD_SEED_PROBE=leaked-value")
+	run := runCovFixture(t, "BOARD_SEED_PROBE=leaked-board-value", "VH_SEED_PROBE=leaked-vh-value")
 	probe, outdir, runErr := run.probe, run.outdir, run.err
 
 	seen, err := os.ReadFile(probe)
@@ -97,7 +97,7 @@ func TestSuiteScriptScrubsBoardEnvironmentAndFailsOnEmptyMergedCoverage(t *testi
 		t.Fatalf("fixture never wrote probe file %s (did unit/unit_test.go even run?): %v", probe, err)
 	}
 	if string(seen) != "" {
-		t.Errorf("BOARD_SEED_PROBE leaked into the go test process's own environment: saw %q, want \"\" (unset) -- ci/suite.sh must unset every BOARD_* variable from its own environment before launching go test", seen)
+		t.Errorf("BOARD_SEED_PROBE leaked into the go test process's own environment: saw %q, want \"\" (unset) -- ci/suite.sh must unset every BOARD_* and VH_* variable from its own environment before launching go test", seen)
 	}
 
 	if runErr == nil {

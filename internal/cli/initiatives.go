@@ -55,7 +55,7 @@ func clientContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// initCmd runs `board init ...` against the server named by BOARD_URL.
+// initCmd runs `board init ...` against the server named by VH_URL.
 func initCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, InitUsage)

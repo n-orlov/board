@@ -540,7 +540,7 @@ func TestParseTimeout(t *testing.T) {
 		t.Errorf("DefaultTimeout = %v", notify.DefaultTimeout)
 	}
 	for _, in := range []string{"0", "0s", "-1s", "soon", "10"} {
-		if _, err := notify.ParseTimeout(in); err == nil || !strings.Contains(err.Error(), "BOARD_NOTIFY_TIMEOUT") {
+		if _, err := notify.ParseTimeout(in); err == nil || !strings.Contains(err.Error(), "VH_NOTIFY_TIMEOUT") {
 			t.Errorf("ParseTimeout(%q) = %v, want an error", in, err)
 		}
 	}
@@ -554,7 +554,7 @@ func TestParseHeader(t *testing.T) {
 	}
 	for _, in := range []string{"novalue", ": v", "X-Token:", "X Token: v", "X-Token: a\nb", "X-Token: a\x7fb", "Bad(name): v", "Xé: v"} {
 		_, err := notify.ParseHeader(in)
-		if err == nil || !strings.Contains(err.Error(), "BOARD_NOTIFY_HEADER") || strings.Contains(err.Error(), "a\n") {
+		if err == nil || !strings.Contains(err.Error(), "VH_NOTIFY_HEADER") || strings.Contains(err.Error(), "a\n") {
 			t.Errorf("ParseHeader(%q) = %v, want an error", in, err)
 		}
 	}

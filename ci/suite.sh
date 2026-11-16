@@ -285,7 +285,7 @@ unit_test_timeout=${BOARD_CI_UNIT_TEST_TIMEOUT:-15m}
 # variable to that one child's environment regardless of what this
 # process has unset, so this scrub cannot remove the few BOARD_GODOG_*
 # values the script sets on purpose.
-for board_var in $(env | sed -n 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+for board_var in $(env | sed -n -e 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' -e 's/^\(VH_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
     unset "$board_var"
 done
 

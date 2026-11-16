@@ -36,7 +36,7 @@ func transition(verb string) func([]string, io.Writer, io.Writer, Env) int {
 	}
 }
 
-// taskCmd runs `board task ...` against the server named by BOARD_URL.
+// taskCmd runs `board task ...` against the server named by VH_URL.
 func taskCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, TaskUsage)

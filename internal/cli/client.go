@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/n-orlov/board/internal/envvar"
 )
 
 // ExitAuth is the exit code of a refused or missing key (SPEC §8.1).
@@ -34,11 +36,11 @@ type identity struct {
 	WayBack string
 }
 
-// resolveIdentity reads BOARD_ACTOR and BOARD_WAY_BACK. With no BOARD_ACTOR it
+// resolveIdentity reads VH_ACTOR and VH_WAY_BACK. With no VH_ACTOR it
 // falls back to agent:<hostname>:<ppid> (SPEC §9), which never reads a
 // tool-specific variable.
 func resolveIdentity(env Env) identity {
-	id := identity{Actor: env("BOARD_ACTOR"), WayBack: env("BOARD_WAY_BACK")}
+	id := identity{Actor: envvar.Actor.Get(env), WayBack: envvar.WayBack.Get(env)}
 	if id.Actor != "" {
 		return id
 	}
@@ -94,7 +96,7 @@ func (e *apiError) exitCode() int {
 }
 
 // authNext is what an agent does about a key the server refused (SPEC §8.1).
-const authNext = "check BOARD_API_KEY (board admin keys list shows which keys are active)"
+const authNext = "check VH_API_KEY (board admin keys list shows which keys are active)"
 
 // withNext replaces the suggested next action of an apiError with the given
 // status by a command the CLI knows to be the right one: the server's own
@@ -141,16 +143,16 @@ type client struct {
 	onBehalf string
 }
 
-// newClient checks the environment: BOARD_API_KEY and BOARD_URL. The key comes
+// newClient checks the environment: VH_API_KEY and VH_URL. The key comes
 // from the environment only.
 func newClient(env Env) (*client, error) {
-	key := env("BOARD_API_KEY")
+	key := envvar.APIKey.Get(env)
 	if key == "" {
-		return nil, &apiError{Status: http.StatusUnauthorized, Detail: "no BOARD_API_KEY", Next: "export BOARD_API_KEY (this environment's key)"}
+		return nil, &apiError{Status: http.StatusUnauthorized, Detail: envvar.APIKey.Unset(), Next: "export " + envvar.APIKey.Name() + " (this environment's key)"}
 	}
-	base := strings.TrimRight(env("BOARD_URL"), "/")
+	base := strings.TrimRight(envvar.URL.Get(env), "/")
 	if base == "" {
-		return nil, errors.New("no BOARD_URL → export BOARD_URL (the address of the board server)")
+		return nil, fmt.Errorf("%s → export %s (the address of the board server)", envvar.URL.Unset(), envvar.URL.Name())
 	}
 	return &client{base: base, key: key, id: resolveIdentity(env), http: &http.Client{Timeout: requestTimeout}}, nil
 }
@@ -171,7 +173,7 @@ func (c *client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
-		return fmt.Errorf("bad BOARD_URL %q → export BOARD_URL (the address of the board server)", c.base)
+		return fmt.Errorf("bad %s %q → export %s (the address of the board server)", envvar.URL.Name(), c.base, envvar.URL.Name())
 	}
 	c.headers(req, in != nil)
 	return c.finish(req, out)
@@ -195,7 +197,7 @@ func (c *client) headers(req *http.Request, hasBody bool) {
 func (c *client) finish(req *http.Request, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("server unreachable at %s → check BOARD_URL and that board serve is running", c.base)
+		return fmt.Errorf("server unreachable at %s → check %s and that board serve is running", c.base, envvar.URL.Name())
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

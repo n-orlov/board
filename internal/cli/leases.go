@@ -30,7 +30,7 @@ var leaseSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"ls":    leaseLs,
 }
 
-// leaseCmd runs `board lease ...` against the server named by BOARD_URL.
+// leaseCmd runs `board lease ...` against the server named by VH_URL.
 func leaseCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, LeaseUsage)

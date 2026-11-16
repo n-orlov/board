@@ -13,7 +13,7 @@ import (
 var columns = []string{"id", "kind", "event_id", "payload", "state", "attempts", "next_attempt_at", "created_at"}
 
 // Enqueue adds a pending notification of kind for the event eventID, with the payload of BuildPayload, in tx, when
-// alerts are on and BOARD_NOTIFY_ON names the kind. It writes nothing otherwise.
+// alerts are on and VH_NOTIFY_ON names the kind. It writes nothing otherwise.
 // The outbox is unique on (event, kind), so an event never enqueues a kind twice.
 func Enqueue(ctx context.Context, tx *sql.Tx, st *store.Store, eventID, kind string, now time.Time) error {
 	if !st.Notifies(kind) {

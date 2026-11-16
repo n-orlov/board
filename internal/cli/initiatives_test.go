@@ -289,11 +289,11 @@ func TestInitUsageErrors(t *testing.T) {
 func TestClientCommandsNeedAKeyAndAServer(t *testing.T) {
 	for _, args := range [][]string{{"init", "add", "ab", "T"}, {"init", "ls"}, {"init", "show", "ab"}, {"whoami"}} {
 		code, out, errs := runEnv(envWith(map[string]string{"BOARD_URL": "http://127.0.0.1:1"}), args...)
-		if code != ExitAuth || out != "" || errs != "no BOARD_API_KEY → export BOARD_API_KEY (this environment's key)\n" {
+		if code != ExitAuth || out != "" || errs != "VH_API_KEY is unset (BOARD_API_KEY is also accepted) → export VH_API_KEY (this environment's key)\n" {
 			t.Errorf("%v: %d %q %q", args, code, out, errs)
 		}
 		code, _, errs = runEnv(envWith(map[string]string{"BOARD_API_KEY": "brd_k"}), args...)
-		if code != ExitError || !strings.HasPrefix(errs, "no BOARD_URL → ") {
+		if code != ExitError || !strings.HasPrefix(errs, "VH_URL is unset (BOARD_URL is also accepted) → ") {
 			t.Errorf("%v: %d %q", args, code, errs)
 		}
 		code, _, errs = runEnv(envWith(map[string]string{"BOARD_API_KEY": "brd_k", "BOARD_URL": "http://127.0.0.1:1"}), args...)

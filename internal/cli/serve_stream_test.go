@@ -17,7 +17,7 @@ import (
 func TestServeRejectsAnUnreadableStreamHeartbeat(t *testing.T) {
 	for _, v := range []string{"soon", "0", "0s", "-2s", "off"} {
 		if code, errs := runServe(t, envWith(map[string]string{"BOARD_STREAM_HEARTBEAT": v})); code != ExitError ||
-			!strings.Contains(errs, "BOARD_STREAM_HEARTBEAT") || strings.Count(errs, "\n") != 1 {
+			!strings.Contains(errs, "VH_STREAM_HEARTBEAT") || strings.Count(errs, "\n") != 1 {
 			t.Errorf("BOARD_STREAM_HEARTBEAT=%q: code=%d err=%q", v, code, errs)
 		}
 	}

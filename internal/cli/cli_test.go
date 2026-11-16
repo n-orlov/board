@@ -49,7 +49,7 @@ func TestServeRejectsUnknownMigrateMode(t *testing.T) {
 		}
 		return ""
 	}
-	if code, errs := runServe(t, env); code != ExitError || !strings.Contains(errs, "BOARD_MIGRATE") {
+	if code, errs := runServe(t, env); code != ExitError || !strings.Contains(errs, "VH_MIGRATE") {
 		t.Fatalf("got code=%d err=%q", code, errs)
 	}
 }
@@ -225,7 +225,7 @@ func TestServeReportsAListenFailureFromTheEnvironment(t *testing.T) {
 
 func TestServeRejectsAMalformedSweepInterval(t *testing.T) {
 	if code, errs := runServe(t, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "soon"})); code != ExitError ||
-		!strings.Contains(errs, "BOARD_SWEEP_INTERVAL") {
+		!strings.Contains(errs, "VH_SWEEP_INTERVAL") {
 		t.Fatalf("got code=%d err=%q", code, errs)
 	}
 }
@@ -233,7 +233,7 @@ func TestServeRejectsAMalformedSweepInterval(t *testing.T) {
 func TestServeRejectsAnUnreadableStreamPoll(t *testing.T) {
 	for _, v := range []string{"soon", "0", "0s", "-2s", "off"} {
 		if code, errs := runServe(t, envWith(map[string]string{"BOARD_STREAM_POLL": v})); code != ExitError ||
-			!strings.Contains(errs, "BOARD_STREAM_POLL") || strings.Count(errs, "\n") != 1 {
+			!strings.Contains(errs, "VH_STREAM_POLL") || strings.Count(errs, "\n") != 1 {
 			t.Errorf("BOARD_STREAM_POLL=%q: code=%d err=%q", v, code, errs)
 		}
 	}

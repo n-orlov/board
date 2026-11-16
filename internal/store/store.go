@@ -51,16 +51,16 @@ type Store struct {
 	migrations fs.FS
 	// notify holds the kinds of alert a write enqueues; nil means alerts are off.
 	notify atomic.Pointer[map[string]bool]
-	// publicURL is BOARD_PUBLIC_URL as alerts link to it; empty when unset.
+	// publicURL is VH_PUBLIC_URL as alerts link to it; empty when unset.
 	publicURL atomic.Pointer[string]
 }
 
-// Open opens the database named by a BOARD_DB_URL value. It does not migrate.
+// Open opens the database named by a VH_DB_URL value. It does not migrate.
 // Supported: sqlite:///data/board.db and postgres://... (or postgresql://...).
 func Open(rawURL string) (*Store, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse BOARD_DB_URL: %w", err)
+		return nil, fmt.Errorf("parse VH_DB_URL: %w", err)
 	}
 	switch u.Scheme {
 	case "sqlite":
@@ -68,7 +68,7 @@ func Open(rawURL string) (*Store, error) {
 	case "postgres", "postgresql":
 		return openPostgres(rawURL)
 	default:
-		return nil, fmt.Errorf("BOARD_DB_URL scheme %q is not supported (want sqlite://<path> or postgres://...)", u.Scheme)
+		return nil, fmt.Errorf("VH_DB_URL scheme %q is not supported (want sqlite://<path> or postgres://...)", u.Scheme)
 	}
 }
 
@@ -102,9 +102,9 @@ func sqliteDSN(path string, readOnly bool) string {
 func sqliteFilePath(u *url.URL) (string, error) {
 	path := filepath.Clean(u.Host + u.Path)
 	if path == "." {
-		return "", errors.New("BOARD_DB_URL names no database file")
+		return "", errors.New("VH_DB_URL names no database file")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // the path is the operator's own BOARD_DB_URL, not request input
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // the path is the operator's own VH_DB_URL, not request input
 		return "", fmt.Errorf("create database directory: %w", err)
 	}
 	return path, nil

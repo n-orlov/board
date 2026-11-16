@@ -585,8 +585,8 @@ func TestParseHeartbeatReadsADurationAboveZero(t *testing.T) {
 		}
 	}
 	for _, in := range []string{"0", "0s", "-1s", "soon", "25"} {
-		if _, err := ParseHeartbeat(in); err == nil || !strings.Contains(err.Error(), "BOARD_STREAM_HEARTBEAT") {
-			t.Errorf("ParseHeartbeat(%q) error = %v, want one naming BOARD_STREAM_HEARTBEAT", in, err)
+		if _, err := ParseHeartbeat(in); err == nil || !strings.Contains(err.Error(), "VH_STREAM_HEARTBEAT") {
+			t.Errorf("ParseHeartbeat(%q) error = %v, want one naming VH_STREAM_HEARTBEAT", in, err)
 		}
 	}
 }

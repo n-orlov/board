@@ -27,7 +27,7 @@ Feature: Lease expiry by the sweeper and on read
   Scenario: a malformed interval stops the server with one error line
     When I run "board serve" with BOARD_SWEEP_INTERVAL=soon
     Then the exit code is 1
-    And stderr is exactly one line containing "BOARD_SWEEP_INTERVAL"
+    And stderr is exactly one line containing "VH_SWEEP_INTERVAL"
 
   Scenario: with the sweeper off nothing expires until a read asks
     Given the board server is running on a free port with BOARD_SWEEP_INTERVAL=off

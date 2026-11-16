@@ -53,7 +53,7 @@ var askSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"withdraw": askWithdraw,
 }
 
-// askCmd runs `board ask ...` against the server named by BOARD_URL.
+// askCmd runs `board ask ...` against the server named by VH_URL.
 func askCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) > 0 {
 		if run, ok := askSubcommands[args[0]]; ok {

@@ -151,8 +151,8 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   expiry are real. The cookie value is never stored. Two expiries end a session, both enforced
   on the server whatever the cookie says, and both delete its row (on the next request presenting
   it that is not refused, or by the sweeper, see below):
-  - **absolute**: `BOARD_SESSION_TTL` (default `168h`, 7 days) after login; activity does not extend it;
-  - **idle**: `BOARD_SESSION_IDLE` (default `24h`) since the session was last used (a request
+  - **absolute**: `VH_SESSION_TTL` (default `168h`, 7 days) after login; activity does not extend it;
+  - **idle**: `VH_SESSION_IDLE` (default `24h`) since the session was last used (a request
     refreshes its last-seen time, written at most once per tenth of the idle timeout).
   - Like a key's `last_used_at` bump (§3.3), both session writes a lookup makes (the last-seen
     time, the deletion of a session found dead) commit only with a request that succeeds (a
@@ -166,7 +166,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   start the server with lifetimes of a few seconds, so no step sleeps longer than 5 s.
 - **CSRF**: every cookie-authenticated request whose method is not GET, HEAD or OPTIONS (so
   `POST /auth/logout` and every write) must carry `X-CSRF-Token` equal to the session's CSRF token
-  (delivered to the UI by `GET /auth/session`) **and** an `Origin` header whose scheme, host and port equal those of `BOARD_PUBLIC_URL`; a
+  (delivered to the UI by `GET /auth/session`) **and** an `Origin` header whose scheme, host and port equal those of `VH_PUBLIC_URL`; a
   `Referer` never stands in for a missing `Origin`. A missing or wrong token, a missing or foreign
   `Origin` (including `null`) gets **403** with a problem document, and
   the request does not run. Bearer-authenticated requests are exempt (no ambient credential).
@@ -176,7 +176,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   401 with a problem document, including `/auth/login` and `/auth/oidc/callback`; a navigation to
   `/auth/login` or `/auth/oidc/callback` is served; a navigation to anything else is redirected
   (302) to `/auth/login`, which redirects to the provider. Only `GET /healthz` is answered with no
-  credential at all. When login is off (`BOARD_OIDC_ISSUER` unset) every credential-less request
+  credential at all. When login is off (`VH_OIDC_ISSUER` unset) every credential-less request
   gets 401, and the `/auth/*` operations answer 404 to an authenticated caller.
 - **The mock provider** (`internal/oidc/oidctest`) is a test-only OIDC issuer the test harness
   starts in-process. It serves discovery, a JWKS, an authorization endpoint that signs in whoever
@@ -188,7 +188,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   (`ci/repocheck` checks `go list -deps ./cmd/board`). CI contacts no external identity provider.
   `cmd/fake-oidc` runs it as a process for the Playwright specs (`e2e/serve.sh` starts it beside the
   real binary with a client secret made up for the run and passed through the environment, and
-  points `BOARD_OIDC_ISSUER` at it); it is a test fixture like `cmd/fake-*`, and `cmd/board` never
+  points `VH_OIDC_ISSUER` at it); it is a test fixture like `cmd/fake-*`, and `cmd/board` never
   imports it either.
 - **The UI's login**: the UI has no login form of its own. A navigation without a session never
   reaches the app: it is redirected to `/auth/login`, which starts the flow above and ends on `/`
@@ -221,7 +221,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - Management:
   - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
   - **Bootstrap, no HTTP**: `board admin keys create <name> [--expires 90d]`, `board admin keys
-    list`, `board admin keys revoke <name>`, run inside the container against `BOARD_DB_URL`
+    list`, `board admin keys revoke <name>`, run inside the container against `VH_DB_URL`
     directly. This is how the first key is made, and the recovery path if SSO is broken. The
     commands are described in §8.
   - API (any authenticated principal, v1 has no ACL; all three are in `api/openapi.yaml`):
@@ -277,12 +277,12 @@ initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e
 **Start-up bootstrap.** When `board serve` starts on a migrated database it creates the built-in initiative `inbox`
 (title `Inbox`, description `Work that fits no other initiative yet.`, no tags, status `open`) when no initiative with
 that slug exists, in one transaction with its one `initiative_created` event: the actor is the operator actor
-(`BOARD_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
+(`VH_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
 `system:bootstrap`. An `inbox` that exists is left exactly as it is: another title or tags, a closed status and its
 events all stay, and no second event is written. Two servers started together on one database leave one `inbox` and
 one event: the unique slug, or on Postgres the one operator row the winner's transaction also wrote, makes the loser's
 transaction roll back, and the loser looks once more, finds that `inbox` and carries on. A database that is
-not migrated (`BOARD_MIGRATE=off`) waits for the next start. The inbox is an ordinary initiative afterwards: it
+not migrated (`VH_MIGRATE=off`) waits for the next start. The inbox is an ordinary initiative afterwards: it
 lists first in a list in creation order (§6.3), can be edited, closed and reopened, and is never recreated while it
 exists.
 
@@ -304,7 +304,7 @@ An actor row is created on first use of a handle (upsert). In Phase 0 a use is a
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
 A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
 that has only read has no row, and the operator row exists after the start of `serve` whose inbox bootstrap created `inbox` (it writes the row, §4), or else not until the first write made by a session (its
-actor is `BOARD_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `BOARD_OPERATOR_HANDLE`) makes
+actor is `VH_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `VH_OPERATOR_HANDLE`) makes
 that handle's row `operator`, promoting a row an earlier key write created as `agent` under the same handle, and an
 `operator` row is never demoted, so a key write that names the operator's handle after a session write leaves the
 kind `operator` (the event's `principal` still records `key:<name>` or `oidc:<email>`, so the two stay
@@ -650,7 +650,7 @@ HTTP and `admin-cli` for one made by `board admin keys create`. `expires_at` is 
 verifier answers 401 `key expired` from that instant on.
 
 `sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Rows past
-`expires_at` are deleted by the same sweeper as leases (§5.1), on the same `BOARD_SWEEP_INTERVAL` tick; a session
+`expires_at` are deleted by the same sweeper as leases (§5.1), on the same `VH_SWEEP_INTERVAL` tick; a session
 that only the idle timeout has ended is deleted when it is next looked up by a request that is not refused (§3.2). `sessions` has no `n`: it is keyed by `id_hash`, has no short ref
 and is indexed on `expires_at` for that sweep.
 
@@ -708,7 +708,7 @@ leaves none, and nothing deletes or cancels a row afterwards.
   visible on the timeline.
 - **End** `POST /api/v1/leases/{id}/end {outcome?}`.
 - **Expire**: a sweeper marks `live` leases with `expires_at < now` as `expired` and writes
-  `lease_expired`. `board serve` runs it every `BOARD_SWEEP_INTERVAL` (default `15s`; any Go duration
+  `lease_expired`. `board serve` runs it every `VH_SWEEP_INTERVAL` (default `15s`; any Go duration
   above zero; `off`, `0` or `0s` turns the sweeper off, and any other value makes `board serve` exit 1
   naming the variable). It also runs lazily first on every read that returns leases (`GET /leases`,
   `GET /leases/{ref}`, and the live leases of `GET /tasks/{ref}`), so a read never shows a lease as live past
@@ -785,26 +785,26 @@ follows, through `internal/notify`:
 | `asking` | `ask_raised` | an ask is raised, on a task, on an initiative or on the board |
 | `done` | `task_done` | a task is marked done; a done request that also ends its holder's live lease (§6.4) enqueues the one `done` row, and the `lease_ended` event it writes enqueues none |
 
-A row is enqueued only when `BOARD_NOTIFY_URL` is set and `BOARD_NOTIFY_ON` names the kind (§13); with the URL unset no
+A row is enqueued only when `VH_NOTIFY_URL` is set and `VH_NOTIFY_ON` names the kind (§13); with the URL unset no
 row is ever written. A renewal, an end, an answer, a withdrawal, a close and a note enqueue nothing, and neither
 does a write that is refused, since its transaction writes no event. A row is not cancelled when its condition clears
 (the lease acknowledged, the ask answered): what was enqueued is what is delivered. `serve` turns the triggers on once at
-start-up, before it takes a request, and a word in `BOARD_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
+start-up, before it takes a request, and a word in `VH_NOTIFY_ON` outside `stranded`, `asking`, `done` makes it exit 1
 whether or not the URL is set. `GET /api/v1/notifications` lists the outbox (§6.9).
 
 #### Delivery
 
-When `BOARD_NOTIFY_URL` is set, `serve` runs one background worker (`notify.Worker`, started after the sweeper and
+When `VH_NOTIFY_URL` is set, `serve` runs one background worker (`notify.Worker`, started after the sweeper and
 stopped before the store closes) that looks for due rows every 2 s. A row is due when it is `pending`, its
 `next_attempt_at` is not after the clock's now and its `claimed_until` is empty or not after now. The worker takes up to
 20 due rows per tick, oldest first, and for each one:
 
-1. **Claims it** with one conditional `UPDATE` that sets `claimed_until` to now plus `BOARD_NOTIFY_TIMEOUT` plus 30 s and
+1. **Claims it** with one conditional `UPDATE` that sets `claimed_until` to now plus `VH_NOTIFY_TIMEOUT` plus 30 s and
    holds only while the row is still `pending`, due and unclaimed, so of several servers on one database exactly one wins
    it and the others skip it. A server that dies mid-delivery leaves the claim, and the row is delivered by whichever
    server ticks after the claim lapses.
-2. **POSTs** the `payload` as `Content-Type: application/json` to `BOARD_NOTIFY_URL`, with `BOARD_NOTIFY_HEADER` added
-   when it is set, under `BOARD_NOTIFY_TIMEOUT` from connect to the response status line. The status line decides: the
+2. **POSTs** the `payload` as `Content-Type: application/json` to `VH_NOTIFY_URL`, with `VH_NOTIFY_HEADER` added
+   when it is set, under `VH_NOTIFY_TIMEOUT` from connect to the response status line. The status line decides: the
    response body is never read, so a receiver that sends a 2xx status line and then stalls its body, breaks it off or
    sends none is still a success. A redirect is not followed.
 3. **Records the outcome** and releases the claim. Any received 2xx status, whatever the response body does, makes the row `sent` and sets
@@ -839,14 +839,14 @@ rows it points at:
 |---|---|---|
 | `text` | always | plain text for a phone: one line, two for `stranded`; names the kind, the task ref and title (for an ask on an initiative `on initiative <slug>`, for a board ask `on board`) and the actor; `stranded` adds the lease, the intent and `way back: <way_back>` (`way back: none recorded` when the actor has none). Each title, question, intent and way back is put on one line and cut to 120 runes with `…`; the fields below are never cut |
 | `kind` | always | `stranded`, `asking` or `done` |
-| `task` | the event is about a task (`stranded`, `done`, an ask on a task) | `ref`, `title`, and `url` (`<BOARD_PUBLIC_URL>/#/t/<ref>`, absent when it is unset) |
+| `task` | the event is about a task (`stranded`, `done`, an ask on a task) | `ref`, `title`, and `url` (`<VH_PUBLIC_URL>/#/t/<ref>`, absent when it is unset) |
 | `initiative` | an ask on an initiative, which names no task | `slug` |
 | `actor` | always | `handle` of the event's actor (the lease holder, the asker, whoever marked the task done) and `way_back` (their last recorded one, absent when none) |
 | `ask` | `asking` | `ref` (`A<n>`), the full `question`, `blocking` |
 | `lease` | `stranded` | `ref` (`L<n>`), `intent`, `expired_at` (RFC 3339, UTC) |
-| `board_url` | `BOARD_PUBLIC_URL` is set | the base URL with one trailing `/`, absent when unset |
+| `board_url` | `VH_PUBLIC_URL` is set | the base URL with one trailing `/`, absent when unset |
 
-The payload never carries an API key, a session id or the `BOARD_NOTIFY_HEADER` value: it is built only from the
+The payload never carries an API key, a session id or the `VH_NOTIFY_HEADER` value: it is built only from the
 event, the task, initiative, ask, lease and actor rows named above.
 
 ---
@@ -1170,7 +1170,7 @@ principal may use them. The server answers 503 problem documents when it runs wi
 `api/openapi.yaml`. `{ref}` is `L<n>` (either letter case) or the lease's ULID; one that names no lease is **404**
 (`there is no lease L9`). Any authenticated principal may use them. The server answers 503 problem documents when
 it runs without a store. The rules are those of `internal/leases` (§4.4). The sweeper that expires leases in the
-background runs every `BOARD_SWEEP_INTERVAL` (§5.1, §13); every operation here also expires the due leases
+background runs every `VH_SWEEP_INTERVAL` (§5.1, §13); every operation here also expires the due leases
 first, so none shows a lease live past its expiry, with the sweeper off too.
 
 - **`POST /api/v1/leases`**, body `{task, intent, ttl_seconds?, resources?}`. `task` is a task ref or ULID, `intent`
@@ -1365,7 +1365,7 @@ writes their `lease_expired` events, and judges all five sections at that one in
 
 `GET /api/v1/notifications` is in `api/openapi.yaml` and lists the outbox of §4.11, so the operator can see what was
 delivered, what is waiting and what failed. Any authenticated principal may use it (v1 has no ACL) and a server
-without a store answers **503**. It reads the table whether or not `BOARD_NOTIFY_URL` is set (with the URL unset no row
+without a store answers **503**. It reads the table whether or not `VH_NOTIFY_URL` is set (with the URL unset no row
 is ever written, §5.4, so the list is empty). It writes nothing.
 
 - **Parameters.** `state` is `pending`, `sent` or `failed` and keeps the rows in that state; left out, every row is
@@ -1484,7 +1484,7 @@ message is flushed as it is written. A server with no change feed answers 503.
   ULID (`events.id`) and `data:` the event as one JSON line, the object `GET /api/v1/events` lists. A stream
   starts at the change feed's position when it connects (§7.3): every event the feed delivers from then on is
   sent, and an event the feed had already delivered is not. So an event committed before the connection that
-  the feed had not delivered yet (it reads every `BOARD_STREAM_POLL` and holds rows behind a gap, §7.3) is
+  the feed had not delivered yet (it reads every `VH_STREAM_POLL` and holds rows behind a gap, §7.3) is
   still sent, and nothing committed between a client's read of the board and its stream is lost.
   **Resume:** a `Last-Event-ID` header (the ULID of the last event the client has; an `EventSource` sends it by
   itself when it reconnects) or, when the header is absent or empty, a `?last_event_id=` parameter makes the
@@ -1501,18 +1501,18 @@ message is flushed as it is written. A server with no change feed answers 503.
   `overdue_watches`, `conflicts`, `total`) as one JSON line, sent **once on connect** and again **whenever they
   differ from the ones last sent on that stream**; a change that leaves them equal sends nothing. They are
   recomputed after every event the change feed delivers (§7.3), whichever topics the stream asked for, and at least
-  every 30 s (every `BOARD_STREAM_HEARTBEAT` when that is shorter), because an overdue watch or an expiring lease
+  every 30 s (every `VH_STREAM_HEARTBEAT` when that is shorter), because an overdue watch or an expiring lease
   changes with the clock and writes no event. A stream with only this topic receives no `board` message. The
   counts are read the way `GET /attention` reads them, so the leases that ran out expire first. A read that fails
   after the stream began is skipped and tried again at the next event or recheck; one that fails on connect is a
   500 before the headers.
-- **Heartbeat**: a comment line, `: ping`, every `BOARD_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
+- **Heartbeat**: a comment line, `: ping`, every `VH_STREAM_HEARTBEAT` (default `25s`, §13) while the stream
   is idle, so a proxy keeps it open.
 - **Lifetime**: the stream outlives the server's write timeout, because it moves its own write deadline ahead
   (10 s) before every write; a client that stops reading ends it. It ends, releasing its goroutine and its
   subscription to the change feed (§7.3), when the client disconnects, when the feed stops, and when the server
   shuts down (`http.Server.Shutdown` does not end a handler by itself, so the stream watches the shutdown).
-  `board serve` refuses a `BOARD_STREAM_HEARTBEAT` that is not a Go duration above zero (one stderr line,
+  `board serve` refuses a `VH_STREAM_HEARTBEAT` that is not a Go duration above zero (one stderr line,
   exit 1). The UI uses this stream; nothing in the UI polls.
 
 ### 7.2 Ask long-poll
@@ -1560,7 +1560,7 @@ Marking the poll at the end (below) waits at most 5 seconds for the writer and d
 
 Waiters are woken by the events feed (§7.3), not by `LISTEN/NOTIFY`: a wait subscribes to the feed, then reads the
 ask, and re-reads it when an `ask_answered` or `ask_withdrawn` event of that ask arrives. An answer written through any
-replica on the same database therefore ends the wait within the feed's tail interval (`BOARD_STREAM_POLL`), and one
+replica on the same database therefore ends the wait within the feed's tail interval (`VH_STREAM_POLL`), and one
 written through the same server ends it at once. A subscription the feed ended because the waiter fell behind starts
 again and re-reads, and the wait re-reads the ask at every renewal below, so no change is lost. The write deadline is
 moved past the wait, so a server write timeout shorter than N does not cut it, and a server shutdown ends the wait with
@@ -1587,7 +1587,7 @@ wait, and requires the label to read "asker waiting" within five seconds with no
 
 The source of every live signal is the `events` table, tailed by `n` (the order of insertion) by the
 change feed of `internal/feed/`, one per `board serve`. It reads the rows after the last one it delivered
-every `BOARD_STREAM_POLL` (default `1s`, §13) and a write made through the same server wakes it at once,
+every `VH_STREAM_POLL` (default `1s`, §13) and a write made through the same server wakes it at once,
 so a local write reaches a subscriber without waiting for the interval. Each subscriber (an SSE stream,
 §7.1; an ask waiter, §7.2) gets every event after the position its subscription began at, in order of `n`,
 once. A subscriber costs a channel, not a goroutine, and a subscriber that falls too far behind is ended
@@ -1604,8 +1604,8 @@ missing `n` below the highest one read was drawn by one of them or by a transact
 feed holds the later rows, however long that takes, until each noted transaction has ended. Then it reads
 the table once more: a missing row that committed is delivered in its place, and one still missing rolled
 back, so the feed moves past it. On SQLite there is one writer and no such gap. `board serve` refuses a
-`BOARD_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1). A
-server started with `BOARD_MIGRATE=off` on a database it cannot read yet still serves: the feed starts at the
+`VH_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1). A
+server started with `VH_MIGRATE=off` on a database it cannot read yet still serves: the feed starts at the
 newest event as of its first successful read.
 
 ---
@@ -1615,12 +1615,12 @@ newest event as of its first successful read.
 One binary, same Go module: `board serve` runs the server, every other subcommand is a client
 (`board admin …` excepted, below). Static builds for linux/darwin × amd64/arm64.
 
-Configuration: `BOARD_URL`, `BOARD_ACTOR` (handle; if unset, the CLI derives one with the
-built-in fallback rule, §9), `BOARD_WAY_BACK`, `BOARD_API_KEY` (the environment's key, §3.3;
+Configuration: `VH_URL`, `VH_ACTOR` (handle; if unset, the CLI derives one with the
+built-in fallback rule, §9), `VH_WAY_BACK`, `VH_API_KEY` (the environment's key, §3.3;
 never accepted as a flag, so it does not land in shell history or process lists).
-`board admin …` subcommands talk to the database directly (`BOARD_DB_URL`) and need no key.
+`board admin …` subcommands talk to the database directly (`VH_DB_URL`) and need no key.
 
-`board serve` starts the HTTP server on `BOARD_LISTEN` (default `:8080`) and shuts down gracefully on
+`board serve` starts the HTTP server on `VH_LISTEN` (default `:8080`) and shuts down gracefully on
 SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version, then a space and the commit the binary was built from
 when the version does not already name it. A binary built by the container image build carries the
 image's `VERSION` and `REVISION` build args (§13), stamped with the linker, and prints `<VERSION> <REVISION>`
@@ -1631,25 +1631,25 @@ version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
 `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
-`board serve` opens the database named by `BOARD_DB_URL` (default `sqlite:///data/board.db`) and, unless
-`BOARD_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
-`BOARD_MIGRATE=off` starts the server on the database as it is, migrated or not. `GET /healthz` answers 200
+`board serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
+`VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
+`VH_MIGRATE=off` starts the server on the database as it is, migrated or not. `GET /healthz` answers 200
 whenever the process is up, whatever the database state. `GET /readyz` answers 200 only when the database is
 reachable and carries every embedded migration, and 503 otherwise (unmigrated, behind the embedded migrations,
-or unreachable); it never writes. A value of `BOARD_MIGRATE` other than `auto` or `off` exits 1.
+or unreachable); it never writes. A value of `VH_MIGRATE` other than `auto` or `off` exits 1.
 
 `board serve` refuses a database whose recorded goose version is newer than the highest migration the binary
-embeds (a newer board migrated it): whatever `BOARD_MIGRATE` says, it exits 1 before it listens, printing exactly
+embeds (a newer board migrated it): whatever `VH_MIGRATE` says, it exits 1 before it listens, printing exactly
 one stderr line that names both versions (`board: database schema is newer than this binary: database is at
 version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also answers 503 for such a database.
 
-`board admin migrate` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
+`board admin migrate` opens `VH_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
 `migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
-`board admin keys` opens `BOARD_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
+`board admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
 1 to 64 characters of `a-z A-Z 0-9 . _ -`, starting with a letter or digit.
 
@@ -1682,7 +1682,7 @@ The CLI is written for agents first: every line costs context.
   `ok ask A12 raised`, `ok note N40 → host:gw1`.
 - **Every error is one line, on stderr, with the next action** after `→` when there is one:
   `lease L7 expired 14m ago → board lease start phone-onboard-3 "<intent>"`,
-  `no BOARD_API_KEY → export BOARD_API_KEY (this environment's key)`,
+  `no VH_API_KEY → export VH_API_KEY (this environment's key)`,
   `task phone-onboard-9 not found → board task ls phone-onboard`.
   The server's problem documents carry a machine-readable `next` field the CLI renders.
 - **List caps**: each list section in `board now`, `board attention`, `board notes` and
@@ -1695,11 +1695,11 @@ Exit codes:
 | code | meaning | Phase 0 condition |
 |---|---|---|
 | 0 | success | a command did what was asked (a write printed its `ok` line, a list printed, possibly nothing) |
-| 1 | error (server, network, unexpected) | the server cannot be reached, `BOARD_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
+| 1 | error (server, network, unexpected) | the server cannot be reached, `VH_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
 | 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
 | 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
 | 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board note show` of an unknown `N<n>`, `board ask`, `board note` and `board notes` on an unknown task or initiative |
-| 5 | authentication failed (missing, revoked or expired key) | `BOARD_API_KEY` is unset, or the server answers 401 to the key |
+| 5 | authentication failed (missing, revoked or expired key) | `VH_API_KEY` is unset, or the server answers 401 to the key |
 | 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board task done` while another actor holds a live lease and `--force` is not given (`→ wait for L<n> to end, or --force`) and `board lease start` on a done task (`→ board task reopen <ref> first`); `board lease ack` of a lease that has not expired (live or ended); `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
 | 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | `board lease start` and `board lease renew` when a live lease of another holds a resource of the lease; `board now --resources` and `board now` when a conflict touches one of my live leases or a resource given; `board start` arrives later |
 
@@ -1707,7 +1707,7 @@ Exit codes:
 items print without a `more` line, 21 print 20 plus `+1 more → board init ls --all`.
 
 The CLI words the next action itself: the `→ <next>` of a client error is a command (`→ board init ls` for an
-unknown initiative, `→ board init show <slug>` for a taken slug, `→ check BOARD_API_KEY (board admin keys list
+unknown initiative, `→ board init show <slug>` for a taken slug, `→ check VH_API_KEY (board admin keys list
 shows which keys are active)` for a refused key), not the server's HTTP-flavoured `next`, which stays in the
 problem document for other clients. A status the CLI has no command for prints the server's own `next`.
 
@@ -1733,16 +1733,16 @@ case-insensitive on input. The API accepts refs wherever it accepts IDs (§6.1).
 ### 8.3 Commands
 
 Shipped so far: `version`, `serve`, `admin migrate`, `admin keys`, `whoami`, `init add|ls|show|edit|close|reopen` and `task add|ls|show|edit|done|reopen|close|dep add|dep rm|events`, `lease start|renew|end|ack|ls`, `now`, `milestone`, `check`, `events`, `ask`, `ask show|ls|withdraw`, `answer`, `note`, `note show` and `notes`; the other lines
-below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `lease …`, `now`, `milestone`, `check`, `events`, `ask …`, `answer`, `note …`, `notes`) call the server at `BOARD_URL` with
-`Authorization: Bearer $BOARD_API_KEY`, `Board-Actor: $BOARD_ACTOR` and, when there is one, `Board-Actor-Way-Back:
-$BOARD_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
-walks every registered flag and fails on a key-like name). With `BOARD_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
-and, unless `BOARD_WAY_BACK` is set, the way back is `pid <ppid> on <hostname>, cwd <cwd>` (§9). With
-no `BOARD_API_KEY` a client command exits 5 with `no BOARD_API_KEY → export BOARD_API_KEY (this environment's
-key)`, with no `BOARD_URL` it exits 1 with `no BOARD_URL → export BOARD_URL (the address of the board server)`, and
-an unreachable server exits 1 with `server unreachable at <url> → check BOARD_URL and that board serve is running`.
+below arrive with their phases. The client commands (`whoami`, `init …`, `task …`, `lease …`, `now`, `milestone`, `check`, `events`, `ask …`, `answer`, `note …`, `notes`) call the server at `VH_URL` with
+`Authorization: Bearer $VH_API_KEY`, `Board-Actor: $VH_ACTOR` and, when there is one, `Board-Actor-Way-Back:
+$VH_WAY_BACK`. The key is read from the environment only: no command has a flag that takes a key (a unit test
+walks every registered flag and fails on a key-like name). With `VH_ACTOR` unset the actor is `agent:<hostname>:<ppid>`
+and, unless `VH_WAY_BACK` is set, the way back is `pid <ppid> on <hostname>, cwd <cwd>` (§9). With
+no `VH_API_KEY` a client command exits 5 with `no VH_API_KEY → export VH_API_KEY (this environment's
+key)`, with no `VH_URL` it exits 1 with `no VH_URL → export VH_URL (the address of the board server)`, and
+an unreachable server exits 1 with `server unreachable at <url> → check VH_URL and that board serve is running`.
 A server problem document is printed as one line, `<detail> → <next>`, with the server's `next` except where the
-CLI names its own: a 401 always ends `→ check BOARD_API_KEY (board admin keys list shows which keys are active)`, a
+CLI names its own: a 401 always ends `→ check VH_API_KEY (board admin keys list shows which keys are active)`, a
 taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
 It exits by its status: 401 is 5, 404 is 4,
 anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move, or for done another actor's live lease without `--force`) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed or done task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `lease ack` (a lease that has not expired) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
@@ -2003,7 +2003,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   duration, time, link (`label=url`) or kind is exit 2 with the single line `board: <flag>: invalid <what> …`, before any
   request is sent.
 - `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
-  the one of the key whose display prefix matches `BOARD_API_KEY` in `GET /api/v1/keys`; the call also proves the
+  the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
 - The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
@@ -2107,11 +2107,11 @@ curl -fsSL https://raw.githubusercontent.com/<owner>/board/main/install.sh | sh
 - Detects OS (linux, darwin) and arch (amd64, arm64), downloads `board_<os>_<arch>.tar.gz` and
   `checksums.txt` from the GitHub release over HTTPS only, verifies SHA-256, installs to
   `~/.local/bin/board` (copy then rename, so a running binary is replaced safely).
-- `BOARD_VERSION=vX.Y.Z` pins a release (default latest); `BOARD_INSTALL_DIR` changes the
+- `VH_VERSION=vX.Y.Z` pins a release (default latest); `VH_INSTALL_DIR` changes the
   directory.
 - **Immutability**: before installing it asks the GitHub release API whether the release is
   immutable and refuses one that is not confirmed, as `deck update` does;
-  `BOARD_REQUIRE_IMMUTABLE=0` (exactly `0`) opts out with a note. (deck's own `install.sh` does
+  `VH_REQUIRE_IMMUTABLE=0` (exactly `0`) opts out with a note. (deck's own `install.sh` does
   not check this yet; board's does.)
 - Prints the installed `board version` and warns if the directory is not on `PATH`.
 
@@ -2129,8 +2129,8 @@ Numbered steps the agent runs and checks itself, each with the command and the e
 5. Download the asset and `checksums.txt`; verify the SHA-256 of the asset.
 6. Extract and install to `~/.local/bin` (or the chosen directory); make it executable.
 7. Run `board version` and compare with the release tag.
-8. Configure `BOARD_URL` and `BOARD_API_KEY` (from the operator's secret store, never pasted
-   into files under version control), and `BOARD_ACTOR` per the identity rules (§9).
+8. Configure `VH_URL` and `VH_API_KEY` (from the operator's secret store, never pasted
+   into files under version control), and `VH_ACTOR` per the identity rules (§9).
 9. Run `board whoami` and expect the handle, key name and `server ok`.
 
 The README says: *"or ask your agent: install board following
@@ -2147,7 +2147,7 @@ The rules an agent follows live **in the binary**, not in a skill file each oper
 lets drift. `board help agent` prints a cheat sheet of about 40 lines, headed
 `board protocol vN`, that is the whole working protocol:
 
-- **identity**: export `BOARD_URL`, `BOARD_API_KEY`, `BOARD_ACTOR`, `BOARD_WAY_BACK` per the
+- **identity**: export `VH_URL`, `VH_API_KEY`, `VH_ACTOR`, `VH_WAY_BACK` per the
   operator's instructions (§9); check with `board whoami`; subagents use the parent's handle;
 - **start**: `board start <task> "<intent>" --res …` (or `board new`) once the task is
   understood; search before creating, never duplicate an open task;
@@ -2170,7 +2170,7 @@ The text is a Go `embed`ded file (`internal/cli/protocol.txt`) with its version 
 small integer bumped whenever an agent would have to behave differently (wording fixes don't
 bump it). `board help agent --version` prints just `N` and records nothing. Running
 `board help agent` prints the text, then records the version as read for the actor
-(`PUT /actors/me/protocol-seen`, best effort: with no `BOARD_URL` or `BOARD_API_KEY`, an unreachable
+(`PUT /actors/me/protocol-seen`, best effort: with no `VH_URL` or `VH_API_KEY`, an unreachable
 server or a refused key it still prints the text, prints nothing on stderr and exits 0). Any other
 argument to `board help` is the exit-2 usage error `usage: board help agent [--version]`.
 
@@ -2281,8 +2281,8 @@ Template for the operator's instructions (first matching rule wins; adapt to you
 
 ```markdown
 ## board identity
-Before using `board`, export BOARD_URL, BOARD_API_KEY (this environment's key,
-from your secret store), BOARD_ACTOR and BOARD_WAY_BACK:
+Before using `board`, export VH_URL, VH_API_KEY (this environment's key,
+from your secret store), VH_ACTOR and VH_WAY_BACK:
 1. Autonomous run (e.g. RALPHD_RUN_ID set):   ralph:<run-id>
    way back: `ralphctl status <run-id>`
 2. Session manager (e.g. DECK_SESSION_NAME set): deck:<DECK_PROFILE>/<DECK_SESSION_NAME>
@@ -2294,7 +2294,7 @@ Always include the host when the identifier is not globally unique.
 Subagents never register: they act under their parent's handle.
 ```
 
-The CLI's built-in fallback: `BOARD_ACTOR` if set, else `agent:<hostname>:<ppid>`, with way
+The CLI's built-in fallback: `VH_ACTOR` if set, else `agent:<hostname>:<ppid>`, with way
 back `pid <ppid> on <hostname>, cwd <cwd>`. It never reads tool-specific variables.
 
 ---
@@ -3310,7 +3310,7 @@ network requests (all assets embedded).
 
 - `database/sql` with drivers: **SQLite** via `modernc.org/sqlite` (pure Go), **Postgres** via
   `jackc/pgx/v5/stdlib`.
-- `BOARD_DB_URL` selects the driver: `sqlite:///data/board.db`, `postgres://…`.
+- `VH_DB_URL` selects the driver: `sqlite:///data/board.db`, `postgres://…`.
 - **Dialect layer**: one small Go interface, `store.Dialect`, with a `SQLite` and a `Postgres`
   implementation, for the differences that matter: placeholder style and `Rebind`, `INSERT ... RETURNING`,
   upsert (`ON CONFLICT ... DO UPDATE`), partial index creation, boolean encoding, `LISTEN/NOTIFY`
@@ -3321,7 +3321,7 @@ network requests (all assets embedded).
   (DDL identical in both databases) plus `sqlite` and `postgres` (only where the DDL must differ: today
   the identity column `n` and the primary key of the tables that have one). A dialect applies its own
   directory merged with `common`, one version sequence across both. Applied on start
-  (`BOARD_MIGRATE=auto`, default) or by `board admin migrate`. A database whose goose version is above the
+  (`VH_MIGRATE=auto`, default) or by `board admin migrate`. A database whose goose version is above the
   highest embedded one is refused (§8).
 - SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, applied to every
   connection through the DSN, with one writer connection (`MaxOpenConns=1`, `BEGIN IMMEDIATE`) plus a read
@@ -3383,41 +3383,42 @@ commit. Releases are immutable (§8.5, §15.3).
 
 ## 13. Configuration and deployment
 
-All configuration is by environment variable:
+All configuration is by environment variable. Each name below is a `VH_` name, and its `BOARD_` alias is
+also accepted (§13.1).
 
 | var | default | meaning |
 |---|---|---|
-| `BOARD_LISTEN` | `:8080` | listen address |
-| `BOARD_DB_URL` | `sqlite:///data/board.db` | §12.2 |
-| `BOARD_MIGRATE` | `auto` | `auto` \| `off` |
-| `BOARD_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
+| `VH_LISTEN` | `:8080` | listen address |
+| `VH_DB_URL` | `sqlite:///data/board.db` | §12.2 |
+| `VH_MIGRATE` | `auto` | `auto` \| `off` |
+| `VH_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
-| `BOARD_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
-| `BOARD_SQLITE_CHECKPOINT` | `10m` | how often `board serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
-| `BOARD_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
-| `BOARD_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
-| `BOARD_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `BOARD_NOTIFY_URL` is set |
-| `BOARD_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take to get a response status line, connect to status (§5.4); the response body is not read, so a stalled or truncated body after a 2xx does not matter. A Go duration above zero; any other value exits 1, whether or not `BOARD_NOTIFY_URL` is set. A POST that gets no status line within it fails with `last_error` `timeout` and is retried |
-| `BOARD_NOTIFY_HEADER` | (unset: none) | one `Name: value` header sent with every alert POST, for a receiver that wants a token (§5.4). A value that is not a header name, a colon and a non-empty one-line value exits 1, with a message that never repeats it. It comes from the environment only; it is never logged, never written to an event or an outbox row and never part of a payload |
-| `BOARD_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
-| `BOARD_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
-| `BOARD_LOG_LEVEL` | `info` | |
-| `BOARD_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check, and as the base of the links in an alert (§5.4). With `BOARD_NOTIFY_URL` set, a value that is not an absolute http(s) URL exits 1 |
-| `BOARD_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
-| `BOARD_OIDC_CLIENT_ID` | (required with the issuer) | |
-| `BOARD_OIDC_CLIENT_SECRET` | (required with the issuer) | or `BOARD_OIDC_CLIENT_SECRET_FILE` |
-| `BOARD_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as the operator |
-| `BOARD_SESSION_TTL` | `168h` | absolute session lifetime (§3.2) |
-| `BOARD_SESSION_IDLE` | `24h` | idle timeout (§3.2) |
+| `VH_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
+| `VH_SQLITE_CHECKPOINT` | `10m` | how often `board serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
+| `VH_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
+| `VH_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
+| `VH_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `VH_NOTIFY_URL` is set |
+| `VH_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take to get a response status line, connect to status (§5.4); the response body is not read, so a stalled or truncated body after a 2xx does not matter. A Go duration above zero; any other value exits 1, whether or not `VH_NOTIFY_URL` is set. A POST that gets no status line within it fails with `last_error` `timeout` and is retried |
+| `VH_NOTIFY_HEADER` | (unset: none) | one `Name: value` header sent with every alert POST, for a receiver that wants a token (§5.4). A value that is not a header name, a colon and a non-empty one-line value exits 1, with a message that never repeats it. It comes from the environment only; it is never logged, never written to an event or an outbox row and never part of a payload |
+| `VH_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
+| `VH_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
+| `VH_LOG_LEVEL` | `info` | |
+| `VH_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check, and as the base of the links in an alert (§5.4). With `VH_NOTIFY_URL` set, a value that is not an absolute http(s) URL exits 1 |
+| `VH_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
+| `VH_OIDC_CLIENT_ID` | (required with the issuer) | |
+| `VH_OIDC_CLIENT_SECRET` | (required with the issuer) | or `VH_OIDC_CLIENT_SECRET_FILE` |
+| `VH_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as the operator |
+| `VH_SESSION_TTL` | `168h` | absolute session lifetime (§3.2) |
+| `VH_SESSION_IDLE` | `24h` | idle timeout (§3.2) |
 
-Browser login is on when `BOARD_OIDC_ISSUER` is set: the other four OIDC settings and
-`BOARD_PUBLIC_URL` are then required, a partial or malformed set refuses to start (one stderr line,
-exit 1), and `BOARD_OIDC_CLIENT_SECRET_FILE` may replace the secret variable. With the issuer unset
+Browser login is on when `VH_OIDC_ISSUER` is set: the other four OIDC settings and
+`VH_PUBLIC_URL` are then required, a partial or malformed set refuses to start (one stderr line,
+exit 1), and `VH_OIDC_CLIENT_SECRET_FILE` may replace the secret variable. With the issuer unset
 browser login is off and only API keys authenticate (§3.3); there is no unauthenticated mode either way,
 and tests use a mock provider (§3.2, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
 proxy, since the session cookie is `Secure`. Register the redirect URI
-`<BOARD_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
+`<VH_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
 `board backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
 
 **Image version.** The root `Dockerfile` takes two build args, `VERSION` (default `devel`) and `REVISION`
@@ -3431,6 +3432,44 @@ passing them as those two flags.
 
 The operator's own deployment (host, network, image registry, backup schedule) is described
 outside this repository.
+
+### 13.1 Names: `VH_*` variables with `BOARD_*` aliases, and what keeps its name
+
+Every product environment variable has a `VH_` name and an older `BOARD_` alias. All lookups go through one
+table in code (`internal/envvar`); no other code passes a `VH_` or `BOARD_` literal to `os.Getenv` or
+`os.LookupEnv`, and a static test fails when it does. The 24 variables are listed by suffix after `VH_` or
+`BOARD_`: `URL`, `API_KEY`, `ACTOR`, `WAY_BACK`, `PUBLIC_URL`, `LISTEN`, `DB_URL`, `MIGRATE`,
+`SQLITE_CHECKPOINT`, `SWEEP_INTERVAL`, `NOTIFY_URL`, `NOTIFY_ON`, `NOTIFY_HEADER`, `NOTIFY_TIMEOUT`,
+`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_CLIENT_SECRET_FILE`, `OIDC_ALLOWED_EMAILS`,
+`OPERATOR_HANDLE`, `SESSION_TTL`, `SESSION_IDLE`, `STREAM_POLL` and `STREAM_HEARTBEAT`. Every `VH_` name in this
+document stands for the pair. For each variable:
+
+- `VH_<X>` is used when it is set and not empty.
+- Otherwise `BOARD_<X>` is used when it is set and not empty.
+- Otherwise the variable is unset; an empty value counts as unset.
+- When both are set, `VH_` wins silently. Using the old name never prints a warning.
+
+A message that names a variable uses the `VH_` name and says the alias is accepted where the variable is
+missing, for example `VH_URL is unset (BOARD_URL is also accepted)`. The variables new in the Village Hall
+phase (`VH_VERSION`, `VH_INSTALL_DIR`, `VH_REQUIRE_IMMUTABLE`, `VH_REPO` and the test base-URL overrides) exist
+only as `VH_*` names, with no `BOARD_*` alias. The test suite clears every `BOARD_*` and `VH_*` variable from
+the processes it starts, apart from the CI-internal names below, and `ci/run.sh` forwards the `BOARD_*`
+variables it always forwarded.
+
+The wire protocol and the database stay compatible with the names before the rename. Old names stay, and a new
+name appears only where a user sees it:
+
+| kept exactly as before | new user-facing name |
+|---|---|
+| HTTP headers `Board-Actor`, `Board-Actor-Way-Back`, `Board-Actor-Meta`, `Board-On-Behalf-Of` (no `VH-*` aliases) | binary `vh`; image entrypoint `/vh` |
+| every path under `/api/v1`, every event type and SSE event name, every response field | `usage: vh …`, `→ vh …` hints, `vh version` |
+| database schema, table and column names; the default database file `/data/board.db` | protocol header `vh protocol v4` |
+| cookies `board_session`, `board_login`; API key prefix `brd_` | OpenAPI `info.title` "Village Hall API" |
+| notification payload field `board_url` | page title "Village Hall", manifest `name` "Village Hall", `short_name` "Hall" |
+| CI-internal names: `BOARD_CI_*`, `BOARD_GODOG_*`, `BOARD_DB_LEG`, `BOARD_MUTATION_*`, `BOARD_IMAGE_*`, `BOARD_ALLURE_*`, `BOARD_FEATURES_*`; `board-ci:local`, `board:ci`, `board-image*.tar`; Jenkins labels `board`, `board-test`; job paths; credential IDs | Go module `github.com/n-orlov/village-hall`; `cmd/vh` |
+| | `VH_*` for every product variable, with each `BOARD_*` name still accepted |
+| | browser storage `vh.*`, migrated from `board.*` |
+| | release assets `vh_<os>_<arch>.tar.gz`; release image name `village-hall` (a parameter) |
 
 ---
 

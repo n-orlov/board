@@ -1,6 +1,6 @@
 // Package sweep runs the background expiry of board serve: it marks live
 // leases whose time has run out as expired and deletes expired sessions, on a
-// fixed interval (BOARD_SWEEP_INTERVAL, SPEC §5.1 and §13).
+// fixed interval (VH_SWEEP_INTERVAL, SPEC §5.1 and §13).
 package sweep
 
 import (
@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-// DefaultInterval is the sweep interval when BOARD_SWEEP_INTERVAL is unset.
+// DefaultInterval is the sweep interval when VH_SWEEP_INTERVAL is unset.
 const DefaultInterval = 15 * time.Second
 
 // Disabled is the setting that turns the sweeper off. "0" and "0s" do too.
 const Disabled = "off"
 
-// ParseInterval reads BOARD_SWEEP_INTERVAL. An empty value is DefaultInterval,
+// ParseInterval reads VH_SWEEP_INTERVAL. An empty value is DefaultInterval,
 // a Go duration above zero is that interval, and "off" (or a zero duration)
 // returns 0, which means no sweeper. Anything else is an error.
 func ParseInterval(v string) (time.Duration, error) {
@@ -29,7 +29,7 @@ func ParseInterval(v string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
-		return 0, fmt.Errorf("BOARD_SWEEP_INTERVAL=%q: want a duration such as 15s, or %s", v, Disabled)
+		return 0, fmt.Errorf("VH_SWEEP_INTERVAL=%q: want a duration such as 15s, or %s", v, Disabled)
 	}
 	return d, nil
 }

@@ -69,14 +69,14 @@ func TestLoginRefusesAnIncompleteOrMalformedConfiguration(t *testing.T) {
 	cases := map[string]struct {
 		set, drop, want string
 	}{
-		"no client id":      {"", "BOARD_OIDC_CLIENT_ID", "BOARD_OIDC_CLIENT_ID"},
-		"no secret":         {"", "BOARD_OIDC_CLIENT_SECRET", "BOARD_OIDC_CLIENT_SECRET"},
-		"no allowed emails": {"", "BOARD_OIDC_ALLOWED_EMAILS", "BOARD_OIDC_ALLOWED_EMAILS"},
-		"no public url":     {"", "BOARD_PUBLIC_URL", "BOARD_PUBLIC_URL"},
+		"no client id":      {"", "BOARD_OIDC_CLIENT_ID", "VH_OIDC_CLIENT_ID"},
+		"no secret":         {"", "BOARD_OIDC_CLIENT_SECRET", "VH_OIDC_CLIENT_SECRET"},
+		"no allowed emails": {"", "BOARD_OIDC_ALLOWED_EMAILS", "VH_OIDC_ALLOWED_EMAILS"},
+		"no public url":     {"", "BOARD_PUBLIC_URL", "VH_PUBLIC_URL"},
 		"relative url":      {"BOARD_PUBLIC_URL=board.test", "", "absolute"},
-		"only commas":       {"BOARD_OIDC_ALLOWED_EMAILS=, ,", "", "names no email"},
-		"bad ttl":           {"BOARD_SESSION_TTL=soon", "", "BOARD_SESSION_TTL"},
-		"negative idle":     {"BOARD_SESSION_IDLE=-1h", "", "BOARD_SESSION_IDLE"},
+		"only commas":       {"VH_OIDC_ALLOWED_EMAILS=, ,", "", "names no email"},
+		"bad ttl":           {"VH_SESSION_TTL=soon", "", "VH_SESSION_TTL"},
+		"negative idle":     {"BOARD_SESSION_IDLE=-1h", "", "VH_SESSION_IDLE"},
 	}
 	for name, tc := range cases {
 		env := oidcEnv()
@@ -96,7 +96,7 @@ func TestServeRefusesToStartWithAnIncompleteLoginConfiguration(t *testing.T) {
 	defer cancel()
 	var errb bytes.Buffer
 	env := envOf(map[string]string{"BOARD_OIDC_ISSUER": "https://idp.test"})
-	if code := serveUntil(ctx, &errb, env, sqliteURL(t), "127.0.0.1:0", true); code != ExitError || !strings.Contains(errb.String(), "BOARD_OIDC_CLIENT_ID") {
+	if code := serveUntil(ctx, &errb, env, sqliteURL(t), "127.0.0.1:0", true); code != ExitError || !strings.Contains(errb.String(), "VH_OIDC_CLIENT_ID") {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }

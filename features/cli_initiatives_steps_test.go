@@ -39,6 +39,14 @@ func splitQuoted(line string) []string {
 // remembered key. A nil actor leaves BOARD_ACTOR unset; a nil wayBack leaves
 // BOARD_WAY_BACK unset.
 func (h *harness) runClient(ctx context.Context, line string, actor, wayBack *string) error {
+	return h.runClientNamed(ctx, line, actor, wayBack, "BOARD_", "")
+}
+
+// runClientNamed is runClient with the variables spelled under prefix (BOARD_
+// or VH_), so a scenario can run the same command with only one family set.
+// A non-empty task also sets <prefix>TASK, a variable the binary does not
+// read, to show that an unrelated one in the same family changes nothing.
+func (h *harness) runClientNamed(ctx context.Context, line string, actor, wayBack *string, prefix, task string) error {
 	if err := h.requireKey(); err != nil {
 		return err
 	}
@@ -46,14 +54,24 @@ func (h *harness) runClient(ctx context.Context, line string, actor, wayBack *st
 	if len(words) == 0 || words[0] != "board" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
-	extra := []string{"BOARD_URL=http://" + h.addr, "BOARD_API_KEY=" + h.key}
+	extra := []string{prefix + "URL=http://" + h.addr, prefix + "API_KEY=" + h.key}
 	if actor != nil {
-		extra = append(extra, "BOARD_ACTOR="+*actor)
+		extra = append(extra, prefix+"ACTOR="+*actor)
 	}
 	if wayBack != nil {
-		extra = append(extra, "BOARD_WAY_BACK="+*wayBack)
+		extra = append(extra, prefix+"WAY_BACK="+*wayBack)
+	}
+	if task != "" {
+		extra = append(extra, prefix+"TASK="+task)
 	}
 	return h.runArgs(ctx, words[1:], extra...)
+}
+
+// runClientOnlyFamily runs the command with BOARD_URL, BOARD_API_KEY,
+// BOARD_ACTOR, BOARD_WAY_BACK and BOARD_TASK, or with their VH_ equivalents,
+// and with no variable of the other family.
+func (h *harness) runClientOnlyFamily(ctx context.Context, line, actor, wayBack, family, task string) error {
+	return h.runClientNamed(ctx, line, &actor, &wayBack, family, task)
 }
 
 func (h *harness) runClientAsActor(ctx context.Context, line, actor string) error {
@@ -123,6 +141,7 @@ func registerCLIInitiativeSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)"$`, h.runClientAsActor)
 	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)" with way back "([^"]*)"$`, h.runClientWithWayBack)
 	sc.Step(`^I run the client '([^']*)' with no actor$`, h.runClientWithNoActor)
+	sc.Step(`^I run the client '([^']*)' as actor "([^"]*)" with way back "([^"]*)" setting only (BOARD_|VH_) variables including a task "([^"]*)"$`, h.runClientOnlyFamily)
 	sc.Step(`^stdout is:$`, h.stdoutIs)
 	sc.Step(`^stdout is one JSON object whose "([^"]*)" is "([^"]*)"$`, h.stdoutJSONField)
 	sc.Step(`^stdout line (\d+) matches "([^"]*)"$`, h.stdoutLineMatches)

@@ -109,7 +109,7 @@ func TestCheckpointerWithAMalformedIntervalRunsNothing(_ *testing.T) {
 func TestServeRejectsAMalformedCheckpointInterval(t *testing.T) {
 	for _, v := range []string{"soon", "-1m"} {
 		code, errs := runServe(t, envWith(map[string]string{"BOARD_SQLITE_CHECKPOINT": v}))
-		if code != ExitError || !strings.Contains(errs, "BOARD_SQLITE_CHECKPOINT") {
+		if code != ExitError || !strings.Contains(errs, "VH_SQLITE_CHECKPOINT") {
 			t.Errorf("%q: got code=%d err=%q", v, code, errs)
 		}
 	}

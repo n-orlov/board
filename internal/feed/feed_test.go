@@ -124,8 +124,8 @@ func TestParseInterval(t *testing.T) {
 		if (err != nil) != tc.wantErr || got != tc.want {
 			t.Errorf("ParseInterval(%q) = %v, %v; want %v, error %v", tc.in, got, err, tc.want, tc.wantErr)
 		}
-		if err != nil && !strings.Contains(err.Error(), "BOARD_STREAM_POLL") {
-			t.Errorf("error %q does not name BOARD_STREAM_POLL", err)
+		if err != nil && !strings.Contains(err.Error(), "VH_STREAM_POLL") {
+			t.Errorf("error %q does not name VH_STREAM_POLL", err)
 		}
 	}
 }

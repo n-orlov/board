@@ -25,7 +25,7 @@ type Payload struct {
 	BoardURL   string      `json:"board_url,omitempty"`
 }
 
-// TaskInfo names a task; URL is absent when BOARD_PUBLIC_URL is unset.
+// TaskInfo names a task; URL is absent when VH_PUBLIC_URL is unset.
 type TaskInfo struct {
 	Ref   string `json:"ref"`
 	Title string `json:"title"`
@@ -61,7 +61,7 @@ type LeaseInfo struct {
 const textMax = 120
 
 // BuildPayload reads what the event eventID of the given kind is about, in tx,
-// and returns the alert's JSON. publicURL is BOARD_PUBLIC_URL (empty when unset).
+// and returns the alert's JSON. publicURL is VH_PUBLIC_URL (empty when unset).
 func BuildPayload(ctx context.Context, tx *sql.Tx, st *store.Store, eventID, kind, publicURL string) ([]byte, error) {
 	r := reader{ctx: ctx, tx: tx, st: st}
 	p := Payload{Kind: kind}

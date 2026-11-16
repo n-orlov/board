@@ -31,8 +31,8 @@ fi
 go build -o "$work/board" ./cmd/board
 go build -o "$work/fake-oidc" ./cmd/fake-oidc
 
-# Only the variables this store needs: nothing from the caller's BOARD_* leaks in.
-for v in $(env | sed -n 's/^\(BOARD_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+# Only the variables this store needs: nothing from the caller's BOARD_* or VH_* leaks in.
+for v in $(env | sed -n -e 's/^\(BOARD_[A-Za-z0-9_]*\)=.*/\1/p' -e 's/^\(VH_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 export BOARD_DB_URL="sqlite://$work/board.db"
 
 "$work/board" admin migrate >&2

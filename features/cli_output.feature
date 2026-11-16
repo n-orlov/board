@@ -27,7 +27,7 @@ Feature: The command-line output rules and exit codes
     When I run the client 'board init ls' as actor "claude@laptop" against the address "http://127.0.0.1:1"
     Then the exit code is 1
     And stdout is empty
-    And stderr is one line ending with "→ check BOARD_URL and that board serve is running"
+    And stderr is one line ending with "→ check VH_URL and that board serve is running"
 
   Scenario: exit 2, a bad flag is a usage error with one usage line
     When I run the client 'board init ls --frobnicate' as actor "claude@laptop"
@@ -44,12 +44,12 @@ Feature: The command-line output rules and exit codes
   Scenario: exit 5, a missing or revoked key is one error line with the next action
     When I run the client 'board init ls' as actor "claude@laptop" with no BOARD_API_KEY
     Then the exit code is 5
-    And stderr is exactly "no BOARD_API_KEY → export BOARD_API_KEY (this environment's key)"
+    And stderr is exactly "VH_API_KEY is unset (BOARD_API_KEY is also accepted) → export VH_API_KEY (this environment's key)"
     When I run "board admin keys revoke workstation"
     And I run the client 'board init ls' as actor "claude@laptop"
     Then the exit code is 5
     And stdout is empty
-    And stderr is one line ending with "→ check BOARD_API_KEY (board admin keys list shows which keys are active)"
+    And stderr is one line ending with "→ check VH_API_KEY (board admin keys list shows which keys are active)"
     And neither stdout nor stderr contains the remembered key
 
   Scenario: a list of exactly 20 items shows all of them and no more line

@@ -130,14 +130,41 @@ type harness struct {
 	own       *postgresServer
 }
 
-func (h *harness) env(extra ...string) []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "BOARD_") {
-			env = append(env, kv)
+// ciInternalPrefixes are the BOARD_ names that belong to CI, not to the
+// product: the suite and its scripts read them, and the binary under test
+// ignores them. Every other BOARD_ name and every VH_ name is a product
+// variable (or a lookalike) and never reaches a process the suite starts.
+var ciInternalPrefixes = []string{
+	"BOARD_CI_", "BOARD_GODOG_", "BOARD_DB_LEG", "BOARD_MUTATION_",
+	"BOARD_IMAGE_", "BOARD_ALLURE_", "BOARD_FEATURES_",
+}
+
+// scrubProductEnv drops the BOARD_* and VH_* entries of environ, except the
+// CI-internal names.
+func scrubProductEnv(environ []string) []string {
+	var kept []string
+	for _, kv := range environ {
+		if (strings.HasPrefix(kv, "BOARD_") || strings.HasPrefix(kv, "VH_")) && !ciInternal(kv) {
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	return kept
+}
+
+func ciInternal(kv string) bool {
+	for _, p := range ciInternalPrefixes {
+		if strings.HasPrefix(kv, p) {
+			return true
 		}
 	}
-	return append(env, extra...)
+	return false
+}
+
+// env is the environment of a process the suite starts: the test process's,
+// scrubbed of product variables, plus extra.
+func (h *harness) env(extra ...string) []string {
+	return append(scrubProductEnv(os.Environ()), extra...)
 }
 
 func (h *harness) run(ctx context.Context, line string) error {

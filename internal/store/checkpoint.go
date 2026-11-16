@@ -8,10 +8,10 @@ import (
 )
 
 // DefaultCheckpointInterval is how often `board serve` checkpoints a SQLite
-// write-ahead log when BOARD_SQLITE_CHECKPOINT is unset.
+// write-ahead log when VH_SQLITE_CHECKPOINT is unset.
 const DefaultCheckpointInterval = 10 * time.Minute
 
-// ParseCheckpointInterval reads a BOARD_SQLITE_CHECKPOINT value: empty is
+// ParseCheckpointInterval reads a VH_SQLITE_CHECKPOINT value: empty is
 // DefaultCheckpointInterval, `0` (`0s`, `off`) is zero, which turns the timer
 // off, and anything else must be a Go duration, not negative.
 func ParseCheckpointInterval(v string) (time.Duration, error) {
@@ -24,7 +24,7 @@ func ParseCheckpointInterval(v string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
-		return 0, fmt.Errorf("BOARD_SQLITE_CHECKPOINT=%q: want a duration such as 10m, or 0 to turn it off", v)
+		return 0, fmt.Errorf("VH_SQLITE_CHECKPOINT=%q: want a duration such as 10m, or 0 to turn it off", v)
 	}
 	return d, nil
 }

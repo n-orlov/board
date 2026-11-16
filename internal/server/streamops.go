@@ -16,7 +16,7 @@ import (
 )
 
 // DefaultHeartbeat is the interval between `: ping` comments when
-// BOARD_STREAM_HEARTBEAT is unset.
+// VH_STREAM_HEARTBEAT is unset.
 const DefaultHeartbeat = 25 * time.Second
 
 // streamWriteWindow is how long one write of the stream may take: the write
@@ -30,7 +30,7 @@ const (
 	resetTooMany   = "too_many"
 )
 
-// ParseHeartbeat reads BOARD_STREAM_HEARTBEAT. An empty value is
+// ParseHeartbeat reads VH_STREAM_HEARTBEAT. An empty value is
 // DefaultHeartbeat and a Go duration above zero is that interval. Anything
 // else is an error: a heartbeat of zero would spin.
 func ParseHeartbeat(v string) (time.Duration, error) {
@@ -40,7 +40,7 @@ func ParseHeartbeat(v string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("BOARD_STREAM_HEARTBEAT=%q: want a duration above zero such as 25s", v)
+		return 0, fmt.Errorf("VH_STREAM_HEARTBEAT=%q: want a duration above zero such as 25s", v)
 	}
 	return d, nil
 }
