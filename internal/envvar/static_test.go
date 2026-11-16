@@ -92,10 +92,38 @@ func TestNoProductCodePassesAVHOrBoardLiteralToTheOSEnvironment(t *testing.T) {
 	}
 }
 
+// plantedTree copies testdata/planted into a temporary directory, dropping the
+// .fixture suffix, so the planted files are .go files only while a test runs
+// (as .go files in the tree they would be unmeasured product code).
+func plantedTree(t *testing.T) string {
+	t.Helper()
+	dst := t.TempDir()
+	src := filepath.Join("testdata", "planted")
+	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, strings.TrimSuffix(rel, ".fixture"))
+		if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
+			return err
+		}
+		return os.WriteFile(out, raw, 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
 // TestTheStaticTestFailsOnAPlantedFixture proves the scan is not vacuous: the
 // fixture plants one read of each shape, plus calls that are allowed.
 func TestTheStaticTestFailsOnAPlantedFixture(t *testing.T) {
-	found, err := literalEnvReads(filepath.Join("testdata", "planted"), "")
+	found, err := literalEnvReads(plantedTree(t), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +140,7 @@ func TestTheStaticTestFailsOnAPlantedFixture(t *testing.T) {
 }
 
 func TestTheStaticScanSkipsTheNamedTableFile(t *testing.T) {
-	found, err := literalEnvReads(filepath.Join("testdata", "planted"), "bad.go")
+	found, err := literalEnvReads(plantedTree(t), "bad.go")
 	if err != nil {
 		t.Fatal(err)
 	}
