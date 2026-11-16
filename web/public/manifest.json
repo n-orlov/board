@@ -1,7 +1,7 @@
 {
-  "name": "board",
-  "short_name": "board",
-  "description": "Initiatives and API keys for board",
+  "name": "Village Hall",
+  "short_name": "Hall",
+  "description": "Initiatives and API keys for Village Hall",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

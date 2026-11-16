@@ -191,8 +191,8 @@ describe('dropping a restored initiative the board no longer has', () => {
   it('drops the unknown initiative of a saved query restored by the shared helper, and unknown enum values with it', () => {
     const storage = memory();
     saveViewQuery(storage, TASKS_VIEW, 'status=bogus&kind=nope&initiative=gone&sort=title&dir=asc');
-    expect(viewKey(TASKS_VIEW)).toBe('board.view.v1.tasks');
-    expect(storage.data.has('board.view.v1.tasks')).toBe(true);
+    expect(viewKey(TASKS_VIEW)).toBe('vh.view.v1.tasks');
+    expect(storage.data.has('vh.view.v1.tasks')).toBe(true);
     const hashes: string[] = [];
     const query = openView({ storage, replaceHash: (h) => hashes.push(h) }, TASKS_VIEW, '#/tasks', '');
     const restored = dropUnknownInitiative(viewFromQuery(query), ['board']);

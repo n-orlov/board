@@ -7,7 +7,7 @@
 
 <main class="flex min-h-dvh items-center justify-center p-4">
   <div class="w-full max-w-sm rounded-lg border border-border bg-surface-raised p-6 text-center shadow-sm">
-    <h1 class="mb-4 text-lg font-bold">board</h1>
+    <h1 class="mb-4 text-lg font-bold">Village Hall</h1>
     <h2 class="sr-only">{title}</h2>
     {@render children()}
   </div>

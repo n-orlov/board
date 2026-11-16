@@ -164,7 +164,7 @@ export function affectsNotes(event: { type: string }): boolean {
   return event.type.startsWith('note_');
 }
 
-/** The name of the view's saved state (PRD R16): the key is `board.view.v1.notes`. */
+/** The name of the view's saved state (PRD R16): the key is `vh.view.v1.notes`. */
 export const NOTES_VIEW = 'notes';
 
 /** The filter the view opens with, and whether it came from the saved query (a bare route) rather than a link's own query. */

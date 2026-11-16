@@ -11,7 +11,7 @@
 // - A storage or history that throws means "nothing to restore": navigation never breaks on it.
 
 /** Every sessionStorage key this module owns starts with this. */
-export const ENTRY_KEY_FAMILY = 'board.entry.';
+export const ENTRY_KEY_FAMILY = 'vh.entry.';
 /** At most this many entries are remembered; older ones are dropped first. */
 export const ENTRY_LIMIT = 200;
 /**

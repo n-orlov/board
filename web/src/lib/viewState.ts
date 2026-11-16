@@ -1,12 +1,12 @@
 // Saved view state (PRD R16): each view keeps its whole fragment query (filters and sort) in localStorage under one
-// versioned key, `board.view.v1.<view>`, so leaving a view and coming back restores it.
+// versioned key, `vh.view.v1.<view>`, so leaving a view and coming back restores it.
 //
 // - A route opened WITH a query uses it and saves it (a shared link wins).
 // - A bare route restores the saved query by rewriting the fragment in place (`history.replaceState`, no history
 //   entry, no hashchange) before the view's first fetch, so only one request is made.
 // - A bare fragment on an entry revisited by Back, Forward or reload is that entry's own state: the defaults. It
 //   never imports what a later visit saved (historyEntry.ts `entryRevisited`).
-// - Clear filters removes the key; signing out removes every `board.view.*` key.
+// - Clear filters removes the key; signing out removes every `vh.view.*` and `board.view.*` key.
 // - A missing, malformed, foreign-version or unreadable value, and a storage that throws, mean "defaults": the view
 //   never breaks on its storage.
 
@@ -15,7 +15,9 @@ import { entryRevisited } from './historyEntry';
 /** The version of the stored value; a stored value of another version is ignored. */
 export const VIEW_STATE_VERSION = 1;
 /** Every key this module owns starts with this; sign out removes them all. */
-export const VIEW_KEY_FAMILY = 'board.view.';
+export const VIEW_KEY_FAMILY = 'vh.view.';
+/** The family before the rename (R3): storageMigration.ts moves it to `vh.view.`, sign out removes it too. */
+export const LEGACY_VIEW_KEY_FAMILY = 'board.view.';
 /** The key of the current version, followed by the view's name. */
 export const VIEW_KEY_PREFIX = `${VIEW_KEY_FAMILY}v${VIEW_STATE_VERSION}.`;
 
@@ -87,14 +89,14 @@ export function clearViewQuery(storage: ViewStorage | undefined, view: string): 
   saveViewQuery(storage, view, '');
 }
 
-/** Sign out: removes every `board.view.*` key (every version) and leaves other keys alone. */
+/** Sign out: removes every `vh.view.*` and legacy `board.view.*` key (every version) and leaves other keys alone. */
 export function clearAllViews(storage: ViewStorage | undefined): void {
   try {
     if (!storage) return;
     const keys: string[] = [];
     for (let i = 0; i < storage.length; i++) {
       const key = storage.key(i);
-      if (key !== null && key.startsWith(VIEW_KEY_FAMILY)) keys.push(key);
+      if (key !== null && (key.startsWith(VIEW_KEY_FAMILY) || key.startsWith(LEGACY_VIEW_KEY_FAMILY))) keys.push(key);
     }
     for (const key of keys) storage.removeItem(key);
   } catch {

@@ -217,7 +217,7 @@ export class AttentionStore {
   }
 }
 
-/** The name of the view's saved state (PRD R16): the key is `board.view.v1.attention`. */
+/** The name of the view's saved state (PRD R16): the key is `vh.view.v1.attention`. */
 export const ATTENTION_VIEW = 'attention';
 
 /** What opening the view found: the filter to start with, and whether it came from the saved query (a bare route). */

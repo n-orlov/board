@@ -1,13 +1,13 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Notes view's saved filters (PRD R16, SPEC 11): the six filters are saved under `board.view.v1.notes` when they
+// The Notes view's saved filters (PRD R16, SPEC 11): the six filters are saved under `vh.view.v1.notes` when they
 // are applied, a bare `#/notes` restores them before the first fetch (one notes read), a fragment with its own query
 // wins, and Clear filters forgets them.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.notes';
+const KEY = 'vh.view.v1.notes';
 const FIVE_SECONDS = { timeout: 5000 };
 
 async function post(api: APIRequestContext, path: string, data: object, status: number) {
@@ -212,7 +212,7 @@ for (const vp of viewports) {
       await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
       await expect(fresh).toHaveURL(/#\/timeline\?actor=playwright$/);
       await expect(fresh.getByTestId('timeline-view')).toBeVisible();
-      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('board.view.v1.timeline'))) as string).query).toBe('actor=playwright');
+      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('vh.view.v1.timeline'))) as string).query).toBe('actor=playwright');
       // The departed Notes never read: not under the restored filter, not under what its check kept.
       expect(reads.queries).toEqual([]);
       await fresh.close();

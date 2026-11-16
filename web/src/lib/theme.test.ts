@@ -175,7 +175,7 @@ describe('the pre-paint script in index.html', () => {
   const head = html.slice(0, html.indexOf('</head>'));
   const script = /<script>([\s\S]*?)<\/script>/.exec(head)?.[1] ?? '';
 
-  function run(stored: string | null, systemDark: boolean, blocked = false) {
+  function run(stored: string | null, systemDark: boolean, blocked = false, legacy: string | null = null) {
     const attrs: Record<string, string> = {};
     const meta: Record<string, string> = {};
     const selectors: string[] = [];
@@ -189,6 +189,7 @@ describe('the pre-paint script in index.html', () => {
     const storage = {
       getItem: (k: string) => {
         if (blocked) throw new Error('blocked');
+        if (k === 'board.theme') return legacy;
         return k === THEME_STORAGE_KEY ? stored : null;
       },
     };
@@ -211,6 +212,13 @@ describe('the pre-paint script in index.html', () => {
       expect(r.selectors).toEqual(['meta[name="theme-color"]']);
     });
   }
+
+  it('paints the earlier board.theme until the app migrates it, and lets vh.theme win (R3)', () => {
+    expect(THEME_STORAGE_KEY).toBe('vh.theme');
+    expect(run(null, false, false, 'dark').attrs['data-theme']).toBe('dark');
+    expect(run(null, true, false, 'light').attrs['data-theme']).toBe('light');
+    expect(run('light', true, false, 'dark').attrs['data-theme']).toBe('light');
+  });
 
   it('treats nothing stored, an unknown value and blocked storage as System', () => {
     for (const stored of [null, 'neon', '']) {

@@ -1,13 +1,13 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The Attention view's saved filters (PRD R16, SPEC 11): the tag and initiative filters are saved under
-// `board.view.v1.attention`, a bare `#/attention` restores them before the first fetch (one `GET /attention`), a fragment
+// `vh.view.v1.attention`, a bare `#/attention` restores them before the first fetch (one `GET /attention`), a fragment
 // with its own query wins, Clear filters forgets them, and a restored initiative or tag the board does not have is dropped.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.attention';
+const KEY = 'vh.view.v1.attention';
 const FIVE_SECONDS = { timeout: 5000 };
 
 async function post(api: APIRequestContext, path: string, data: object, status: number) {

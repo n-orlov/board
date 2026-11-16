@@ -331,9 +331,9 @@ function env(storage: ViewStorage | undefined): ViewEnv & { hashes: string[] } {
 }
 
 describe('saved Attention filters', () => {
-  const KEY = 'board.view.v1.attention';
+  const KEY = 'vh.view.v1.attention';
 
-  it('is saved under board.view.v1.attention', () => {
+  it('is saved under vh.view.v1.attention', () => {
     expect(viewKey(ATTENTION_VIEW)).toBe(KEY);
   });
 
@@ -430,7 +430,7 @@ describe('startFilter', () => {
   });
 
   it('restores from storage and drops through the same module, the empty answer included', () => {
-    const e = env(memory({ ['board.view.v1.attention']: JSON.stringify({ v: 1, query: 'tag=gone&initiative=ghost' }) }));
+    const e = env(memory({ ['vh.view.v1.attention']: JSON.stringify({ v: 1, query: 'tag=gone&initiative=ghost' }) }));
     const opened = openAttention(e, '#/attention');
     expect(opened.restored).toBe(true);
     expect(startFilter(opened, [])).toEqual(DEFAULT_ATTENTION_FILTER);

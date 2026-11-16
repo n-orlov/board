@@ -4,7 +4,7 @@
 import type { Key } from './keys';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
-/** The name of the view's saved state: the key is `board.view.v1.keys`. */
+/** The name of the view's saved state: the key is `vh.view.v1.keys`. */
 export const KEYS_VIEW = 'keys';
 
 /** The route of the view, without a query. */

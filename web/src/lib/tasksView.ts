@@ -6,7 +6,7 @@ import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tabl
 import { flagsText, type TaskRow } from './initiativePage';
 import { filterFromQuery, filterToQuery, type TasksFilter } from './taskFilters';
 
-/** The name of the view's saved state: the key is `board.view.v1.tasks`. */
+/** The name of the view's saved state: the key is `vh.view.v1.tasks`. */
 export const TASKS_VIEW = 'tasks';
 
 /** The sortable columns of the table, by the name the `sort` query uses. Flags sorts by its badge labels (active, blocked, overdue), no flag last. */

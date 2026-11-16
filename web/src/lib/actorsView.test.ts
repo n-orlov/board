@@ -312,7 +312,7 @@ describe('saved state', () => {
   it('opens a bare route with the saved query, in place', () => {
     const storage = memory();
     saveViewQuery(storage, ACTORS_VIEW, 'sort=seen&dir=desc');
-    expect(viewKey(ACTORS_VIEW)).toBe('board.view.v1.actors');
+    expect(viewKey(ACTORS_VIEW)).toBe('vh.view.v1.actors');
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, ACTORS_VIEW, '#/actors', '');
     expect(replaced).toEqual(['#/actors?sort=seen&dir=desc']);
@@ -324,6 +324,6 @@ describe('saved state', () => {
     saveViewQuery(storage, ACTORS_VIEW, 'sort=actor&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', 'sort=leases&dir=desc');
     expect(sortOfQuery(query)).toEqual({ column: 'leases', dir: 'desc' });
-    expect(JSON.parse(storage.data.get('board.view.v1.actors')!)).toEqual({ v: 1, query: 'sort=leases&dir=desc' });
+    expect(JSON.parse(storage.data.get('vh.view.v1.actors')!)).toEqual({ v: 1, query: 'sort=leases&dir=desc' });
   });
 });

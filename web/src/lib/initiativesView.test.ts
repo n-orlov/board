@@ -102,8 +102,8 @@ describe('saved state', () => {
   it('opens a bare route with the saved query, in place', () => {
     const storage = memory();
     saveViewQuery(storage, INITIATIVES_VIEW, 'status=all&sort=title&dir=desc');
-    expect(storage.data.has('board.view.v1.initiatives')).toBe(true);
-    expect(viewKey(INITIATIVES_VIEW)).toBe('board.view.v1.initiatives');
+    expect(storage.data.has('vh.view.v1.initiatives')).toBe(true);
+    expect(viewKey(INITIATIVES_VIEW)).toBe('vh.view.v1.initiatives');
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, INITIATIVES_VIEW, '#/initiatives', '');
     expect(replaced).toEqual(['#/initiatives?status=all&sort=title&dir=desc']);
@@ -115,7 +115,7 @@ describe('saved state', () => {
     saveViewQuery(storage, INITIATIVES_VIEW, 'sort=title&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, INITIATIVES_VIEW, '#/initiatives', 'status=closed');
     expect(viewFromQuery(query)).toEqual({ filter: 'closed', sort: null });
-    expect(JSON.parse(storage.data.get('board.view.v1.initiatives')!)).toEqual({ v: 1, query: 'status=closed' });
+    expect(JSON.parse(storage.data.get('vh.view.v1.initiatives')!)).toEqual({ v: 1, query: 'status=closed' });
   });
 
   it('sorts Tags as text with the untagged initiatives last in both directions', () => {

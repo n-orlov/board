@@ -112,7 +112,7 @@ describe('saved state', () => {
   it('opens a bare route with the saved query, in place', () => {
     const storage = memory();
     saveViewQuery(storage, KEYS_VIEW, 'sort=created&dir=desc');
-    expect(viewKey(KEYS_VIEW)).toBe('board.view.v1.keys');
+    expect(viewKey(KEYS_VIEW)).toBe('vh.view.v1.keys');
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, KEYS_VIEW, '#/settings/keys', '');
     expect(replaced).toEqual(['#/settings/keys?sort=created&dir=desc']);
@@ -124,6 +124,6 @@ describe('saved state', () => {
     saveViewQuery(storage, KEYS_VIEW, 'sort=name&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, KEYS_VIEW, '#/settings/keys', 'sort=status&dir=desc');
     expect(sortOfQuery(query)).toEqual({ column: 'status', dir: 'desc' });
-    expect(JSON.parse(storage.data.get('board.view.v1.keys')!)).toEqual({ v: 1, query: 'sort=status&dir=desc' });
+    expect(JSON.parse(storage.data.get('vh.view.v1.keys')!)).toEqual({ v: 1, query: 'sort=status&dir=desc' });
   });
 });

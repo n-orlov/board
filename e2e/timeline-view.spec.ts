@@ -1,13 +1,13 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Timeline view's saved filters (PRD R16, SPEC 11): the filters are saved under `board.view.v1.timeline`, a bare
+// The Timeline view's saved filters (PRD R16, SPEC 11): the filters are saved under `vh.view.v1.timeline`, a bare
 // `#/timeline` restores them before the first fetch (one `GET /timeline`), a fragment with its own query wins, Clear
 // filters forgets them, and a restored initiative or tag the board does not have is dropped before the first fetch.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.timeline';
+const KEY = 'vh.view.v1.timeline';
 const FIVE_SECONDS = { timeout: 5000 };
 
 async function post(api: APIRequestContext, path: string, data: object, status: number) {

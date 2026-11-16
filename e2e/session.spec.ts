@@ -80,7 +80,7 @@ test('the signing-in card shows the product name and a spinner while the session
   });
   await page.goto('/');
   await expect(page.getByTestId('spinner')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1, name: 'board' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Village Hall' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
 });
 

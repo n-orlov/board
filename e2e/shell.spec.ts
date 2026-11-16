@@ -150,7 +150,7 @@ for (const vp of viewports) {
       const foot = page.getByTestId('sidebar-foot');
       if (vp.name === 'phone') {
         await expect(topbar).toBeVisible();
-        await expect(topbar).toContainText('board');
+        await expect(topbar).toContainText('Village Hall');
         await expect(page.getByTestId('topbar-title')).toHaveText('Attention');
         await expect(foot).toBeHidden();
       } else {

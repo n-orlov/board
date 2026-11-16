@@ -5,7 +5,7 @@
 import { windowFromQuery, windowToQuery, type ArchiveRow, type ArchiveWindow } from './archive';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
-/** The name of the view's saved state: the key is `board.view.v1.archive`. */
+/** The name of the view's saved state: the key is `vh.view.v1.archive`. */
 export const ARCHIVE_VIEW = 'archive';
 
 /**

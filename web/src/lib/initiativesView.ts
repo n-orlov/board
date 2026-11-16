@@ -7,7 +7,7 @@ import { totalTasks } from './counts';
 import type { InitiativeListItem } from './initiatives';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
-/** The name of the view's saved state: the key is `board.view.v1.initiatives`. */
+/** The name of the view's saved state: the key is `vh.view.v1.initiatives`. */
 export const INITIATIVES_VIEW = 'initiatives';
 
 /** The sortable columns of the table, by the name the `sort` query uses. Tags sorts by the tags as one text (they are kept sorted), none last; Tasks by the number of tasks in all. */

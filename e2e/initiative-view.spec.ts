@@ -3,14 +3,14 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 // The initiative page's Tasks table sort and saved view state (PRD R16, SPEC 11): the table sorts by Ref (ref), Title (text),
 // Kind (kind), Status (status), Flags (text) and Lease holder (text) through the shared header (desktop, with the keyboard) and the Sort
 // select (phone); the sort rides in the fragment query next to the task filter; the whole query is saved under the ONE key
-// every initiative shares, `board.view.v1.initiative`, so a sort set on one initiative is restored on nav back and on a second
+// every initiative shares, `vh.view.v1.initiative`, so a sort set on one initiative is restored on nav back and on a second
 // initiative; a fragment with its own query wins; Clear filters forgets it all. The table has no time column. Each test seeds
 // initiatives of its own and reads only their rows.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.initiative';
+const KEY = 'vh.view.v1.initiative';
 
 async function post<T = { ref: string }>(api: APIRequestContext, path: string, data: object, status: number): Promise<T> {
   const response = await api.post(path, { data });

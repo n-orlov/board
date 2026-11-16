@@ -1,13 +1,13 @@
 // The initiative page's own view state (PRD R16, SPEC 11): the Tasks table's status filter plus its sort, in one fragment
 // query (`#/i/<slug>?status=done&sort=ref&dir=desc`), which the shared view-state helper (lib/viewState.ts) saves and
-// restores. Every initiative shares ONE saved key, `board.view.v1.initiative`, so a sort chosen on one initiative is the
+// restores. Every initiative shares ONE saved key, `vh.view.v1.initiative`, so a sort chosen on one initiative is the
 // sort another one opens with. The filter is lib/initiativeFilters.ts, the sort is lib/tableSort.ts; this module joins the
 // two. Sorting is by the view: the page holds all of its tasks, and the Needs attention section above never sorts.
 import { DEFAULT_TASK_FILTER, TASK_FILTERS, type TaskFilter } from './initiativeFilters';
 import { flagsText, type TaskRow } from './initiativePage';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 
-/** The name of the view's saved state: the key is `board.view.v1.initiative`, shared by every initiative. */
+/** The name of the view's saved state: the key is `vh.view.v1.initiative`, shared by every initiative. */
 export const INITIATIVE_VIEW = 'initiative';
 
 /** The sortable columns of the Tasks table, by the name the `sort` query uses. Flags sorts by its badge labels, no flag last. */

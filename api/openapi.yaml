@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Board API
+  title: Village Hall API
   version: 0.1.0
   summary: The board server's HTTP API.
   description: >-

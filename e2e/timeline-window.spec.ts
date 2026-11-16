@@ -2,14 +2,14 @@ import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArg
 
 // The Timeline's window lives in the URL fragment (SPEC 11, R3): a settled pan or zoom rewrites `from` and `to` in place
 // (replaceState, so history.length does not grow), a reload opens on the same span, a fragment that names a window opens
-// on it, and the window is never saved: board.view.v1.timeline holds the filters alone.
+// on it, and the window is never saved: vh.view.v1.timeline holds the filters alone.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
 const FIVE_SECONDS = { timeout: 5000 };
 const DAY = 86_400_000;
-const KEY = 'board.view.v1.timeline';
+const KEY = 'vh.view.v1.timeline';
 
 async function post<T = Record<string, never>>(api: APIRequestContext, path: string, data: object, status: number): Promise<T> {
   const response = await api.post(path, { data });

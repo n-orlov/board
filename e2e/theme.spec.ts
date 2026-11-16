@@ -62,7 +62,7 @@ test('System follows a change of the system preference without a reload', async 
 });
 
 test('an unknown stored value falls back to System before first paint', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('board.theme', 'neon'));
+  await page.addInitScript(() => localStorage.setItem('vh.theme', 'neon'));
   await page.goto('/');
   await expect(html(page)).toHaveAttribute('data-theme', 'dark');
 });

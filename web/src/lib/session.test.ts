@@ -222,29 +222,47 @@ describe('SessionController', () => {
     expect(setHash).toHaveBeenCalledWith('#/signed-out');
   });
 
-  it('clears every board.view.* key on Sign out and leaves the other keys (R16)', async () => {
+  it('clears every vh.view.* key on Sign out and leaves the other keys (R16)', async () => {
     const storage = memoryStorage({
-      'board.view.v1.tasks': '{"v":1,"query":"status=done"}',
-      'board.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
-      'board.view.v2.tasks': 'a later version',
-      'board.theme': 'dark',
+      'vh.view.v1.tasks': '{"v":1,"query":"status=done"}',
+      'vh.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
+      'vh.view.v2.tasks': 'a later version',
+      'vh.theme': 'dark',
     });
     const { c, fetchFn, b } = controller(async () => Response.json(session));
     b.storage = storage;
     await c.start();
     fetchFn.mockImplementation(async () => new Response(null, { status: 204 }));
     expect(await c.signOut()).toBe('signed-out');
-    expect(Object.keys(storage.data)).toEqual(['board.theme']);
+    expect(Object.keys(storage.data)).toEqual(['vh.theme']);
+  });
+
+  it('clears both the board.view.* and the vh.view.* families on Sign out (R3)', async () => {
+    const storage = memoryStorage({
+      'board.view.v1.tasks': '{"v":1,"query":"status=done"}',
+      'board.view.v2.tasks': 'a later version',
+      'vh.view.v1.tasks': '{"v":1,"query":"status=done"}',
+      'vh.view.v1.initiative': '{"v":1,"query":"sort=ref"}',
+      'vh.view.v2.tasks': 'a later version',
+      'vh.theme': 'dark',
+    });
+    const { c, fetchFn, b } = controller(async () => Response.json(session));
+    b.storage = storage;
+    await c.start();
+    fetchFn.mockImplementation(async () => new Response(null, { status: 204 }));
+    expect(await c.signOut()).toBe('signed-out');
+    expect(Object.keys(storage.data)).toEqual(['vh.theme']);
+    expect(Object.keys(storage.data).filter((k) => k.startsWith('board.') || k.startsWith('vh.view.'))).toEqual([]);
   });
 
   it('keeps the saved view state when the logout fails', async () => {
-    const storage = memoryStorage({ 'board.view.v1.tasks': '{"v":1,"query":"status=done"}' });
+    const storage = memoryStorage({ 'vh.view.v1.tasks': '{"v":1,"query":"status=done"}' });
     const { c, fetchFn, b } = controller(async () => Response.json(session));
     b.storage = storage;
     await c.start();
     fetchFn.mockImplementation(async () => new Response('{}', { status: 403 }));
     expect(await c.signOut()).toBe('failed');
-    expect(Object.keys(storage.data)).toEqual(['board.view.v1.tasks']);
+    expect(Object.keys(storage.data)).toEqual(['vh.view.v1.tasks']);
   });
 
   it('stays signed in when the logout fails', async () => {

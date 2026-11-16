@@ -13,7 +13,7 @@
   // The Actors view (PRD R7, SPEC 11): who is on the board. Actors with a live lease come first, each lease linking to
   // its task, then the rest by last seen; every actor with a way back has a button that copies it. The table sorts by Actor,
   // Live leases and Last seen (headers from 768 px, the Sort select on the phone), and the sort rides in the fragment query and
-  // is saved under board.view.v1.actors. The data layer is lib/actorsView.ts.
+  // is saved under vh.view.v1.actors. The data layer is lib/actorsView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const store = new ActorsStore(new ActorsApi(currentBrowser(), () => csrf), (s) => (view = s));

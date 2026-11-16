@@ -1887,7 +1887,7 @@ describe('the window in the fragment', () => {
   });
 
   it('opens on the window a fragment names, with the filter it names and none saved over it', () => {
-    const KEY = 'board.view.v1.timeline';
+    const KEY = 'vh.view.v1.timeline';
     const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=old' }) });
     const e = viewEnv(storage);
     expect(openTimeline(e, `#/timeline?from=${from}&to=${to}`)).toEqual({ filter: DEFAULT_TIMELINE_FILTER, restored: false, window: w });
@@ -1898,7 +1898,7 @@ describe('the window in the fragment', () => {
   });
 
   it('never saves the window or the task: the saved query is the filter alone', () => {
-    const KEY = 'board.view.v1.timeline';
+    const KEY = 'vh.view.v1.timeline';
     const storage = memory();
     openTimeline(viewEnv(storage), `#/timeline?actor=bob&from=${from}&to=${to}&task=T-1`);
     expect(JSON.parse(storage.data.get(KEY)!)).toEqual({ v: 1, query: 'actor=bob' });
@@ -1913,10 +1913,10 @@ describe('the window in the fragment', () => {
 });
 
 describe('saved Timeline filters', () => {
-  const KEY = 'board.view.v1.timeline';
+  const KEY = 'vh.view.v1.timeline';
   const SAVED = 'initiative=ghost&tag=gone&tag=work&actor=bob&closed=30';
 
-  it('is saved under board.view.v1.timeline', () => {
+  it('is saved under vh.view.v1.timeline', () => {
     expect(viewKey(TIMELINE_VIEW)).toBe(KEY);
   });
 

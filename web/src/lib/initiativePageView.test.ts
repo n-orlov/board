@@ -171,7 +171,7 @@ describe('every column is sortable and survives a reload', () => {
 
 describe('saved state', () => {
   it('shares one key between every initiative', () => {
-    expect(viewKey(INITIATIVE_VIEW)).toBe('board.view.v1.initiative');
+    expect(viewKey(INITIATIVE_VIEW)).toBe('vh.view.v1.initiative');
   });
 
   it('opens a bare page with the query saved on another initiative, in place', () => {
@@ -188,6 +188,6 @@ describe('saved state', () => {
     saveViewQuery(storage, INITIATIVE_VIEW, 'sort=ref&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, INITIATIVE_VIEW, pagePath('a'), 'status=done');
     expect(viewFromQuery(query)).toEqual({ filter: 'done', sort: null });
-    expect(JSON.parse(storage.data.get('board.view.v1.initiative')!)).toEqual({ v: 1, query: 'status=done' });
+    expect(JSON.parse(storage.data.get('vh.view.v1.initiative')!)).toEqual({ v: 1, query: 'status=done' });
   });
 });

@@ -3,14 +3,14 @@ import { backdateInitiative, backdateTask } from './store';
 
 // The Archive table sort and saved view state (PRD R16, SPEC 11): the table sorts by Item (text), Kind (kind), Resolution
 // (status) and Closed (time) through the shared header (desktop, with the keyboard) and the Sort select (phone). The window and
-// the sort ride in one fragment query and are saved under `board.view.v1.archive`, so they survive nav away and back. The
+// the sort ride in one fragment query and are saved under `vh.view.v1.archive`, so they survive nav away and back. The
 // table has no ref column of its own (the ref sits under the title). The server is shared with every other spec, so each test
 // reads only the four rows it seeded, by ref.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.archive';
+const KEY = 'vh.view.v1.archive';
 const COLUMNS = ['item', 'kind', 'resolution', 'closed'];
 
 async function post<T = Record<string, never>>(api: APIRequestContext, path: string, data: object, status = 201): Promise<T> {

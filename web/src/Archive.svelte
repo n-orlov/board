@@ -29,7 +29,7 @@
   // The Archive view (PRD R7, SPEC 11): the closed tasks and closed initiatives of a window, newest closed first, each
   // with a Reopen button that confirms in the shared Dialog. The window and the table's sort (Item, Kind, Resolution,
   // Closed: headers from 768 px, the Sort select on the phone) live in the fragment query and are saved under
-  // board.view.v1.archive. The data layer is lib/archive.ts, the view state lib/archiveView.ts.
+  // vh.view.v1.archive. The data layer is lib/archive.ts, the view state lib/archiveView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const viewEnv = currentViewEnv();

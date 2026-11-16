@@ -2,14 +2,14 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // The API keys table sort and saved view state (PRD R16, SPEC 11): the table sorts by Name (text), Status (status) and
 // Expires (time) through the shared header (desktop, with the keyboard) and the Sort select (phone); the sort rides in the
-// fragment query and is saved under `board.view.v1.keys`, so it survives nav away and back. The table has no ref or kind
+// fragment query and is saved under `vh.view.v1.keys`, so it survives nav away and back. The table has no ref or kind
 // column. The server is shared with every other spec (and holds the suite's own key), so each test seeds three keys of its
 // own and reads only their rows.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.keys';
+const KEY = 'vh.view.v1.keys';
 
 async function post(api: APIRequestContext, path: string, data: object | undefined, status: number) {
   const response = await api.post(path, { data });

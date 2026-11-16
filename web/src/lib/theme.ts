@@ -10,7 +10,7 @@ export type ThemeSetting = 'system' | 'light' | 'dark';
 export type EffectiveTheme = 'light' | 'dark';
 
 export const THEME_SETTINGS: readonly ThemeSetting[] = ['system', 'light', 'dark'];
-export const THEME_STORAGE_KEY = 'board.theme';
+export const THEME_STORAGE_KEY = 'vh.theme';
 
 /** The `--surface` token of each theme: the `theme-color` the browser chrome takes. */
 export const THEME_COLORS: Readonly<Record<EffectiveTheme, string>> = {

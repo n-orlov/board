@@ -84,7 +84,7 @@ export function actorRows(actors: readonly ActorView[], now: Date): ActorRow[] {
   return orderActors(actors).map((a) => actorRow(a, now));
 }
 
-/** The name of the view's saved state: the key is `board.view.v1.actors`. */
+/** The name of the view's saved state: the key is `vh.view.v1.actors`. */
 export const ACTORS_VIEW = 'actors';
 
 /**

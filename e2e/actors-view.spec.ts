@@ -2,14 +2,14 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // The Actors table sort and saved view state (PRD R16, SPEC 11): the table sorts by Actor (text), Live leases (ref, the
 // actor's first live lease), Last seen (time) and Way back (text) through the shared header (desktop, with the keyboard) and the Sort select
-// (phone); the sort rides in the fragment query and is saved under `board.view.v1.actors`, so it survives nav away and back.
+// (phone); the sort rides in the fragment query and is saved under `vh.view.v1.actors`, so it survives nav away and back.
 // The table has no status or kind column. The server is shared with every other spec, so each test reads only the rows of
 // the three actors it seeded.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.actors';
+const KEY = 'vh.view.v1.actors';
 
 async function post<T = Record<string, never>>(api: APIRequestContext, path: string, data: object, status: number): Promise<T> {
   const response = await api.post(path, { data });

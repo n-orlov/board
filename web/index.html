@@ -10,18 +10,18 @@
     <link rel="manifest" href="./manifest.json" />
     <script>
       // Runs before the app bundle so the first paint already has the effective theme. The rule is
-      // web/src/lib/theme.ts's (setting from localStorage, unknown = System, System = prefers-color-scheme).
+      // web/src/lib/theme.ts's (setting from localStorage, `vh.theme` or else the earlier `board.theme` that the app migrates once it starts, unknown = System, System = prefers-color-scheme).
       (function () {
         var setting = null;
         try {
-          setting = localStorage.getItem('board.theme');
+          setting = localStorage.getItem('vh.theme') || localStorage.getItem('board.theme');
         } catch (e) {}
         var dark = setting === 'dark' || (setting !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
         document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#14161a' : '#f6f7f9');
       })();
     </script>
-    <title>board</title>
+    <title>Village Hall</title>
   </head>
   <body>
     <div id="app"></div>

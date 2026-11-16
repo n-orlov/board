@@ -24,8 +24,9 @@ test('the page links a same-origin manifest and five icons that are served', asy
   expect(manifestResponse.headers()['content-type']).toContain('json');
   const manifest = await manifestResponse.json();
 
-  expect(manifest.name).toBeTruthy();
-  expect(manifest.short_name).toBeTruthy();
+  expect(manifest.name).toBe('Village Hall');
+  expect(manifest.short_name).toBe('Hall');
+  await expect(page).toHaveTitle('Village Hall');
   expect(manifest.start_url).toBeTruthy();
   expect(manifest.start_url).not.toMatch(/^([a-z][a-z0-9+.-]*:|\/)/i); // relative
   expect(manifest.display).toBe('standalone');

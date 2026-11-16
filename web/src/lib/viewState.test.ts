@@ -48,13 +48,13 @@ function env(storage: ViewStorage | undefined) {
   return { e, replaceHash };
 }
 
-const KEY = 'board.view.v1.tasks';
+const KEY = 'vh.view.v1.tasks';
 const stored = (query: string) => JSON.stringify({ v: 1, query });
 
 describe('viewKey', () => {
-  it('is board.view.v1.<view>', () => {
+  it('is vh.view.v1.<view>', () => {
     expect(viewKey('tasks')).toBe(KEY);
-    expect(viewKey('initiative')).toBe('board.view.v1.initiative');
+    expect(viewKey('initiative')).toBe('vh.view.v1.initiative');
   });
 });
 
@@ -83,7 +83,7 @@ describe('openView on a revisited entry', () => {
 
   it('restores the saved query for a bare link that is a new navigation, for any view', () => {
     for (const [view, path] of [['tasks', '#/tasks'], ['actors', '#/actors']] as const) {
-      const storage = fakeStorage({ [`board.view.v1.${view}`]: stored('sort=x&dir=desc') });
+      const storage = fakeStorage({ [`vh.view.v1.${view}`]: stored('sort=x&dir=desc') });
       const { e, replaceHash } = revisitedEnv(storage, false);
       expect(openView(e, view, path, '')).toBe('sort=x&dir=desc');
       expect(replaceHash).toHaveBeenCalledWith(`${path}?sort=x&dir=desc`);
@@ -171,11 +171,11 @@ describe('Back and Forward restore the entry revisited, not a later visit', () =
     expect(page.open(view)).toEqual({ shown: '', hash: `#/${view}` }); // the default entry, bare
     page.follow(`#/${view}?${prefs}`);
     expect(page.open(view).shown).toBe(prefs); // the later visit saves its own preferences
-    expect(page.local.data[`board.view.v1.${view}`]).toBe(stored(prefs));
+    expect(page.local.data[`vh.view.v1.${view}`]).toBe(stored(prefs));
 
     page.back();
     expect(page.open(view)).toEqual({ shown: '', hash: `#/${view}` }); // the default entry stays default
-    expect(page.local.data[`board.view.v1.${view}`]).toBe(stored(prefs)); // and the saved view is untouched
+    expect(page.local.data[`vh.view.v1.${view}`]).toBe(stored(prefs)); // and the saved view is untouched
 
     page.forward();
     expect(page.open(view)).toEqual({ shown: prefs, hash: `#/${view}?${prefs}` });
@@ -259,7 +259,7 @@ describe('openView', () => {
   });
 
   it('never reads another version key', () => {
-    const { e } = env(fakeStorage({ 'board.view.v2.tasks': stored('status=done') }));
+    const { e } = env(fakeStorage({ 'vh.view.v2.tasks': stored('status=done') }));
     expect(openView(e, 'tasks', '#/tasks', '')).toBe('');
   });
 
@@ -299,9 +299,9 @@ describe('saveViewQuery and clearViewQuery', () => {
   });
 
   it('clear removes the key and only that key', () => {
-    const storage = fakeStorage({ [KEY]: stored('status=done'), 'board.view.v1.notes': stored('q=x') });
+    const storage = fakeStorage({ [KEY]: stored('status=done'), 'vh.view.v1.notes': stored('q=x') });
     clearViewQuery(storage, 'tasks');
-    expect(Object.keys(storage.data)).toEqual(['board.view.v1.notes']);
+    expect(Object.keys(storage.data)).toEqual(['vh.view.v1.notes']);
     expect(loadViewQuery(storage, 'tasks')).toBeNull();
   });
 
@@ -315,11 +315,23 @@ describe('saveViewQuery and clearViewQuery', () => {
 });
 
 describe('clearAllViews', () => {
-  it('removes every board.view.* key of every version and nothing else', () => {
+  it('removes every vh.view.* key of every version and nothing else', () => {
     const storage = fakeStorage({
       [KEY]: stored('a=b'),
-      'board.view.v1.initiative': stored('c=d'),
-      'board.view.v9.tasks': 'x',
+      'vh.view.v1.initiative': stored('c=d'),
+      'vh.view.v9.tasks': 'x',
+      'vh.theme': 'dark',
+      'other': 'y',
+    });
+    clearAllViews(storage);
+    expect(Object.keys(storage.data).sort()).toEqual(['other', 'vh.theme']);
+  });
+
+  it('removes the board.view.* keys of the earlier name too (R3)', () => {
+    const storage = fakeStorage({
+      'board.view.v1.tasks': stored('a=b'),
+      'board.view.v2.tasks': 'x',
+      [KEY]: stored('a=b'),
       'board.theme': 'dark',
       'other': 'y',
     });

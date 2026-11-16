@@ -2,14 +2,14 @@ import { expect, test, type APIRequestContext, type Locator, type Page, type Pla
 
 // The Tasks view's sort and saved view state (PRD R16, SPEC 11): the table sorts by its columns through the shared header
 // (desktop) and the Sort select (phone), the sort rides in the fragment query next to the filters, the whole query is
-// saved under `board.view.v1.tasks` and restored on a bare `#/tasks` with one fetch, a fragment with its own query wins,
+// saved under `vh.view.v1.tasks` and restored on a bare `#/tasks` with one fetch, a fragment with its own query wins,
 // Clear filters forgets it all, and an initiative the board no longer has is dropped from a restored query. Each test
 // seeds initiatives of its own on the shared board and filters the view down to them.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
-const KEY = 'board.view.v1.tasks';
+const KEY = 'vh.view.v1.tasks';
 
 async function post<T = { ref: string }>(api: APIRequestContext, path: string, data: object, status: number): Promise<T> {
   const response = await api.post(path, { data });
@@ -307,7 +307,7 @@ for (const vp of viewports) {
       await lookups.answered;
       await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
       await expect(fresh).toHaveURL(new RegExp(`#/notes\\?author=tv-depart-${vp.name}$`));
-      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('board.view.v1.notes'))) as string).query).toBe(`author=tv-depart-${vp.name}`);
+      expect(JSON.parse((await fresh.evaluate(() => localStorage.getItem('vh.view.v1.notes'))) as string).query).toBe(`author=tv-depart-${vp.name}`);
       // The departed Tasks never read its table or its needs-attention panel.
       expect(reads).toEqual({ table: 0, needs: 0 });
       await fresh.close();

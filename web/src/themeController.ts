@@ -1,3 +1,4 @@
+import './migrateOnLoad';
 import { createThemeController } from './lib/theme';
 
 // The one theme controller of the page, wired to the real browser.

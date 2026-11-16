@@ -285,7 +285,7 @@ function env(storage: ViewStorage | undefined): ViewEnv & { hashes: string[] } {
 }
 
 describe('saved Notes filters', () => {
-  const KEY = 'board.view.v1.notes';
+  const KEY = 'vh.view.v1.notes';
   const FILTER = {
     ...DEFAULT_NOTES_FILTER,
     broadcastOnly: true,
@@ -293,7 +293,7 @@ describe('saved Notes filters', () => {
     resource: 'host:b-1',
   };
 
-  it('is saved under board.view.v1.notes', () => {
+  it('is saved under vh.view.v1.notes', () => {
     expect(viewKey(NOTES_VIEW)).toBe(KEY);
   });
 
@@ -400,7 +400,7 @@ describe('saved Notes filters', () => {
 });
 
 describe('restored board references the server no longer knows', () => {
-  const KEY = 'board.view.v1.notes';
+  const KEY = 'vh.view.v1.notes';
   const lookup = (slugs: string[], tasks: string[]): NotesLookup => ({
     initiatives: vi.fn(async () => slugs),
     taskExists: vi.fn(async (ref: string) => tasks.includes(ref)),

@@ -46,7 +46,7 @@
     class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-surface-raised px-4 md:hidden"
     data-testid="topbar"
   >
-    <span class="font-bold">board</span>
+    <span class="shrink-0 whitespace-nowrap font-bold">Village Hall</span>
     <span class="min-w-0 flex-1 truncate text-text-muted" data-testid="topbar-title">{title}</span>
     <LiveIndicator />
     <button type="button" class={button} aria-label="Account menu" aria-haspopup="dialog" onclick={() => (menuOpen = true)}>
@@ -57,7 +57,7 @@
   <aside
     class="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col items-center gap-4 border-r border-border bg-surface-raised py-4 md:flex lg:hidden"
   >
-    <span class="font-bold" aria-hidden="true">b</span>
+    <span class="font-bold" aria-hidden="true">VH</span>
     <div class="flex-1">
       <Nav {entries} variant="rail" testid="nav-rail" />
     </div>
@@ -70,7 +70,7 @@
   <aside
     class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface-raised p-3 lg:flex"
   >
-    <span class="px-3 py-2 text-lg font-bold">board</span>
+    <span class="px-3 py-2 text-lg font-bold">Village Hall</span>
     <div class="flex-1">
       <Nav {entries} variant="sidebar" testid="nav-sidebar" />
     </div>

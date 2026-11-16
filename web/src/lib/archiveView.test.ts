@@ -136,8 +136,8 @@ describe('saved state', () => {
   it('opens a bare route with the saved window and sort, in place', () => {
     const storage = memory();
     saveViewQuery(storage, ARCHIVE_VIEW, 'window=all&sort=item&dir=desc');
-    expect(viewKey(ARCHIVE_VIEW)).toBe('board.view.v1.archive');
-    expect(storage.data.has('board.view.v1.archive')).toBe(true);
+    expect(viewKey(ARCHIVE_VIEW)).toBe('vh.view.v1.archive');
+    expect(storage.data.has('vh.view.v1.archive')).toBe(true);
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, ARCHIVE_VIEW, '#/archive', '');
     expect(replaced).toEqual(['#/archive?window=all&sort=item&dir=desc']);
@@ -149,14 +149,14 @@ describe('saved state', () => {
     saveViewQuery(storage, ARCHIVE_VIEW, 'sort=item&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, ARCHIVE_VIEW, '#/archive', 'window=7');
     expect(viewFromQuery(query)).toEqual({ window: '7', sort: null });
-    expect(JSON.parse(storage.data.get('board.view.v1.archive')!)).toEqual({ v: 1, query: 'window=7' });
+    expect(JSON.parse(storage.data.get('vh.view.v1.archive')!)).toEqual({ v: 1, query: 'window=7' });
   });
 
   it('forgets the key when the state is back to the defaults', () => {
     const storage = memory();
     saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '90', sort: null }));
-    expect(storage.data.has('board.view.v1.archive')).toBe(true);
+    expect(storage.data.has('vh.view.v1.archive')).toBe(true);
     saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '30', sort: null }));
-    expect(storage.data.has('board.view.v1.archive')).toBe(false);
+    expect(storage.data.has('vh.view.v1.archive')).toBe(false);
   });
 });
