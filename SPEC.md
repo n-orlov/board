@@ -3874,6 +3874,34 @@ releases required). board's release additionally builds and pushes the multi-arc
 image (tagged `VERSION` and digest-pinned in the release notes); the registry is a job
 parameter, not hard-coded.
 
+`ci/release-publish.sh <outdir>` is the publish half (`ci/release-build.sh` wrote `<outdir>`, §12.5). It
+takes `VERSION`, `CI_BUILD`, `REGISTRY`, `IMAGE_NAME` (default `village-hall`) and `DRY_RUN` (default `true`) in
+the environment, and runs seven steps in this order, stopping at the first that fails:
+
+1. **Verify the candidate.** `VERSION` matches `vMAJOR.MINOR.PATCH[-pre]`; `release-candidate.json` (the
+   file a fully green `main` build archives, §15.3 above) names a full sha, is the build `CI_BUILD` when that is
+   given, and points at a `.../job/main/<n>` build; the checked-out commit is that sha; and the CI build's own
+   API answer reads `result: SUCCESS` and lists that sha as a built revision.
+2. **Refuse an existing tag or release.** Both are read (`gh api .../git/ref/tags/<VERSION>`, `gh release view`);
+   only a 404 means absent, so an unreadable answer refuses too. Nothing has been written yet.
+3. **Create a draft** release at the candidate commit (`gh release create --draft --target <sha>`).
+4. **Upload every asset**: each file at the top of `<outdir>`; the `image/` directory is not an asset.
+5. **Push the image** `<REGISTRY>/<IMAGE_NAME>:<VERSION>` from `<outdir>/image/board-image-oci.tar` (both
+   platforms, `skopeo copy --all` from the OCI layout in a throwaway container started by the agent's docker, the
+   image pinned by digest, a `docker login` kept in a temporary config so no secret is in an argument list), read
+   the pushed digest back, and put `<REGISTRY>/<IMAGE_NAME>@sha256:...` in the release notes.
+6. **Publish** the draft.
+7. **Read the release back and require `immutable: true`.** Otherwise the script exits non-zero after
+   publishing, with a message that names what to fix (enable immutable releases for the repository, then
+   release a new version: the published tag stays mutable and is not reused).
+
+`DRY_RUN=true` runs steps 1 and 2 (reads only) and prints what steps 3 to 7 would do; it calls nothing that
+writes (no `gh release` write, no `docker`, no non-GET request). `ci/repocheck` runs the script against stub `gh`,
+`docker` and `curl` that record their calls, and covers: a dry run's zero writing calls, a real run's seven-step
+order, `immutable: false` failing after publishing, an existing tag refused before any write, a non-SUCCESS
+candidate refused, a candidate with a differing sha refused, and a bad `VERSION` refused. The step-7 test fails
+when the read-back is deleted from the script.
+
 ### 15.4 Quality gates
 
 All gates are **on from the first commit**. Thresholds live in `ci/quality.json`, read by

@@ -307,6 +307,17 @@ asset, that the linux/amd64 `vh version` prints the version, that every SBOM par
 index lists both platforms) through `ci/run.sh`, writes their JUnit to `<dir>/junit-merged/junit-release-dryrun.xml`,
 keeps `<dir>/release-dryrun-checksums.txt` and removes the assets and the `village-hall:v0.0.0-dryrun` tag.
 
+## Release publish
+
+`ci/release-publish.sh <outdir>` publishes what `ci/release-build.sh` wrote. Its environment is `VERSION`,
+`CI_BUILD`, `REGISTRY`, `IMAGE_NAME` (default `village-hall`) and `DRY_RUN` (default `true`); `CANDIDATE`
+(default `candidate/ci-results/release-candidate.json`), `RELEASE_SHA`, `REPO`, `JENKINS_USER`/`JENKINS_TOKEN`,
+`REGISTRY_USER`/`REGISTRY_PASSWORD` and gh's `GH_TOKEN` are optional. The seven steps (verify the candidate,
+refuse an existing tag or release, create a draft, upload every asset, push the image and put its digest in
+the notes, publish, read back `immutable: true`) are in SPEC 15.3. A dry run only reads. The tests are
+`ci/repocheck/releasepublish_test.go`, against stub `gh`, `docker` and `curl`; nothing in CI reaches GitHub or a
+registry.
+
 ## Quality gates
 
 Every SPEC section 15.4 gate is in `ci/quality.json` with `enabled: true` at
