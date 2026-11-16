@@ -1,6 +1,7 @@
 package envvar
 
 import (
+	"embed"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -92,32 +93,37 @@ func TestNoProductCodePassesAVHOrBoardLiteralToTheOSEnvironment(t *testing.T) {
 	}
 }
 
-// plantedTree copies testdata/planted into a temporary directory, dropping the
+//go:embed testdata/planted
+var planted embed.FS
+
+// plantedFiles are the files of testdata/planted, without the .fixture suffix.
+var plantedFiles = []string{"bad.go", "nested/deep.go", "good_test.go"}
+
+// plantedTree writes testdata/planted into a temporary directory, dropping the
 // .fixture suffix, so the planted files are .go files only while a test runs
 // (as .go files in the tree they would be unmeasured product code).
 func plantedTree(t *testing.T) string {
 	t.Helper()
-	dst := t.TempDir()
-	src := filepath.Join("testdata", "planted")
-	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, _ := filepath.Rel(src, path)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		out := filepath.Join(dst, strings.TrimSuffix(rel, ".fixture"))
-		if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
-			return err
-		}
-		return os.WriteFile(out, raw, 0o600)
-	})
+	root, err := os.OpenRoot(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dst
+	t.Cleanup(func() { _ = root.Close() })
+	for _, name := range plantedFiles {
+		raw, err := planted.ReadFile("testdata/planted/" + name + ".fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dir := filepath.Dir(name); dir != "." {
+			if err := root.Mkdir(dir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := root.WriteFile(name, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root.Name()
 }
 
 // TestTheStaticTestFailsOnAPlantedFixture proves the scan is not vacuous: the
