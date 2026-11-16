@@ -133,5 +133,84 @@ for (const vp of viewports) {
       await collapsed();
       await api.dispose();
     });
+
+    test('a collapse or an expansion made in the same turn as a link or a reload is the state its entry comes back with', async ({ page, playwright, baseURL }) => {
+      const first = `e2e-tlc-${vp.name}-c`;
+      const second = `e2e-tlc-${vp.name}-d`;
+      const api = await playwright.request.newContext({
+        baseURL,
+        extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': `tlc2-${vp.name}` },
+      });
+      const now = Date.now();
+      for (const [slug, title] of [[first, `Turn ${vp.name} first`], [second, `Turn ${vp.name} second`]] as const) {
+        await post(api, '/api/v1/initiatives', { slug, title }, 201);
+        for (let i = 0; i < 2; i++) {
+          const { ref } = await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: `${title} task ${i}` }, 201);
+          dateTask(slug, ref, now - (4 - i) * DAY);
+        }
+      }
+      const firstLabel = initiativeLabel(page, `Turn ${vp.name} first`);
+      const secondLabel = initiativeLabel(page, `Turn ${vp.name} second`);
+      const expanded = async () => {
+        await expect(taskRows(page)).toHaveCount(4, FIVE_SECONDS);
+        await expect(firstLabel).not.toHaveClass(/collapsed/);
+        await expect(secondLabel).not.toHaveClass(/collapsed/);
+      };
+      const firstCollapsed = async () => {
+        await expect(taskRows(page)).toHaveCount(2, FIVE_SECONDS);
+        await expect(firstLabel).toHaveClass(/collapsed/);
+        await expect(secondLabel).not.toHaveClass(/collapsed/);
+      };
+      // Enter on a label toggles its initiative at once, in vis-timeline's data; the redraw that shows it is a frame away,
+      // so what `then` does in the same turn happens before the chart has drawn the change.
+      const toggleThen = (title: string, then: () => void) =>
+        page.evaluate(
+          ([label, after]) => {
+            const el = [...document.querySelectorAll<HTMLElement>('.vis-labelset .vis-label.tl-initiative')].find((l) => l.textContent?.includes(label))!;
+            el.focus();
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            new Function(after)();
+          },
+          [title, `(${then.toString()})()`] as const,
+        );
+
+      await page.goto(`/#/timeline?initiative=${first}&initiative=${second}`);
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      await expanded();
+
+      // A collapse in the turn a link leaves: Back shows the entry collapsed.
+      await toggleThen(`Turn ${vp.name} first`, () => {
+        window.location.hash = '#/tasks';
+      });
+      await expect(page).toHaveURL(/#\/tasks/, FIVE_SECONDS);
+      await page.goBack();
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      await firstCollapsed();
+
+      // An expansion in the turn a link leaves is kept too: Back shows the entry expanded.
+      await toggleThen(`Turn ${vp.name} first`, () => {
+        window.location.hash = '#/tasks';
+      });
+      await expect(page).toHaveURL(/#\/tasks/, FIVE_SECONDS);
+      await page.goBack();
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      await expanded();
+
+      // A collapse in the turn of a reload: the reloaded entry shows it.
+      await toggleThen(`Turn ${vp.name} first`, () => {
+        window.location.reload();
+      });
+      await expect(page.getByTestId('timeline-view')).toBeVisible();
+      await firstCollapsed();
+
+      // A fresh entry (a link to the same route) is not that entry: it opens expanded, and Back finds this one collapsed.
+      await page.evaluate((query) => {
+        window.location.hash = `#/timeline?${query}&x=1`;
+      }, `initiative=${first}&initiative=${second}`);
+      await expanded();
+      await page.goBack();
+      await firstCollapsed();
+      await api.dispose();
+    });
   });
 }
