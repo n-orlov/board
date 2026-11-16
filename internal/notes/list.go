@@ -127,7 +127,7 @@ func (f *filter) mention(handle string) error {
 	if err != nil {
 		return fmt.Errorf("encode mention: %w", err)
 	}
-	f.add(`LENGTH(REPLACE(k.mentions, ?, '')) < LENGTH(k.mentions)`, string(needle))
+	f.add(`(k.mentions <> '[]' AND LENGTH(REPLACE(k.mentions, ?, '')) < LENGTH(k.mentions))`, string(needle))
 	return nil
 }
 

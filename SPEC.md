@@ -657,7 +657,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -666,7 +666,12 @@ an upgrade survive it. `events.task_id` is a plain nullable column with no forei
 - `events(id)` (PK) and `events(task_id, id)`, `events(initiative_id, id)`: since-T reads.
 - `notes(id)`, `notes(task_id, id)`, `notes(resource, id)`, partial/filtered index for broadcasts
   where the dialect supports it (`WHERE task_id IS NULL AND initiative_id IS NULL`), plain
-  composite otherwise.
+  composite otherwise. `00011_notes_concern_indexes` serves the notes a check-in counts (§6.5) from covering
+  indexes, so the count never reads the table: on SQLite `notes(task_id, id)` and `notes(initiative_id, id)` hold only
+  the notes that have one (SQLite's planner would otherwise walk them for `IS NULL`, which is nearly every note,
+  instead of the broadcast index), `notes(resource, id, task_id, initiative_id)` carries the columns the count tests, and
+  `notes(id, task_id, initiative_id, resource, mentions) WHERE mentions <> '[]'` holds the notes that mention anyone;
+  on Postgres the migration adds `notes(id) WHERE mentions <> '[]'` only.
 - `leases(state, expires_at)`: expiry sweep and the live set.
 - `lease_resources(resource)`: conflicts.
 - `asks(state, created_at)`: open asks.
@@ -3559,7 +3564,9 @@ network requests (all assets embedded).
   directory merged with `common`, one version sequence across both. Applied on start
   (`VH_MIGRATE=auto`, default) or by `vh admin migrate`. A database whose goose version is above the
   highest embedded one is refused (§8).
-- SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, applied to every
+- SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, `wal_autocheckpoint=10000` (ten times
+  SQLite's default, so a commit on the request path rarely pays for a checkpoint; the timer of `VH_SQLITE_CHECKPOINT`
+  truncates the log), applied to every
   connection through the DSN, with one writer connection (`MaxOpenConns=1`, `BEGIN IMMEDIATE`) plus a read
   pool whose connections are `query_only`. `Store.Writer()` and `Store.Reader()` return the two pools; on
   Postgres both are one pool. SQLite is single-replica.
@@ -3752,7 +3759,9 @@ unit.
 | sustained load | 200 req/s mixed (80 % reads) without errors; 500 concurrent SSE clients |
 | CLI | `vh now` round trip ≤ 100 ms on a LAN; binary start ≤ 20 ms |
 
-Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s; Phase 0 updates it on writes only and does not coalesce, §4.1);
+Hot-path rules: a check-in (`GET /now`) reads the live leases once (their resources in one query, not one per lease),
+counts the notes that concern the caller through covering indexes (§4.10), and looks for a due lease on a reader before it
+takes the writer connection, so a read with nothing to expire never waits behind a write; `last_seen_at` updates are coalesced (at most one write per actor per 30 s; Phase 0 updates it on writes only and does not coalesce, §4.1);
 attention counts are cached and invalidated by the writes that change them; reads never take
 the SQLite writer connection. The Perf unit's gates are the absolute values in the table; no
 baseline is committed and no run is compared against an earlier one.

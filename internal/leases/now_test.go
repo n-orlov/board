@@ -1,11 +1,14 @@
 package leases_test
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func leaseRefs(list []leases.Lease) []string {
@@ -73,5 +76,55 @@ func TestNowExpiresTheDueLeasesWithOneEventAndLeavesThemOut(t *testing.T) {
 	}
 	if evs := e.events(t, leases.EventExpired); len(evs) != 1 {
 		t.Errorf("%d lease_expired events after two reads, want 1", len(evs))
+	}
+}
+
+// A check-in that finds no lease due is a read: it must not need the SQLite
+// writer connection, which another request may hold (SPEC 14).
+func TestNowWithNothingDueDoesNotTakeTheWriterConnection(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", secs(600), "r1")
+	held, err := e.S.Store.Writer().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	got, err := e.S.CheckIn(short, me.Handle, nil)
+	if err != nil || len(got.Mine) != 1 {
+		t.Fatalf("CheckIn with the writer held = %d of mine, %v; want 1 and no error", len(got.Mine), err)
+	}
+	if _, err := e.S.Live(short); err != nil {
+		t.Errorf("Live with the writer held: %v", err)
+	}
+}
+
+// Resources are read for many leases at once: every lease gets its own, sorted,
+// across the chunks a long list is read in.
+func TestLiveLeasesCarryTheirOwnResourcesAcrossChunks(t *testing.T) {
+	e := newEnv(t)
+	const n = 520
+	for i := 0; i < n; i++ {
+		e.Clock.add(time.Millisecond)
+		task, err := e.Tasks.Create(ctx, me, "key:x", tasks.New{Initiative: "aa", Title: "t"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.start(t, me, task.Ref, secs(600), fmt.Sprintf("r%04d-b", i), fmt.Sprintf("r%04d-a", i))
+	}
+	e.start(t, bob, "aa-1", secs(600))
+	live, err := e.S.Live(ctx)
+	if err != nil || len(live) != n+1 {
+		t.Fatalf("Live = %d leases, %v; want %d", len(live), err, n+1)
+	}
+	for i, l := range live[:n] {
+		want := []string{fmt.Sprintf("r%04d-a", i), fmt.Sprintf("r%04d-b", i)}
+		if !reflect.DeepEqual(l.Resources, want) {
+			t.Fatalf("lease %s resources = %v, want %v", l.Ref, l.Resources, want)
+		}
+	}
+	if last := live[n]; last.Resources == nil || len(last.Resources) != 0 {
+		t.Errorf("a lease with no resources has %#v, want an empty non-nil list", last.Resources)
 	}
 }

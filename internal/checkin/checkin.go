@@ -74,7 +74,7 @@ func (s Store) Check(ctx context.Context, me string, queried []string) (Result, 
 	if r.Notes, r.NotesMore, err = s.Notes.Concerning(ctx, concern(me, cursor, r.Leases.Mine), NotesLimit); err != nil {
 		return Result{}, err
 	}
-	r.Counts, err = s.Attention.Counts(ctx, attention.Query{})
+	r.Counts, err = s.Attention.CountsOf(ctx, attention.Query{}, append(append([]leases.Lease{}, r.Leases.Mine...), r.Leases.Others...))
 	return r, err
 }
 
@@ -84,7 +84,7 @@ func concern(me, cursor string, mine []leases.Lease) notes.Concern {
 	c := notes.Concern{Handle: me, After: cursor}
 	seen := map[string]bool{}
 	for _, l := range mine {
-		c.Tasks = append(c.Tasks, l.Task)
+		c.TaskIDs = append(c.TaskIDs, l.TaskID)
 		for _, res := range l.Resources {
 			if !seen[res] {
 				seen[res] = true

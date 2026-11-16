@@ -167,12 +167,56 @@ func (s Store) readLeases(ctx context.Context, query string, args []any) ([]Leas
 		return nil, err
 	}
 	// Resources are read after the cursor is closed: the reader may be one connection.
-	for i := range out {
-		if out[i].Resources, err = s.resourcesOf(ctx, s.Store.Reader(), out[i].ID); err != nil {
-			return nil, err
-		}
+	if err := s.attachResources(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// resourceChunk is how many leases one resource query names.
+const resourceChunk = 500
+
+// attachResources sets the Resources of every lease in list, each sorted, in one
+// query per resourceChunk leases instead of one per lease.
+func (s Store) attachResources(ctx context.Context, list []Lease) error {
+	for from := 0; from < len(list); from += resourceChunk {
+		chunk := list[from:min(from+resourceChunk, len(list))]
+		by, err := s.resourcesOfAll(ctx, chunk)
+		if err != nil {
+			return err
+		}
+		for i := range chunk {
+			chunk[i].Resources = by[chunk[i].ID]
+			if chunk[i].Resources == nil {
+				chunk[i].Resources = []string{}
+			}
+		}
+	}
+	return nil
+}
+
+// resourcesOfAll reads the resources of the leases in one query, by lease id.
+func (s Store) resourcesOfAll(ctx context.Context, list []Lease) (map[string][]string, error) {
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(list)), ", ")
+	args := make([]any, len(list))
+	for i, l := range list {
+		args[i] = l.ID
+	}
+	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT lease_id, resource FROM lease_resources WHERE lease_id IN (`+marks+`) ORDER BY lease_id, resource`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("read lease resources: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]string{}
+	for rows.Next() {
+		var id, r string
+		if err := rows.Scan(&id, &r); err != nil {
+			return nil, fmt.Errorf("read lease resources: %w", err)
+		}
+		out[id] = append(out[id], r)
+	}
+	return out, rows.Err()
 }
 
 // scanAll reads and closes rows.

@@ -34,12 +34,18 @@ var ErrNotMigrated = errors.New("database is not migrated")
 var ErrSchemaNewer = errors.New("database schema is newer than this binary")
 
 // SQLite settings (SPEC 12.2). Each is applied to every connection the driver
-// opens, and a unit test reads all four back.
+// opens, and a unit test reads all five back.
+//
+// wal_autocheckpoint is 10000 pages, ten times SQLite's default: the default
+// checkpoint ran inside a commit on the request path every few hundred writes and
+// put a 15-25 ms tail on write latency (SPEC 14). The checkpointer of
+// checkpoint.go truncates the log on its own timer instead.
 var sqlitePragmas = []string{
 	"busy_timeout(5000)",
 	"journal_mode(WAL)",
 	"foreign_keys(1)",
 	"synchronous(NORMAL)",
+	"wal_autocheckpoint(10000)",
 }
 
 // Store is one open database. On SQLite it holds one writer connection and a

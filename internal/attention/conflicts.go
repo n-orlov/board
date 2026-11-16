@@ -27,6 +27,22 @@ func (s Store) conflicts(ctx context.Context, sc scope) ([]Conflict, error) {
 	return contested(live, kept, wayBacks), nil
 }
 
+// conflictCount is how many conflicts the scope keeps, from the live leases
+// given, or from those it reads when live is nil. It needs no way backs.
+func (s Store) conflictCount(ctx context.Context, sc scope, live []leases.Lease) (int, error) {
+	if live == nil {
+		var err error
+		if live, err = (leases.Store{Store: s.Store, Now: s.Now}).Live(ctx); err != nil {
+			return 0, err
+		}
+	}
+	kept, err := s.keptTasks(ctx, sc)
+	if err != nil {
+		return 0, err
+	}
+	return len(contested(live, kept, nil)), nil
+}
+
 // contested groups the leases by resource and returns the resources with two or
 // more of them. kept is nil for no scope.
 func contested(live []leases.Lease, kept map[string]bool, wayBacks map[string]string) []Conflict {

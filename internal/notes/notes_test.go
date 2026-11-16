@@ -429,7 +429,7 @@ func TestMigrationCreatesNotesAndCursors(t *testing.T) {
 			got = append(got, n)
 		}
 	}
-	want := []string{"notes_broadcast", "notes_initiative_id", "notes_resource", "notes_task_id"}
+	want := []string{"notes_broadcast", "notes_initiative_id", "notes_mentioning", "notes_resource", "notes_task_id"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("note indexes = %v, want %v", got, want)
 	}

@@ -178,6 +178,7 @@
             "internal/leases": [
                 "end.go",
                 "expire.go",
+                "list.go",
                 "ontask.go",
                 "write.go"
             ]

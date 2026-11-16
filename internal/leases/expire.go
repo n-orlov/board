@@ -3,6 +3,7 @@ package leases
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,14 +31,38 @@ func (s Store) ExpireDue(ctx context.Context) (int, error) { return s.expireAt(c
 
 // expireAt is ExpireDue judged at the instant now, so a read can expire and
 // then list at one and the same instant.
+//
+// A read comes here on every check-in, so it looks for a due lease on a reader
+// first and takes the writer connection only when one is there (SPEC 14: reads
+// never take the SQLite writer connection). A lease that falls due between the
+// look and the listing is expired by the next call; the listing itself drops
+// leases past their expiry.
 func (s Store) expireAt(ctx context.Context, now time.Time) (int, error) {
+	pending, err := s.anyDue(ctx, now)
+	if err != nil || !pending {
+		return 0, err
+	}
 	var n int
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		n, err = s.expireDue(ctx, tx, now)
 		return err
 	})
 	return n, err
+}
+
+// anyDue reports whether a live lease expired before now, without the writer.
+func (s Store) anyDue(ctx context.Context, now time.Time) (bool, error) {
+	var one int
+	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT 1 FROM leases WHERE state = 'live' AND expires_at < ? LIMIT 1`), store.EncodeBound(now)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look for expired leases: %w", err)
+	}
+	return true, nil
 }
 
 func (s Store) expireDue(ctx context.Context, tx *sql.Tx, now time.Time) (int, error) {

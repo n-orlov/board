@@ -199,15 +199,15 @@ func TestAttentionCountsRideAlong(t *testing.T) {
 
 func TestConcernNamesEachLeasedTaskAndResourceOnce(t *testing.T) {
 	mine := []leases.Lease{
-		{Task: "aa-1", Resources: []string{"db:x", "repo:y"}},
-		{Task: "aa-2", Resources: []string{"db:x"}},
+		{Task: "aa-1", TaskID: "T1", Resources: []string{"db:x", "repo:y"}},
+		{Task: "aa-2", TaskID: "T2", Resources: []string{"db:x"}},
 	}
 	got := concern("me@host", "01CURSOR", mine)
-	if strings.Join(got.Tasks, ",") != "aa-1,aa-2" || strings.Join(got.Resources, ",") != "db:x,repo:y" ||
+	if strings.Join(got.TaskIDs, ",") != "T1,T2" || len(got.Tasks) != 0 || strings.Join(got.Resources, ",") != "db:x,repo:y" ||
 		got.Handle != "me@host" || got.After != "01CURSOR" {
 		t.Errorf("concern = %+v", got)
 	}
-	if none := concern("me@host", "", nil); len(none.Tasks) != 0 || len(none.Resources) != 0 {
+	if none := concern("me@host", "", nil); len(none.TaskIDs) != 0 || len(none.Resources) != 0 {
 		t.Errorf("with no lease concern = %+v", none)
 	}
 }

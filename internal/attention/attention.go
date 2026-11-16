@@ -209,6 +209,21 @@ func total(c Counts) Counts {
 // Counts returns only the size of each section, without reading the items of the
 // four that SQL can count.
 func (s Store) Counts(ctx context.Context, q Query) (Counts, error) {
+	return s.count4(ctx, q, nil)
+}
+
+// CountsOf is Counts for a caller that has just read the live leases (a
+// check-in does): the conflicts are counted from live instead of reading the
+// leases again.
+func (s Store) CountsOf(ctx context.Context, q Query, live []leases.Lease) (Counts, error) {
+	if live == nil {
+		live = []leases.Lease{}
+	}
+	return s.count4(ctx, q, live)
+}
+
+// count4 counts the sections; a nil live means the live leases are read here.
+func (s Store) count4(ctx context.Context, q Query, live []leases.Lease) (Counts, error) {
 	sc, now, err := s.begin(ctx, q)
 	if err != nil {
 		return Counts{}, err
@@ -223,8 +238,7 @@ func (s Store) Counts(ctx context.Context, q Query) (Counts, error) {
 			return Counts{}, err
 		}
 	}
-	cons, err := s.conflicts(ctx, sc)
-	c.Conflicts = len(cons)
+	c.Conflicts, err = s.conflictCount(ctx, sc, live)
 	return total(c), err
 }
 

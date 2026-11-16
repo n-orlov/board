@@ -83,17 +83,18 @@ func pragma(t *testing.T, c *sql.Conn, name string) string {
 	return v
 }
 
-// TestSQLitePragmasOnEveryConnection reads the four required settings back
+// TestSQLitePragmasOnEveryConnection reads the five required settings back
 // from the writer and from every connection the read pool opens. It fails
 // when any one of them is dropped from the DSN.
 func TestSQLitePragmasOnEveryConnection(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
 	want := map[string]string{
-		"journal_mode": "wal",
-		"busy_timeout": "5000",
-		"foreign_keys": "1",
-		"synchronous":  "1", // NORMAL
+		"journal_mode":       "wal",
+		"busy_timeout":       "5000",
+		"foreign_keys":       "1",
+		"synchronous":        "1", // NORMAL
+		"wal_autocheckpoint": "10000",
 	}
 	check := func(label string, c *sql.Conn) {
 		for name, w := range want {
@@ -280,7 +281,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 10 || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
+		if len(files) != 11 || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {
