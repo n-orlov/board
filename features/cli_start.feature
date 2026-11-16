@@ -93,3 +93,34 @@ Feature: Starting work from the command line, vh start
       | vh start aa-1 x extra            | usage: vh start <task> "<intent>" [--res r]... [--ttl D] [--json]                    |
       | vh start aa-1 x --start y        | usage: vh start <task> "<intent>" [--res r]... [--ttl D] [--json]                    |
       | vh start aa-1 x --ttl 2          | invalid duration "2": want a whole number and a unit s, m, h or d, such as 90m       |
+
+  Scenario: a server with a newer protocol than the binary makes start print the update hint and keeps exit 0
+    Given a stub board answers vh start with protocol 99 and protocol_seen 4
+    When I run the client 'vh start aa-1 "x"' as actor "claude@laptop" against the stub board
+    Then the exit code is 0
+    And stdout has the line "hint: vh protocol v99 on the server, you have v4 → vh update, then vh help agent"
+    And the last stdout line starts with "hint: "
+    And stdout has 1 line starting with "hint: "
+    And stderr is empty
+
+  Scenario: a protocol_seen older than the binary's makes start and new print the read-again hint and keep their exit codes
+    When I run the client 'vh start aa-1 "x"' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout has the line "hint: vh protocol v4 changed since you last read it → vh help agent"
+    And the last stdout line starts with "hint: "
+    And stdout has 1 line starting with "hint: "
+    And stderr is empty
+    When I run the client 'vh new aa "Fourth" --start "y" --res db:x' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout has the line "hint: vh protocol v4 changed since you last read it → vh help agent"
+    And stdout has 1 line starting with "hint: "
+    When I run the client 'vh start aa-2 "z" --res db:x' as actor "codex@laptop"
+    Then the exit code is 7
+    And stdout has 1 line starting with "hint: "
+
+  Scenario: an actor that has read the current protocol sees no hint
+    Given I run the client 'vh help agent' as actor "claude@laptop"
+    When I run the client 'vh start aa-1 "x"' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout has no line starting with "hint: "
+    And stderr is empty

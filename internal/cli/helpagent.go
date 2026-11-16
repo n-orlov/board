@@ -16,12 +16,12 @@ import (
 const HelpAgentUsage = "usage: vh help agent [--version]"
 
 // protocolText is the agent protocol cheat sheet (SPEC §8.6). Its first line is
-// the header `board protocol vN`.
+// the header `vh protocol vN`.
 //
 //go:embed protocol.txt
 var protocolText string
 
-var protocolHeader = regexp.MustCompile(`^board protocol v(\d+)\n`)
+var protocolHeader = regexp.MustCompile(`^vh protocol v(\d+)\n`)
 
 // seenTimeout bounds the request that records the protocol as read: printing
 // the text never waits long for a server.

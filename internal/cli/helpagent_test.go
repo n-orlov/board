@@ -18,8 +18,8 @@ func TestHelpAgentPrintsTheEmbeddedProtocolAndMatchesTheGolden(t *testing.T) {
 	if code != ExitOK || errs != "" {
 		t.Fatalf("got %d %q", code, errs)
 	}
-	if !strings.HasPrefix(out, "board protocol v3\n") {
-		t.Fatalf("the text is not headed board protocol v3: %q", firstLine(out))
+	if !strings.HasPrefix(out, "vh protocol v4\n") {
+		t.Fatalf("the text is not headed vh protocol v4: %q", firstLine(out))
 	}
 	if *update {
 		if err := os.WriteFile(goldenPath, []byte(out), 0o600); err != nil {
@@ -51,7 +51,7 @@ func TestHelpAgentTextFitsTheLineBudget(t *testing.T) {
 
 func TestHelpAgentTextCoversIdentityWhoamiAndInitiatives(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"BOARD_URL", "BOARD_API_KEY", "BOARD_ACTOR", "BOARD_WAY_BACK", "`vh whoami`", "`vh init add ", "`vh init ls", "`vh init show "} {
+	for _, want := range []string{"VH_URL", "VH_API_KEY", "VH_ACTOR", "VH_WAY_BACK", "`vh whoami`", "`vh init ls", "`vh task ls "} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
 		}
@@ -60,7 +60,7 @@ func TestHelpAgentTextCoversIdentityWhoamiAndInitiatives(t *testing.T) {
 
 func TestHelpAgentTextCoversTasksLeasesConflictsAndClosing(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"`vh task add ", "`vh task done ", "`vh lease start ", "`vh lease renew`", "`vh lease end ", "`vh now --resources ", "`vh milestone ", "`vh check ", "CONFLICT", "exit 7", "`vh task close <ref> --for operator`", "never close"} {
+	for _, want := range []string{"`vh task done <ref>`", "`vh task reopen <ref>`", "`vh lease ack L5`", "`vh now --resources ", "CONFLICT", "exit 7", "`vh task close <ref> --for operator`", "never close"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
 		}
@@ -98,11 +98,11 @@ func TestCommandsListsTheFlagsOfEachCommand(t *testing.T) {
 }
 
 func TestProtocolVersionIsTheNumberInTheHeader(t *testing.T) {
-	if v := ProtocolVersion(); v != 3 {
+	if v := ProtocolVersion(); v != 4 {
 		t.Fatalf("version %d", v)
 	}
 	defer func(old string) { protocolText = old }(protocolText)
-	for text, want := range map[string]int{"board protocol v12\nx": 12, "protocol v1\n": -1, "board protocol v\n": -1, "": -1, "board protocol v99999999999999999999\n": -1} {
+	for text, want := range map[string]int{"vh protocol v12\nx": 12, "protocol v1\n": -1, "board protocol v3\n": -1, "vh protocol v\n": -1, "": -1, "vh protocol v99999999999999999999\n": -1} {
 		protocolText = text
 		if got := ProtocolVersion(); got != want {
 			t.Errorf("%q gave %d, want %d", text, got, want)
@@ -115,7 +115,7 @@ func TestHelpAgentVersionPrintsJustTheNumberAndRecordsNothing(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "help", "agent", "--version")
-	if code != ExitOK || out != "3\n" || errs != "" || len(f.requests) != 0 {
+	if code != ExitOK || out != "4\n" || errs != "" || len(f.requests) != 0 {
 		t.Fatalf("got %d %q %q with %d requests", code, out, errs, len(f.requests))
 	}
 }
@@ -134,7 +134,7 @@ func TestHelpAgentRecordsTheVersionAsRead(t *testing.T) {
 		t.Fatalf("%d requests, want 1", len(f.requests))
 	}
 	r := f.requests[0]
-	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":3}` {
+	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":4}` {
 		t.Fatalf("request %s %s %q", r.Method, r.URL.Path, f.bodies[0])
 	}
 	if r.Header.Get("Board-Actor") != "claude:test" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer brd_") {
@@ -172,9 +172,27 @@ func TestHelpUsageErrors(t *testing.T) {
 
 func TestHelpAgentTextCoversAsksNotesAndAttention(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"`vh ask <task> ", "(stop, the default)", "--poll 10m", "exit 0 answered", "3 still", "`vh answer ", "--relay", "`vh note ", "`vh notes --since last --ack`", "`vh attention`", "`vh note show "} {
+	for _, want := range []string{"`vh block <task> ", "(--stop, the default)", "--poll 10m", "exit 0 answered", "3 still", "`vh answer ", "--relay", "`vh note ", "`vh catchup`", "`vh attention`", "`vh note show "} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
+		}
+	}
+}
+
+func TestHelpAgentTextIsWrittenAroundTheShortcutCommands(t *testing.T) {
+	text := ProtocolText()
+	for _, want := range []string{
+		"`vh start <task> \"<intent>\" --res host-a --ttl 2h`", "`vh new <slug> \"<title>\" --start \"<intent>\"`",
+		"`vh ping \"<progress>\"`", "`vh finish \"<outcome>\" --done`", "`vh block <task> \"<question>\"`", "`vh catchup`",
+		"`vh now --resources host-a`", "`vh task reopen <ref>` first", "`vh task done --force` only when the operator says so",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the text does not mention %s", want)
+		}
+	}
+	for _, gone := range []string{"BOARD_", "board protocol", "`vh lease start", "`vh notes "} {
+		if strings.Contains(text, gone) {
+			t.Errorf("the text still mentions %s", gone)
 		}
 	}
 }

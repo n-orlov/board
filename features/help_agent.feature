@@ -14,18 +14,25 @@ Feature: The agent protocol, vh help agent
     When I run the client 'vh help agent' as actor "claude@laptop"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v3$"
+    And stdout line 1 matches "^vh protocol v4$"
     And the stdout text names at least 5 commands
     And every board command and flag the stdout text names exists in the command tree
     When I run the client 'vh help agent --version' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout is exactly "3"
+    And stdout is exactly "4"
 
-  Scenario: protocol v3 teaches the four lease and done changes
+  Scenario: protocol v4 is written around the shortcuts and keeps the v3 rules
     When I run the client 'vh help agent' as actor "claude@laptop"
     Then the exit code is 0
-    And stdout line 1 matches "^board protocol v3$"
-    And the stdout text names the command 'vh task done <ref> ["outcome"]'
+    And stdout line 1 matches "^vh protocol v4$"
+    And the stdout text names the command 'vh start <task> "<intent>" --res host-a --ttl 2h'
+    And the stdout text names the command 'vh new <slug> "<title>" --start "<intent>"'
+    And the stdout text names the command 'vh ping "<progress>"'
+    And the stdout text names the command 'vh finish "<outcome>" --done'
+    And the stdout text names the command 'vh block <task> "<question>"'
+    And the stdout text names the command 'vh catchup'
+    And the stdout text names the command 'vh now --resources host-a'
+    And the stdout text names the command 'vh task done <ref>'
     And the stdout text names the command 'vh task reopen <ref>'
     And the stdout text names the command 'vh lease ack L5'
     And the stdout text names the command 'vh task done --force'
@@ -36,13 +43,13 @@ Feature: The agent protocol, vh help agent
     Then there is no actor row for "claude@laptop"
     When I run the client 'vh help agent' as actor "claude@laptop"
     Then the exit code is 0
-    And the protocol_seen of the actor "claude@laptop" is 3
-    When I record protocol version 4 as read as actor "claude@laptop" through the API
+    And the protocol_seen of the actor "claude@laptop" is 4
+    When I record protocol version 5 as read as actor "claude@laptop" through the API
     Then the response status is 200
     And the response field "actor" is "claude@laptop"
-    And the response field "protocol_seen" is "4"
+    And the response field "protocol_seen" is "5"
     When I run the client 'vh help agent' as actor "claude@laptop"
-    Then the protocol_seen of the actor "claude@laptop" is 4
+    Then the protocol_seen of the actor "claude@laptop" is 5
     When I record protocol version -1 as read as actor "claude@laptop" through the API
     Then the response status is 400
     And the problem has a next field containing "version"
@@ -51,5 +58,5 @@ Feature: The agent protocol, vh help agent
     When I run the client 'vh help agent' as actor "claude@laptop" against the address "http://127.0.0.1:1"
     Then the exit code is 0
     And stderr is empty
-    And stdout line 1 matches "^board protocol v3$"
+    And stdout line 1 matches "^vh protocol v4$"
     And every board command and flag the stdout text names exists in the command tree

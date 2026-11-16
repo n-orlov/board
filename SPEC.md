@@ -2306,14 +2306,14 @@ The README says: *"or ask your agent: install board following
 
 A CI check (Lint stage) parses `install.sh` and `INSTALL-AGENT.md` and fails if they disagree on
 the asset name pattern, supported OS/arch list, checksum file name, default install directory or
-the environment variable names. Where releases come from while the repository is private is the
-operator's deployment concern, not part of this spec.
+the environment variable names. The repository is public, so `install.sh` and `vh update`
+download release assets anonymously over HTTPS, with no token.
 
 ### 8.6 Agent protocol: `vh help agent`
 
 The rules an agent follows live **in the binary**, not in a skill file each operator copies and
 lets drift. `vh help agent` prints a cheat sheet of about 40 lines, headed
-`board protocol vN`, that is the whole working protocol:
+`vh protocol vN`, that is the whole working protocol:
 
 - **identity**: export `VH_URL`, `VH_API_KEY`, `VH_ACTOR`, `VH_WAY_BACK` per the
   operator's instructions (§9); check with `vh whoami`; subagents use the parent's handle;
@@ -2383,26 +2383,41 @@ and names no command or flag the build lacks (the `help_agent.feature` scenario 
   `+` marks a body, `vh note show N<n>` prints it) and `vh attention` for what needs a human;
 - exit code 3 (an ask still open) next to the others.
 
-**Protocol v3** is the current text. It is headed `board protocol v3`, replaces wording rather than
-adding to it so as to keep the same budget (45 lines of 100 columns, held by a test), and names no
-command or flag the build lacks (`vh lease ack` and `vh task done --force` are in the command
-tree). On top of v2 it carries exactly four changes, each one something an agent would otherwise
-do wrong:
+**Protocol v3** was the text of Phase 3. It was headed `board protocol v3`, replaced wording
+rather than adding to it, and carried four changes on top of v2, each one something an agent
+would otherwise do wrong: `vh task done <ref> ["outcome"]` ends your own live lease (§3.4);
+`vh lease start` on a done task is refused, so reopen it with `vh task reopen <ref>`;
+`vh lease ack L<n>` acknowledges a lease that ran out (§8.1); and `vh task done --force` only
+when the operator says so, because it is the way past another actor's live lease and ends it.
 
-- `vh task done <ref> ["outcome"]` ends your own live lease on the task, with the outcome as the
-  lease's closing text (§3.4);
-- `vh lease start` on a done task is refused: reopen it first with `vh task reopen <ref>`;
-- `vh lease ack L<n>` acknowledges a lease that ran out, so the task stops needing attention
-  for it (§8.1);
-- `vh task done --force` only when the operator says so: it is the way past another actor's
-  live lease and ends that lease.
+**Protocol v4** is the current text. It is headed `vh protocol v4` (the header regexp in
+`internal/cli/helpagent.go` is `^vh protocol v(\d+)\n`), keeps the budget of 45 lines of 100
+columns held by a test, and names no command or flag the build lacks. It is rewritten around the
+shortcuts of §8.4, and replaces v3's lease and ask commands rather than adding to them:
 
-`features/help_agent.feature` asserts the version line `board protocol v3`, the version number 3
-and each of those four commands in the printed text; `internal/cli/helpagent_test.go` and the
-golden file hold the same version.
+- **identity** uses the `VH_*` names: `VH_URL`, `VH_API_KEY`, `VH_ACTOR`, `VH_WAY_BACK`
+  (`vh whoami` checks them; subagents use the parent's handle);
+- **start, ping, finish**: search before creating (`vh init ls`, `vh task ls <slug>`), then
+  `vh start <task> "<intent>" --res … --ttl …` or `vh new <slug> "<title>" --start "<intent>"`;
+  `vh ping "<progress>"` at each milestone and at least every half TTL;
+  `vh finish "<outcome>" --done` ends the lease with a note and marks the task done, as does
+  `vh task done <ref>`;
+- the v3 rules stay: a done task is reopened with `vh task reopen <ref>` before `start`,
+  `vh lease ack L<n>` acknowledges a lease that ran out, and `vh task done --force` only on the
+  operator's explicit word;
+- **shared resources**: `vh now --resources host-a` before a risky action; `CONFLICT` lines and
+  exit 7 mean read the other lease's intent, then wait, coordinate or ask, and never go on
+  through a conflict on a destructive action;
+- **block**: `vh block <task> "<question>"` raises the ask and ends the lease (`--stop`, the
+  default); `--poll D` keeps the lease and waits (exit 0 answered, 6 withdrawn, 3 still open);
+  `vh answer A<n> "<answer>" --relay` records an answer given in conversation;
+- **catchup**: `vh catchup` at check-in and after long waits, `vh note`, `vh note show N<n>` and
+  `vh attention`;
+- closing only when asked (`vh task close <ref> --for operator`) and the exit codes 0 to 7.
 
-The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) arrive with their
-commands, each bumping the version.
+`features/help_agent.feature` asserts the version line `vh protocol v4`, the version number 4 and
+each of those commands in the printed text; `internal/cli/helpagent_test.go` and the golden file
+hold the same version.
 
 **Server side.** `GET /meta` answers `{version, revision, protocol, principal, actor}`: the server binary's
 version (as `vh version` prints it first), the commit it was built from (`revision`, omitted when the
@@ -2414,15 +2429,22 @@ nothing from the database. `PUT /actors/me/protocol-seen` takes `{"version": N}`
 version read and a repeated or older call changes nothing. It answers
 `{actor, protocol_seen}` with the value stored.
 
-**Staleness hint.** `GET /meta` returns the server's protocol version (the one its own binary
-embeds). `vh start` (and `vh new`) prints at most one extra line when either is newer:
+**Staleness hint.** `vh start` (and `vh new`) prints at most one extra line when the server's
+protocol or the caller's last reading is behind the binary:
 
 ```
-hint: board protocol v4 on the server, you have v3 → vh update, then vh help agent
-hint: board protocol v4 changed since you last read it → vh help agent
+hint: vh protocol v<S> on the server, you have v<C> → vh update, then vh help agent
+hint: vh protocol v<C> changed since you last read it → vh help agent
 ```
 
-The hint never changes the exit code and never blocks the command.
+The first is printed when the server's protocol `S` is newer than the binary's `C`, the second
+otherwise when the caller's `protocol_seen` is lower than `C`; a caller that is current prints no
+hint. The line comes last on stdout, after the `now` summary, and only in the text output (`--json`
+prints the response as it came, which carries both numbers). It costs no request: it reads the
+`protocol` and `protocol_seen` fields of the `POST /start` answer (§8.4), not `GET /meta`. The hint
+never changes the exit code and never blocks the command. `features/cli_start.feature` covers it in
+three cases: a stub server newer than the binary, a `protocol_seen` older than the binary's (for
+`start` and `new`, with exit 0 and 7), and an actor that has read the current text.
 
 **Tests.**
 - Golden file: the exact text (`internal/cli/testdata/help-agent.golden`), updated deliberately with

@@ -24,6 +24,10 @@ type startView struct {
 	leaseResult
 	TaskCreated bool    `json:"task_created"`
 	Now         nowView `json:"now"`
+	// Protocol is the agent protocol the server embeds, ProtocolSeen the
+	// highest one the caller has read (0 when it recorded none).
+	Protocol     int `json:"protocol"`
+	ProtocolSeen int `json:"protocol_seen"`
 }
 
 // startCmd runs `vh start <task> "<intent>"`: the lease start and the check-in
@@ -83,7 +87,7 @@ func postStart(p parsedArgs, body map[string]any, failure func(error) error, std
 	if p.has("--json") {
 		_, _ = fmt.Fprintln(stdout, string(raw))
 	} else {
-		_, _ = fmt.Fprint(stdout, startText(v, nowFn()))
+		_, _ = fmt.Fprint(stdout, startText(v, nowFn())+protocolHint(v.Protocol, v.ProtocolSeen, ProtocolVersion()))
 	}
 	if len(v.Conflicts) > 0 {
 		return ExitWarning
@@ -99,4 +103,19 @@ func startText(v startView, now time.Time) string {
 		created = "ok task " + v.Lease.Task + " created\n"
 	}
 	return created + leaseResultText(v.leaseResult, now) + nowText(v.Now, now)
+}
+
+// protocolHint is the one hint line a start or new may end with, with its
+// newline, or "" when nothing is stale: the server's protocol being newer than
+// this binary's (update first), else the protocol the caller last read being
+// older than this binary's (read it again). It costs no request: the start
+// response carries both numbers.
+func protocolHint(server, seen, client int) string {
+	switch {
+	case server > client:
+		return fmt.Sprintf("hint: vh protocol v%d on the server, you have v%d \u2192 vh update, then vh help agent\n", server, client)
+	case seen < client:
+		return fmt.Sprintf("hint: vh protocol v%d changed since you last read it \u2192 vh help agent\n", client)
+	}
+	return ""
 }

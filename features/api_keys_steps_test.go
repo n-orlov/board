@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -31,6 +32,9 @@ type apiState struct {
 	counts string
 	// startCounts is the tasks, leases and events count a scenario noted.
 	startCounts string
+	// stubBoard is the server a scenario started to answer POST /api/v1/start
+	// with chosen protocol numbers; stopServer closes it.
+	stubBoard *httptest.Server
 	// blockCounts is the asks, events and live leases count a scenario noted.
 	blockCounts string
 	// finishCounts is the events, notes and live leases count a scenario noted.

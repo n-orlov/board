@@ -410,6 +410,10 @@ func (h *harness) keyFromAnotherDatabase(ctx context.Context) error {
 }
 
 func (h *harness) stopServer() {
+	if h.api.stubBoard != nil {
+		h.api.stubBoard.Close()
+		h.api.stubBoard = nil
+	}
 	if h.server != nil && h.server.Process != nil {
 		endServer(h.server)
 	}
