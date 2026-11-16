@@ -170,12 +170,12 @@ FROM --platform=$BUILDPLATFORM golang:1.26@sha256:bb AS build
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -tags timetzdata -o /out/board ./cmd/vh
+    go build -tags timetzdata -o /out/vh ./cmd/vh
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /out/board /board
+COPY --from=build /out/vh /vh
 USER 65532:65532
-ENTRYPOINT ["/board"]
+ENTRYPOINT ["/vh"]
 `
 
 func TestImageProblemsAcceptsACrossCompilingScratchImage(t *testing.T) {
@@ -199,7 +199,7 @@ func TestImageProblemsFlagsEachDeparture(t *testing.T) {
 		{"root user", "USER 65532:65532", "USER 0", "runs as root"},
 		{"root by name", "USER 65532:65532", "USER root:root", "runs as root"},
 		{"no user", "USER 65532:65532\n", "", "sets no USER"},
-		{"a RUN in the final stage", "USER 65532:65532", "RUN chmod +x /board\nUSER 65532:65532", "final stage has a RUN"},
+		{"a RUN in the final stage", "USER 65532:65532", "RUN chmod +x /vh\nUSER 65532:65532", "final stage has a RUN"},
 		{"no CA certificates", "COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\n", "", "CA certificates"},
 		{"build for the host", "GOARCH=$TARGETARCH", "GOARCH=amd64", "GOOS=$TARGETOS GOARCH=$TARGETARCH"},
 		{"no TARGETOS", "GOOS=$TARGETOS ", "", "GOOS=$TARGETOS GOARCH=$TARGETARCH"},
@@ -246,7 +246,7 @@ func TestRootDockerfileBuildsTheMultiArchContainer(t *testing.T) {
 
 // TestImageCiStepBuildsBothPlatformsAndPushesNothing: the Quality stage's
 // image step builds linux/amd64 and linux/arm64 from the digest-pinned buildx
-// and BuildKit images, loads the amd64 image, runs `board version`, probes
+// and BuildKit images, loads the amd64 image, runs `vh version`, probes
 // /healthz and inspects both manifests, and never pushes.
 func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
 	build := readRepoFile(t, "ci", "image-build.sh")
@@ -270,7 +270,10 @@ func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"go run ./ci/imagecheck", `docker run --rm "$tag" version`, "/healthz"} {
+	for _, want := range []string{
+		"go run ./ci/imagecheck", `docker run --rm "$tag" version`, "/healthz",
+		"-tags imagedeploy", "^TestDeployedConfiguration", "junit-image-deployed.xml",
+	} {
 		if !strings.Contains(check, want) {
 			t.Errorf("ci/image-check.sh lacks %q", want)
 		}
@@ -287,6 +290,16 @@ func TestImageCiStepBuildsBothPlatformsAndPushesNothing(t *testing.T) {
 		}
 	}
 	jf := readRepoFile(t, "Jenkinsfile")
+	deployed := readRepoFile(t, "ci", "imagecheck", "deployed_test.go")
+	for _, want := range []string{
+		"//go:build imagedeploy", "func TestDeployedConfiguration",
+		`Cmd: []string{"serve"}`, "ReadonlyRootfs = true", `CapDrop = []string{"ALL"}`, `"/tmp"`,
+		"BOARD_DB_URL", "BOARD_OIDC_ISSUER", "BOARD_OIDC_CLIENT_SECRET", "oidctest.New", "baseSchemaVersion",
+	} {
+		if !strings.Contains(deployed, want) {
+			t.Errorf("ci/imagecheck/deployed_test.go lacks %q", want)
+		}
+	}
 	expectProblems(t, jf, imageUnitProblems, map[string]string{
 		"an image checked before it is built": replaceOnce(t, jf, `ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"`, `ci/image-check.sh "$BOARD_CI_OUT" && ci/image-build.sh "$BOARD_CI_OUT/board-image.tar"`),
 		"an image that is never checked":      replaceOnce(t, jf, ` && ci/image-check.sh "$BOARD_CI_OUT"`, ""),

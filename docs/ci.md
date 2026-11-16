@@ -209,10 +209,16 @@ builder (removed on exit), builds both platforms into one OCI layout
 loads it as `board:ci`, and saves it as `ci-results/board-image.tar`, which the
 `trivy-image` and `sbom-image` gates scan. `ci/image-check.sh` then inspects what
 was built: `go run ./ci/imagecheck` (through `ci/run.sh`) requires a manifest for
-each platform, a non-root user, `/board` as the entrypoint, and an ELF `/board`
-whose machine is that platform's (so an arm64 manifest holding the build host's
-binary fails); `docker run board:ci version` runs the loaded image; a container of
-it must answer `GET /healthz` with 200. Both run in the Image unit of the Core
+each platform, a non-root user, `/vh` as the entrypoint, the OCI title `Village Hall`,
+at most 30 MB of compressed layers, and an ELF `/vh` whose machine is that
+platform's (so an arm64 manifest holding the build host's binary fails);
+`docker run board:ci version` runs the loaded image; the `imagedeploy` test in
+`ci/imagecheck` (through `ci/run.sh`, JUnit in `ci-results/junit-image-deployed.xml`)
+starts the image the way the deployment does (`serve`, `BOARD_*` variables only, a
+read-only root, `tmpfs /tmp`, a non-root uid, no capabilities, OIDC on the mock
+provider, `/data` holding a SQLite file at the 0315466 schema) and checks `/healthz`,
+the existing `brd_` key, the existing `board_session` cookie and the rows; a container
+of it must answer `GET /healthz` with 200. Both run in the Image unit of the Core
 phase, whose tar the Quality unit then scans with `ci/quality.sh`.
 `ci/repocheck` fails when the final stage is not scratch or
 distroless static, has a `RUN`, runs as root or sets no user, lacks the CA
@@ -534,10 +540,11 @@ Scripts, each run through `ci/run.sh` unless noted:
   image's `VERSION` and `REVISION` build args (`BOARD_IMAGE_VERSION`, `BOARD_IMAGE_REVISION`, set by
   the Jenkinsfile to the commit's tag or short sha and the full commit), which the binary reports in
   `board version` and `GET /api/v1/meta`.
-- `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `board version`
-  and a `/healthz` probe against `board:ci`.
+- `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `vh version`,
+  the deployed-configuration test and a `/healthz` probe against `board:ci`.
 - `ci/imagecheck`: the Go tool that reads the OCI layout (both manifests, user,
-  entrypoint, the ELF machine of `/board`).
+  entrypoint, title, compressed size, the ELF machine of `/vh`); its `imagedeploy`
+  test (`deployed_test.go`) starts the loaded image as the deployment does.
 - `ci/stability.sh`: the suite N times, each run labelled by the exit status of
   `go test` itself.
 - On the Jenkins agent, outside `ci/run.sh`: `ci/jenkins-image.sh` (builds

@@ -3364,7 +3364,23 @@ network requests (all assets embedded).
 
 - Multi-stage build; final image `FROM scratch` (or distroless static) with the binary, CA
   certificates and tzdata (embedded in the binary with `-tags timetzdata`). Runs as a non-root
-  uid (65532). Multi-arch: linux/amd64, linux/arm64.
+  uid (65532). Multi-arch: linux/amd64, linux/arm64. The binary is `/vh`, the image's
+  `ENTRYPOINT` is `["/vh"]` and its `CMD` is `["serve"]`, and its OCI title label
+  (`org.opencontainers.image.title`) is `Village Hall`.
+- The image is 30 MB or less (§14), measured as the compressed size of its layers on each
+  platform (what a registry stores and a pull transfers). `ci/imagecheck` reads that from the OCI
+  layout and fails an image over 30,000,000 bytes, an entrypoint other than `/vh`, and a title
+  other than `Village Hall`.
+- The deployed configuration starts the image unchanged: `command: [serve]` with no entrypoint
+  override, only `BOARD_*` variables (`BOARD_LISTEN`, `BOARD_DB_URL=sqlite:///data/board.db`,
+  `BOARD_PUBLIC_URL`, `BOARD_OIDC_ISSUER`, `BOARD_OIDC_ALLOWED_EMAILS`, `BOARD_OIDC_CLIENT_ID`,
+  `BOARD_OIDC_CLIENT_SECRET`, and `BOARD_TASK`, which the product does not read), a read-only
+  root filesystem, `tmpfs /tmp`, a non-root uid, every capability dropped and a `/data` volume.
+  `ci/image-check.sh` proves it against the built image with `ci/imagecheck`'s `imagedeploy` test:
+  `/data` holds a SQLite file migrated to the 0315466 schema (migration 9) with an API key, a
+  browser session and rows; the container answers `GET /healthz` with 200, the existing `brd_`
+  key authenticates, the existing `board_session` cookie is accepted, the rows read back, and a
+  wrong key or cookie is refused.
 - Built by cross-compiling: every builder stage is `FROM --platform=$BUILDPLATFORM` and the Go
   build takes `GOOS=$TARGETOS GOARCH=$TARGETARCH`; the final stage only `COPY`s, so no platform is
   built under emulation. Every `FROM` is pinned by digest. CI (`ci/image-build.sh`,
@@ -3482,7 +3498,7 @@ Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
 | target | value |
 |---|---|
 | idle RSS | ≤ 40 MB |
-| image size | ≤ 30 MB |
+| image size | ≤ 30 MB (compressed layers, each platform; `ci/imagecheck`) |
 | cold start to `/readyz` | ≤ 1 s with an empty DB, ≤ 3 s with 1 M events |
 | `GET /now`, `GET /attention` p99 | ≤ 20 ms at 1 M events, 50 k notes, 200 live leases |
 | lease renew p99 | ≤ 10 ms |

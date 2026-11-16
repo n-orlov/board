@@ -1,4 +1,4 @@
-# board container image (SPEC 12.4). Multi-stage, final stage FROM scratch with
+# Village Hall container image (SPEC 12.4). Multi-stage, final stage FROM scratch with
 # the binary, CA certificates and tzdata, running as a non-root uid. Every
 # builder stage runs on the build host's own platform (--platform=$BUILDPLATFORM)
 # and cross-compiles with GOOS/GOARCH from the target platform, so the linux/amd64
@@ -33,16 +33,17 @@ COPY --from=web /src/internal/webui/dist/ internal/webui/dist/
 # timetzdata embeds the time zone database, so the scratch image needs no
 # /usr/share/zoneinfo; there is no .git in the build context, hence -buildvcs=false.
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -buildvcs=false -tags timetzdata -ldflags="-s -w -X github.com/n-orlov/village-hall/internal/version.version=$VERSION -X github.com/n-orlov/village-hall/internal/version.revision=$REVISION" -o /out/board ./cmd/vh \
+    go build -trimpath -buildvcs=false -tags timetzdata -ldflags="-s -w -X github.com/n-orlov/village-hall/internal/version.version=$VERSION -X github.com/n-orlov/village-hall/internal/version.revision=$REVISION" -o /out/vh ./cmd/vh \
  && mkdir -p /out/data
 
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /out/board /board
+COPY --from=build /out/vh /vh
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
+LABEL org.opencontainers.image.title="Village Hall"
 ENV BOARD_LISTEN=:8080
 VOLUME /data
 EXPOSE 8080
-ENTRYPOINT ["/board"]
+ENTRYPOINT ["/vh"]
 CMD ["serve"]

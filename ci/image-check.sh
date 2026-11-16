@@ -3,10 +3,17 @@
 # pushing nothing:
 #
 #   1. both platforms' manifests are in the OCI layout, each runs as a
-#      non-root user from /board, and each /board is an ELF binary for that
-#      platform (ci/imagecheck, run through ci/run.sh);
-#   2. the loaded amd64 image (board:ci) answers `board version`;
-#   3. a container of it answers GET /healthz with 200.
+#      non-root user from /vh, is titled "Village Hall", is 30 MB or less, and
+#      each /vh is an ELF binary for that platform (ci/imagecheck, run through
+#      ci/run.sh);
+#   2. the loaded amd64 image (board:ci) answers `vh version`;
+#   3. the deployed configuration (command [serve], BOARD_* variables only, a
+#      read-only root, tmpfs /tmp, a non-root uid, every capability dropped,
+#      OIDC on a mock provider, /data holding a database written at the
+#      0315466 schema) starts it and it serves that database: ci/imagecheck's
+#      imagedeploy test, run through ci/run.sh, its JUnit in
+#      <dir>/junit-image-deployed.xml;
+#   4. a container of it answers GET /healthz with 200.
 #
 # On the Jenkins agent, outside ci/run.sh for the docker parts (they need the
 # docker CLI), in the Quality stage after ci/image-build.sh.
@@ -24,8 +31,14 @@ probe_seconds=${BOARD_IMAGE_PROBE_SECONDS:-30}
 
 ci/run.sh go run ./ci/imagecheck "$dir/board-image-oci.tar"
 
-echo "ci/image-check.sh: board version"
+echo "ci/image-check.sh: vh version"
 docker run --rm "$tag" version
+
+echo "ci/image-check.sh: the deployed configuration on a database written at 0315466"
+rm -f "$dir/junit-image-deployed.xml"
+ci/run.sh gotestsum --junitfile "$dir/junit-image-deployed.xml" --format testname -- \
+	-tags imagedeploy -count=1 -run '^TestDeployedConfiguration' ./ci/imagecheck/
+[ -s "$dir/junit-image-deployed.xml" ] || { echo "ci/image-check.sh: the deployed-configuration test wrote no JUnit file" >&2; exit 1; }
 
 # shellcheck disable=SC2317 # invoked by the trap below
 cleanup() { docker rm --force "$name" >/dev/null 2>&1 || true; }

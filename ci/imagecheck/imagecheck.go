@@ -17,6 +17,19 @@ import (
 // manifest, which sits in the image index beside the real platform manifests.
 const attestationKey = "vnd.docker.reference.type"
 
+const (
+	// titleLabel is the OCI annotation that names the image, and wantTitle its value.
+	titleLabel = "org.opencontainers.image.title"
+	wantTitle  = "Village Hall"
+	// wantEntrypoint is the binary the image runs, and wantBinary its name in
+	// the layers (no leading slash).
+	wantEntrypoint = "/vh"
+	wantBinary     = "vh"
+	// MaxImageBytes is SPEC 14's image size: 30 MB, decimal, measured on the
+	// compressed layers of each platform (Image.Size).
+	MaxImageBytes = 30 * 1000 * 1000
+)
+
 // wantPlatforms are the platforms SPEC 12.4 requires, with the ELF machine
 // the binary in each must have: the proof that the binary was cross-compiled
 // for that platform rather than copied from the build host.
@@ -45,8 +58,9 @@ type configDoc struct {
 	OS           string `json:"os"`
 	Architecture string `json:"architecture"`
 	Config       struct {
-		User       string   `json:"User"`
-		Entrypoint []string `json:"Entrypoint"`
+		User       string            `json:"User"`
+		Entrypoint []string          `json:"Entrypoint"`
+		Labels     map[string]string `json:"Labels"`
 	} `json:"config"`
 }
 
@@ -56,6 +70,11 @@ type Image struct {
 	User       string
 	Entrypoint []string
 	Machine    elf.Machine
+	// Title is the org.opencontainers.image.title label.
+	Title string
+	// Size is the image's compressed size: the bytes of its layer blobs in the
+	// layout, which is what a registry stores and a pull transfers.
+	Size int64
 }
 
 // layout is an OCI image layout read into memory: path in the tar -> bytes.
@@ -161,39 +180,42 @@ func (l layout) image(doc manifestDoc) (Image, error) {
 	image.Platform = config.OS + "/" + config.Architecture
 	image.User = config.Config.User
 	image.Entrypoint = config.Config.Entrypoint
-	image.Machine, err = l.binaryMachine(doc.Layers)
+	image.Title = config.Config.Labels[titleLabel]
+	image.Machine, image.Size, err = l.binaryMachine(doc.Layers)
 	if err != nil {
 		return image, fmt.Errorf("%s: %w", image.Platform, err)
 	}
 	return image, nil
 }
 
-// binaryMachine returns the ELF machine of /board in the last layer that
-// carries it.
-func (l layout) binaryMachine(layers []descriptor) (elf.Machine, error) {
+// binaryMachine returns the ELF machine of /vh in the last layer that carries
+// it, and the compressed size of all the layers together.
+func (l layout) binaryMachine(layers []descriptor) (elf.Machine, int64, error) {
 	machine := elf.EM_NONE
+	var size int64
 	for _, layer := range layers {
 		data, err := l.blob(layer.Digest)
 		if err != nil {
-			return machine, err
+			return machine, size, err
 		}
-		binary, err := fileInLayer(data, "board")
+		size += int64(len(data))
+		binary, err := fileInLayer(data, wantBinary)
 		if err != nil {
-			return machine, err
+			return machine, size, err
 		}
 		if binary == nil {
 			continue
 		}
 		parsed, err := elf.NewFile(bytes.NewReader(binary))
 		if err != nil {
-			return machine, fmt.Errorf("/board is not an ELF binary: %w", err)
+			return machine, size, fmt.Errorf("/%s is not an ELF binary: %w", wantBinary, err)
 		}
 		machine = parsed.Machine
 	}
 	if machine == elf.EM_NONE {
-		return machine, errors.New("no /board binary in any layer")
+		return machine, size, fmt.Errorf("no /%s binary in any layer", wantBinary)
 	}
-	return machine, nil
+	return machine, size, nil
 }
 
 // fileInLayer returns the bytes of name in a (possibly gzipped) layer tar, or
@@ -223,8 +245,8 @@ func fileInLayer(layer []byte, name string) ([]byte, error) {
 }
 
 // Verify returns one message per way the images fall short of SPEC 12.4:
-// a missing platform, a root user, a wrong entrypoint, a binary built for
-// another architecture.
+// a missing platform, a root user, a wrong entrypoint or title, an oversize
+// image, a binary built for another architecture.
 func Verify(images []Image) []string {
 	var problems []string
 	byPlatform := map[string]Image{}
@@ -247,11 +269,17 @@ func imageProblems(image Image, machine elf.Machine) []string {
 	if isRoot(image.User) {
 		problems = append(problems, fmt.Sprintf("%s: runs as root (User %q)", image.Platform, image.User))
 	}
-	if len(image.Entrypoint) == 0 || image.Entrypoint[0] != "/board" {
-		problems = append(problems, fmt.Sprintf("%s: entrypoint is %q, want /board", image.Platform, image.Entrypoint))
+	if len(image.Entrypoint) == 0 || image.Entrypoint[0] != wantEntrypoint {
+		problems = append(problems, fmt.Sprintf("%s: entrypoint is %q, want %s", image.Platform, image.Entrypoint, wantEntrypoint))
+	}
+	if image.Title != wantTitle {
+		problems = append(problems, fmt.Sprintf("%s: %s is %q, want %q", image.Platform, titleLabel, image.Title, wantTitle))
+	}
+	if image.Size > MaxImageBytes {
+		problems = append(problems, fmt.Sprintf("%s: image is %d bytes compressed, over the %d bytes SPEC 14 allows", image.Platform, image.Size, MaxImageBytes))
 	}
 	if image.Machine != machine {
-		problems = append(problems, fmt.Sprintf("%s: /board is %s, want %s: it was not cross-compiled for this platform", image.Platform, image.Machine, machine))
+		problems = append(problems, fmt.Sprintf("%s: /%s is %s, want %s: it was not cross-compiled for this platform", image.Platform, wantBinary, image.Machine, machine))
 	}
 	return problems
 }

@@ -1,7 +1,7 @@
 // Command imagecheck inspects the multi-platform OCI layout that
 // ci/image-build.sh writes (SPEC 12.4): a manifest exists for linux/amd64 and
-// linux/arm64, each runs as a non-root user with /board as its entrypoint, and
-// the /board in each is an ELF binary for that platform's architecture.
+// linux/arm64, each runs as a non-root user with /vh as its entrypoint and the title
+// "Village Hall", is 30 MB or less, and the /vh in each is an ELF binary for that platform's architecture.
 //
 //	go run ./ci/imagecheck ci-results/board-image-oci.tar
 //
@@ -37,7 +37,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	sort.Slice(images, func(i, j int) bool { return images[i].Platform < images[j].Platform })
 	for _, image := range images {
-		say(stdout, "%s user=%s entrypoint=%v binary=%s\n", image.Platform, image.User, image.Entrypoint, image.Machine)
+		say(stdout, "%s user=%s entrypoint=%v title=%q size=%d binary=%s\n", image.Platform, image.User, image.Entrypoint, image.Title, image.Size, image.Machine)
 	}
 	problems := Verify(images)
 	for _, problem := range problems {

@@ -83,18 +83,22 @@ type imageSpec struct {
 	machine        elf.Machine
 	binaryName     string
 	gzipped        bool
+	// title is the org.opencontainers.image.title label; padding is how many
+	// zero bytes follow the ELF header inside the binary.
+	title   string
+	padding int
 }
 
 func goodSpec(arch string, machine elf.Machine) imageSpec {
-	return imageSpec{os: "linux", arch: arch, user: "65532:65532", entrypoint: []string{"/board"}, machine: machine, binaryName: "board"}
+	return imageSpec{os: "linux", arch: arch, user: "65532:65532", entrypoint: []string{"/vh"}, machine: machine, binaryName: "vh", title: "Village Hall"}
 }
 
 // image adds one platform manifest and returns its index descriptor.
 func (b *ociBuilder) image(spec imageSpec) map[string]any {
-	layer := b.blob(layerTar(b.t, spec.binaryName, elfBinary(spec.machine), spec.gzipped))
+	layer := b.blob(layerTar(b.t, spec.binaryName, append(elfBinary(spec.machine), make([]byte, spec.padding)...), spec.gzipped))
 	config := b.json(map[string]any{
 		"os": spec.os, "architecture": spec.arch,
-		"config": map[string]any{"User": spec.user, "Entrypoint": spec.entrypoint},
+		"config": map[string]any{"User": spec.user, "Entrypoint": spec.entrypoint, "Labels": map[string]string{titleLabel: spec.title}},
 	})
 	manifest := b.json(map[string]any{
 		"config": map[string]any{"digest": config},
@@ -151,8 +155,12 @@ func TestVerifyFlagsWhatSpecTwelveFourForbids(t *testing.T) {
 		{"root user", func(s *imageSpec) { s.user = "0:0" }, "runs as root"},
 		{"no user", func(s *imageSpec) { s.user = "" }, "runs as root"},
 		{"named root", func(s *imageSpec) { s.user = "root" }, "runs as root"},
-		{"wrong entrypoint", func(s *imageSpec) { s.entrypoint = []string{"/bin/sh"} }, "want /board"},
-		{"no entrypoint", func(s *imageSpec) { s.entrypoint = nil }, "want /board"},
+		{"wrong entrypoint", func(s *imageSpec) { s.entrypoint = []string{"/bin/sh"} }, "want /vh"},
+		{"the old /board entrypoint", func(s *imageSpec) { s.entrypoint = []string{"/board"} }, "want /vh"},
+		{"no entrypoint", func(s *imageSpec) { s.entrypoint = nil }, "want /vh"},
+		{"no title", func(s *imageSpec) { s.title = "" }, `want "Village Hall"`},
+		{"the old title", func(s *imageSpec) { s.title = "board" }, `want "Village Hall"`},
+		{"an oversize image", func(s *imageSpec) { s.padding = oversizePadding }, "over the 30000000 bytes"},
 		{"binary of the build host", func(s *imageSpec) { s.machine = elf.EM_X86_64 }, "not cross-compiled"},
 	}
 	for _, tc := range cases {
@@ -169,6 +177,43 @@ func TestVerifyFlagsWhatSpecTwelveFourForbids(t *testing.T) {
 		}
 	}
 }
+
+// A layer tar is a 512-byte header, the content rounded up to 512 and a
+// 1024-byte trailer. 58593*512 = 29,999,616 bytes is the largest layer within
+// 30 MB; one block more is over it.
+const (
+	paddingAtTheLimit = 58593*512 - 1536 - 64
+	oversizePadding   = paddingAtTheLimit + 512
+)
+
+func TestVerifyAcceptsAnImageExactlyAtTheSizeLimitAndNoMore(t *testing.T) {
+	b := newOCI(t)
+	spec := goodSpec("amd64", elf.EM_X86_64)
+	spec.padding = paddingAtTheLimit
+	images, err := Inspect(b.tar(b.image(spec)))
+	if err != nil || len(images) != 1 {
+		t.Fatalf("Inspect = %+v, %v", images, err)
+	}
+	if got := images[0].Size; got != 58593*512 {
+		t.Fatalf("size = %d, want %d", got, 58593*512)
+	}
+	for _, problem := range Verify(images) {
+		if strings.Contains(problem, "amd64") && strings.Contains(problem, "SPEC 14") {
+			t.Errorf("an image under 30 MB was flagged: %s", problem)
+		}
+	}
+	spec.padding = oversizePadding
+	images, err = Inspect(newOCI(t).tarOf(spec))
+	if err != nil || images[0].Size <= MaxImageBytes {
+		t.Fatalf("oversize image: size %d, %v", images[0].Size, err)
+	}
+	if problems := strings.Join(Verify(images), "\n"); !strings.Contains(problems, "linux/amd64: image is") {
+		t.Errorf("an image over 30 MB was not flagged: %q", problems)
+	}
+}
+
+// tarOf is a layout holding the one image of spec.
+func (b *ociBuilder) tarOf(spec imageSpec) *bytes.Reader { return b.tar(b.image(spec)) }
 
 func TestVerifyFlagsAMissingPlatform(t *testing.T) {
 	b := newOCI(t)
@@ -196,7 +241,7 @@ func TestInspectSkipsAttestationManifests(t *testing.T) {
 func TestInspectRejectsBrokenLayouts(t *testing.T) {
 	missingBinary := newOCI(t)
 	noBinary := goodSpec("amd64", elf.EM_X86_64)
-	noBinary.binaryName = "other"
+	noBinary.binaryName = "board"
 	notELF := newOCI(t)
 	notELFImage := notELF.image(goodSpec("amd64", elf.EM_X86_64))
 	notELF.files = map[string][]byte{} // drop the blobs: manifest not found
@@ -205,7 +250,7 @@ func TestInspectRejectsBrokenLayouts(t *testing.T) {
 		in   func() *bytes.Reader
 		want string
 	}{
-		{"no /board in any layer", func() *bytes.Reader { return missingBinary.tar(missingBinary.image(noBinary)) }, "no /board binary"},
+		{"no /vh in any layer", func() *bytes.Reader { return missingBinary.tar(missingBinary.image(noBinary)) }, "no /vh binary"},
 		{"a blob that is not in the layout", func() *bytes.Reader { return notELF.tar(notELFImage) }, "is not in the layout"},
 		{"index.json is not JSON", func() *bytes.Reader {
 			b := newOCI(t)
@@ -240,10 +285,10 @@ func TestBlobRejectsAMalformedDigest(t *testing.T) {
 }
 
 func TestFileInLayerRejectsACorruptGzip(t *testing.T) {
-	if _, err := fileInLayer([]byte{0x1f, 0x8b, 0, 0}, "board"); err == nil {
+	if _, err := fileInLayer([]byte{0x1f, 0x8b, 0, 0}, "vh"); err == nil {
 		t.Error("a truncated gzip layer was read without error")
 	}
-	if _, err := fileInLayer(bytes.Repeat([]byte("y"), 600), "board"); err == nil {
+	if _, err := fileInLayer(bytes.Repeat([]byte("y"), 600), "vh"); err == nil {
 		t.Error("a layer that is not a tar was read without error")
 	}
 }
@@ -278,7 +323,7 @@ func TestRunReportsEachOutcomeWithItsExitCode(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{"both platforms", []string{good}, 0, "linux/arm64 user=65532:65532 entrypoint=[/board] binary=EM_AARCH64", ""},
+		{"both platforms", []string{good}, 0, "linux/arm64 user=65532:65532 entrypoint=[/vh] title=\"Village Hall\"", ""},
 		{"one platform", []string{partial}, 1, "linux/amd64", "linux/arm64: no manifest"},
 		{"unreadable tar", []string{garbage}, 1, "", "read the OCI tar"},
 		{"missing file", []string{filepath.Join(t.TempDir(), "absent.tar")}, 1, "", "imagecheck:"},
