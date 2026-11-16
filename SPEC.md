@@ -2269,17 +2269,29 @@ attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1
 **Script** (mirrors deck's `install.sh`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/<owner>/board/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
 ```
 
-- Detects OS (linux, darwin) and arch (amd64, arm64), downloads `board_<os>_<arch>.tar.gz` and
-  `checksums.txt` from the GitHub release over HTTPS only, verifies SHA-256, installs to
-  `~/.local/bin/vh` (copy then rename, so a running binary is replaced safely).
-- `VH_VERSION=vX.Y.Z` pins a release (default latest); `VH_INSTALL_DIR` changes the
-  directory.
+- Detects OS (linux, darwin) and arch (amd64, arm64; `uname -m` `x86_64` and `aarch64` are mapped),
+  downloads `vh_<os>_<arch>.tar.gz` and `checksums.txt` from the release over HTTPS only, verifies
+  SHA-256, installs to `${VH_INSTALL_DIR:-$HOME/.local/bin}/vh` (copy to a temporary file in that
+  directory, then rename, so a running binary is replaced safely and the inode changes).
+- **Where releases come from**: `VH_REPO` (default `n-orlov/board`; GitHub redirects the old
+  slug once the repository is renamed). The release API answer and the release assets are
+  anonymous HTTPS downloads from the public repository: no token is read or sent, and `install.sh` and
+  `vh update` have no token handling.
+- `VH_VERSION=vX.Y.Z` pins a release (default latest, resolved through the release API);
+  `VH_INSTALL_DIR` changes the directory.
+- Every `curl` in `install.sh` is `--proto =https` (redirects too). The base URLs of the release
+  API and of the downloads default to `https://api.github.com` and `https://github.com`; tests
+  override them with `VH_API_URL` and `VH_DOWNLOAD_URL`, which accept `https://`, or `http://`
+  only on `127.0.0.1`, `localhost` or `[::1]`, and anything else is refused before any request.
+  A static test fails on any `curl` call without `--proto =https`.
 - **Immutability**: before installing it asks the GitHub release API whether the release is
-  immutable and refuses one that is not confirmed, as `deck update` does;
-  `VH_REQUIRE_IMMUTABLE=0` (exactly `0`) opts out with a note. (deck's own `install.sh` does
+  immutable and refuses one that is not confirmed (the `immutable` member of the release object is not
+  exactly `true`, or the answer is missing), as `deck update` does; nothing is downloaded or
+  installed then. `VH_REQUIRE_IMMUTABLE=0` (exactly `0`; `1`, `no` and every other value keep the
+  check on) opts out with a note. (deck's own `install.sh` does
   not check this yet; board's does.)
 - Prints the installed `vh version` and warns if the directory is not on `PATH`.
 

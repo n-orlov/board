@@ -565,12 +565,11 @@ ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
 - **tmux-only tests.** Board has no TUI: `ci/tmuxguard/`, `ci/tmux-guard.sh`
   and the `tmux.version` assertion in deck's `ci/suitecheck/allure_test.go`
   are not carried.
-- **install.sh tests, deferred to Phase 4.** deck's
-  `ci/repocheck/installcheck_test.go` and
-  `TestInstallScriptCurlIsHTTPSOnlyAndStatesItsChecksumLimit` (deck's
-  `ci/allureverify/allureverify_test.go`) are not carried. `install.sh` is
-  Phase 4 (SPEC §16), and its tests are rewritten then against SPEC §8.5's
-  immutability check, not deck's checksum-only one.
+- **install.sh tests, rewritten for Phase 4.** deck's `ci/repocheck/installcheck_test.go`
+  and `TestInstallScriptCurlIsHTTPSOnlyAndStatesItsChecksumLimit` are not carried as
+  they were: `ci/repocheck/install_test.go` runs `sh install.sh` against an httptest
+  release server with a fake `uname`, covers SPEC §8.5's immutability check (not
+  deck's checksum-only one) and fails any `curl` call without `--proto =https`.
 - **Jenkinsfile tests, carried here.** deck's `ci/repocheck/jenkinsfile_test.go`
   and its `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
   `ci/repocheck/lintgate_test.go`, here `TestLintUnitRunsGolangciLintBeforeLaterPhases`)
