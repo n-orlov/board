@@ -39,6 +39,7 @@ var commandTree = map[string][]flagSpec{
 	"start":             startFlags,
 	"new":               newFlags,
 	"finish":            finishFlags,
+	"block":             blockFlags,
 	"ping":              pingFlags,
 	"now":               nowFlags,
 	"milestone":         milestoneFlags,

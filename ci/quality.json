@@ -103,6 +103,7 @@
             "internal/server": [
                 "api.go",
                 "askops.go",
+                "askraised.go",
                 "askwait.go",
                 "attentionops.go",
                 "auth.go",
@@ -131,6 +132,7 @@
                 "askpoll.go",
                 "asks.go",
                 "attention.go",
+                "block.go",
                 "cli.go",
                 "client.go",
                 "events.go",
@@ -176,6 +178,7 @@
             "internal/server": {
                 "ops": [
                     "askops.go",
+                    "askraised.go",
                     "attentionops.go",
                     "cursorops.go",
                     "eventops.go",
@@ -208,6 +211,7 @@
                 "core": [
                     "adminkeys.go",
                     "args.go",
+                    "block.go",
                     "cli.go",
                     "client.go",
                     "finish.go",

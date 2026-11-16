@@ -1545,8 +1545,13 @@ paths:
         `poll`; `blocking` (default false) marks an ask that blocks its task. `task` is a task ref or ULID and
         `initiative` a slug or ULID; both may be left out for a board-wide ask. The initiative of an ask on a task is
         the task's: sending both is 400 unless the task belongs to that initiative. An unknown task or initiative is
-        404, and a closed task or a closed initiative is 409. The answer is 201 with the ask and the event
-        `ask_raised`. A refused request writes no ask, event or actor.
+        404, and a closed task or a closed initiative is 409. `lease_action` is what the raise does to the
+        caller's live lease on the task: `none` (default) leaves it as it is, `keep` leaves it live, and `stop` ends it
+        with the outcome `blocked on A<n>` (a `lease_ended` event) in the same transaction as the ask. A `keep` or `stop`
+        with no live lease on the task, or with no task, still raises the ask and acts on nothing. Any other value is
+        400. The answer is 201 with the ask and the event `ask_raised`, and the caller's `lease` on the task when
+        `keep` or `stop` found one (ended for `stop`, still live for `keep`). A refused
+        request writes no ask, event, lease end or actor.
       security:
         - bearerAuth: []
         - cookieAuth: []
@@ -1558,11 +1563,11 @@ paths:
               $ref: "#/components/schemas/AskRaise"
       responses:
         "201":
-          description: The ask was raised.
+          description: The ask was raised, and the lease acted on when `lease_action` was `keep` or `stop`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ask"
+                $ref: "#/components/schemas/AskRaised"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3747,6 +3752,20 @@ components:
         blocking:
           type: boolean
           description: Default false.
+        lease_action:
+          type: string
+          enum: [none, keep, stop]
+          description: >-
+            What the raise does to the caller's live lease on the task. `none` (default) leaves it, `keep` leaves it live
+            and `stop` ends it with the outcome `blocked on A<n>`.
+    AskRaised:
+      description: A raised ask, with the caller's lease on its task when `lease_action` was `keep` or `stop` and one was live.
+      allOf:
+        - $ref: "#/components/schemas/Ask"
+        - type: object
+          properties:
+            lease:
+              $ref: "#/components/schemas/Lease"
     AskAnswer:
       type: object
       description: The answer to an open ask.

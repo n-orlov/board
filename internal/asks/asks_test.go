@@ -167,6 +167,7 @@ func TestRaiseRefusalsWriteNothing(t *testing.T) {
 		"empty option":       {New{Question: "q", Options: []string{""}}, ErrInvalid},
 		"long option":        {New{Question: "q", Options: []string{strings.Repeat("x", 81)}}, ErrInvalid},
 		"bad mode":           {New{Question: "q", Mode: "shout"}, ErrInvalid},
+		"bad lease action":   {New{Question: "q", LeaseAction: "pause"}, ErrInvalid},
 		"task and other ini": {New{Question: "q", Task: "aa-1", Initiative: "bb"}, ErrInvalid},
 		"unknown task":       {New{Question: "q", Task: "aa-9"}, ErrNotFound},
 		"unreadable task":    {New{Question: "q", Task: "??"}, ErrNotFound},
@@ -598,5 +599,40 @@ func TestRaiseEnqueuesNothingWhenAskingIsOffOrARaiseIsRefused(t *testing.T) {
 	}
 	if got := e.notifications(t); len(got) != 0 {
 		t.Fatalf("notifications = %q", got)
+	}
+}
+
+func TestNormalizeDefaultsTheLeaseActionToNoneAndKeepsTheOthers(t *testing.T) {
+	for in, want := range map[string]string{"": "none", "none": "none", "keep": "keep", "stop": "stop"} {
+		got, err := New{Question: "q", LeaseAction: in}.Normalize()
+		if err != nil || got.LeaseAction != want {
+			t.Errorf("lease action %q normalizes to %q, %v, want %q", in, got.LeaseAction, err, want)
+		}
+	}
+}
+
+func TestRaiseInWritesInTheCallersTransactionAndCommitsNothing(t *testing.T) {
+	e := newEnv(t)
+	tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := e.S.RaiseIn(ctx, tx, bob, "key:y", New{Question: "q", Task: "aa-1"})
+	if err != nil || k.Ref != "A1" {
+		t.Fatalf("RaiseIn = %+v, %v", k, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.S.Get(ctx, "A1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the ask survived the caller's rollback: %v", err)
+	}
+	tx, err = e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := e.S.RaiseIn(ctx, tx, bob, "key:y", New{Question: "q", LeaseAction: "pause"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("RaiseIn with a bad lease action = %v, want invalid", err)
 	}
 }

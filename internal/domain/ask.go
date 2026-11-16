@@ -98,3 +98,20 @@ func ValidateChannel(channel string) error {
 	}
 	return fmt.Errorf("channel %q must be ui, api or relay", channel)
 }
+
+// What raising an ask does to the asker's live lease on the task: none leaves
+// it, keep leaves it live on purpose and stop ends it as blocked on the ask.
+const (
+	LeaseActionNone = "none"
+	LeaseActionKeep = "keep"
+	LeaseActionStop = "stop"
+)
+
+// ValidateLeaseAction returns nil for none, keep or stop.
+func ValidateLeaseAction(action string) error {
+	switch action {
+	case LeaseActionNone, LeaseActionKeep, LeaseActionStop:
+		return nil
+	}
+	return fmt.Errorf("lease_action %q must be none, keep or stop", action)
+}

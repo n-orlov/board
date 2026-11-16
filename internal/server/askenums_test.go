@@ -15,6 +15,9 @@ func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 		AskStateAnswered, AskStateOpen, AskStateWithdrawn,
 		AskAnswerChannelApi, AskAnswerChannelRelay, AskAnswerChannelUi,
 		AskRaiseModePoll, AskRaiseModeStop,
+		AskRaiseLeaseActionNone, AskRaiseLeaseActionKeep, AskRaiseLeaseActionStop,
+		AskRaisedChannelApi, AskRaisedChannelRelay, AskRaisedChannelUi, AskRaisedModePoll, AskRaisedModeStop,
+		AskRaisedStateAnswered, AskRaisedStateOpen, AskRaisedStateWithdrawn,
 		NotificationStatePending, NotificationStateSent, NotificationStateFailed,
 		ListNotificationsParamsStatePending, ListNotificationsParamsStateSent, ListNotificationsParamsStateFailed,
 		NotificationKindStranded, NotificationKindAsking, NotificationKindDone,
@@ -29,7 +32,7 @@ func TestAskEnumsAcceptOnlyTheDeclaredValues(t *testing.T) {
 		}
 	}
 	for _, v := range []interface{ Valid() bool }{
-		AskChannel("x"), AskMode("x"), AskState("x"), AskAnswerChannel("x"), AskRaiseMode("x"), NotificationState("x"), NotificationKind("x"), ListNotificationsParamsState("x"),
+		AskChannel("x"), AskMode("x"), AskState("x"), AskAnswerChannel("x"), AskRaiseMode("x"), AskRaiseLeaseAction("x"), AskRaisedChannel("x"), AskRaisedMode("x"), AskRaisedState("x"), NotificationState("x"), NotificationKind("x"), ListNotificationsParamsState("x"),
 		TimelineTaskStatus("x"), TimelineTaskKind("x"), TimelineLeaseState("x"), TimelineMarkerType("x"), ActorViewKind("x"), ActorAskMode("x"),
 	} {
 		if v.Valid() {

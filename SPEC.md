@@ -1298,6 +1298,13 @@ is §7.2.
   state `open`, and `ask_raised`. A refusal changes nothing: no ask, event or actor. In one transaction the server
   upserts the actor and writes the ask with its event, whose `task` and `initiative` are those of the ask and whose
   `data` is `{ref, question, mode, blocking, task?, initiative?}`.
+  `lease_action` (§8.4) is `none` (the default: the caller's lease is left as it is), `keep` or `stop`; any other value is
+  **400** with a `next`, writing nothing. `stop` ends the caller's live lease on the ask's task with the outcome `blocked on A<n>`,
+  in the same transaction as the ask, so a `lease_ended` event follows `ask_raised`. `keep` leaves that lease live. The
+  **201** body then also carries `lease`, the caller's lease on the task (ended for `stop`, live for `keep`). A `keep` or
+  `stop` where the caller holds no live lease on the task, or the ask has no task, still raises the ask, ends nothing
+  and carries no `lease`. Another actor's lease is never touched. The cases: `stop` with a live lease, `stop` without
+  one, `keep`, and an unknown value.
 - **`POST /api/v1/asks/{ref}/answer`**, body `{answer, channel?, on_behalf_of?}`. `answer` is 1 to 20000
   characters, `channel` `ui`, `api` or `relay` (left out it is `ui` for a browser session and `api` for a key) and
   `on_behalf_of` the handle of the person a relayed answer came from, allowed with `relay` only (**400** otherwise).
@@ -1671,7 +1678,7 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1689,7 +1696,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
@@ -2047,7 +2054,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 vh version | update [--check] [--version vX.Y.Z]
@@ -2156,6 +2163,19 @@ them. `--json` prints the response as it came. The exit codes are **0**; **6** w
 server's `next` as the `→` line, nothing written); **2** for more than one argument or a flag the command does not have (one
 `usage: vh ping ["<progress>"] [--json]` line on stderr, nothing sent). `ping` is in `cli.Commands()` with its flag table
 (`--json`).
+
+**Built: `vh block`.** `vh block <task> "<question>" [--poll D | --stop] [--json]` sends one `POST /api/v1/asks` (§6.6) and
+prints one line per effect, the lines of the commands it replaces. The default, `--stop`, sends `mode` stop with
+`lease_action` stop: it prints the `vh ask` line `ok ask A<n> raised` and, when the caller held a live lease on the task
+and it ended, the `vh lease end` line `ok lease L<n> ended` (only the first line without a lease). `--poll D` sends `mode`
+poll with `lease_action` keep, prints `ok ask A<n> raised`, then waits as `vh ask --poll D` does, renewing the lease it kept
+(`POST /api/v1/leases/{ref}/renew`, before each wait of at most 300 seconds) so it stays live, and ends with the line and
+exit code of `ask --poll`: **0** with `ok A<n> answered by <actor>: <answer>`, **6** when the ask was withdrawn, **3**
+when D passed with the ask still open. `--json` prints the response of the raise (with `--stop`), or the ask the wait
+ended on (with `--poll`), as it came. The other exit codes are **4** for an unknown task (`→ vh task ls`), **6** for a
+closed task or initiative, and **2** for `--poll` together with `--stop`, a bad duration, a missing argument or a flag the
+command does not have (one `usage: vh block <task> "<question>" [--poll D | --stop] [--json]` line on stderr, nothing
+sent). `block` is in `cli.Commands()` with its flag table (`--poll --stop --json`).
 
 Example `vh now` output:
 

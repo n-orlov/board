@@ -27,6 +27,9 @@ type New struct {
 	Options    []string
 	Mode       string
 	Blocking   bool
+	// LeaseAction is what the raise does to the asker's live lease on the task:
+	// none (the default), keep or stop. Only checkin.Store.Block acts on stop.
+	LeaseAction string
 }
 
 // Normalize checks every field and returns the request with the mode defaulted,
@@ -34,6 +37,9 @@ type New struct {
 func (n New) Normalize() (New, error) {
 	if n.Mode == "" {
 		n.Mode = domain.AskModeStop
+	}
+	if n.LeaseAction == "" {
+		n.LeaseAction = domain.LeaseActionNone
 	}
 	for _, c := range []struct {
 		err  error
@@ -43,6 +49,7 @@ func (n New) Normalize() (New, error) {
 		{domain.ValidateDescription(n.Details), "Shorten the details to at most 20000 characters."},
 		{domain.ValidateOptions(n.Options), "Send at most 10 options, each of 1 to 80 characters."},
 		{domain.ValidateAskMode(n.Mode), "Send mode stop or poll, or leave it out for stop."},
+		{domain.ValidateLeaseAction(n.LeaseAction), "Send lease_action none, keep or stop, or leave it out for none."},
 	} {
 		if c.err != nil {
 			return New{}, InvalidError{Msg: c.err.Error(), Next: c.next}
@@ -67,11 +74,22 @@ func (s Store) Raise(ctx context.Context, actor audit.Actor, principal string, i
 		return Ask{}, err
 	}
 	var out Ask
-	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		out, err = s.raise(ctx, tx, actor, principal, in)
+	err = s.inTx(ctx, func(tx *sql.Tx) (err error) {
+		out, err = s.RaiseIn(ctx, tx, actor, principal, in)
 		return err
 	})
 	return out, err
+}
+
+// RaiseIn does the writes of Raise inside the transaction tx, on the writer: it
+// commits and rolls back nothing, so a caller can write more in the same
+// transaction. It fails as Raise does.
+func (s Store) RaiseIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in New) (Ask, error) {
+	in, err := in.Normalize()
+	if err != nil {
+		return Ask{}, err
+	}
+	return s.raise(ctx, tx, actor, principal, in)
 }
 
 // scope is the task and initiative an ask is raised on.

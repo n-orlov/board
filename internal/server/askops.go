@@ -8,6 +8,7 @@ import (
 
 	"github.com/n-orlov/village-hall/internal/asks"
 	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/checkin"
 	"github.com/n-orlov/village-hall/internal/domain"
 )
 
@@ -23,6 +24,7 @@ type askOps struct {
 	asks  *asks.Store
 	waits *streamHub    // the change feed that wakes a wait; nil: waits answer 503
 	touch time.Duration // how often a held wait renews poll_seen_at; 0 is DefaultAskTouch
+	block checkin.Store // the stores a raise with lease_action stop ends the lease through; set once every option is applied
 }
 
 // ready answers 503 when the operations have no store behind them.
@@ -105,6 +107,9 @@ func askRequest(b *AskRaise) asks.New {
 	if b.Blocking != nil {
 		in.Blocking = *b.Blocking
 	}
+	if b.LeaseAction != nil {
+		in.LeaseAction = string(*b.LeaseAction)
+	}
 	return in
 }
 
@@ -117,11 +122,14 @@ func (o askOps) RaiseAsk(ctx context.Context, req RaiseAskRequestObject) (RaiseA
 	if req.Body == nil {
 		return failure(http.StatusBadRequest, "the request needs a JSON body with a question").withNext(nextAskBody), nil
 	}
+	if acts(req.Body) {
+		return o.raiseActing(ctx, who, askRequest(req.Body))
+	}
 	k, err := o.asks.Raise(ctx, who.AuditActor(), who.Principal, askRequest(req.Body))
 	if err != nil {
 		return askResult[RaiseAskResponseObject](err)
 	}
-	return RaiseAsk201JSONResponse(o.apiAsk(k)), nil
+	return RaiseAsk201JSONResponse(askRaised(o.apiAsk(k), nil)), nil
 }
 
 // GetAsk reads one ask.

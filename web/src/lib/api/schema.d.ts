@@ -647,7 +647,7 @@ export interface paths {
         put?: never;
         /**
          * Raise an ask
-         * @description Raises an open ask by the caller. `question` is 1 to 200 characters on one line; `details` is at most 20000 characters; `options` is at most 10 suggested answers of 1 to 80 characters each; `mode` is `stop` (default) or `poll`; `blocking` (default false) marks an ask that blocks its task. `task` is a task ref or ULID and `initiative` a slug or ULID; both may be left out for a board-wide ask. The initiative of an ask on a task is the task's: sending both is 400 unless the task belongs to that initiative. An unknown task or initiative is 404, and a closed task or a closed initiative is 409. The answer is 201 with the ask and the event `ask_raised`. A refused request writes no ask, event or actor.
+         * @description Raises an open ask by the caller. `question` is 1 to 200 characters on one line; `details` is at most 20000 characters; `options` is at most 10 suggested answers of 1 to 80 characters each; `mode` is `stop` (default) or `poll`; `blocking` (default false) marks an ask that blocks its task. `task` is a task ref or ULID and `initiative` a slug or ULID; both may be left out for a board-wide ask. The initiative of an ask on a task is the task's: sending both is 400 unless the task belongs to that initiative. An unknown task or initiative is 404, and a closed task or a closed initiative is 409. `lease_action` is what the raise does to the caller's live lease on the task: `none` (default) leaves it as it is, `keep` leaves it live, and `stop` ends it with the outcome `blocked on A<n>` (a `lease_ended` event) in the same transaction as the ask. A `keep` or `stop` with no live lease on the task, or with no task, still raises the ask and acts on nothing. Any other value is 400. The answer is 201 with the ask and the event `ask_raised`, and the caller's `lease` on the task when `keep` or `stop` found one (ended for `stop`, still live for `keep`). A refused request writes no ask, event, lease end or actor.
          */
         post: operations["raiseAsk"];
         delete?: never;
@@ -1788,6 +1788,15 @@ export interface components {
             mode?: "stop" | "poll";
             /** @description Default false. */
             blocking?: boolean;
+            /**
+             * @description What the raise does to the caller's live lease on the task. `none` (default) leaves it, `keep` leaves it live and `stop` ends it with the outcome `blocked on A<n>`.
+             * @enum {string}
+             */
+            lease_action?: "none" | "keep" | "stop";
+        };
+        /** @description A raised ask, with the caller's lease on its task when `lease_action` was `keep` or `stop` and one was live. */
+        AskRaised: components["schemas"]["Ask"] & {
+            lease?: components["schemas"]["Lease"];
         };
         /** @description The answer to an open ask. */
         AskAnswer: {
@@ -3382,13 +3391,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The ask was raised. */
+            /** @description The ask was raised, and the lease acted on when `lease_action` was `keep` or `stop`. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ask"];
+                    "application/json": components["schemas"]["AskRaised"];
                 };
             };
             400: components["responses"]["BadRequest"];

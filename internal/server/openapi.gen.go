@@ -136,6 +136,27 @@ func (e AskAnswerChannel) Valid() bool {
 	}
 }
 
+// Defines values for AskRaiseLeaseAction.
+const (
+	AskRaiseLeaseActionKeep AskRaiseLeaseAction = "keep"
+	AskRaiseLeaseActionNone AskRaiseLeaseAction = "none"
+	AskRaiseLeaseActionStop AskRaiseLeaseAction = "stop"
+)
+
+// Valid indicates whether the value is a known member of the AskRaiseLeaseAction enum.
+func (e AskRaiseLeaseAction) Valid() bool {
+	switch e {
+	case AskRaiseLeaseActionKeep:
+		return true
+	case AskRaiseLeaseActionNone:
+		return true
+	case AskRaiseLeaseActionStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AskRaiseMode.
 const (
 	AskRaiseModePoll AskRaiseMode = "poll"
@@ -148,6 +169,66 @@ func (e AskRaiseMode) Valid() bool {
 	case AskRaiseModePoll:
 		return true
 	case AskRaiseModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskRaisedChannel.
+const (
+	AskRaisedChannelApi   AskRaisedChannel = "api"
+	AskRaisedChannelRelay AskRaisedChannel = "relay"
+	AskRaisedChannelUi    AskRaisedChannel = "ui"
+)
+
+// Valid indicates whether the value is a known member of the AskRaisedChannel enum.
+func (e AskRaisedChannel) Valid() bool {
+	switch e {
+	case AskRaisedChannelApi:
+		return true
+	case AskRaisedChannelRelay:
+		return true
+	case AskRaisedChannelUi:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskRaisedMode.
+const (
+	AskRaisedModePoll AskRaisedMode = "poll"
+	AskRaisedModeStop AskRaisedMode = "stop"
+)
+
+// Valid indicates whether the value is a known member of the AskRaisedMode enum.
+func (e AskRaisedMode) Valid() bool {
+	switch e {
+	case AskRaisedModePoll:
+		return true
+	case AskRaisedModeStop:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AskRaisedState.
+const (
+	AskRaisedStateAnswered  AskRaisedState = "answered"
+	AskRaisedStateOpen      AskRaisedState = "open"
+	AskRaisedStateWithdrawn AskRaisedState = "withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the AskRaisedState enum.
+func (e AskRaisedState) Valid() bool {
+	switch e {
+	case AskRaisedStateAnswered:
+		return true
+	case AskRaisedStateOpen:
+		return true
+	case AskRaisedStateWithdrawn:
 		return true
 	default:
 		return false
@@ -966,6 +1047,9 @@ type AskRaise struct {
 	// Initiative An initiative slug or ULID. With a task it must be the task's own initiative.
 	Initiative *string `json:"initiative,omitempty"`
 
+	// LeaseAction What the raise does to the caller's live lease on the task. `none` (default) leaves it, `keep` leaves it live and `stop` ends it with the outcome `blocked on A<n>`.
+	LeaseAction *AskRaiseLeaseAction `json:"lease_action,omitempty"`
+
 	// Mode Default stop.
 	Mode *AskRaiseMode `json:"mode,omitempty"`
 
@@ -979,8 +1063,77 @@ type AskRaise struct {
 	Task *string `json:"task,omitempty"`
 }
 
+// AskRaiseLeaseAction What the raise does to the caller's live lease on the task. `none` (default) leaves it, `keep` leaves it live and `stop` ends it with the outcome `blocked on A<n>`.
+type AskRaiseLeaseAction string
+
 // AskRaiseMode Default stop.
 type AskRaiseMode string
+
+// AskRaised A raised ask, with the caller's lease on its task when `lease_action` was `keep` or `stop` and one was live.
+type AskRaised struct {
+	// Answer Absent until it is answered.
+	Answer     *string    `json:"answer,omitempty"`
+	AnsweredAt *time.Time `json:"answered_at,omitempty"`
+
+	// AnsweredBy The handle of the actor that answered it.
+	AnsweredBy *string `json:"answered_by,omitempty"`
+
+	// Asker The handle of the actor that raised it.
+	Asker string `json:"asker"`
+
+	// AskerWaiting It is open, its mode is `poll` and a long poll on it was seen within the last 60 seconds.
+	AskerWaiting bool `json:"asker_waiting"`
+
+	// Blocking It blocks its task while it is open.
+	Blocking bool `json:"blocking"`
+
+	// Channel How the answer reached the board. Absent until it is answered.
+	Channel   *AskRaisedChannel `json:"channel,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+
+	// Details At most 20000 characters. Empty when none was given.
+	Details string `json:"details"`
+
+	// EndedAt The server's clock read just after the answer or withdrawal committed, rounded up to the millisecond, so never before the end took effect (`answered_at` and `withdrawn_at` are read before the commit). Absent while the ask is open, and for an end recorded without one.
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+
+	// Id The ask's ULID.
+	Id string `json:"id"`
+
+	// Initiative The slug of the initiative, derived from the task when there is one. Absent for a board-wide ask.
+	Initiative *string `json:"initiative,omitempty"`
+
+	// Lease A lease on a task, with its resources.
+	Lease *Lease        `json:"lease,omitempty"`
+	Mode  AskRaisedMode `json:"mode"`
+
+	// OnBehalfOf The handle of the person a relayed answer came from.
+	OnBehalfOf *string `json:"on_behalf_of,omitempty"`
+
+	// Options The suggested answers, at most 10 of 1 to 80 characters.
+	Options []string `json:"options"`
+
+	// Question One line, 1 to 200 characters.
+	Question string `json:"question"`
+
+	// Ref The short ref, `A<n>`.
+	Ref   string         `json:"ref"`
+	State AskRaisedState `json:"state"`
+
+	// Task The ref of the task it is on. Absent for an ask on an initiative or board-wide.
+	Task           *string    `json:"task,omitempty"`
+	WithdrawReason *string    `json:"withdraw_reason,omitempty"`
+	WithdrawnAt    *time.Time `json:"withdrawn_at,omitempty"`
+}
+
+// AskRaisedChannel How the answer reached the board. Absent until it is answered.
+type AskRaisedChannel string
+
+// AskRaisedMode defines model for AskRaised.Mode.
+type AskRaisedMode string
+
+// AskRaisedState defines model for AskRaised.State.
+type AskRaisedState string
 
 // AskWithdraw Why the ask was withdrawn.
 type AskWithdraw struct {
@@ -5305,7 +5458,7 @@ type RaiseAskResponseObject interface {
 	VisitRaiseAskResponse(w http.ResponseWriter) error
 }
 
-type RaiseAsk201JSONResponse Ask
+type RaiseAsk201JSONResponse AskRaised
 
 func (response RaiseAsk201JSONResponse) VisitRaiseAskResponse(w http.ResponseWriter) error {
 

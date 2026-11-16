@@ -31,6 +31,8 @@ type apiState struct {
 	counts string
 	// startCounts is the tasks, leases and events count a scenario noted.
 	startCounts string
+	// blockCounts is the asks, events and live leases count a scenario noted.
+	blockCounts string
 	// finishCounts is the events, notes and live leases count a scenario noted.
 	finishCounts string
 	// leaseRows is the leases table a scenario noted.
