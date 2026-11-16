@@ -30,7 +30,7 @@ test('/api/docs lists every operation of api/openapi.yaml from embedded assets',
 
   const response = await page.goto('/api/docs');
   expect(response?.status()).toBe(200);
-  await expect(page.locator('.swagger-ui .info .title')).toContainText('Board');
+  await expect(page.locator('.swagger-ui .info .title')).toContainText('Village Hall');
 
   for (const { method, path } of ops) {
     const block = page.locator(`.opblock-${method}`).filter({
