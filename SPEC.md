@@ -2514,7 +2514,8 @@ Template for the operator's instructions (first matching rule wins; adapt to you
 ```markdown
 ## board identity
 Before using `vh`, export VH_URL, VH_API_KEY (this environment's key,
-from your secret store), VH_ACTOR and VH_WAY_BACK:
+from your secret store), VH_ACTOR and VH_WAY_BACK (the older BOARD_URL, BOARD_API_KEY,
+BOARD_ACTOR and BOARD_WAY_BACK names are still accepted), then run `vh whoami`:
 1. Autonomous run (e.g. RALPHD_RUN_ID set):   ralph:<run-id>
    way back: `ralphctl status <run-id>`
 2. Session manager (e.g. DECK_SESSION_NAME set): deck:<DECK_PROFILE>/<DECK_SESSION_NAME>
@@ -2539,13 +2540,14 @@ it once):
 
 ```markdown
 ---
-name: board
-description: Shared work board. Use at the start of any task, before risky shared actions,
-  when you need the operator, and when you finish.
+name: village-hall
+description: Shared work board (Village Hall). Use at the start of any task, before risky shared actions, when you need the operator, and when you finish.
 ---
 Run `vh help agent` once per session and follow it.
-Set your identity per the operator's AGENTS.md ("board identity") before the first command.
-If `vh` is missing, install it following <repo URL>/INSTALL-AGENT.md.
+Set your identity per the operator's instructions ("board identity" in their AGENTS.md)
+before the first command: VH_URL, VH_API_KEY, VH_ACTOR and VH_WAY_BACK.
+Check the connection with `vh whoami`.
+If `vh` is missing, install it by following INSTALL-AGENT.md in the repository (<repo URL>/INSTALL-AGENT.md).
 ```
 
 The previous long outline is now the content of `vh help agent`.
