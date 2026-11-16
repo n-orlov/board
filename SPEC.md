@@ -943,6 +943,13 @@ event, the task, initiative, ask, lease and actor rows named above.
   - The stored row (§4.12) holds neither the key nor the answer in the clear: the key is stored as a hash, and the
     answer is sealed with AES-256-GCM under a key derived from the principal and the key, so the one answer that holds
     a secret (a created API key, §3.3) is never readable from the database.
+  - The CLI (§8.1) sends a fresh random `Idempotency-Key` (26 printable ASCII characters from a CSPRNG) with every
+    write it issues, that is every request whose method is not `GET` or `HEAD`, and never one with a read. A write that
+    gets no response at all (the connection fails, is reset or times out before a status line) or is answered 502, 503
+    or 504 is sent once more, after a quarter of a second, with the same key and the same body; the second outcome is
+    the command's outcome. Any other answer (a 500, a 4xx, a 2xx) ends the command at once, a write the command's
+    context has cancelled is not retried, and a read is never retried. A command whose first send reached the
+    server and whose answer was lost therefore has one effect and exits 0 with the original answer.
 - Pagination: `limit` (default 100, max 1000) + `after=<ulid|ref>` cursor. Lists are ordered by id.
 - Path and query parameters accept the short ref (§8.2) or the ULID of an object; responses
   carry both (`id`, `ref`).

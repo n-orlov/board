@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,25 +158,83 @@ func newClient(env Env) (*client, error) {
 	return &client{base: base, key: key, id: resolveIdentity(env), http: &http.Client{Timeout: requestTimeout}}, nil
 }
 
+// retryPause is how long a write waits before its one retry. Tests set it to zero.
+var retryPause = 250 * time.Millisecond
+
+// isWrite reports whether the method changes the board: every method but the
+// two that only read.
+func isWrite(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead
+}
+
+// retryable is the set of answers that mean the request may not have reached
+// the handler, so sending it again with the same key is safe (SPEC §6.1).
+func retryable(status int) bool {
+	return status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
+}
+
 // do sends one request and decodes a 2xx JSON answer into out (when not nil).
+// Every write carries a fresh random Idempotency-Key. A write that got no
+// answer at all, or a 502, 503 or 504, is sent once more with the same key, so
+// a dropped answer never makes the effect happen twice.
 func (c *client) do(ctx context.Context, method, path string, query url.Values, in, out any) error {
-	var body io.Reader
+	var raw []byte
 	if in != nil {
-		raw, err := json.Marshal(in)
-		if err != nil {
+		var err error
+		if raw, err = json.Marshal(in); err != nil {
 			return err
 		}
-		body = bytes.NewReader(raw)
 	}
 	target := c.base + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
+	key := ""
+	if isWrite(method) {
+		key = rand.Text()
+	}
+	err := c.attempt(ctx, method, target, key, raw, out)
+	if key == "" || !errors.Is(err, errRetry) || ctx.Err() != nil {
+		return unretry(err)
+	}
+	time.Sleep(retryPause)
+	return unretry(c.attempt(ctx, method, target, key, raw, out))
+}
+
+// errRetry marks the failure of an attempt after which a write may be sent again.
+var errRetry = errors.New("retry")
+
+// retryError carries the error to show when the retry is not made or fails too.
+type retryError struct{ err error }
+
+func (e *retryError) Error() string { return e.err.Error() }
+func (e *retryError) Unwrap() []error {
+	return []error{e.err, errRetry}
+}
+
+// unretry strips the retry marker.
+func unretry(err error) error {
+	var re *retryError
+	if errors.As(err, &re) {
+		return re.err
+	}
+	return err
+}
+
+// attempt sends the request once.
+func (c *client) attempt(ctx context.Context, method, target, key string, raw []byte, out any) error {
+	var body io.Reader
+	if raw != nil {
+		body = bytes.NewReader(raw)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
 		return fmt.Errorf("bad %s %q → export %s (the address of the board server)", envvar.URL.Name(), c.base, envvar.URL.Name())
 	}
-	c.headers(req, in != nil)
+	c.headers(req, raw != nil)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	return c.finish(req, out)
 }
 
@@ -197,7 +256,7 @@ func (c *client) headers(req *http.Request, hasBody bool) {
 func (c *client) finish(req *http.Request, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("server unreachable at %s → check %s and that vh serve is running", c.base, envvar.URL.Name())
+		return &retryError{fmt.Errorf("server unreachable at %s → check %s and that vh serve is running", c.base, envvar.URL.Name())}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -205,7 +264,11 @@ func (c *client) finish(req *http.Request, out any) error {
 		return fmt.Errorf("reading the server's answer: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return withNext(newAPIError(resp.StatusCode, raw), http.StatusUnauthorized, authNext)
+		failure := withNext(newAPIError(resp.StatusCode, raw), http.StatusUnauthorized, authNext)
+		if retryable(resp.StatusCode) {
+			return &retryError{failure}
+		}
+		return failure
 	}
 	if out == nil {
 		return nil

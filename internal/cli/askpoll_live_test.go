@@ -15,6 +15,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/asks"
 	"github.com/n-orlov/village-hall/internal/audit"
 	"github.com/n-orlov/village-hall/internal/feed"
+	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/server"
 	"github.com/n-orlov/village-hall/internal/store"
@@ -102,7 +103,7 @@ func newLiveAskBoard(t *testing.T) *liveAskBoard {
 	b.w = &asks.Store{Store: st, Now: b.clock}
 	verify := func(context.Context, string) (string, error) { return "key:x", nil }
 	h := server.NewHandler(func(context.Context) error { return nil }, verify, nil, nil,
-		server.WithAsks(b.reads), server.WithStream(f, time.Minute))
+		server.WithAsks(b.reads), server.WithStream(f, time.Minute), server.WithIdempotency(&idempotency.Store{Store: st}))
 	b.srv = httptest.NewServer(b.delayed(h))
 	t.Cleanup(b.srv.Close)
 	b.warmReaders()
