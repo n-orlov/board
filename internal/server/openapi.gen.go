@@ -1800,6 +1800,21 @@ type NowLease struct {
 // NowLeaseState defines model for NowLease.State.
 type NowLeaseState string
 
+// PingRequest The progress to record on each leased task.
+type PingRequest struct {
+	// Progress What has been done so far, 1 to 200 characters. Left out, the leases are only renewed.
+	Progress *string `json:"progress,omitempty"`
+}
+
+// PingResult The leases the ping renewed and the tasks it wrote a milestone on.
+type PingResult struct {
+	// Leases The renewed leases, oldest first.
+	Leases []Lease `json:"leases"`
+
+	// Milestones The refs of the tasks a milestone was written on, one for each leased task. Empty without `progress`.
+	Milestones []string `json:"milestones"`
+}
+
 // Problem An RFC 9457 problem document.
 type Problem struct {
 	// Detail A human-readable explanation of this occurrence.
@@ -2695,6 +2710,9 @@ type RenewLeaseJSONRequestBody = LeaseRenew
 // PostNoteJSONRequestBody defines body for PostNote for application/json ContentType.
 type PostNoteJSONRequestBody = NotePost
 
+// PingJSONRequestBody defines body for Ping for application/json ContentType.
+type PingJSONRequestBody = PingRequest
+
 // StartJSONRequestBody defines body for Start for application/json ContentType.
 type StartJSONRequestBody = StartRequest
 
@@ -2829,6 +2847,9 @@ type ServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(w http.ResponseWriter, r *http.Request, params GetNowParams)
+	// Ping Renew every live lease the caller holds
+	// (POST /api/v1/ping)
+	Ping(w http.ResponseWriter, r *http.Request)
 	// Start Start working on a task, or on a new one
 	// (POST /api/v1/start)
 	Start(w http.ResponseWriter, r *http.Request)
@@ -3910,6 +3931,20 @@ func (siw *ServerInterfaceWrapper) GetNow(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// Ping operation middleware
+func (siw *ServerInterfaceWrapper) Ping(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Ping(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Start operation middleware
 func (siw *ServerInterfaceWrapper) Start(w http.ResponseWriter, r *http.Request) {
 
@@ -4669,6 +4704,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/start", wrapper.Start)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/finish", wrapper.Finish)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/ping", wrapper.Ping)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -7807,6 +7843,92 @@ func (response GetNow503ApplicationProblemPlusJSONResponse) VisitGetNowResponse(
 	return err
 }
 
+type PingRequestObject struct {
+	Body *PingJSONRequestBody
+}
+
+type PingResponseObject interface {
+	VisitPingResponse(w http.ResponseWriter) error
+}
+
+type Ping200JSONResponse PingResult
+
+func (response Ping200JSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ping400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response Ping400ApplicationProblemPlusJSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ping401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response Ping401ApplicationProblemPlusJSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ping409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response Ping409ApplicationProblemPlusJSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ping503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response Ping503ApplicationProblemPlusJSONResponse) VisitPingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartRequestObject struct {
 	Body *StartJSONRequestBody
 }
@@ -9755,6 +9877,9 @@ type StrictServerInterface interface {
 	// GetNow Check in
 	// (GET /api/v1/now)
 	GetNow(ctx context.Context, request GetNowRequestObject) (GetNowResponseObject, error)
+	// Ping Renew every live lease the caller holds
+	// (POST /api/v1/ping)
+	Ping(ctx context.Context, request PingRequestObject) (PingResponseObject, error)
 	// Start Start working on a task, or on a new one
 	// (POST /api/v1/start)
 	Start(ctx context.Context, request StartRequestObject) (StartResponseObject, error)
@@ -10901,6 +11026,40 @@ func (sh *strictHandler) GetNow(w http.ResponseWriter, r *http.Request, params G
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetNowResponseObject); ok {
 		if err := validResponse.VisitGetNowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Ping operation middleware
+func (sh *strictHandler) Ping(w http.ResponseWriter, r *http.Request) {
+	var request PingRequestObject
+
+	var body PingJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Ping(ctx, request.(PingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Ping")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PingResponseObject); ok {
+		if err := validResponse.VisitPingResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

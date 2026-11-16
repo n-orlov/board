@@ -53,6 +53,7 @@ type operations struct {
 	nowOps
 	startOps
 	finishOps
+	pingOps
 	askOps
 	noteOps
 	attentionOps

@@ -2096,6 +2096,42 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/ping:
+    post:
+      operationId: ping
+      tags: [composite]
+      summary: Renew every live lease the caller holds
+      description: >-
+        Renews every live lease the caller holds, each to now plus its own ttl, in one transaction with their
+        `lease_renewed` events. With `progress` (1 to 200 characters) it also writes one milestone with that summary on
+        each leased task (a `milestone` event each), in the same transaction. The answer is 200 with the renewed `leases`,
+        oldest first, and `milestones`, the refs of the tasks it wrote a milestone on (empty without `progress`). The
+        caller holding no live lease is 409; it writes nothing. A `progress` that is empty or longer than 200 characters is
+        400, and writes nothing either.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PingRequest"
+      responses:
+        "200":
+          description: Every live lease of the caller was renewed, and a milestone written on each leased task when `progress` was sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PingResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/attention:
     get:
       operationId: getAttention
@@ -3314,6 +3350,28 @@ components:
         done:
           type: boolean
           description: True when the request marked the task done.
+    PingRequest:
+      type: object
+      description: The progress to record on each leased task.
+      properties:
+        progress:
+          type: string
+          description: What has been done so far, 1 to 200 characters. Left out, the leases are only renewed.
+    PingResult:
+      type: object
+      description: The leases the ping renewed and the tasks it wrote a milestone on.
+      required: [leases, milestones]
+      properties:
+        leases:
+          type: array
+          description: The renewed leases, oldest first.
+          items:
+            $ref: "#/components/schemas/Lease"
+        milestones:
+          type: array
+          description: The refs of the tasks a milestone was written on, one for each leased task. Empty without `progress`.
+          items:
+            type: string
     NowLease:
       description: One of the caller's live leases, with the title of its task.
       allOf:

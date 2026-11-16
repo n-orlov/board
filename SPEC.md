@@ -1242,6 +1242,17 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   /api/v1/tasks/{ref}/done` does) with nothing changed: neither the lease end nor the note is written. An unknown task is
   **404**. A refused request writes no note, no event, no status change and no actor row.
 
+- **`POST /api/v1/ping`** (§8.4) renews every live lease the caller holds and, with `progress`, writes one milestone on each
+  leased task, in one transaction. The body is optional, `{progress?}`: `progress` is 1 to 200 characters (empty, blank or
+  longer: **400** with a `next`, checked before anything is read). Every live lease is renewed as `POST
+  /api/v1/leases/{ref}/renew` with no body renews it (to now plus its own ttl, intent and resources kept) with its
+  `lease_renewed` event, and with `progress` each leased task also gets a `milestone` event whose summary is the progress
+  (as `POST /api/v1/tasks/{ref}/milestones` writes it, without `data`). It answers **200** `{leases, milestones}`: the
+  renewed leases oldest first, and the refs of the tasks a milestone was written on in the same order (`[]` without
+  `progress`). The cases: no live lease, **409** (`you hold no live lease`, with a `next`), writing nothing and no actor row;
+  one lease; three leases; each with and without `progress`. An expired lease is not live and is not renewed. Another
+  actor's leases are never touched. A refused request writes no renewal, no milestone, no event and no actor row.
+
 - **`GET /api/v1/now`**, `?resources=r1,r2` (optional), is the check-in of the caller. It answers exactly `{actor, my_leases,
   others_leases, conflicts, my_asks, notes, notes_more, attention}`, every list `[]` when empty. Like every lease read it
   expires the due leases first, so a lease past its expiry is left out and its one `lease_expired` event is written, with the
@@ -1660,7 +1671,7 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1678,7 +1689,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
@@ -2036,7 +2047,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|ping|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 vh version | update [--check] [--version vX.Y.Z]
@@ -2137,6 +2148,14 @@ a live lease on the task), with the server's `next` as the `→` line, or `→ w
 <ref> --force` for the last one; **4** for an unknown task (`→ vh task ls`); **2** for a missing outcome, more than two
 arguments or a flag the command does not have (one `usage: vh finish [<task>] "<outcome>" [--done] [--json]` line on stderr,
 nothing sent). `finish` is in `cli.Commands()` with its flag table (`--done --json`).
+
+**Built: `vh ping`.** `vh ping ["<progress>"] [--json]` sends one `POST /api/v1/ping` (§6.5). It prints one line per effect,
+the lines of the commands it replaces: the `vh lease renew` line `ok lease L<n> <task> exp <ttl>` for each renewed lease,
+oldest first, and, with a progress, the `vh milestone` line `ok task <ref> milestone recorded` for each leased task after
+them. `--json` prints the response as it came. The exit codes are **0**; **6** when the caller holds no live lease (the
+server's `next` as the `→` line, nothing written); **2** for more than one argument or a flag the command does not have (one
+`usage: vh ping ["<progress>"] [--json]` line on stderr, nothing sent). `ping` is in `cli.Commands()` with its flag table
+(`--json`).
 
 Example `vh now` output:
 

@@ -232,6 +232,7 @@ func (brokenResponse) VisitListLeasesResponse(http.ResponseWriter) error        
 func (brokenResponse) VisitGetNowResponse(http.ResponseWriter) error              { return errBroken }
 func (brokenResponse) VisitStartResponse(http.ResponseWriter) error               { return errBroken }
 func (brokenResponse) VisitFinishResponse(http.ResponseWriter) error              { return errBroken }
+func (brokenResponse) VisitPingResponse(http.ResponseWriter) error                { return errBroken }
 func (brokenResponse) VisitGetLeaseResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitRenewLeaseResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitEndLeaseResponse(http.ResponseWriter) error            { return errBroken }
@@ -492,6 +493,12 @@ func (s stubOperations) GetNow(context.Context, GetNowRequestObject) (GetNowResp
 func (s stubOperations) Finish(context.Context, FinishRequestObject) (FinishResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(FinishResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) Ping(context.Context, PingRequestObject) (PingResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(PingResponseObject)
 	return resp, err
 }
 
@@ -900,6 +907,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"finish 404", 404, Finish404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitFinishResponse},
 		{"finish 409", 409, Finish409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitFinishResponse},
 		{"finish 503", 503, Finish503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitFinishResponse},
+		{"ping 400", 400, Ping400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitPingResponse},
+		{"ping 401", 401, Ping401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitPingResponse},
+		{"ping 409", 409, Ping409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitPingResponse},
+		{"ping 503", 503, Ping503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitPingResponse},
 		{"list leases 503", 503, ListLeases503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitListLeasesResponse},
 		{"get lease 400", 400, GetLease400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},
 		{"get lease 401", 401, GetLease401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetLeaseResponse},

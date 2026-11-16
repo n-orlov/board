@@ -93,22 +93,30 @@ func (s Store) writeCheck(ctx context.Context, tx *sql.Tx, actor audit.Actor, pr
 // (checked before the task is read) and ErrNotFound for an unknown task, and
 // writes no event or actor then.
 func (s Store) Milestone(ctx context.Context, actor audit.Actor, principal, ref, summary string, data map[string]any) (Task, error) {
-	if err := domain.ValidateSummary(summary); err != nil {
-		return Task{}, InvalidError{Msg: err.Error(), Next: nextSummary}
-	}
 	var out Task
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		cur, err := s.find(ctx, tx, ref)
-		if err != nil {
-			return err
-		}
-		out = cur
-		return s.appendMilestone(ctx, tx, actor, principal, cur, summary, data)
+		var err error
+		out, err = s.MilestoneIn(ctx, tx, actor, principal, ref, summary, data)
+		return err
 	})
 	if err != nil {
 		return Task{}, err
 	}
 	return out, nil
+}
+
+// MilestoneIn is Milestone inside the caller's transaction: it commits nothing,
+// so the milestone event stands or falls with tx. It is how a ping writes one
+// milestone on each leased task together with the renewals.
+func (s Store) MilestoneIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref, summary string, data map[string]any) (Task, error) {
+	if err := domain.ValidateSummary(summary); err != nil {
+		return Task{}, InvalidError{Msg: err.Error(), Next: nextSummary}
+	}
+	cur, err := s.find(ctx, tx, ref)
+	if err != nil {
+		return Task{}, err
+	}
+	return cur, s.appendMilestone(ctx, tx, actor, principal, cur, summary, data)
 }
 
 func (s Store) appendMilestone(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, cur Task, summary string, data map[string]any) error {

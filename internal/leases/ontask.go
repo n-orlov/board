@@ -118,3 +118,38 @@ func (s Store) EndHeldIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, pri
 	}
 	return s.writeEnd(ctx, tx, actorID, principal, l, outcome, actor.Handle, now, false)
 }
+
+// RenewHeldIn renews every live lease the actor with the handle holds, inside
+// the transaction tx, to now plus its own ttl, each with its lease_renewed
+// event, and returns them as renewed, oldest first. It commits nothing. It
+// returns ErrConflict, with a Next, for an actor that holds no live lease, and
+// writes nothing then.
+func (s Store) RenewHeldIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string) ([]Lease, error) {
+	now := s.now()
+	held, err := s.heldBy(ctx, tx, actor.Handle, now)
+	if err != nil {
+		return nil, err
+	}
+	if len(held) == 0 {
+		return nil, ConflictError{Msg: "you hold no live lease",
+			Next: "Start one first with vh start <task> \"<intent>\"."}
+	}
+	actorID, err := audit.UpsertActor(ctx, tx, s.Store.Dialect(), actor, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Lease, len(held))
+	for i, l := range held {
+		task, err := s.lockTask(ctx, tx, l.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.renew(ctx, tx, actorID, principal, l.ID, Renew{}, task, now); err != nil {
+			return nil, err
+		}
+		if out[i], err = s.find(ctx, tx, l.ID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}

@@ -114,6 +114,7 @@
                 "noteops.go",
                 "notifyops.go",
                 "nowops.go",
+                "pingops.go",
                 "startops.go",
                 "server.go",
                 "streamattention.go",
@@ -142,6 +143,7 @@
                 "login.go",
                 "notes.go",
                 "now.go",
+                "ping.go",
                 "start.go",
                 "taskattention.go",
                 "taskdeps.go",
@@ -160,7 +162,8 @@
                 "task.go",
                 "tasks.go",
                 "transitions.go",
-                "upgrade.go"
+                "upgrade.go",
+                "watch.go"
             ],
             "internal/leases": [
                 "end.go",
@@ -182,6 +185,7 @@
                     "noteops.go",
                     "notifyops.go",
                     "nowops.go",
+                    "pingops.go",
                     "startops.go",
                     "timelineops.go",
                     "actorops.go"
@@ -211,6 +215,7 @@
                     "initedit.go",
                     "initiatives.go",
                     "login.go",
+                    "ping.go",
                     "start.go",
                     "taskdeps.go",
                     "tree.go",

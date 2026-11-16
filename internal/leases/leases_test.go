@@ -1005,3 +1005,56 @@ func TestEndHeldInEndsTheLeaseWithTheOutcomeInTheCallersTransaction(t *testing.T
 		t.Errorf("%d lease_ended events, want 1", len(ev))
 	}
 }
+
+func TestRenewHeldInRenewsEveryLiveLeaseOfTheActorInTheCallersTransaction(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", nil)
+	e.start(t, bob, "aa-1", nil)
+	e.start(t, me, "aa-2", nil)
+	before, _ := e.S.Get(ctx, "L1")
+	bobBefore, _ := e.S.Get(ctx, "L2")
+	e.Clock.add(time.Hour)
+	e.inTx(t, func(tx *sql.Tx) {
+		got, err := e.S.RenewHeldIn(ctx, tx, me, "key:x")
+		if err != nil || len(got) != 2 || got[0].Ref != "L1" || got[1].Ref != "L3" {
+			t.Fatalf("RenewHeldIn = %+v, %v; want L1 and L3", got, err)
+		}
+		for _, l := range got {
+			if l.RenewedAt.Before(before.RenewedAt.Add(time.Hour)) || !l.ExpiresAt.Equal(l.RenewedAt.Add(2*time.Hour)) {
+				t.Errorf("%s renewed at %v, expires %v; want renewed an hour on with its 2h ttl", l.Ref, l.RenewedAt, l.ExpiresAt)
+			}
+		}
+	})
+	if l, _ := e.S.Get(ctx, "L1"); !l.ExpiresAt.Equal(before.ExpiresAt) {
+		t.Errorf("after the rollback L1 expires at %v, want %v", l.ExpiresAt, before.ExpiresAt)
+	}
+	e.inTx(t, func(tx *sql.Tx) {
+		if _, err := e.S.RenewHeldIn(ctx, tx, me, "key:x"); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if l, _ := e.S.Get(ctx, "L1"); l.ExpiresAt.Before(before.ExpiresAt.Add(time.Hour)) {
+		t.Errorf("after the commit L1 expires at %v", l.ExpiresAt)
+	}
+	if l, _ := e.S.Get(ctx, "L2"); !l.ExpiresAt.Equal(bobBefore.ExpiresAt) {
+		t.Errorf("bob's L2 expires at %v, want it untouched", l.ExpiresAt)
+	}
+	if ev := e.events(t, "lease_renewed"); len(ev) != 2 {
+		t.Errorf("%d lease_renewed events, want 2", len(ev))
+	}
+}
+
+func TestRenewHeldInWithNoLiveLeaseIsAConflictWithANext(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, bob, "aa-1", nil)
+	e.inTx(t, func(tx *sql.Tx) {
+		_, err := e.S.RenewHeldIn(ctx, tx, me, "key:x")
+		var ce leases.ConflictError
+		if !errors.As(err, &ce) || ce.Msg != "you hold no live lease" || !strings.Contains(ce.Next, "vh start") {
+			t.Errorf("err = %v (next %q), want the no-lease conflict", err, ce.Next)
+		}
+	})
+}

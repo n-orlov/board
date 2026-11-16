@@ -840,6 +840,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew every live lease the caller holds
+         * @description Renews every live lease the caller holds, each to now plus its own ttl, in one transaction with their `lease_renewed` events. With `progress` (1 to 200 characters) it also writes one milestone with that summary on each leased task (a `milestone` event each), in the same transaction. The answer is 200 with the renewed `leases`, oldest first, and `milestones`, the refs of the tasks it wrote a milestone on (empty without `progress`). The caller holding no live lease is 409; it writes nothing. A `progress` that is empty or longer than 200 characters is 400, and writes nothing either.
+         */
+        post: operations["ping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/attention": {
         parameters: {
             query?: never;
@@ -1543,6 +1563,18 @@ export interface components {
             note: components["schemas"]["Note"];
             /** @description True when the request marked the task done. */
             done: boolean;
+        };
+        /** @description The progress to record on each leased task. */
+        PingRequest: {
+            /** @description What has been done so far, 1 to 200 characters. Left out, the leases are only renewed. */
+            progress?: string;
+        };
+        /** @description The leases the ping renewed and the tasks it wrote a milestone on. */
+        PingResult: {
+            /** @description The renewed leases, oldest first. */
+            leases: components["schemas"]["Lease"][];
+            /** @description The refs of the tasks a milestone was written on, one for each leased task. Empty without `progress`. */
+            milestones: string[];
         };
         /** @description One of the caller's live leases, with the title of its task. */
         NowLease: components["schemas"]["Lease"] & {
@@ -3683,6 +3715,34 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    ping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PingRequest"];
+            };
+        };
+        responses: {
+            /** @description Every live lease of the caller was renewed, and a milestone written on each leased task when `progress` was sent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PingResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };

@@ -194,3 +194,37 @@ func TestOverdueIsAnOpenOrDoneWatchTaskWithNextCheckAtBeforeNow(t *testing.T) {
 		t.Error("a check moves next_check_at into the future, so the task is no longer overdue")
 	}
 }
+
+func TestMilestoneInIsTheCallersTransactionAndChecksTheSummaryFirst(t *testing.T) {
+	now := t0
+	s := fixed(newStore(t), &now)
+	initiative(t, s, "aa")
+	tk := mk(t, s, "aa", "work")
+	write := func(commit bool, ref, summary string) error {
+		tx, err := s.Store.Writer().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.MilestoneIn(ctx, tx, who, "k", ref, summary, nil)
+		if err == nil && got.Ref != tk.Ref {
+			t.Errorf("MilestoneIn answered %s, want %s", got.Ref, tk.Ref)
+		}
+		if commit && err == nil {
+			return tx.Commit()
+		}
+		_ = tx.Rollback()
+		return err
+	}
+	if err := write(false, tk.Ref, "rolled back"); err != nil || len(events(t, s, EventMilestone)) != 0 {
+		t.Errorf("a rolled back milestone: %v, %d events", err, len(events(t, s, EventMilestone)))
+	}
+	if err := write(true, tk.Ref, "kept"); err != nil || len(events(t, s, EventMilestone)) != 1 {
+		t.Errorf("a committed milestone: %v, %d events", err, len(events(t, s, EventMilestone)))
+	}
+	if err := write(true, "aa-9", "kept"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown task: %v, want ErrNotFound", err)
+	}
+	if err := write(true, "aa-9", " "); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a blank summary on an unknown task: %v, want ErrInvalid before the task is read", err)
+	}
+}
