@@ -2316,9 +2316,14 @@ Numbered steps the agent runs and checks itself, each with the command and the e
 The README says: *"or ask your agent: install board following
 `<repo URL>/INSTALL-AGENT.md`"*.
 
-A CI check (Lint stage) parses `install.sh` and `INSTALL-AGENT.md` and fails if they disagree on
-the asset name pattern, supported OS/arch list, checksum file name, default install directory or
-the environment variable names. The repository is public, so `install.sh` and `vh update`
+A CI check (Lint stage, `go run ./ci/installcheck`) parses `install.sh` and `INSTALL-AGENT.md` and
+fails if they disagree on the asset name pattern, the OS list, the arch list, the checksum file
+name, the default install directory or the set of environment variable names. `install.sh` is
+parsed for its `asset=`, `checksums=` and `dir=` lines, the arms of its `case "$os"` and
+`case "$arch"` and every `VH_*` name; the guide states the same facts in a list at its top
+(`- Asset:`, `- OS:`, `- Arch:`, `- Checksums:`, `- Directory:`, `- Installer variables:`,
+`- Runtime variables:`), and a `VH_*` name anywhere else in the guide must be in one of the two
+variable lists. The repository is public, so `install.sh` and `vh update`
 download release assets anonymously over HTTPS, with no token.
 
 ### 8.6 Agent protocol: `vh help agent`

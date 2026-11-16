@@ -23,6 +23,12 @@ import (
 const goStub = `#!/bin/sh
 echo "go $*" >> "$LINTPROBE_LOG"
 case "$1" in
+run)
+    if [ -n "${LINTPROBE_INSTALLCHECK_FAIL:-}" ]; then
+        echo "stub installcheck: install.sh and INSTALL-AGENT.md disagree" >&2
+        exit 1
+    fi
+    ;;
 vet)
     if [ -n "${LINTPROBE_VET_FAIL:-}" ]; then
         echo "stub go vet: failing on request" >&2
@@ -259,7 +265,8 @@ func runLintScriptWith(t *testing.T, opts scratchOptions) lintRun {
 //     `go mod tidy`, then `golangci-lint run ./...` (the shared ci/golangci.sh
 //     invocation), then shellcheck over the tracked .sh files, ESLint,
 //     svelte-check, `tsc --noEmit`, the OpenAPI lint and the generated-code
-//     drift check are all actually invoked, in that order, and the script
+//     drift check and the install.sh / INSTALL-AGENT.md agreement check are
+//     all actually invoked, in that order, and the script
 //     exits 0;
 //   - a finding from any later stage: the script exits non-zero and no stage
 //     after it runs;
@@ -282,6 +289,7 @@ func TestLintScriptRunsAllStagesFailFastAndExitsOnDrift(t *testing.T) {
 	tscCall := "npm run --silent check"
 	openapiCall := "npm run --silent openapi:lint -- ../api/openapi.yaml"
 	driftCall := "openapi-drift"
+	installCall := "go run ./ci/installcheck"
 
 	goStages := []string{gofmtCall, vetCall, tidyCall, lintCall}
 	upTo := func(calls ...string) []string { return append(append([]string{}, goStages...), calls...) }
@@ -293,7 +301,7 @@ func TestLintScriptRunsAllStagesFailFastAndExitsOnDrift(t *testing.T) {
 		wantCalls []string
 	}{
 		{"clean tree runs every stage in order and passes", nil, false,
-			upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall)},
+			upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall, installCall)},
 		{"gofmt drift fails before vet and tidy", []string{"LINTPROBE_GOFMT_DRIFT"}, true, []string{gofmtCall}},
 		{"vet failure fails before tidy", []string{"LINTPROBE_VET_FAIL"}, true, []string{gofmtCall, vetCall}},
 		{"go mod tidy drift fails before golangci-lint", []string{"LINTPROBE_TIDY_DRIFT"}, true, []string{gofmtCall, vetCall, tidyCall}},
@@ -303,7 +311,8 @@ func TestLintScriptRunsAllStagesFailFastAndExitsOnDrift(t *testing.T) {
 		{"svelte-check findings fail before tsc", []string{"LINTPROBE_NPM_FAIL=check:svelte"}, true, upTo(shellcheckCall, eslintCall, svelteCall)},
 		{"tsc findings fail before the OpenAPI lint", []string{"LINTPROBE_NPM_FAIL=check"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall)},
 		{"OpenAPI lint findings fail before the drift check", []string{"LINTPROBE_NPM_FAIL=openapi:lint"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall)},
-		{"generated-code drift fails last", []string{"LINTPROBE_DRIFT_FAIL"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall)},
+		{"generated-code drift fails before the install agreement check", []string{"LINTPROBE_DRIFT_FAIL"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall)},
+		{"install.sh and INSTALL-AGENT.md disagreement fails last", []string{"LINTPROBE_INSTALLCHECK_FAIL"}, true, upTo(shellcheckCall, eslintCall, svelteCall, tscCall, openapiCall, driftCall, installCall)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

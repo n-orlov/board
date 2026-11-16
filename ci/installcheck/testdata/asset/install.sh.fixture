@@ -1,0 +1,19 @@
+#!/bin/sh
+# Env: VH_VERSION, VH_INSTALL_DIR, VH_REPO
+set -eu
+version="${VH_VERSION:-latest}"
+repo="${VH_REPO:-example/repo}"
+dir="${VH_INSTALL_DIR:-$HOME/.local/bin}"
+checksums=checksums.txt
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m)
+case "$os" in
+  linux | darwin) ;;
+  *) echo "unsupported OS" >&2; exit 1 ;;
+esac
+case "$arch" in
+  x86_64 | amd64) arch=amd64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) echo "unsupported architecture" >&2; exit 1 ;;
+esac
+asset="vh_${os}_${arch}.tar.gz"

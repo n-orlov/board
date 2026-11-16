@@ -26,6 +26,17 @@ specification:
 - configuration and deployment (§13)
 - testing, CI and quality gates (§15), delivery phases (§16)
 
+## Install the CLI
+
+The `vh` CLI installs from a release of this public repository with `install.sh`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
+```
+
+Or ask your agent: install board following [INSTALL-AGENT.md](INSTALL-AGENT.md), a nine-step guide
+where the agent runs each command and checks its result itself, with no script to pipe into a shell.
+
 ## Run it
 
 The container image is one static binary (`/board`) running as a non-root user, with the

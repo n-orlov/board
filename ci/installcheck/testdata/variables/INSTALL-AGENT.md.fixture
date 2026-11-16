@@ -1,0 +1,9 @@
+# Installing vh
+
+- Asset: `vh_<os>_<arch>.tar.gz`
+- OS: `linux`, `darwin`
+- Arch: `amd64`, `arm64`
+- Checksums: `checksums.txt`
+- Directory: `~/.local/bin`
+- Installer variables: `VH_VERSION`, `VH_INSTALL_DIR`, `VH_REPO`
+- Runtime variables: `VH_URL`, `VH_API_KEY`

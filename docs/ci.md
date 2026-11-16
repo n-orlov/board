@@ -508,7 +508,10 @@ Scripts, each run through `ci/run.sh` unless noted:
   (`web/redocly.yaml`: `recommended-strict`, every finding is an error, plus
   `operationId`, summary, description, licence and tag-description rules; the
   one rule left off is `operation-4xx-response`, because `GET /healthz` has no
-  failing client path) and `ci/openapi-drift.sh`.
+  failing client path) and `ci/openapi-drift.sh`. Last comes `go run ./ci/installcheck` (R9): it parses `install.sh` and
+  `INSTALL-AGENT.md` (the shared-facts list at the top of the guide) and fails when they disagree on the
+  asset name pattern, the OS list, the arch list, the checksum file name, the default install directory
+  or the set of `VH_*` variable names; its fixture pairs live in `ci/installcheck/testdata`.
 - `ci/openapi-gen.sh` writes the generated code from `api/openapi.yaml`:
   `internal/server/openapi.gen.go` (oapi-codegen in `std-http,strict-server,models`
   mode, pinned by go.mod's `tool` directive, so no image change) and `web/src/lib/api/schema.d.ts`

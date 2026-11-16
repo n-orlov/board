@@ -6,7 +6,8 @@
 # '*.sh'`, then the frontend (ESLint, svelte-check, `tsc --noEmit`, all from
 # web/), then the OpenAPI document (Redocly lint of api/openapi.yaml) and
 # generated-code drift (ci/openapi-drift.sh: oapi-codegen and
-# openapi-typescript), in that order, stopping at the first failure so CI
+# openapi-typescript), then the install.sh / INSTALL-AGENT.md agreement check
+# (ci/installcheck, R9), in that order, stopping at the first failure so CI
 # reports the earliest, cheapest signal rather than piling up unrelated ones.
 # gofmt, vet and tidy live only here; golangci-lint's own formatters are not
 # enabled, so nothing is checked twice. ci/lintcheck proves each checker fails
@@ -95,4 +96,7 @@ echo "ci/lint.sh: OpenAPI lint"
 echo "ci/lint.sh: OpenAPI generated-code drift"
 sh ci/openapi-drift.sh
 
-echo "ci/lint.sh: clean (gofmt, go vet, go mod tidy, golangci-lint, shellcheck, ESLint, svelte-check, tsc, OpenAPI lint and drift all pass)"
+echo "ci/lint.sh: install.sh and INSTALL-AGENT.md agreement"
+go run ./ci/installcheck
+
+echo "ci/lint.sh: clean (gofmt, go vet, go mod tidy, golangci-lint, shellcheck, ESLint, svelte-check, tsc, OpenAPI lint and drift, the install.sh and INSTALL-AGENT.md agreement all pass)"
