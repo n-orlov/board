@@ -3776,7 +3776,7 @@ unit.
 |---|---|
 | idle RSS | ≤ 40 MB |
 | image size | ≤ 30 MB (compressed layers, each platform; `ci/imagecheck`) |
-| cold start to `/readyz` | ≤ 1 s with an empty DB, ≤ 3 s with 1 M events |
+| cold start to `/healthz` 200 | ≤ 1 s with an empty DB, ≤ 3 s with 1 M events |
 | `GET /now`, `GET /attention` p99 | ≤ 20 ms at 1 M events, 50 k notes, 200 live leases |
 | lease renew p99 | ≤ 10 ms |
 | sustained load | 200 req/s mixed (80 % reads) without errors; 500 concurrent SSE clients |
