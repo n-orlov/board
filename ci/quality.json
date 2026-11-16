@@ -58,7 +58,8 @@
             "internal/server",
             "internal/cli",
             "internal/envvar",
-            "internal/sweep"
+            "internal/sweep",
+            "internal/update"
         ],
         "lanes": {
             "base": [
@@ -83,7 +84,8 @@
                 "internal/timeline",
                 "internal/version",
                 "internal/envvar",
-                "internal/sweep"
+                "internal/sweep",
+                "internal/update"
             ],
             "server-ops": [
                 "internal/server#ops"
@@ -158,6 +160,7 @@
                 "tasktransitions.go",
                 "taskview.go",
                 "tree.go",
+                "update.go",
                 "whoami.go"
             ],
             "internal/initiatives": [
@@ -231,6 +234,7 @@
                     "start.go",
                     "taskdeps.go",
                     "tree.go",
+                    "update.go",
                     "whoami.go"
                 ],
                 "views": [

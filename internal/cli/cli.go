@@ -42,7 +42,7 @@ const (
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
-const Usage = "usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
+const Usage = "usage: vh <serve|version|update|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
 
 // Env looks up an environment variable.
 type Env func(string) string
@@ -64,6 +64,8 @@ func Run(args []string, stdout, stderr io.Writer, env Env) int {
 			return usage(stderr)
 		}
 		return serve(stderr, env)
+	case "update":
+		return updateCmd(args[1:], stdout, stderr, env)
 	case "help":
 		return helpCmd(args[1:], stdout, stderr, env)
 	case "admin":

@@ -1742,7 +1742,7 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|update|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 `vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
@@ -1760,7 +1760,7 @@ version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also an
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
 and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|update|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
 `vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
@@ -2119,7 +2119,7 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|update|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
 vh version | update [--check] [--version vX.Y.Z]
@@ -2295,9 +2295,33 @@ curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
   not check this yet; board's does.)
 - Prints the installed `vh version` and warns if the directory is not on `PATH`.
 
-**`vh update`** replaces the running binary with the latest (or `--version`) release, with
-the same checksum and immutability checks; `--check` only reports. It refuses dev builds,
-package-managed installs and unwritable directories, like `deck update`.
+**`vh update [--version vX.Y.Z] [--check]`** (package `internal/update`, command `internal/cli/update.go`)
+replaces the running binary with the latest release, or the pinned one (a downgrade is allowed),
+and uses what `install.sh` uses: the asset `vh_<os>_<arch>.tar.gz` and `checksums.txt` of the same release,
+the SHA-256 check, the immutability check (`VH_REQUIRE_IMMUTABLE=0`, exactly `0`, opts out with a note on
+stderr), `VH_REPO`, and the loopback-only `http://` rule for `VH_API_URL` and `VH_DOWNLOAD_URL` (a redirect
+may only lead to https). Every request is anonymous. The archive's `vh` is written to a temporary file in
+the directory of the running binary (symlinks resolved), set to mode 0755 and renamed over it, so a running
+`vh` is replaced safely and nothing half-written is ever at the path.
+
+- `--check` prints `up to date (vX.Y.Z)` or `update available: vA → vB`, exits 0 and writes nothing. It is
+  read-only, so it works where the binary could not be replaced; it still refuses a dev build.
+  `vh update` itself prints `updated: vA → vB (<path>)`, or `up to date (vA)` when the latest release is not
+  newer (with `--version`, when it is the running one).
+- It refuses with exit 1, one stderr line that ends in a `→ <what to do>` hint, and the binary unchanged,
+  in these six cases, plus a bad `VH_REPO`, `VH_API_URL` or `VH_DOWNLOAD_URL` and an unsupported platform:
+  a **dev build** (the running version is not `vMAJOR.MINOR.PATCH` with an optional pre-release part: a
+  checkout build `devel+<commit>`, `devel`, and any `-dirty` build); a **package-managed install** (the
+  binary, before or after resolving symlinks, lies at or under `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
+  `/usr/lib`, `/usr/libexec`, `/opt/homebrew`, `/usr/local/Cellar`, `/home/linuxbrew`, `/nix/store` or
+  `/snap`, as in `deck update`; a bare `/usr` is not listed, so `/usr/local/bin` is updated); an
+  **unwritable directory** (checked by creating and removing a file; no `sudo` is ever run); a release
+  **not immutable** (the `immutable` member of the release object is not exactly `true`, or the API gave
+  no answer); a **checksum mismatch** (or no single checksum line for the asset); and an **unknown
+  `--version`** (the release API answers 404, or the value is not a release tag). The first three are
+  decided before any request.
+- With the opt-out, a release the API does not confirm installs when `--version` pins it; the latest
+  release cannot be resolved without the API, so that case is refused.
 
 **`INSTALL-AGENT.md`**: an install guide for agents, with no script to pipe into a shell.
 Numbered steps the agent runs and checks itself, each with the command and the expected result:

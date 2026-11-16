@@ -35,6 +35,10 @@ type apiState struct {
 	// stubBoard is the server a scenario started to answer POST /api/v1/start
 	// with chosen protocol numbers; stopServer closes it.
 	stubBoard *httptest.Server
+	// releases is the stub release server of a vh update scenario and
+	// installedVH the stamped binary it runs; stopServer closes the server.
+	releases    *httptest.Server
+	installedVH string
 	// blockCounts is the asks, events and live leases count a scenario noted.
 	blockCounts string
 	// finishCounts is the events, notes and live leases count a scenario noted.

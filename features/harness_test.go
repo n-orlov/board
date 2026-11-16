@@ -25,7 +25,7 @@ import (
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: vh <serve|version|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
+const usageLine = "usage: vh <serve|version|update|help|whoami|init|task|lease|start|new|finish|block|ping|catchup|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -410,6 +410,14 @@ func (h *harness) keyFromAnotherDatabase(ctx context.Context) error {
 }
 
 func (h *harness) stopServer() {
+	if h.api.releases != nil {
+		h.api.releases.Close()
+		h.api.releases = nil
+	}
+	if h.api.installedVH != "" {
+		_ = os.RemoveAll(filepath.Dir(h.api.installedVH))
+		h.api.installedVH = ""
+	}
 	if h.api.stubBoard != nil {
 		h.api.stubBoard.Close()
 		h.api.stubBoard = nil
@@ -477,6 +485,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	registerNotificationSteps(sc, h)
 	registerHelpAgentSteps(sc, h)
 	registerStartSteps(sc, h)
+	registerUpdateSteps(sc, h)
 	registerFinishSteps(sc, h)
 	registerPingSteps(sc, h)
 	registerBlockSteps(sc, h)
