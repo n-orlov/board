@@ -1,10 +1,11 @@
-# board — product spec
+# Village Hall — product spec
 
-A shared work board for one operator and the coding agents working for them.
+Village Hall is a shared work board for one operator and the coding agents working for them.
 Initiatives, tasks, live leases, asks and notes, in one service with a web UI for
 the human, and an HTTP API plus a CLI for agents.
 
-This document is the design. Nothing here is implemented yet. Requirement IDs
+This document is the design and, for what §16 marks shipped, its description; a feature marked "not yet served" is
+designed but not built. Requirement IDs
 (`B1`, `B2`, …) are stable: code, tests and PRDs cite them.
 
 Contents
@@ -42,7 +43,7 @@ context. Nobody (human or agent) can see at a glance:
 - whether two agents are about to touch the same thing (a host, a repo, a service);
 - what other agents wanted everyone to know.
 
-`board` is that shared surface. It is **tool-agnostic**: it has no integration with any
+Village Hall (`vh`) is that shared surface. It is **tool-agnostic**: it has no integration with any
 session manager or job runner. Agents take part because a skill tells them to, and identify
 themselves from what their environment exposes (§9).
 
@@ -908,8 +909,8 @@ event, the task, initiative, ask, lease and actor rows named above.
   `api/openapi.yaml`.
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` and the six public PWA files (§12.3) are
-  unauthenticated (`/readyz`, the spec documents, `/api/docs` and `/metrics` all require a key or
-  session; `features/unauthenticated.feature` reads the operation list from `api/openapi.yaml` and
+  unauthenticated (`/readyz`, the spec documents and `/api/docs` all require a key or
+  session, and `/metrics` would too once it is served (it is not yet served, §6.2); `features/unauthenticated.feature` reads the operation list from `api/openapi.yaml` and
   expects 401 from each operation but `GET /healthz`). Every other route,
   including the embedded UI at `/` and an unknown path, answers a request with no credential
   with 401 and a problem document (`application/problem+json`, `WWW-Authenticate: Bearer`)
@@ -966,8 +967,9 @@ event, the task, initiative, ask, lease and actor rows named above.
   every path, including a problem an operation returns as a typed response (an unknown Swagger asset is a
   404 with its own `next`): a final step over the whole handler fills the status default into any
   `application/problem+json` response that arrives without a non-empty `next`.
-- Compact mode: `?view=compact` returns the minimal fields agents need (ids, refs, one-line
-  text, times), to keep agent context small.
+- Compact mode (**not yet served**): `?view=compact` would return the minimal fields agents need (ids, refs, one-line
+  text, times), to keep agent context small. No operation reads the parameter today: every answer is the full
+  document whatever `view` says.
 
 ### 6.2 Endpoints (v1)
 
@@ -1005,7 +1007,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | GET | `/readyz` | 200 when the DB is reachable and migrated, 503 otherwise |
 | GET/POST | `/keys`, POST `/keys/{name}/revoke` | API keys (§3.3) |
 | GET | `/auth/login`, `/auth/oidc/callback`; GET `/auth/session`; POST `/auth/logout` | OIDC (§3.2); outside `/api/v1` |
-| GET | `/metrics` | Prometheus text |
+| GET | `/metrics` | Prometheus text. **Not yet served**: the route does not exist today and answers 401 without a credential or 404 with one, like any unknown path |
 
 **Events** (`GET /api/v1/events`, `GET /api/v1/tasks/{ref}/events`, in `api/openapi.yaml`): a page of
 `{items, next_after?}` ordered by the order the events were written (the `n` behind `E<n>`). Each item is `{id, ref,
@@ -2151,7 +2153,7 @@ vh note show <N…>
 vh milestone <task> "<summary>"
 vh check <task> "<summary>" [--next 24h]
 vh admin keys create <name> [--expires 90d] | list | revoke <name>   # direct DB, no HTTP
-vh admin migrate | backup <dest>
+vh admin migrate | backup <dest>   # backup: not yet served (no such command today); migrate is served
 ```
 
 `vh ask --poll D` prints the answer (exit 0), the withdrawal (exit 6), or exits 3 on timeout with the ask still open.
@@ -3545,7 +3547,7 @@ network requests (all assets embedded).
 - Go 1.25+, one module, one static binary (`CGO_ENABLED=0`).
 - HTTP: standard library `net/http` (1.22+ routing), handlers generated from OpenAPI
   (`oapi-codegen`, strict server). No web framework.
-- Logging: `log/slog` JSON. Metrics: Prometheus text exposition (minimal dependency).
+- Logging: `log/slog` JSON. Metrics: Prometheus text exposition (minimal dependency; **not yet served**, §6.2).
 
 ### 12.2 Database
 
@@ -3689,8 +3691,8 @@ also accepted (§13.1).
 | `VH_NOTIFY_TIMEOUT` | `10s` | how long one alert POST may take to get a response status line, connect to status (§5.4); the response body is not read, so a stalled or truncated body after a 2xx does not matter. A Go duration above zero; any other value exits 1, whether or not `VH_NOTIFY_URL` is set. A POST that gets no status line within it fails with `last_error` `timeout` and is retried |
 | `VH_NOTIFY_HEADER` | (unset: none) | one `Name: value` header sent with every alert POST, for a receiver that wants a token (§5.4). A value that is not a header name, a colon and a non-empty one-line value exits 1, with a message that never repeats it. It comes from the environment only; it is never logged, never written to an event or an outbox row and never part of a payload |
 | `VH_STREAM_HEARTBEAT` | `25s` | how often an idle `GET /api/v1/stream` (§7.1) sends a `: ping` comment. A Go duration above zero; any other value exits 1 |
-| `VH_BASE_PATH` | `/` | serve under a sub-path behind a proxy |
-| `VH_LOG_LEVEL` | `info` | |
+| `VH_BASE_PATH` | `/` | **Not yet served**: serve under a sub-path behind a proxy. The server reads no such variable today and always serves at `/` |
+| `VH_LOG_LEVEL` | `info` | **Not yet served**: the server reads no such variable today |
 | `VH_PUBLIC_URL` | (required with the issuer) | external base URL; used for the OIDC redirect URI and the CSRF origin check, and as the base of the links in an alert (§5.4). With `VH_NOTIFY_URL` set, a value that is not an absolute http(s) URL exits 1 |
 | `VH_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
 | `VH_OIDC_CLIENT_ID` | (required with the issuer) | |
@@ -3705,8 +3707,8 @@ exit 1), and `VH_OIDC_CLIENT_SECRET_FILE` may replace the secret variable. With 
 browser login is off and only API keys authenticate (§3.3); there is no unauthenticated mode either way,
 and tests use a mock provider (§3.2, §15). The board does no TLS itself: it must be served over HTTPS by a terminating
 proxy, since the session cookie is `Secure`. Register the redirect URI
-`<VH_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file (use the online backup command
-`vh backup <dest>`, which runs `VACUUM INTO`) or the Postgres database by its own tooling.
+`<VH_PUBLIC_URL>/auth/oidc/callback` with the provider. Backups: the SQLite file or the Postgres database, by their own tooling. The online backup command
+`vh backup <dest>` (`VACUUM INTO`) is **not yet served**: no such command exists today.
 
 **Image version.** The root `Dockerfile` takes two build args, `VERSION` (default `devel`) and `REVISION`
 (default empty), and passes them to `go build` as the linker flags
@@ -3996,7 +3998,7 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 | 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `vh now` (lease/conflict parts), task and lease CLI. |
 | 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
 | 3 | **Phase 3 is shipped.** Timeline UI (`vis-timeline` bundled with the app; filters: initiative, tag, actor and closed within, in the fragment; zoom hour to quarter, panning refetch, live refresh), archive window, remaining UI views. |
-| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `vh start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `vh update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
+| 4 | **Phase 4 is done, except the operator's own deployment.** CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `vh start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `vh update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment (not done here: it is the operator's, outside this repository). |
 
 Each phase ends on a green `main` build with all gates still enforced.
 

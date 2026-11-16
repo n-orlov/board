@@ -1,6 +1,8 @@
 # CI
 
-This is the only CI document. It grows with the pipeline; this section covers
+This is the only CI document, for Village Hall (`vh`). CI-internal names keep their `board` spelling
+(`BOARD_CI_*`, `BOARD_GODOG_*`, `BOARD_DB_LEG`, `BOARD_MUTATION_*`, `BOARD_IMAGE_*`, `board-ci:local`,
+`board:ci`, the Jenkins job paths, labels and credential IDs): SPEC §13.1 lists what is kept. It grows with the pipeline; this section covers
 the toolchain image and how every command runs in it.
 
 ## Toolchain image
@@ -162,7 +164,7 @@ A red Lint, Suite, Image, Allure smoke, Quality, Stability, Perf or Mutation uni
 fails the build. Within a phase the other units still finish, and a later phase
 does not start after a failure.
 
-**Allure smoke.** `features/allure_formatter_test.go` is board's Godog formatter
+**Allure smoke.** `features/allure_formatter_test.go` is Village Hall's Godog formatter
 for Allure 2 (selected by `BOARD_GODOG_ALLURE=<absolute results dir>`, which
 `ci/suite.sh` sets for every `features/` run, rerun included, so a rerun scenario
 keeps its history id). `features/allure_formatter_fixture_test.go` runs a fixture
@@ -237,7 +239,7 @@ builds every release asset at the commit being built and asserts them, and publi
 distroless static, has a `RUN`, runs as root or sets no user, lacks the CA
 certificates or tzdata, when a builder `FROM` lacks `--platform=$BUILDPLATFORM`, or
 when the Go build does not cross-compile. Nothing is pushed: the registry push
-belongs to the release job (Phase 4).
+belongs to the release job ("Release", below).
 
 **Reports.** `post { always }` publishes the JUnit, Allure and CI summary reports,
 declares the README badges, adds the build page summary line, and archives
@@ -489,7 +491,7 @@ Scripts, each run through `ci/run.sh` unless noted:
   positional argument names the results directory.
   The feature passes get `GOCOVERDIR` and `BOARD_FEATURES_COVERMODE` (the unit
   pass's mode, `atomic` under `-race`): the Godog harness then builds the real
-  board binary with `-cover -covermode=<mode>` (`features/harness_test.go`), and
+  `vh` binary with `-cover -covermode=<mode>` (`features/harness_test.go`), and
   stops a scenario's server with SIGTERM so its counters are flushed. The suite
   merges those counters with the unit pass's into `coverage-merged.out`. A
   database leg whose log shows scenarios ran but that left no non-empty counter
@@ -519,7 +521,7 @@ Scripts, each run through `ci/run.sh` unless noted:
   takes seconds to draw once it holds thousands of tasks; run last, those specs failed
   the first run on the agent and the repeat took the Suite past its bound.
   `ci/suitecheck` fails if that order is lost. Only `GET /healthz` is open,
-  so `e2e/global-setup.ts` mints a key with `board admin keys create` at test
+  so `e2e/global-setup.ts` mints a key with `vh admin keys create` at test
   time (no key is committed) and the `test` exported by `e2e/fixtures.ts`
   sends it, with a `Board-Actor` header, on every request; every spec imports
   `test` from there. The retry-once is the
@@ -589,7 +591,7 @@ Scripts, each run through `ci/run.sh` unless noted:
   `ci-results/board-image-oci.tar` (the Jenkins Image unit; on the agent). It passes the
   image's `VERSION` and `REVISION` build args (`BOARD_IMAGE_VERSION`, `BOARD_IMAGE_REVISION`, set by
   the Jenkinsfile to the commit's tag or short sha and the full commit), which the binary reports in
-  `board version` and `GET /api/v1/meta`.
+  `vh version` and `GET /api/v1/meta`.
 - `ci/image-check.sh [dir]`: runs `ci/imagecheck` over the OCI layout, `vh version`,
   the deployed-configuration test and a `/healthz` probe against `board:ci`.
 - `ci/release-build.sh <version> <outdir>`: builds the release assets of SPEC 12.5 into
@@ -609,28 +611,33 @@ Scripts, each run through `ci/run.sh` unless noted:
 ## Known differences from deck
 
 The `ci/` tools and scripts are carried from deck (`DECK_*` renamed to
-`BOARD_*`, deck's module, image, volume and label names renamed to board's).
+`BOARD_*`, deck's module, image, volume and label names renamed to this repository's).
 Every test in deck's copies of `ci/covgate`, `ci/crapgate`, `ci/qualitycheck`,
 `ci/junit2allure`, `ci/junitflaky`, `ci/allureverify`, `ci/suitecheck`,
-`ci/lintcheck` and `ci/repocheck` is carried, adapted to board's tree (CRAP
+`ci/lintcheck` and `ci/repocheck` is carried, adapted to Village Hall's tree (CRAP
 ceiling 8 instead of 10, the zero-statement list naming `features/`), except:
 
-- **tmux-only tests.** Board has no TUI: `ci/tmuxguard/`, `ci/tmux-guard.sh`
+- **tmux-only tests.** Village Hall has no TUI: `ci/tmuxguard/`, `ci/tmux-guard.sh`
   and the `tmux.version` assertion in deck's `ci/suitecheck/allure_test.go`
   are not carried.
-- **install.sh tests, rewritten for Phase 4.** deck's `ci/repocheck/installcheck_test.go`
+- **Install tests, rewritten for Village Hall.** deck's `ci/repocheck/installcheck_test.go`
   and `TestInstallScriptCurlIsHTTPSOnlyAndStatesItsChecksumLimit` are not carried as
   they were: `ci/repocheck/install_test.go` runs `sh install.sh` against an httptest
   release server with a fake `uname`, covers SPEC §8.5's immutability check (not
   deck's checksum-only one) and fails any `curl` call without `--proto =https`.
+  They run in the Suite's Go pass of the Core phase, like every `ci/repocheck` test.
+  `vh update` is tested the same way: `internal/update` and `features/cli_update.feature` point
+  `VH_API_URL` and `VH_DOWNLOAD_URL` at a loopback stub release server. The installer and the
+  updater download anonymously over HTTPS (the repository is public); no test and no CI step calls
+  the real GitHub release API.
 - **Jenkinsfile tests, carried here.** deck's `ci/repocheck/jenkinsfile_test.go`
   and its `TestLintJobRunsGolangciLintBeforeTheSuite` (deck's
   `ci/repocheck/lintgate_test.go`, here `TestLintUnitRunsGolangciLintBeforeLaterPhases`)
-  are carried against board's `Jenkinsfile`, renamed (`DECK_*` to `BOARD_*`, the
+  are carried against Village Hall's `Jenkinsfile`, renamed (`DECK_*` to `BOARD_*`, the
   `deck/` jobs to `board/`) and rewritten for its three phases (Core, Stability,
-  Mutation) and parallel units. Board's pipeline adds Mutation and the image
+  Mutation) and parallel units. Village Hall's pipeline adds Mutation and the image
   build, and drops the tmux-only parts. deck's release
-  assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is carried for board's
+  assertion, `TestJenkinsfileReleasePublishesTheCandidate`, is carried for Village Hall's
   `Jenkinsfile.release` under the same name: it asserts the five stages in order, the
   `DRY_RUN` default, the CI job path derived from the folder of `JOB_NAME`, the repository read
   from the checkout's remote, the `REGISTRY`, `IMAGE_NAME` and two credential-ID parameters, no hostname
