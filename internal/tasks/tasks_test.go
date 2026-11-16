@@ -470,3 +470,45 @@ func TestCreateInRefusesWhatCreateRefuses(t *testing.T) {
 		_ = tx.Rollback()
 	}
 }
+
+func TestDoneInMarksTheTaskDoneInTheCallersTransactionAndCommitsNothing(t *testing.T) {
+	s, ls, tk := leased(t)
+	startLease(t, ls, who, tk.Ref, "work")
+	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.DoneIn(ctx, tx, who, "key:x", tk.Ref, DoneOptions{Outcome: "finished"})
+	if err != nil || got.Status != StatusDone || got.DoneBy != who.Handle {
+		t.Fatalf("DoneIn = %+v, %v", got, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if now, err := s.Get(ctx, tk.Ref); err != nil || now.Status != StatusOpen {
+		t.Errorf("after the rollback the task is %+v, %v; want open", now, err)
+	}
+	if l, err := ls.Get(ctx, "L1"); err != nil || l.State != "live" {
+		t.Errorf("after the rollback L1 = %+v, %v; want live", l, err)
+	}
+}
+
+func TestDoneInRefusesWhatDoneRefuses(t *testing.T) {
+	s, ls, tk := leased(t)
+	startLease(t, ls, bobby, tk.Ref, "theirs")
+	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var held LeaseHeldError
+	if _, err := s.DoneIn(ctx, tx, who, "key:x", tk.Ref, DoneOptions{}); !errors.As(err, &held) {
+		t.Errorf("done under another's lease: err = %v, want LeaseHeldError", err)
+	}
+	if _, err := s.DoneIn(ctx, tx, who, "key:x", tk.Ref, DoneOptions{Outcome: strings.Repeat("x", 201)}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a long outcome: err = %v, want ErrInvalid", err)
+	}
+	if _, err := s.DoneIn(ctx, tx, who, "key:x", "aa-9", DoneOptions{}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown task: err = %v, want ErrNotFound", err)
+	}
+}

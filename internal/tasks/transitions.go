@@ -51,18 +51,40 @@ type DoneOptions struct {
 // the current status) for a task that is not open, and writes no row or event
 // then.
 func (s Store) Done(ctx context.Context, actor audit.Actor, principal, ref string, opt DoneOptions) (Task, error) {
+	tr, err := doneTransition(opt)
+	if err != nil {
+		return Task{}, err
+	}
+	return s.transit(ctx, actor, principal, ref, tr)
+}
+
+// DoneIn is Done inside the caller's transaction: it commits nothing and rolls
+// nothing back, so the task's status, its lease endings and their events stand
+// or fall with tx. It is how a finish ends the lease, writes the outcome and
+// marks the task done together.
+func (s Store) DoneIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal, ref string, opt DoneOptions) (Task, error) {
+	tr, err := doneTransition(opt)
+	if err != nil {
+		return Task{}, err
+	}
+	return s.transitInTx(ctx, tx, actor, principal, ref, tr)
+}
+
+// doneTransition is the done of a task with the options' outcome, checked
+// before the task is read.
+func doneTransition(opt DoneOptions) (transition, error) {
 	outcome := strings.TrimSpace(opt.Outcome)
 	if outcome == "" {
 		outcome = "done"
 	} else if err := domain.ValidateSummary(outcome); err != nil {
-		return Task{}, InvalidError{Msg: err.Error(), Next: "Send an outcome of at most 200 characters, or leave it out."}
+		return transition{}, InvalidError{Msg: err.Error(), Next: "Send an outcome of at most 200 characters, or leave it out."}
 	}
-	return s.transit(ctx, actor, principal, ref, transition{
+	return transition{
 		action: "mark done", event: EventDone, allowed: []string{"open"},
 		set:    `status = 'done', done_at = ?, done_by = ?`,
 		args:   func(actorID string, at int64) []any { return []any{at, actorID} },
 		leases: doneLeases(outcome, opt.Force),
-	})
+	}, nil
 }
 
 // Reopen moves a done or closed task back to open, clearing resolution, done_at,

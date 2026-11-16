@@ -2,6 +2,7 @@ package leases_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -901,5 +902,106 @@ func TestStartInCheckedLikeStart(t *testing.T) {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := e.S.StartIn(ctx, tx, me, "key:x", leases.Start{Task: "aa-9", Intent: "x"}); !errors.Is(err, leases.ErrNotFound) {
 		t.Errorf("unknown task: err = %v, want ErrNotFound", err)
+	}
+}
+
+func (e env) inTx(t *testing.T, f func(tx *sql.Tx)) {
+	t.Helper()
+	tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	f(tx)
+}
+
+func TestHeldInFindsTheCallersLiveLeaseOnTheTaskNamedOrOnItsOnlyOne(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, bob, "aa-1", nil)
+	e.start(t, me, "aa-2", nil)
+	e.inTx(t, func(tx *sql.Tx) {
+		for ref, want := range map[string]string{"": "L2", "aa-2": "L2", "AA-2": "L2"} {
+			if l, err := e.S.HeldIn(ctx, tx, me.Handle, ref); err != nil || l.Ref != want || l.Task != "aa-2" || l.Actor != me.Handle {
+				t.Errorf("HeldIn(%q) = %+v, %v; want %s on aa-2", ref, l, err, want)
+			}
+		}
+	})
+}
+
+func TestHeldInRefusesWhatIsNotAHeldLeaseWithANext(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, bob, "aa-1", nil)
+	short := int64(60)
+	e.start(t, me, "aa-2", &short)
+	e.inTx(t, func(tx *sql.Tx) {
+		for name, c := range map[string]struct{ handle, ref, msg, next string }{
+			"no lease at all":      {"nobody@host", "", "you hold no live lease", "vh start <task>"},
+			"none on the task":     {me.Handle, "aa-1", "you hold no live lease on task aa-1", "vh start aa-1"},
+			"an actor with no row": {"nobody@host", "aa-2", "you hold no live lease on task aa-2", "vh start aa-2"},
+		} {
+			_, err := e.S.HeldIn(ctx, tx, c.handle, c.ref)
+			var ce leases.ConflictError
+			if !errors.As(err, &ce) || ce.Msg != c.msg || !strings.Contains(ce.Next, c.next) {
+				t.Errorf("%s: err = %v (next %q), want %q with %q", name, err, ce.Next, c.msg, c.next)
+			}
+		}
+		if _, err := e.S.HeldIn(ctx, tx, me.Handle, "aa-9"); !errors.Is(err, leases.ErrNotFound) {
+			t.Errorf("unknown task: err = %v, want ErrNotFound", err)
+		}
+	})
+	e.Clock.add(2 * time.Minute)
+	e.inTx(t, func(tx *sql.Tx) {
+		if _, err := e.S.HeldIn(ctx, tx, me.Handle, ""); !errors.Is(err, leases.ErrConflict) {
+			t.Errorf("an expired lease is held: err = %v", err)
+		}
+	})
+}
+
+func TestHeldInWithSeveralLeasesListsThemInTheNext(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", nil)
+	e.start(t, me, "aa-2", nil)
+	e.inTx(t, func(tx *sql.Tx) {
+		_, err := e.S.HeldIn(ctx, tx, me.Handle, "")
+		var ce leases.ConflictError
+		if !errors.As(err, &ce) || ce.Msg != "you hold 2 live leases" || ce.Next != "Name the task to finish: aa-1 (L1), aa-2 (L2)." {
+			t.Errorf("err = %v, next %q", err, ce.Next)
+		}
+	})
+}
+
+func TestEndHeldInEndsTheLeaseWithTheOutcomeInTheCallersTransaction(t *testing.T) {
+	e := newEnv(t)
+	e.start(t, me, "aa-1", nil)
+	e.inTx(t, func(tx *sql.Tx) {
+		l, err := e.S.HeldIn(ctx, tx, me.Handle, "aa-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.S.EndHeldIn(ctx, tx, me, "key:x", l, "shipped"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.S.HeldIn(ctx, tx, me.Handle, "aa-1"); !errors.Is(err, leases.ErrConflict) {
+			t.Errorf("the lease is still held in the transaction: %v", err)
+		}
+	})
+	if l, err := e.S.Get(ctx, "L1"); err != nil || l.State != "live" {
+		t.Errorf("after the rollback L1 = %+v, %v; want live", l, err)
+	}
+	e.inTx(t, func(tx *sql.Tx) {
+		l, _ := e.S.HeldIn(ctx, tx, me.Handle, "aa-1")
+		if err := e.S.EndHeldIn(ctx, tx, me, "key:x", l, "shipped"); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	got, err := e.S.Get(ctx, "L1")
+	if err != nil || got.State != "ended" || got.Outcome != "shipped" || got.EndedBy != "" {
+		t.Errorf("L1 = %+v, %v; want ended by its holder with the outcome", got, err)
+	}
+	if ev := e.events(t, "lease_ended"); len(ev) != 1 {
+		t.Errorf("%d lease_ended events, want 1", len(ev))
 	}
 }

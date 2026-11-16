@@ -820,6 +820,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish working on a task
+         * @description Ends the caller's live lease on a task, writes `outcome` as a note on the task and, with `done`, marks the task done, in one transaction with their events (`lease_ended`, `note_posted` and, with `done`, `task_done`). Send `task` (a ref or ULID) to name the task; leave it out to finish the only task the caller holds a live lease on. `outcome` is 1 to 200 characters on one line, and is both the lease's outcome and the note's summary. The answer is 200 with the ended `lease`, the `note` and `done`. The caller holding no live lease on the given task, no live lease at all when `task` is left out, or several live leases when it is left out (the `next` lists them), is 409; so is `done` while another actor holds a live lease on the task. A 409 writes nothing: neither the lease end, nor the note, nor the status. An unknown task is 404, and a missing or malformed `outcome` is 400.
+         */
+        post: operations["finish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/attention": {
         parameters: {
             query?: never;
@@ -1507,6 +1527,22 @@ export interface components {
             protocol: number;
             /** @description The highest agent protocol version the caller has read, 0 when it has recorded none. */
             protocol_seen: number;
+        };
+        /** @description The lease to end, the outcome to record and whether the task is done. */
+        FinishRequest: {
+            /** @description The task's ref or ULID. Left out, the caller's only live lease names the task. */
+            task?: string;
+            /** @description What was done or where it was left, 1 to 200 characters on one line. The lease's outcome and the note's summary. */
+            outcome: string;
+            /** @description Also mark the task done. Default false. */
+            done?: boolean;
+        };
+        /** @description The lease the finish ended, the note it wrote and whether it marked the task done. */
+        FinishResult: {
+            lease: components["schemas"]["Lease"];
+            note: components["schemas"]["Note"];
+            /** @description True when the request marked the task done. */
+            done: boolean;
         };
         /** @description One of the caller's live leases, with the title of its task. */
         NowLease: components["schemas"]["Lease"] & {
@@ -3613,6 +3649,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StartResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    finish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinishRequest"];
+            };
+        };
+        responses: {
+            /** @description The lease ended and the note was written, and the task was marked done when `done` was sent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinishResult"];
                 };
             };
             400: components["responses"]["BadRequest"];

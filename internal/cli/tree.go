@@ -38,6 +38,7 @@ var commandTree = map[string][]flagSpec{
 	"lease ls":          leaseLsFlags,
 	"start":             startFlags,
 	"new":               newFlags,
+	"finish":            finishFlags,
 	"now":               nowFlags,
 	"milestone":         milestoneFlags,
 	"check":             checkFlags,

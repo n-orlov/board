@@ -1239,6 +1239,30 @@ type ExternalRef struct {
 	Url string `json:"url"`
 }
 
+// FinishRequest The lease to end, the outcome to record and whether the task is done.
+type FinishRequest struct {
+	// Done Also mark the task done. Default false.
+	Done *bool `json:"done,omitempty"`
+
+	// Outcome What was done or where it was left, 1 to 200 characters on one line. The lease's outcome and the note's summary.
+	Outcome string `json:"outcome"`
+
+	// Task The task's ref or ULID. Left out, the caller's only live lease names the task.
+	Task *string `json:"task,omitempty"`
+}
+
+// FinishResult The lease the finish ended, the note it wrote and whether it marked the task done.
+type FinishResult struct {
+	// Done True when the request marked the task done.
+	Done bool `json:"done"`
+
+	// Lease A lease on a task, with its resources.
+	Lease Lease `json:"lease"`
+
+	// Note A note. `body` is present only when the note has one and the read asked for it.
+	Note Note `json:"note"`
+}
+
 // Initiative An initiative with its tags.
 type Initiative struct {
 	// ClosedAt When it was closed. Absent while it is open.
@@ -2644,6 +2668,9 @@ type WithdrawAskJSONRequestBody = AskWithdraw
 // PutCursorJSONRequestBody defines body for PutCursor for application/json ContentType.
 type PutCursorJSONRequestBody = CursorSet
 
+// FinishJSONRequestBody defines body for Finish for application/json ContentType.
+type FinishJSONRequestBody = FinishRequest
+
 // CreateInitiativeJSONRequestBody defines body for CreateInitiative for application/json ContentType.
 type CreateInitiativeJSONRequestBody = InitiativeCreate
 
@@ -2736,6 +2763,9 @@ type ServerInterface interface {
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
+	// Finish Finish working on a task
+	// (POST /api/v1/finish)
+	Finish(w http.ResponseWriter, r *http.Request)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(w http.ResponseWriter, r *http.Request, params ListInitiativesParams)
@@ -3279,6 +3309,20 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Finish operation middleware
+func (siw *ServerInterfaceWrapper) Finish(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Finish(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4624,6 +4668,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/cursors/{stream}", wrapper.PutCursor)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/now", wrapper.GetNow)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/start", wrapper.Start)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/finish", wrapper.Finish)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
@@ -5859,6 +5904,108 @@ type ListEvents503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response ListEvents503ApplicationProblemPlusJSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FinishRequestObject struct {
+	Body *FinishJSONRequestBody
+}
+
+type FinishResponseObject interface {
+	VisitFinishResponse(w http.ResponseWriter) error
+}
+
+type Finish200JSONResponse FinishResult
+
+func (response Finish200JSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response Finish400ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response Finish401ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response Finish404ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response Finish409ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Finish503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response Finish503ApplicationProblemPlusJSONResponse) VisitFinishResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9542,6 +9689,9 @@ type StrictServerInterface interface {
 	// ListEvents List events
 	// (GET /api/v1/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
+	// Finish Finish working on a task
+	// (POST /api/v1/finish)
+	Finish(ctx context.Context, request FinishRequestObject) (FinishResponseObject, error)
 	// ListInitiatives List the initiatives
 	// (GET /api/v1/initiatives)
 	ListInitiatives(ctx context.Context, request ListInitiativesRequestObject) (ListInitiativesResponseObject, error)
@@ -10121,6 +10271,37 @@ func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListEventsResponseObject); ok {
 		if err := validResponse.VisitListEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Finish operation middleware
+func (sh *strictHandler) Finish(w http.ResponseWriter, r *http.Request) {
+	var request FinishRequestObject
+
+	var body FinishJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Finish(ctx, request.(FinishRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Finish")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(FinishResponseObject); ok {
+		if err := validResponse.VisitFinishResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

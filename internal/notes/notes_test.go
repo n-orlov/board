@@ -477,3 +477,28 @@ func TestNormalizeResourceBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestPostInWritesInTheCallersTransactionAndCommitsNothing(t *testing.T) {
+	e := newEnv(t)
+	tx, err := e.S.Store.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	k, err := e.S.PostIn(ctx, tx, me, "key:x", New{Task: "aa-1", Summary: "  inside  "})
+	if err != nil || k.Summary != "inside" || k.Task != "aa-1" || k.Actor != me.Handle {
+		t.Fatalf("PostIn = %+v, %v", k, err)
+	}
+	if _, err := e.S.PostIn(ctx, tx, me, "key:x", New{Task: "aa-1", Summary: ""}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("an empty summary: err = %v, want ErrInvalid", err)
+	}
+	if _, err := e.S.PostIn(ctx, tx, me, "key:x", New{Task: "aa-9", Summary: "x"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown task: err = %v, want ErrNotFound", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.S.Get(ctx, k.Ref); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the note is readable after the caller rolled back: %v", err)
+	}
+}

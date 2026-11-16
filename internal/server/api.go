@@ -52,6 +52,7 @@ type operations struct {
 	leaseOps
 	nowOps
 	startOps
+	finishOps
 	askOps
 	noteOps
 	attentionOps

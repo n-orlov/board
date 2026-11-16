@@ -2056,6 +2056,46 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/finish:
+    post:
+      operationId: finish
+      tags: [composite]
+      summary: Finish working on a task
+      description: >-
+        Ends the caller's live lease on a task, writes `outcome` as a note on the task and, with `done`, marks the task
+        done, in one transaction with their events (`lease_ended`, `note_posted` and, with `done`, `task_done`). Send
+        `task` (a ref or ULID) to name the task; leave it out to finish the only task the caller holds a live lease on.
+        `outcome` is 1 to 200 characters on one line, and is both the lease's outcome and the note's summary. The answer
+        is 200 with the ended `lease`, the `note` and `done`. The caller holding no live lease on the given task, no live
+        lease at all when `task` is left out, or several live leases when it is left out (the `next` lists them), is
+        409; so is `done` while another actor holds a live lease on the task. A 409 writes nothing: neither the lease
+        end, nor the note, nor the status. An unknown task is 404, and a missing or malformed `outcome` is 400.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinishRequest"
+      responses:
+        "200":
+          description: The lease ended and the note was written, and the task was marked done when `done` was sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinishResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/attention:
     get:
       operationId: getAttention
@@ -3248,6 +3288,32 @@ components:
         protocol_seen:
           type: integer
           description: The highest agent protocol version the caller has read, 0 when it has recorded none.
+    FinishRequest:
+      type: object
+      description: The lease to end, the outcome to record and whether the task is done.
+      required: [outcome]
+      properties:
+        task:
+          type: string
+          description: The task's ref or ULID. Left out, the caller's only live lease names the task.
+        outcome:
+          type: string
+          description: What was done or where it was left, 1 to 200 characters on one line. The lease's outcome and the note's summary.
+        done:
+          type: boolean
+          description: Also mark the task done. Default false.
+    FinishResult:
+      type: object
+      description: The lease the finish ended, the note it wrote and whether it marked the task done.
+      required: [lease, note, done]
+      properties:
+        lease:
+          $ref: "#/components/schemas/Lease"
+        note:
+          $ref: "#/components/schemas/Note"
+        done:
+          type: boolean
+          description: True when the request marked the task done.
     NowLease:
       description: One of the caller's live leases, with the title of its task.
       allOf:

@@ -83,6 +83,16 @@ func (s Store) Post(ctx context.Context, actor audit.Actor, principal string, in
 	return out, err
 }
 
+// PostIn is Post inside the caller's transaction: it commits nothing and rolls
+// nothing back, so the note and its event stand or fall with tx.
+func (s Store) PostIn(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in New) (Note, error) {
+	in, err := in.Normalize()
+	if err != nil {
+		return Note{}, err
+	}
+	return s.post(ctx, tx, actor, principal, in)
+}
+
 func (s Store) post(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in New) (Note, error) {
 	taskID, iniID, err := s.scopeOf(ctx, tx, in)
 	if err != nil {

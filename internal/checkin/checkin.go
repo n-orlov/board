@@ -28,7 +28,8 @@ type Store struct {
 	Notes     *notes.Store
 	Cursors   *cursors.Store
 	Attention *attention.Store
-	// Tasks is read by Start only: the store a new_task is created in.
+	// Tasks is read by Start (the store a new_task is created in) and by a
+	// finish that marks the task done.
 	Tasks *tasks.Store
 	Now   func() time.Time
 }
