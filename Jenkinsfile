@@ -29,7 +29,8 @@
 //   1. Core (every build): Lint, Suite, Image, Allure smoke, then Quality
 //      (4 executors: Quality waits for Suite and Image without holding one).
 //   2. Stability (EXTENDED=true, or nightly on main): three stability runs,
-//      one unit each; EXTENDED also adds -race and fresh vulnerability
+//      one unit each, then the Perf unit (the SPEC 14 harness, 30 minutes,
+//      alone on the agent); EXTENDED also adds -race and fresh vulnerability
 //      databases to Core.
 //   3. Mutation, one unit, in one of two modes:
 //      - full (nightly on main, or MUTATION_FULL=true): every package and
@@ -391,6 +392,14 @@ pipeline {
             branches[u.name] = unitBranch(u)
           }
           parallel branches
+          // Perf (SPEC 14, R14): the harness against the real binary, 30
+          // minutes (about 4 on int21h-ws). It runs after the three stability
+          // units, alone on the agent: its p99 and RSS gates measure the
+          // product, not three suites running beside it. Its failure fails
+          // the build like any unit's; perf.json is archived with the rest.
+          def perf = [name: 'Perf', minutes: 30,
+                      body: { sh(returnStatus: true, script: 'ci/run.sh ci/perf.sh "$BOARD_CI_OUT"') }]
+          unitBranch(perf).call()
         }
       }
     }
@@ -498,7 +507,7 @@ pipeline {
                                attemptLog.values().flatten().collect { it.node }.findAll { it }.unique().sort().join(', ') +
                                (flaky ? '; flaky: ' + flaky.join(', ') : '') +
                                ' (<a href="' + env.BUILD_URL + 'artifact/ci-results/distributed/timing.md">timing</a>)')
-              archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/*.cdx.json, ci-results/mutation/*.json, ci-results/stability/**/*.log, ci-results/distributed/**, ci-summary/**, allure-history/**',
+              archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/*.cdx.json, ci-results/mutation/*.json, ci-results/stability/**/*.log, ci-results/perf.json, ci-results/distributed/**, ci-summary/**, allure-history/**',
                                allowEmptyArchive: true
               if (currentBuild.currentResult == 'SUCCESS' && env.BRANCH_NAME == 'main') {
                 writeFile file: 'ci-results/release-candidate.json',

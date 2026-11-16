@@ -3727,7 +3727,15 @@ name appears only where a user sees it:
 
 ## 14. Performance targets
 
-Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
+Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash. The targets are
+verified on the CI agent (`int21h-ws`, a larger host), which is faster than the reference
+host: a figure the agent meets is the evidence, and a figure it misses is a defect to cure
+or a petition, never a loosened gate. The harness is `ci/perf.sh` (`ci/perf`, build tag
+`perf`): it runs as the Perf unit of the Jenkins Stability phase (`EXTENDED=true` or the
+nightly timer), seeds a SQLite store with 1 M events, 50 k notes and 200 live leases, starts
+the real `vh` binary on it, measures every row below and writes `perf.json` (archived with
+the build's results) and a JUnit file; a gate that is breached, or not measured, fails the
+unit.
 
 | target | value |
 |---|---|
@@ -3741,8 +3749,8 @@ Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
 
 Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s; Phase 0 updates it on writes only and does not coalesce, §4.1);
 attention counts are cached and invalidated by the writes that change them; reads never take
-the SQLite writer connection. A benchmark suite (`go test -bench`) with a seeded large dataset
-runs in the extended lane and fails on a regression > 20 % against the committed baseline.
+the SQLite writer connection. The Perf unit's gates are the absolute values in the table; no
+baseline is committed and no run is compared against an earlier one.
 
 ---
 
@@ -3769,7 +3777,7 @@ frontend's coverage/CRAP/mutation gates.
 | Database matrix | testcontainers-go | every e2e scenario runs against **SQLite and Postgres**; a scenario that passes on one and fails on the other fails the build. `BOARD_DB_LEG=sqlite\|postgres` selects the leg of a `features/` run (SQLite by default); the Postgres leg starts a digest-pinned Postgres 16 container through the docker socket, one database per scenario. A scenario tagged `@postgres` runs on that leg only, and one tagged `@dedicated-database` gets a private container it may stop (the `/readyz` 503 case). `ci/suite.sh` runs both legs, writes one JUnit per leg and fails on a scenario that disagrees between them. |
 | UI e2e | Playwright (TypeScript), s3-browser's reporter set (html, list, allure-playwright, json, junit) and its rule of **no retries in Playwright** (flakiness is handled by the suite's retry-once policy and recorded) | the embedded UI against a seeded server: attention actions, timeline rendering and filters, notes board, archive window, SSE live updates, Swagger UI reachable. Screenshots on failure. |
 | Frontend unit | Vitest + `@vitest/coverage-v8` | stores, API client wrappers, timeline data shaping. |
-| Benchmarks | `go test -bench` | §14, extended lane only. |
+| Performance | `ci/perf.sh` (`ci/perf`, build tag `perf`) | §14, the Perf unit of the extended lane (Stability phase). |
 
 The Playwright layer lives in `e2e/` (own `package.json`, exact pins). `e2e/playwright.config.ts`
 sets `retries: 0` and the five reporters, picks a free port, and starts the real binary through
@@ -3832,11 +3840,11 @@ there marks the build UNSTABLE), and an infrastructure failure gets another atte
 | Allure smoke (Core) | `ci/allure-smoke.sh` over the Godog formatter fixture | same |
 | Image (Core) | — (not in deck as a unit) | builds the root `Dockerfile` image for linux/amd64 and linux/arm64 and checks it (`ci/image-build.sh`, `ci/image-check.sh`, §12.4, never pushed); the amd64 tar feeds the image gates |
 | Quality (Core) | `ci/run.sh ci/quality.sh` with `ci/quality.json` | gates in §15.4. It waits for Suite (the coverage) and Image (the tar) without holding an executor. The two mutation rows are reported as judged by the Mutation phase (`--mutation-deferred`), whose reports exist only after it and only when it ran |
-| Stability | `EXTENDED=true` or the nightly timer: three units, each `ci/stability.sh 1` | same |
+| Stability | `EXTENDED=true` or the nightly timer: three units, each `ci/stability.sh 1`, then the Perf unit (`ci/perf.sh`, §14, 30 minutes, alone on the agent, `perf.json` archived) | same |
 | Mutation | — (not in deck) | one unit, only with `MUTATION=true`, `MUTATION_FULL=true` or the nightly timer (`EXTENDED=true` alone runs no mutation, and a push build of `main` runs none), §15.4. Diff mode (`MUTATION=true`): only the lines changed since the merge base with `origin/<CHANGE_TARGET or main>` (`HEAD~1` on `main`), one 45-minute unit. Full mode (`MUTATION_FULL=true` or the nightly timer on `main`): every package plus Stryker in one unit (`ci/mutation.sh ... all`), `nproc / 2` gremlins workers at GOMAXPROCS 2, `nice 10`, one 6-hour limit and a single attempt, about 70 minutes. `ci/mutation.sh` judges efficacy and break against the same `ci/quality.json` thresholds and fails the build below them |
 
 Extended lane (nightly on `main` at 03:17 + the `EXTENDED` parameter): `-race`, fresh vulnerability
-databases, three clean-state stability runs and benchmarks; the nightly timer also runs the full
+databases, three clean-state stability runs and the Perf unit (§14); the nightly timer also runs the full
 mutation (`MUTATION_FULL=true` does so on demand, `MUTATION=true` runs the diff mode). SBOM: CycloneDX for the
 module, the frontend and the image (`syft`/Trivy), generated on every build and archived;
 attached to releases. Reports exactly as deck:

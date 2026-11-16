@@ -928,3 +928,49 @@ func TestBadgeLinkProbeCatchesAnUnlinkedOrMisdirectedBadge(t *testing.T) {
 		}
 	}
 }
+
+// perfUnitProblems: the Stability phase also runs the Perf unit (R14, SPEC
+// 14): one unit named Perf with a 30-minute bound, running ci/perf.sh into the
+// build's results directory after the three stability units have finished (not
+// beside them, whose load would be part of every latency it measures), with
+// perf.json archived.
+func perfUnitProblems(jf string) []string {
+	var problems []string
+	stability, _ := jenkinsStage(jf, "Stability")
+	if !strings.Contains(stability, "def perf = [name: 'Perf', minutes: 30,") {
+		problems = append(problems, "Stability has no Perf unit with a 30-minute bound")
+	}
+	if strings.Count(stability, "ci/run.sh ci/perf.sh \"$BOARD_CI_OUT\"") != 1 {
+		problems = append(problems, "the Perf unit does not run ci/perf.sh once into $BOARD_CI_OUT")
+	}
+	if !strings.Contains(stability, "unitBranch(perf).call()") {
+		problems = append(problems, "the Perf unit is not run through unitBranch, so its failure would not fail the build")
+	}
+	if p, s := strings.Index(stability, "parallel branches"), strings.Index(stability, "unitBranch(perf)"); p < 0 || s < p {
+		problems = append(problems, "the Perf unit does not run after the three stability units")
+	}
+	if strings.Contains(stability, "branches['Perf']") || strings.Contains(stability, "branches[perf.name]") {
+		problems = append(problems, "the Perf unit runs beside the stability units")
+	}
+	if !strings.Contains(jf, "ci-results/perf.json") {
+		problems = append(problems, "perf.json is not archived")
+	}
+	return problems
+}
+
+// TestJenkinsfileStabilityRunsThePerfUnit: the Perf unit exists in the
+// Stability phase with its 30-minute bound, and each property is checked from
+// both sides.
+func TestJenkinsfileStabilityRunsThePerfUnit(t *testing.T) {
+	jf := readRepoFile(t, "Jenkinsfile")
+	expectProblems(t, jf, perfUnitProblems, map[string]string{
+		"no Perf unit":                 replaceOnce(t, jf, "def perf = [name: 'Perf', minutes: 30,", "def perf = [name: 'Speed', minutes: 30,"),
+		"a Perf bound of 60":           replaceOnce(t, jf, "def perf = [name: 'Perf', minutes: 30,", "def perf = [name: 'Perf', minutes: 60,"),
+		"a Perf bound of 20":           replaceOnce(t, jf, "def perf = [name: 'Perf', minutes: 30,", "def perf = [name: 'Perf', minutes: 20,"),
+		"Perf not running the harness": replaceOnce(t, jf, "ci/run.sh ci/perf.sh \"$BOARD_CI_OUT\"", "ci/run.sh true"),
+		"Perf outside unitBranch":      replaceOnce(t, jf, "unitBranch(perf).call()", "runUnit(perf)"),
+		"Perf before the stability":    replaceOnce(t, replaceOnce(t, jf, "          parallel branches\n          // Perf", "          // Perf"), "unitBranch(perf).call()\n", "unitBranch(perf).call()\n          parallel branches\n"),
+		"Perf beside the stability":    replaceOnce(t, jf, "          unitBranch(perf).call()\n", "          branches['Perf'] = unitBranch(perf)\n"),
+		"perf.json not archived":       replaceOnce(t, jf, " ci-results/perf.json,", ""),
+	})
+}

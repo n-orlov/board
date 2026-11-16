@@ -121,7 +121,7 @@ passed):
 | phase | units | runs |
 |---|---|---|
 | Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
-| Stability | three units, each `ci/stability.sh 1` | `EXTENDED=true` or the nightly timer |
+| Stability | three units, each `ci/stability.sh 1`, then the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes) | `EXTENDED=true` or the nightly timer |
 | Mutation | one unit, in one of two modes (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
 
 Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
@@ -132,6 +132,16 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
   minutes). `EXTENDED=true` and the nightly timer also add `-race` (the Suite's
   limit goes from 45 to 120 minutes) and fresh vulnerability databases to Core.
 - **Stability** is the extended lane: `EXTENDED=true` or the nightly timer.
+  - The **Perf** unit runs the SPEC 14 harness (`ci/perf.sh`, build tag `perf`) after
+    the three stability units, alone on the agent so their load is not part of what it
+    measures, under a 30-minute bound (about 4 minutes on `int21h-ws`). It seeds 1 M
+    events, 50 k notes and 200 live leases, starts the real `vh` binary and checks the
+    eight targets (idle RSS, cold start, `/now` and `/attention` p99, lease renew p99,
+    200 req/s for 60 s, 500 SSE clients, `vh now` and `vh version` p95). A breached or
+    unmeasured gate fails the unit and the build; `ci-results/perf.json` (every measured
+    figure and its gate) is archived with the build. The targets are verified on the
+    agent; no baseline is committed. A gate the agent misses is cured in the code or
+    petitioned with the `perf.json` numbers, never loosened.
 - **Mutation** is one unit, gated on `MUTATION` or `MUTATION_FULL` or the
   timer and on nothing else: `EXTENDED=true` on its own runs no mutation.
   - *diff* (`MUTATION=true`): only the lines changed since a base, in one
@@ -148,7 +158,7 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     under one 6-hour limit and a single attempt (a timeout is not worth another
     6 hours). It takes about 70 minutes.
 
-A red Lint, Suite, Image, Allure smoke, Quality, Stability or Mutation unit
+A red Lint, Suite, Image, Allure smoke, Quality, Stability, Perf or Mutation unit
 fails the build. Within a phase the other units still finish, and a later phase
 does not start after a failure.
 
@@ -246,7 +256,7 @@ last, in `post { cleanup }`.
 
 `ci/repocheck/jenkinsfile_test.go` pins all of it: the three phases Core,
 Stability and Mutation in order, with the Core units and Quality's wait for
-Suite and Image; the job shape (the one `AMD` label for every `node()`, the three
+Suite and Image; the Perf unit (30 minutes, after the stability units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
 booleanParams, `disableConcurrentBuilds`, the 480-minute timeout, the
 per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
 on `main` only); the Quality unit; the two Mutation modes (diff: one 45-minute
