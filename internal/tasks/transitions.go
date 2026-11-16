@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // transition is one status change: the verbs of the three entry points.

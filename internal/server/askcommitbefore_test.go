@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/village-hall/internal/asks"
 )
 
 // An end whose COMMIT returned before until is answered ended in two cases. Its

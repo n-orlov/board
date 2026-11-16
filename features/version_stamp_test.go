@@ -14,13 +14,13 @@ import (
 const (
 	stampedVersion  = "v7.6.5-stamped"
 	stampedRevision = "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334"
-	versionPackage  = "github.com/n-orlov/board/internal/version"
+	versionPackage  = "github.com/n-orlov/village-hall/internal/version"
 )
 
 // TestLinkerStampedVersionAndRevisionReachTheBinaryAndTheAPI builds the board
 // binary the way the Dockerfile does, with -ldflags -X for the version and the
 // revision (no VCS info: -buildvcs=false, as in the image's build context), and
-// asks the built binary: `board version` prints both, and GET /api/v1/meta of
+// asks the built binary: `vh version` prints both, and GET /api/v1/meta of
 // its server reports both. A build that reads build info alone cannot pass.
 func TestLinkerStampedVersionAndRevisionReachTheBinaryAndTheAPI(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "board")
@@ -40,7 +40,7 @@ func TestLinkerStampedVersionAndRevisionReachTheBinaryAndTheAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := stampedVersion + " " + stampedRevision + "\n"; h.stdout != want || h.exit != 0 {
-		t.Fatalf("board version: exit %d, stdout %q, want %q", h.exit, h.stdout, want)
+		t.Fatalf("vh version: exit %d, stdout %q, want %q", h.exit, h.stdout, want)
 	}
 
 	if err := h.freshDatabase(); err != nil {

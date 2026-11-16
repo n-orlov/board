@@ -10,7 +10,7 @@
 #   1. Make a disposable, git-ignored clone of this repository
 #      ($repo_root/.review-clone, removed and recreated each run).
 #   2. Inside that clone, through the ci/run.sh sibling, assert:
-#        - `go list -m` resolves the module path to github.com/n-orlov/board
+#        - `go list -m` resolves the module path to github.com/n-orlov/village-hall
 #        - `go list ./internal/...` resolves every package to a directory under
 #          the clone's own /w/.review-clone tree, and none to the original
 #          checkout's /w/internal/... -- the packages Go is about to build
@@ -89,8 +89,8 @@ fail() { echo "review.sh: $*" >&2; exit 1; }
     fail "the clone at $clone does not carry this run identity"
 
 mod=$(go list -m)
-[ "$mod" = "github.com/n-orlov/board" ] ||
-    fail "module path is [$mod], want github.com/n-orlov/board"
+[ "$mod" = "github.com/n-orlov/village-hall" ] ||
+    fail "module path is [$mod], want github.com/n-orlov/village-hall"
 
 gomod=$(go env GOMOD)
 [ "$gomod" = "$clone/go.mod" ] || fail "GOMOD is [$gomod], want $clone/go.mod"
@@ -102,8 +102,8 @@ esac
 # Every package of the module (and every module-local dependency of it, tests
 # included) must resolve inside the clone: not the original workspace at /w
 # itself, and not an installed copy in the module cache.
-pkgs=$(go list -test -deps -f "{{if and .Module (eq .Module.Path \"github.com/n-orlov/board\")}}{{.Dir}}{{end}}" ./... | sort -u)
-[ -n "$pkgs" ] || fail "no package of github.com/n-orlov/board resolved"
+pkgs=$(go list -test -deps -f "{{if and .Module (eq .Module.Path \"github.com/n-orlov/village-hall\")}}{{.Dir}}{{end}}" ./... | sort -u)
+[ -n "$pkgs" ] || fail "no package of github.com/n-orlov/village-hall resolved"
 for dir in $pkgs; do
     case "$dir" in
         "$clone"/*) : ;;

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/village-hall/internal/audit"
 )
 
 // Event types a close and a reopen append.

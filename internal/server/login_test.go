@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/oidc"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // fakeIdentity is an identity provider whose every answer a test sets.

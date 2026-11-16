@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 type clock struct{ now time.Time }

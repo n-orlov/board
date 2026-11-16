@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// HelpAgentUsage is the single stderr line for a malformed `board help`.
-const HelpAgentUsage = "usage: board help agent [--version]"
+// HelpAgentUsage is the single stderr line for a malformed `vh help`.
+const HelpAgentUsage = "usage: vh help agent [--version]"
 
 // protocolText is the agent protocol cheat sheet (SPEC §8.6). Its first line is
 // the header `board protocol vN`.
@@ -41,7 +41,7 @@ func ProtocolVersion() int {
 	return n
 }
 
-// helpCmd runs `board help ...`: only `help agent` exists.
+// helpCmd runs `vh help ...`: only `help agent` exists.
 func helpCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 || args[0] != "agent" {
 		return usageLine(stderr, HelpAgentUsage)

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Now is the lease and conflict parts of an actor's check-in (SPEC 6.5): the

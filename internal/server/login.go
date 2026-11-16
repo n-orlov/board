@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/oidc"
 )
 
 // Cookie names and paths. The session cookie is HttpOnly, Secure and

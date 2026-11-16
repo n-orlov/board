@@ -7,8 +7,8 @@ Feature: A refused lease write from a browser session changes nothing
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the mock OIDC provider signs in "alice@example.com" with a verified email
     And the board server is running with OIDC login allowing "alice@example.com" and BOARD_SWEEP_INTERVAL set to "off"

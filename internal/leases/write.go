@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Start is the request to start a lease. Task is a task ref or ULID. A nil TTL
@@ -133,7 +133,7 @@ func (s Store) start(ctx context.Context, tx *sql.Tx, actor audit.Actor, princip
 	}
 	if task.Status == "done" {
 		return Result{}, ConflictError{Msg: "cannot start a lease on task " + task.Ref + ": it is done",
-			Next: "Run board task reopen " + task.Ref + " first, or start the lease on an open task."}
+			Next: "Run vh task reopen " + task.Ref + " first, or start the lease on an open task."}
 	}
 	now := s.now()
 	actorID, err := audit.UpsertActor(ctx, tx, s.Store.Dialect(), actor, now)

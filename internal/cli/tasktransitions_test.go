@@ -59,8 +59,8 @@ func TestTaskTransitionRefusalsWordTheirNext(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{http.StatusNotFound, ExitNotFound, "gone → board task ls\n"},
-		{http.StatusConflict, ExitConflict, "gone → board task show aa-1\n"},
+		{http.StatusNotFound, ExitNotFound, "gone → vh task ls\n"},
+		{http.StatusConflict, ExitConflict, "gone → vh task show aa-1\n"},
 		{http.StatusBadRequest, ExitError, "gone\n"},
 	}
 	for _, c := range cases {
@@ -106,7 +106,7 @@ func TestTaskDoneRefusedByAnotherLeaseKeepsTheServersNext(t *testing.T) {
 		s := httptest.NewServer(g)
 		_, _, errs := runEnv(g.env(s), "task", verb, "aa-1")
 		s.Close()
-		if errs != "no → board task show aa-1\n" {
+		if errs != "no → vh task show aa-1\n" {
 			t.Errorf("%s: got %q", verb, errs)
 		}
 	}

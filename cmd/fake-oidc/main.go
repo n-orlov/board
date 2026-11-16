@@ -19,7 +19,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/n-orlov/board/internal/oidc/oidctest"
+	"github.com/n-orlov/village-hall/internal/oidc/oidctest"
 )
 
 func main() {

@@ -1590,13 +1590,13 @@ type Meta struct {
 	// Principal Who authenticated, such as `key:workstation` or `oidc:<email>`.
 	Principal string `json:"principal"`
 
-	// Protocol The agent protocol version the server binary embeds (`board help agent`).
+	// Protocol The agent protocol version the server binary embeds (`vh help agent`).
 	Protocol int `json:"protocol"`
 
 	// Revision The commit the server binary was built from, as the image build stamped it (the VERSION and REVISION build args); absent when the build recorded none.
 	Revision *string `json:"revision,omitempty"`
 
-	// Version The version the server binary was built as (`board version`'s first field).
+	// Version The version the server binary was built as (`vh version`'s first field).
 	Version string `json:"version"`
 }
 
@@ -1811,7 +1811,7 @@ type ProtocolSeen struct {
 
 // ProtocolSeenRequest The agent protocol version the caller has read.
 type ProtocolSeenRequest struct {
-	// Version The protocol version, as `board help agent --version` prints it.
+	// Version The protocol version, as `vh help agent --version` prints it.
 	Version int `json:"version"`
 }
 

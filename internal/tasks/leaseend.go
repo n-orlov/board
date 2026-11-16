@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 // leaseCall is what a lease rule needs to settle the leases of a task that is

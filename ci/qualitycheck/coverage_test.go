@@ -54,7 +54,7 @@ func fullyCoveredTreeProfile(t *testing.T, root string) string {
 		}
 		if hasCode {
 			rel, _ := filepath.Rel(root, p)
-			fmt.Fprintf(&b, "github.com/n-orlov/board/%s/x.go:1.1,2.2 100 1\n", filepath.ToSlash(rel))
+			fmt.Fprintf(&b, "github.com/n-orlov/village-hall/%s/x.go:1.1,2.2 100 1\n", filepath.ToSlash(rel))
 		}
 		return nil
 	})
@@ -95,8 +95,8 @@ func TestRun_CoverageGateFailsWhenOnePackageIsBelowItsFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	seeded := strings.Replace(string(data),
-		"github.com/n-orlov/board/ci/crapgate/x.go:1.1,2.2 100 1\n",
-		"github.com/n-orlov/board/ci/crapgate/x.go:1.1,2.2 79 1\ngithub.com/n-orlov/board/ci/crapgate/x.go:3.1,4.2 21 0\n", 1)
+		"github.com/n-orlov/village-hall/ci/crapgate/x.go:1.1,2.2 100 1\n",
+		"github.com/n-orlov/village-hall/ci/crapgate/x.go:1.1,2.2 79 1\ngithub.com/n-orlov/village-hall/ci/crapgate/x.go:3.1,4.2 21 0\n", 1)
 	if seeded == string(data) {
 		t.Fatal("seeding did not change the profile (ci/crapgate line not found)")
 	}

@@ -22,7 +22,7 @@ func TestNowTextListsTheThreeSections(t *testing.T) {
 		"  L2  aa-2  you  \"testing\"  exp 41m\nconflicts:\n  CONFLICT repo:x: L2 you (aa-2) \"testing\" exp 41m\n" +
 		"my asks:\n  A1  open  aa-1  me  \"which one?\"  asked 3m ago\n" +
 		"  ANSWERED A2  answered  aa-1  me  \"ready?\"  answered by you 1m ago: \"yes now\"\n" +
-		"notes:\n  N4  10m ago  you  aa-2  [host:gw1]  gw1 reboots  +\n  +3 more → board notes --since last\n" +
+		"notes:\n  N4  10m ago  you  aa-2  [host:gw1]  gw1 reboots  +\n  +3 more → vh notes --since last\n" +
 		"attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1\n"
 	if code != ExitWarning || errs != "" {
 		t.Fatalf("got %d %q", code, errs)
@@ -86,8 +86,8 @@ func TestNowRefusalsAndUsage(t *testing.T) {
 
 func TestNowSectionCapsAtFive(t *testing.T) {
 	lines := []string{"a", "b", "c", "d", "e", "f", "g"}
-	want := "others:\n  a\n  b\n  c\n  d\n  e\n  +2 more → board lease ls\n"
-	if got := nowSection("others", lines, 0, "board lease ls"); got != want {
+	want := "others:\n  a\n  b\n  c\n  d\n  e\n  +2 more → vh lease ls\n"
+	if got := nowSection("others", lines, 0, "vh lease ls"); got != want {
 		t.Errorf("got %q", got)
 	}
 	if got := nowSection("others", lines[:5], 0, "x"); strings.Contains(got, "more") {
@@ -116,8 +116,8 @@ func TestNowTextWithNothingNewStillPrintsTheAttentionLine(t *testing.T) {
 }
 
 func TestNowSectionCountsTheItemsTheServerLeftOut(t *testing.T) {
-	want := "notes:\n  a\n  +4 more → board notes --since last\n"
-	if got := nowSection("notes", []string{"a"}, 4, "board notes --since last"); got != want {
+	want := "notes:\n  a\n  +4 more → vh notes --since last\n"
+	if got := nowSection("notes", []string{"a"}, 4, "vh notes --since last"); got != want {
 		t.Errorf("got %q", got)
 	}
 	over := []string{"a", "b", "c", "d", "e", "f"}

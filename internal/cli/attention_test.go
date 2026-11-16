@@ -67,7 +67,7 @@ func TestExpiredWatchAndConflictLines(t *testing.T) {
 
 func TestAttentionSectionCap(t *testing.T) {
 	items := []string{"a", "b", "c"}
-	if got, want := attentionSection("s", items, 2, "board attention"), "s: 3\n  a\n  b\n  +1 more → board attention --all\n"; got != want {
+	if got, want := attentionSection("s", items, 2, "vh attention"), "s: 3\n  a\n  b\n  +1 more → vh attention --all\n"; got != want {
 		t.Errorf("capped: got %q, want %q", got, want)
 	}
 	if got, want := attentionSection("s", items, 0, "x"), "s: 3\n  a\n  b\n  c\n"; got != want {
@@ -82,13 +82,13 @@ func TestAttentionSectionCap(t *testing.T) {
 }
 
 func TestAttentionTextOrderAndCommand(t *testing.T) {
-	got := attentionText(attentionView{}, attentionNow, 5, "board attention")
+	got := attentionText(attentionView{}, attentionNow, 5, "vh attention")
 	heads := strings.Split(strings.TrimSpace(got), "\n")
 	if want := "open asks: 0|done, not closed: 0|expired leases: 0|overdue watches: 0|conflicts: 0"; strings.Join(heads, "|") != want {
 		t.Errorf("got %q, want %q", strings.Join(heads, "|"), want)
 	}
 	p, _ := parseArgs([]string{"--tag", "a b", "--tag", "c", "--init", "aa"}, attentionFlags)
-	if got, want := attentionCommand(p), `board attention --tag "a b" --tag c --init aa`; got != want {
+	if got, want := attentionCommand(p), `vh attention --tag "a b" --tag c --init aa`; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
@@ -122,7 +122,7 @@ func TestAttentionRefusalsAndAnUnreadableAnswer(t *testing.T) {
 	f := answering(404, `{"title":"x","detail":"there is no initiative zz","next":"GET /api/v1/initiatives"}`)
 	srv := httptest.NewServer(f)
 	defer srv.Close()
-	if code, out, errs := runEnv(f.env(srv), "attention", "--init", "zz"); code != ExitNotFound || out != "" || errs != "there is no initiative zz → board init ls\n" {
+	if code, out, errs := runEnv(f.env(srv), "attention", "--init", "zz"); code != ExitNotFound || out != "" || errs != "there is no initiative zz → vh init ls\n" {
 		t.Errorf("got %d %q %q", code, out, errs)
 	}
 	bad := answering(200, `[1]`)

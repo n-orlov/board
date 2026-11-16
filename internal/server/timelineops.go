@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/timeline"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/timeline"
 )
 
 func (p problemResponse) VisitGetTimelineResponse(w http.ResponseWriter) error { return p.write(w) }

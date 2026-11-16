@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func newKeys(t *testing.T, now time.Time) Keys {

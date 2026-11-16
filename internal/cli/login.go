@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/envvar"
-	"github.com/n-orlov/board/internal/oidc"
-	"github.com/n-orlov/board/internal/server"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/envvar"
+	"github.com/n-orlov/village-hall/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/server"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // DefaultOperatorHandle is the operator actor's handle when

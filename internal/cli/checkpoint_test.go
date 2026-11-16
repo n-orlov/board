@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // walFixture opens a migrated SQLite store and writes enough rows to grow its
@@ -97,7 +97,7 @@ func TestCheckpointerReportsAFailingCheckpointOnStderr(t *testing.T) {
 	var errb syncBuffer
 	stop := startCheckpointer(context.Background(), &errb, envWith(map[string]string{"BOARD_SQLITE_CHECKPOINT": "0"}), st)
 	stop()
-	if !strings.Contains(errb.String(), "board: checkpoint:") {
+	if !strings.Contains(errb.String(), "vh: checkpoint:") {
 		t.Fatalf("stderr %q", errb.String())
 	}
 }

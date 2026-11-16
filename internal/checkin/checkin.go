@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/cursors"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/notes"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/notes"
 )
 
 const (

@@ -63,7 +63,7 @@ func TestMilestoneAndCheckUsageErrors(t *testing.T) {
 		}
 	}
 	code, _, errs := runEnv(func(string) string { return "" }, "check", "aa-1", "x", "--next", "soon")
-	if code != ExitUsage || !strings.HasPrefix(errs, "board: --next: invalid duration") {
+	if code != ExitUsage || !strings.HasPrefix(errs, "vh: --next: invalid duration") {
 		t.Errorf("bad --next: got %d %q", code, errs)
 	}
 }
@@ -74,8 +74,8 @@ func TestNoteRefusalsWordTheirNext(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{http.StatusNotFound, ExitNotFound, "d → board task ls\n"},
-		{http.StatusConflict, ExitConflict, "d → board task show aa-1\n"},
+		{http.StatusNotFound, ExitNotFound, "d → vh task ls\n"},
+		{http.StatusConflict, ExitConflict, "d → vh task show aa-1\n"},
 		{http.StatusBadRequest, ExitError, "d\n"},
 	}
 	for _, c := range cases {
@@ -131,11 +131,11 @@ func TestEventsCapsAndNamesTheFilters(t *testing.T) {
 	defer srv.Close()
 	_, out, _ := runEnv(f.env(srv), "events", "--limit", "1", "--task", "aa-1", "--type", "milestone", "--actor", "a b", "--since", "E3", "--initiative", "aa")
 	last := out[strings.LastIndex(strings.TrimSuffix(out, "\n"), "\n")+1:]
-	if want := "+1 more → board events --since E3 --task aa-1 --initiative aa --actor \"a b\" --type milestone --all\n"; last != want {
+	if want := "+1 more → vh events --since E3 --task aa-1 --initiative aa --actor \"a b\" --type milestone --all\n"; last != want {
 		t.Errorf("last line %q, want %q", last, want)
 	}
 	_, out, _ = runEnv(f.env(srv), "task", "events", "AA-1", "--limit=1")
-	if !strings.HasSuffix(out, "+1 more → board task events aa-1 --all\n") {
+	if !strings.HasSuffix(out, "+1 more → vh task events aa-1 --all\n") {
 		t.Errorf("task events: %q", out)
 	}
 }
@@ -160,8 +160,8 @@ func TestEventsPagesAndRefusals(t *testing.T) {
 		detail string
 		want   string
 	}{
-		{"there is no initiative zz", "there is no initiative zz → board init ls\n"},
-		{"there is no task zz-1", "there is no task zz-1 → board task ls\n"},
+		{"there is no initiative zz", "there is no initiative zz → vh init ls\n"},
+		{"there is no task zz-1", "there is no task zz-1 → vh task ls\n"},
 	}
 	for _, c := range cases {
 		fb := answering(404, `{"detail":"`+c.detail+`"}`)
@@ -186,7 +186,7 @@ func TestEventsUsageErrors(t *testing.T) {
 			t.Errorf("%v: got %d %q", args, code, errs)
 		}
 	}
-	if code, _, errs := runEnv(none, "events", "--since", "2026-13-45"); code != ExitUsage || !strings.HasPrefix(errs, "board: --since: invalid time") {
+	if code, _, errs := runEnv(none, "events", "--since", "2026-13-45"); code != ExitUsage || !strings.HasPrefix(errs, "vh: --since: invalid time") {
 		t.Errorf("bad date: %d %q", code, errs)
 	}
 }

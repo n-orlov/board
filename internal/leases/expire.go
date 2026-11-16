@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // systemPrincipal is the principal of an event the board itself writes.

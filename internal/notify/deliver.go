@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Backoff is the wait before each retry of a failed delivery: the first retry

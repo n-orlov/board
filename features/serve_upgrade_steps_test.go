@@ -7,11 +7,11 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // seedDoneWithLease migrates the scenario's database and writes a done task aa-1

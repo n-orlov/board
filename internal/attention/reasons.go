@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // Reason is why a task needs a person.

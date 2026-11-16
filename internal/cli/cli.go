@@ -9,25 +9,25 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/n-orlov/board/internal/actors"
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/cursors"
-	"github.com/n-orlov/board/internal/envvar"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/feed"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/notes"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/roster"
-	"github.com/n-orlov/board/internal/server"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/sweep"
-	"github.com/n-orlov/board/internal/tasks"
-	"github.com/n-orlov/board/internal/timeline"
-	"github.com/n-orlov/board/internal/version"
+	"github.com/n-orlov/village-hall/internal/actors"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/envvar"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/feed"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/notes"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/roster"
+	"github.com/n-orlov/village-hall/internal/server"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/sweep"
+	"github.com/n-orlov/village-hall/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/timeline"
+	"github.com/n-orlov/village-hall/internal/version"
 )
 
 // Exit codes (SPEC §8.1).
@@ -41,7 +41,7 @@ const (
 const DefaultDBURL = "sqlite:///data/board.db"
 
 // Usage is the single line printed to stderr for a usage error.
-const Usage = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
+const Usage = "usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
 
 // Env looks up an environment variable.
 type Env func(string) string
@@ -97,7 +97,7 @@ func runClient(args []string, stdout, stderr io.Writer, env Env) int {
 	return usage(stderr)
 }
 
-// admin runs `board admin ...`, which talks to the database directly.
+// admin runs `vh admin ...`, which talks to the database directly.
 func admin(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) > 0 && args[0] == "keys" {
 		return adminKeys(args[1:], stdout, stderr, env)
@@ -108,7 +108,7 @@ func admin(args []string, stdout, stderr io.Writer, env Env) int {
 	return adminMigrate(stdout, stderr, env)
 }
 
-// adminMigrate runs `board admin migrate`.
+// adminMigrate runs `vh admin migrate`.
 func adminMigrate(stdout, stderr io.Writer, env Env) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -130,7 +130,7 @@ func adminMigrate(stdout, stderr io.Writer, env Env) int {
 
 // fail prints one error line and returns the error exit code.
 func fail(stderr io.Writer, err error) int {
-	_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "vh: %v\n", err)
 	return ExitError
 }
 
@@ -153,7 +153,7 @@ func serve(stderr io.Writer, env Env) int {
 	}
 	migrate := envvar.Migrate.Get(env)
 	if migrate != "" && migrate != "auto" && migrate != "off" {
-		_, _ = fmt.Fprintf(stderr, "board: %s=%q: want auto or off\n", envvar.Migrate.Name(), migrate)
+		_, _ = fmt.Fprintf(stderr, "vh: %s=%q: want auto or off\n", envvar.Migrate.Name(), migrate)
 		return ExitError
 	}
 	if err := validateSettings(env); err != nil {
@@ -276,7 +276,7 @@ func startFeed(ctx context.Context, stderr io.Writer, env Env, st *store.Store) 
 	if err != nil {
 		return nil, nil, err
 	}
-	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: change feed: %v\n", err) }
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "vh: change feed: %v\n", err) }
 	f := feed.NewLazy(feed.StoreSource{Store: st}, feed.Options{Poll: poll, Report: report})
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -332,7 +332,7 @@ func startCheckpointer(ctx context.Context, stderr io.Writer, env Env, st *store
 	if err != nil {
 		return func() {}
 	}
-	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: checkpoint: %v\n", err) }
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "vh: checkpoint: %v\n", err) }
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -369,7 +369,7 @@ func runSweeper(ctx context.Context, stderr io.Writer, env Env, st *store.Store)
 		return
 	}
 	ls, sessions := &leases.Store{Store: st}, &auth.Sessions{Store: st}
-	sweep.Run(ctx, interval, func(err error) { _, _ = fmt.Fprintf(stderr, "board: sweep: %v\n", err) },
+	sweep.Run(ctx, interval, func(err error) { _, _ = fmt.Fprintf(stderr, "vh: sweep: %v\n", err) },
 		func(ctx context.Context) error { _, err := ls.ExpireDue(ctx); return err },
 		func(ctx context.Context) error { _, err := sessions.DeleteExpired(ctx); return err })
 }
@@ -386,7 +386,7 @@ func startNotifier(ctx context.Context, stderr io.Writer, env Env, st *store.Sto
 		return func() {}
 	}
 	w := &notify.Worker{Store: st, URL: url, Header: header, Timeout: timeout}
-	report := func(err error) { _, _ = fmt.Fprintf(stderr, "board: notify: %v\n", err) }
+	report := func(err error) { _, _ = fmt.Fprintf(stderr, "vh: notify: %v\n", err) }
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { defer close(done); sweep.Run(ctx, notify.TickInterval, report, w.Tick) }()

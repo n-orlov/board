@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/cursors"
-	"github.com/n-orlov/board/internal/notes"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/notes"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // boardRig serves notes, cursors, attention and asks over one real database,

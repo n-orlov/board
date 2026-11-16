@@ -4,13 +4,13 @@ Feature: What the server says about itself and the caller, GET /api/v1/meta
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
 
   Scenario: meta returns the server version, the protocol version, the principal and the actor
-    When I run "board version"
+    When I run "vh version"
     And I request GET "/api/v1/meta" with the remembered key as actor "claude@laptop"
     Then the response status is 200
     And the response version is the version the last command printed

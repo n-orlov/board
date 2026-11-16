@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // EventPosted is the type of the event every note appends, broadcast or not.

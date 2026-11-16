@@ -13,10 +13,10 @@ import (
 	"strings"
 )
 
-// TaskUsage is the single stderr line for a malformed `board task` command line.
-const TaskUsage = "usage: board task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [\"outcome\"] [--force] [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
+// TaskUsage is the single stderr line for a malformed `vh task` command line.
+const TaskUsage = "usage: vh task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [\"outcome\"] [--force] [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
 
-// taskSubcommands are the words after `board task` and what runs each.
+// taskSubcommands are the words after `vh task` and what runs each.
 var taskSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"add":    taskAdd,
 	"ls":     taskLs,
@@ -36,7 +36,7 @@ func transition(verb string) func([]string, io.Writer, io.Writer, Env) int {
 	}
 }
 
-// taskCmd runs `board task ...` against the server named by VH_URL.
+// taskCmd runs `vh task ...` against the server named by VH_URL.
 func taskCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, TaskUsage)
@@ -50,7 +50,7 @@ func taskCmd(args []string, stdout, stderr io.Writer, env Env) int {
 
 // badFlagValue reports a flag value the CLI refuses before it asks the server.
 func badFlagValue(stderr io.Writer, err error) int {
-	_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "vh: %v\n", err)
 	return ExitUsage
 }
 
@@ -194,11 +194,11 @@ func addFailure(ae *apiError, err error, initiative string) error {
 	switch ae.Status {
 	case http.StatusNotFound:
 		if strings.HasPrefix(ae.Detail, "there is no initiative") {
-			return withNext(err, ae.Status, "board init ls")
+			return withNext(err, ae.Status, "vh init ls")
 		}
-		return withNext(err, ae.Status, "board task ls "+initiative)
+		return withNext(err, ae.Status, "vh task ls "+initiative)
 	case http.StatusConflict:
-		return conflictError(ae, "board init show "+initiative)
+		return conflictError(ae, "vh init show "+initiative)
 	}
 	return err
 }
@@ -206,9 +206,9 @@ func addFailure(ae *apiError, err error, initiative string) error {
 func editFailure(ae *apiError, err error, ref string) error {
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	case http.StatusConflict:
-		return conflictError(ae, "board task show "+ref)
+		return conflictError(ae, "vh task show "+ref)
 	}
 	return err
 }
@@ -217,7 +217,7 @@ func conflictError(ae *apiError, next string) error {
 	return &apiError{Status: ae.Status, Detail: ae.Detail, Next: next, Exit: ExitConflict}
 }
 
-// taskQuery is what `board task ls` asks the server for.
+// taskQuery is what `vh task ls` asks the server for.
 type taskQuery struct {
 	initiative string
 	status     string
@@ -278,9 +278,9 @@ func (q taskQuery) values() url.Values {
 	return v
 }
 
-// command is the `board task ls` line that shows the same tasks, with --all.
+// command is the `vh task ls` line that shows the same tasks, with --all.
 func (q taskQuery) command() string {
-	cmd := "board task ls"
+	cmd := "vh task ls"
 	if q.initiative != "" {
 		cmd += " " + q.initiative
 	}
@@ -325,7 +325,7 @@ func taskLs(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	items, err := c.orderedTasks(ctx, filter)
 	if err != nil {
-		return report(stderr, withNext(err, http.StatusNotFound, "board init ls"))
+		return report(stderr, withNext(err, http.StatusNotFound, "vh init ls"))
 	}
 	items, more := capItems(items, limit)
 	if p.has("--json") {

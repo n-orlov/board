@@ -9,14 +9,14 @@ import (
 	"strings"
 )
 
-// depOps is what `board task dep add|rm` does by subcommand: the HTTP method
+// depOps is what `vh task dep add|rm` does by subcommand: the HTTP method
 // and the words of the `ok` line that follow the dependent task's ref.
 var depOps = map[string]struct{ method, phrase string }{
 	"add": {"POST", "blocked by"},
 	"rm":  {"DELETE", "no longer blocked by"},
 }
 
-// taskDep runs `board task dep add|rm <ref> <blocked-by-ref>`.
+// taskDep runs `vh task dep add|rm <ref> <blocked-by-ref>`.
 func taskDep(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, TaskUsage)
@@ -50,13 +50,13 @@ func depFailure(err error, ref string) error {
 	if !errors.As(err, &ae) {
 		return err
 	}
-	show := "board task show " + strings.ToLower(ref)
+	show := "vh task show " + strings.ToLower(ref)
 	switch ae.Status {
 	case http.StatusNotFound:
 		if strings.Contains(ae.Detail, "is not blocked by") {
 			return withNext(err, ae.Status, show)
 		}
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	case http.StatusConflict:
 		return conflictError(ae, show)
 	}

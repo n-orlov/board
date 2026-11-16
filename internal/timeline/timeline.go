@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // ErrNoInitiative is an initiative filter that names nothing.

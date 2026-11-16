@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (s *keyServer) task(body string) {

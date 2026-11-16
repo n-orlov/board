@@ -15,9 +15,9 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // postgresImage is the same pinned image the features' Postgres leg runs.

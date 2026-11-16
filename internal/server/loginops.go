@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/oidc"
 )
 
 // problemResponse answers one of the /auth operations with a problem document.

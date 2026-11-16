@@ -7,7 +7,7 @@ Feature: Upgrading a populated Phase 2 database
 
   Scenario: a Phase 2 database with rows in nine tables keeps every row through the Phase 3 migrations
     Given a Phase 2 database at schema version 8 holding rows in initiatives, tasks, leases, asks, notes, cursors, API keys, sessions and events
-    When I run "board admin migrate"
+    When I run "vh admin migrate"
     Then the exit code is 0
     And the database has migrated past schema version 8
     And the notifications table exists

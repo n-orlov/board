@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // AddDep makes the task ref names blocked by the task blockedByRef names, in

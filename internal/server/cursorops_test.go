@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/n-orlov/board/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/cursors"
 )
 
 func TestCursorOperationsAnswer503WithoutAStore(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/village-hall/internal/auth"
 )
 
 func runKeys(t *testing.T, url string, args ...string) (int, string, string) {
@@ -109,7 +109,7 @@ func TestAdminKeysRejectsABadNameOrExpiryAsAUsageError(t *testing.T) {
 		{"create", "a", "--expires", "100000d"}, {"create", "a", "--expires", "36501d"}, {"create", "a", "--expires", "90"},
 	} {
 		code, out, errs := runKeys(t, url, args...)
-		if code != ExitUsage || out != "" || strings.Count(errs, "\n") != 1 || !strings.HasPrefix(errs, "board: ") {
+		if code != ExitUsage || out != "" || strings.Count(errs, "\n") != 1 || !strings.HasPrefix(errs, "vh: ") {
 			t.Errorf("%v: code=%d out=%q err=%q", args, code, out, errs)
 		}
 	}
@@ -128,11 +128,11 @@ func TestParseExpiry(t *testing.T) {
 func TestAdminKeysOnAnUnmigratedOrUnsupportedDatabaseFailsWithOneLine(t *testing.T) {
 	for name, url := range map[string]string{"unmigrated": sqliteURL(t), "unsupported": "mysql://x/y"} {
 		code, out, errs := runKeys(t, url, "list")
-		if code != ExitError || out != "" || strings.Count(errs, "\n") != 1 || !strings.HasPrefix(errs, "board: ") {
+		if code != ExitError || out != "" || strings.Count(errs, "\n") != 1 || !strings.HasPrefix(errs, "vh: ") {
 			t.Errorf("%s: code=%d out=%q err=%q", name, code, out, errs)
 		}
 	}
-	if _, _, errs := runKeys(t, sqliteURL(t), "list"); !strings.Contains(errs, "board admin migrate") {
+	if _, _, errs := runKeys(t, sqliteURL(t), "list"); !strings.Contains(errs, "vh admin migrate") {
 		t.Errorf("unmigrated stderr %q does not name the next action", errs)
 	}
 }

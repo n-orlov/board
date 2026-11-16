@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // attentionRig serves asks and attention over one database with the clock the

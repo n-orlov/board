@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/actors"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/actors"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // sessionServer is a board with OIDC login whose session clock a test moves.

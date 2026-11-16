@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/village-hall/internal/auth"
 )
 
 // kindServer serves key and session writes over one database, so a test can

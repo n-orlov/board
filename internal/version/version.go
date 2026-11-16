@@ -1,6 +1,6 @@
 // Package version reports the version and the revision the binary was built as.
 // There is no hand-maintained version constant. The container image build
-// stamps both with the linker (-X github.com/n-orlov/board/internal/version.version
+// stamps both with the linker (-X github.com/n-orlov/village-hall/internal/version.version
 // and .revision, from the Dockerfile's VERSION and REVISION build args); a build
 // without them reads the Go build info the toolchain embeds: a tagged module build
 // reports its tag, a checkout build reports devel plus the short commit, and a

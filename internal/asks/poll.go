@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // EventPolling is the event a poll mark appends when it turns the asker of an

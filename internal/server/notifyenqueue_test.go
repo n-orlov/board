@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/notes"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/notes"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // outboxWorld is a migrated database with one initiative "aa" and open tasks

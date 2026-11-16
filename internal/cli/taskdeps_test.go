@@ -35,9 +35,9 @@ func TestTaskDepRefusalsWordTheirNext(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{http.StatusNotFound, "there is no task aa-9", ExitNotFound, "there is no task aa-9 → board task ls\n"},
-		{http.StatusNotFound, "task aa-2 is not blocked by aa-1", ExitNotFound, "task aa-2 is not blocked by aa-1 → board task show aa-2\n"},
-		{http.StatusConflict, "cycle", ExitConflict, "cycle → board task show aa-2\n"},
+		{http.StatusNotFound, "there is no task aa-9", ExitNotFound, "there is no task aa-9 → vh task ls\n"},
+		{http.StatusNotFound, "task aa-2 is not blocked by aa-1", ExitNotFound, "task aa-2 is not blocked by aa-1 → vh task show aa-2\n"},
+		{http.StatusConflict, "cycle", ExitConflict, "cycle → vh task show aa-2\n"},
 		{http.StatusBadRequest, "self", ExitError, "self\n"},
 	}
 	for _, c := range cases {

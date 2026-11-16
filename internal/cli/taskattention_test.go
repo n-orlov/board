@@ -57,7 +57,7 @@ func TestStrandedTextNamesTheLeaseHolderAndAge(t *testing.T) {
 		t.Errorf("not stranded: %q", got)
 	}
 	s := &strandedLease{Ref: "L7", Holder: attentionActor{Handle: "claude@laptop", WayBack: "ssh box"}, Intent: "migrate", ExpiredAt: "2026-05-01T09:00:00Z"}
-	want := "stranded: L7 by claude@laptop: \"migrate\" expired 3h ago → board lease ack L7\n"
+	want := "stranded: L7 by claude@laptop: \"migrate\" expired 3h ago → vh lease ack L7\n"
 	if got := strandedText(task{StrandedLease: s}, now); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -69,7 +69,7 @@ func TestTaskDetailPrintsAttentionAndStrandedAfterTheInitiative(t *testing.T) {
 		Attention:     []taskReason{{Reason: "stranded"}},
 		StrandedLease: &strandedLease{Ref: "L1", Holder: attentionActor{Handle: "h"}, Intent: "i", ExpiredAt: "2026-05-01T11:00:00Z"}}
 	lines := strings.Split(taskDetail(tk, nil, now), "\n")
-	want := []string{"aa-1  open  x  !stranded", "initiative: aa", "attention: !stranded", `stranded: L1 by h: "i" expired 1h ago → board lease ack L1`, "created by a just now"}
+	want := []string{"aa-1  open  x  !stranded", "initiative: aa", "attention: !stranded", `stranded: L1 by h: "i" expired 1h ago → vh lease ack L1`, "created by a just now"}
 	if len(lines) < len(want) || strings.Join(lines[:len(want)], "\n") != strings.Join(want, "\n") {
 		t.Errorf("got %q", lines)
 	}
@@ -145,7 +145,7 @@ func TestTaskLsListsAttentionFirstThenTheRestAndHonoursTheCap(t *testing.T) {
 		t.Errorf("requests %v", asked)
 	}
 	_, out, _ = runEnv(f.env(srv), "task", "ls", "--limit", "4")
-	if !strings.HasSuffix(out, "aa-10  open  T aa-10\n+1 more → board task ls --all\n") {
+	if !strings.HasSuffix(out, "aa-10  open  T aa-10\n+1 more → vh task ls --all\n") {
 		t.Errorf("cap across both groups: %q", out)
 	}
 	_, out, _ = runEnv(f.env(srv), "task", "ls", "--json", "--limit", "1")
@@ -161,7 +161,7 @@ func TestTaskLsAttentionKeepsOnlyTheTasksThatNeedIt(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, _ := runEnv(f.env(srv), "task", "ls", "--attention", "--limit", "1")
-	if code != ExitOK || out != "aa-2  open  T aa-2  !stranded\n+1 more → board task ls --attention --all\n" {
+	if code != ExitOK || out != "aa-2  open  T aa-2  !stranded\n+1 more → vh task ls --attention --all\n" {
 		t.Fatalf("got %d %q", code, out)
 	}
 	if len(f.requests) != 1 || f.requests[0].URL.Query().Get("attention") != "true" {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/initiatives"
 )
 
 func TestResumeReadsTheEventsAfterAnIDUpToThePosition(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (p problemResponse) VisitListTasksResponse(w http.ResponseWriter) error { return p.write(w) }

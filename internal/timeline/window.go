@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // Window defaults and limit (SPEC 6.10).

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func scan(r interface{ Scan(dest ...any) error }) (Event, error) {

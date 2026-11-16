@@ -2072,7 +2072,7 @@ paths:
       summary: Describe the server and the caller
       description: >-
         The server's version, the agent protocol version its binary embeds (the one
-        `board help agent` prints), and who the caller is: the principal that
+        `vh help agent` prints), and who the caller is: the principal that
         authenticated and the actor it acts as. Reads nothing from the database.
       security:
         - bearerAuth: []
@@ -2318,7 +2318,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: An API key minted by `board admin keys create`.
+      description: An API key minted by `vh admin keys create`.
     cookieAuth:
       type: apiKey
       in: cookie
@@ -3995,7 +3995,7 @@ components:
       properties:
         version:
           type: string
-          description: The version the server binary was built as (`board version`'s first field).
+          description: The version the server binary was built as (`vh version`'s first field).
         revision:
           type: string
           description: >-
@@ -4003,7 +4003,7 @@ components:
             (the VERSION and REVISION build args); absent when the build recorded none.
         protocol:
           type: integer
-          description: The agent protocol version the server binary embeds (`board help agent`).
+          description: The agent protocol version the server binary embeds (`vh help agent`).
         principal:
           type: string
           description: Who authenticated, such as `key:workstation` or `oidc:<email>`.
@@ -4018,7 +4018,7 @@ components:
         version:
           type: integer
           minimum: 0
-          description: The protocol version, as `board help agent --version` prints it.
+          description: The protocol version, as `vh help agent --version` prints it.
     ProtocolSeen:
       type: object
       description: An actor and the highest agent protocol version it has read.

@@ -170,7 +170,7 @@ FROM --platform=$BUILDPLATFORM golang:1.26@sha256:bb AS build
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -tags timetzdata -o /out/board ./cmd/board
+    go build -tags timetzdata -o /out/board ./cmd/vh
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/board /board

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 func (p problemResponse) VisitStartLeaseResponse(w http.ResponseWriter) error { return p.write(w) }

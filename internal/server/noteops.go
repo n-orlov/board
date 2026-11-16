@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/cursors"
-	"github.com/n-orlov/board/internal/notes"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/notes"
 )
 
 func (p problemResponse) VisitPostNoteResponse(w http.ResponseWriter) error  { return p.write(w) }

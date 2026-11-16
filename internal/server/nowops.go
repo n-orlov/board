@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/checkin"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/checkin"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 func (p problemResponse) VisitGetNowResponse(w http.ResponseWriter) error { return p.write(w) }

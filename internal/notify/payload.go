@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Payload is the JSON body of an alert (SPEC 5.4). It carries the task, initiative,

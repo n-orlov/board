@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Mine lists the asks the actor with this handle raised that its check-in shows

@@ -60,7 +60,7 @@ docker exec board /board admin keys create my-agent --expires 90d
 ```
 
 The key is printed once. An agent then sets `BOARD_URL` and `BOARD_API_KEY` and runs `board help
-agent` for the protocol. Without Docker, `go build ./cmd/board` (after `npm run build` in `web/`,
+agent` for the protocol. Without Docker, `go build ./cmd/vh` (after `npm run build` in `web/`,
 which writes the UI the binary embeds) produces the same `board` binary; run `board serve` with
 the same environment variables.
 

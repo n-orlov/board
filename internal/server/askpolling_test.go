@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // polling is a stream of the events topic that tells when an ask_polling event of ask arrives.

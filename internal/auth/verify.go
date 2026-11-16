@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Errors Verify returns for a key it checked and refused. Any other error

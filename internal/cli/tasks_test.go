@@ -65,7 +65,7 @@ func TestTaskAddRefusesBadFlagValuesWithExit2(t *testing.T) {
 		srv := httptest.NewServer(f)
 		code, out, errs := runEnv(f.env(srv), append([]string{"task", "add", "aa", "T"}, c...)...)
 		srv.Close()
-		if code != ExitUsage || out != "" || !strings.HasPrefix(errs, "board: "+c[0]+": ") || strings.Count(errs, "\n") != 1 || len(f.requests) != 0 {
+		if code != ExitUsage || out != "" || !strings.HasPrefix(errs, "vh: "+c[0]+": ") || strings.Count(errs, "\n") != 1 || len(f.requests) != 0 {
 			t.Errorf("%v: got %d %q %q with %d requests", c, code, out, errs, len(f.requests))
 		}
 	}
@@ -120,12 +120,12 @@ func TestTaskWriteFailuresNameTheNextAction(t *testing.T) {
 		code       int
 		wantStderr string
 	}{
-		{[]string{"add", "zz", "T"}, 404, "there is no initiative zz", ExitNotFound, "there is no initiative zz → board init ls\n"},
-		{[]string{"add", "aa", "T", "--after", "aa-9"}, 404, "task not found: aa-9", ExitNotFound, "task not found: aa-9 → board task ls aa\n"},
-		{[]string{"add", "aa", "T"}, 409, "initiative aa is closed", ExitConflict, "initiative aa is closed → board init show aa\n"},
+		{[]string{"add", "zz", "T"}, 404, "there is no initiative zz", ExitNotFound, "there is no initiative zz → vh init ls\n"},
+		{[]string{"add", "aa", "T", "--after", "aa-9"}, 404, "task not found: aa-9", ExitNotFound, "task not found: aa-9 → vh task ls aa\n"},
+		{[]string{"add", "aa", "T"}, 409, "initiative aa is closed", ExitConflict, "initiative aa is closed → vh init show aa\n"},
 		{[]string{"add", "aa", ""}, 400, "title is empty", ExitError, "title is empty → server next\n"},
-		{[]string{"edit", "aa-9", "--title", "X"}, 404, "task not found: aa-9", ExitNotFound, "task not found: aa-9 → board task ls\n"},
-		{[]string{"edit", "aa-1", "--title", "X"}, 409, "task aa-1 is closed", ExitConflict, "task aa-1 is closed → board task show aa-1\n"},
+		{[]string{"edit", "aa-9", "--title", "X"}, 404, "task not found: aa-9", ExitNotFound, "task not found: aa-9 → vh task ls\n"},
+		{[]string{"edit", "aa-1", "--title", "X"}, 409, "task aa-1 is closed", ExitConflict, "task aa-1 is closed → vh task show aa-1\n"},
 	}
 	for _, c := range cases {
 		f := answering(c.status, fmt.Sprintf(`{"title":"x","detail":%q,"next":"server next"}`, c.detail))
@@ -168,11 +168,11 @@ func TestTaskLsCapsAndNamesTheFiltersInTheMoreLine(t *testing.T) {
 	defer srv.Close()
 	code, out, _ := runEnv(f.env(srv), "task", "ls")
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if code != ExitOK || len(lines) != 21 || lines[0] != "aa-1  open  Task 1" || lines[20] != "+1 more → board task ls --all" {
+	if code != ExitOK || len(lines) != 21 || lines[0] != "aa-1  open  Task 1" || lines[20] != "+1 more → vh task ls --all" {
 		t.Fatalf("got %d %d lines, last %q", code, len(lines), lines[len(lines)-1])
 	}
 	_, out, _ = runEnv(f.env(srv), "task", "ls", "aa", "--status", "all", "--kind", "watch", "--blocked", "--active", "--overdue", "--q", "two words", "--limit", "2")
-	if want := "+19 more → board task ls aa --status all --kind watch --active --blocked --overdue --q \"two words\" --all\n"; !strings.HasSuffix(out, want) {
+	if want := "+19 more → vh task ls aa --status all --kind watch --active --blocked --overdue --q \"two words\" --all\n"; !strings.HasSuffix(out, want) {
 		t.Fatalf("limit 2: %q", out)
 	}
 	q := f.requests[len(f.requests)-1].URL.Query()

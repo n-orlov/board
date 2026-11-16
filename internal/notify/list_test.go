@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 type seeded struct {

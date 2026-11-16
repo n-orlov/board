@@ -114,8 +114,8 @@ func TestLeaseStartRefusalsWordTheirNext(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{http.StatusNotFound, ExitNotFound, "no task → board task ls\n"},
-		{http.StatusConflict, ExitConflict, "no task → board task show aa-1\n"},
+		{http.StatusNotFound, ExitNotFound, "no task → vh task ls\n"},
+		{http.StatusConflict, ExitConflict, "no task → vh task show aa-1\n"},
 		{http.StatusBadRequest, ExitError, "no task\n"},
 	} {
 		f := answering(c.status, `{"detail":"no task"}`)
@@ -128,7 +128,7 @@ func TestLeaseStartRefusalsWordTheirNext(t *testing.T) {
 	}
 	done := startFailure(&apiError{Status: http.StatusConflict, Detail: "cannot start a lease on task aa-1: it is done"}, "AA-1")
 	var ae *apiError
-	if !errors.As(done, &ae) || ae.Next != "board task reopen aa-1 first" || ae.exitCode() != ExitConflict {
+	if !errors.As(done, &ae) || ae.Next != "vh task reopen aa-1 first" || ae.exitCode() != ExitConflict {
 		t.Errorf("done task: got %v", done)
 	}
 	if got := startFailure(http.ErrServerClosed, "aa-1"); !errors.Is(got, http.ErrServerClosed) {
@@ -212,7 +212,7 @@ func TestLeaseRenewOfAnExpiredLeaseExitsSixWithTheStart(t *testing.T) {
 	t.Cleanup(func() { nowFn = was })
 	nowFn = func() time.Time { return time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC) }
 	code, out, errs := runEnv(f.env(srv), "lease", "renew", "l1")
-	if code != ExitConflict || out != "" || errs != "lease L1 expired 14m ago → board lease start aa-1 \"<intent>\"\n" {
+	if code != ExitConflict || out != "" || errs != "lease L1 expired 14m ago → vh lease start aa-1 \"<intent>\"\n" {
 		t.Errorf("got %d %q %q", code, out, errs)
 	}
 }
@@ -224,14 +224,14 @@ func TestLeaseRenewAndEndRefusals(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{[]string{"renew", "L1"}, http.StatusNotFound, ExitNotFound, "gone → board lease ls\n"},
-		{[]string{"renew", "L1"}, http.StatusConflict, ExitConflict, "gone → board lease start <task> \"<intent>\"\n"},
+		{[]string{"renew", "L1"}, http.StatusNotFound, ExitNotFound, "gone → vh lease ls\n"},
+		{[]string{"renew", "L1"}, http.StatusConflict, ExitConflict, "gone → vh lease start <task> \"<intent>\"\n"},
 		{[]string{"renew", "L1"}, http.StatusBadRequest, ExitError, "gone\n"},
-		{[]string{"end", "L1"}, http.StatusNotFound, ExitNotFound, "gone → board lease ls\n"},
-		{[]string{"end", "L1"}, http.StatusConflict, ExitConflict, "gone → board lease ls --mine --state all\n"},
+		{[]string{"end", "L1"}, http.StatusNotFound, ExitNotFound, "gone → vh lease ls\n"},
+		{[]string{"end", "L1"}, http.StatusConflict, ExitConflict, "gone → vh lease ls --mine --state all\n"},
 		{[]string{"end", "L1"}, http.StatusBadRequest, ExitError, "gone\n"},
-		{[]string{"ack", "L1"}, http.StatusNotFound, ExitNotFound, "gone → board lease ls\n"},
-		{[]string{"ack", "L1"}, http.StatusConflict, ExitConflict, "gone → board lease ls --mine --state all\n"},
+		{[]string{"ack", "L1"}, http.StatusNotFound, ExitNotFound, "gone → vh lease ls\n"},
+		{[]string{"ack", "L1"}, http.StatusConflict, ExitConflict, "gone → vh lease ls --mine --state all\n"},
 		{[]string{"ack", "L1"}, http.StatusBadRequest, ExitError, "gone\n"},
 	} {
 		f := answering(c.status, `{"detail":"gone"}`)
@@ -273,7 +273,7 @@ func TestLeaseEndWithSeveralLiveLeasesAndNoArgumentIsUsage(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, _, errs := runEnv(f.env(srv), "lease", "end")
-	if code != ExitUsage || errs != "you hold 2 live leases: L1, L2 → board lease end <L…>\n" {
+	if code != ExitUsage || errs != "you hold 2 live leases: L1, L2 → vh lease end <L…>\n" {
 		t.Errorf("got %d %q", code, errs)
 	}
 }
@@ -286,9 +286,9 @@ func TestLeaseTargetsWithNothingToFind(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"renew"}, "you hold no live lease → board lease ls\n"},
-		{[]string{"renew", "aa-1"}, "you hold no lease on task aa-1 → board lease ls --task aa-1\n"},
-		{[]string{"end"}, "you hold no live lease → board lease ls\n"},
+		{[]string{"renew"}, "you hold no live lease → vh lease ls\n"},
+		{[]string{"renew", "aa-1"}, "you hold no lease on task aa-1 → vh lease ls --task aa-1\n"},
+		{[]string{"end"}, "you hold no live lease → vh lease ls\n"},
 	} {
 		code, _, errs := runEnv(f.env(srv), append([]string{"lease"}, c.args...)...)
 		if code != ExitNotFound || errs != c.want {
@@ -310,7 +310,7 @@ func TestLeaseLsFiltersCapAndJSON(t *testing.T) {
 	defer srv.Close()
 	code, out, _ := runEnv(f.env(srv), "lease", "ls", "--mine", "--task", "aa 1", "--res", "r:x", "--state", "all")
 	q := f.requests[0].URL.Query()
-	if code != ExitOK || strings.Count(out, "\n") != 21 || !strings.HasSuffix(out, "+5 more → board lease ls --state all --mine --task \"aa 1\" --res r:x --all\n") ||
+	if code != ExitOK || strings.Count(out, "\n") != 21 || !strings.HasSuffix(out, "+5 more → vh lease ls --state all --mine --task \"aa 1\" --res r:x --all\n") ||
 		q.Get("actor") != "claude:test" || q.Get("task") != "aa 1" || q.Get("resource") != "r:x" || q.Get("state") != "all" {
 		t.Errorf("got %d %q %v", code, out, q)
 	}
@@ -325,7 +325,7 @@ func TestLeaseLsUnknownTaskExitsFour(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, _, errs := runEnv(f.env(srv), "lease", "ls", "--task", "zz-1")
-	if code != ExitNotFound || errs != "there is no task zz-1 → board task ls\n" {
+	if code != ExitNotFound || errs != "there is no task zz-1 → vh task ls\n" {
 		t.Errorf("got %d %q", code, errs)
 	}
 }
@@ -344,7 +344,7 @@ func TestLeaseUsageErrors(t *testing.T) {
 	}
 	for _, args := range [][]string{{"lease", "start", "a", "b", "--ttl", "2"}, {"lease", "renew", "--ttl", "x"}} {
 		code, out, errs := runEnv(envWith(map[string]string{}), args...)
-		if code != ExitUsage || out != "" || !strings.HasPrefix(errs, "board: --ttl: invalid duration") {
+		if code != ExitUsage || out != "" || !strings.HasPrefix(errs, "vh: --ttl: invalid duration") {
 			t.Errorf("%v: got %d %q %q", args, code, out, errs)
 		}
 	}

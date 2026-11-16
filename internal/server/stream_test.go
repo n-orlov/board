@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/feed"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/feed"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // streamSettings tune one server of a rig.

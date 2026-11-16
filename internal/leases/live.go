@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // LiveOf lists the live leases on the task whose id is taskID, oldest first: those

@@ -216,7 +216,7 @@ func TestAllureFormatterWritesResultsForAFixtureRun(t *testing.T) {
 			t.Fatalf("links = %v, want exactly the @gh-61 issue link", links)
 		}
 		link := links[0].(map[string]any)
-		if link["url"] != "https://github.com/n-orlov/board/issues/61" || link["type"] != "issue" {
+		if link["url"] != "https://github.com/n-orlov/village-hall/issues/61" || link["type"] != "issue" {
 			t.Fatalf("link = %v, want the issue 61 link", link)
 		}
 		for _, s := range r["steps"].([]any) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/village-hall/internal/audit"
 )
 
 // The built-in inbox initiative serve creates on start (SPEC 4).

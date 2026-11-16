@@ -18,10 +18,10 @@ import (
 // live lease holds one of its resources (SPEC §8.1).
 const ExitWarning = 7
 
-// LeaseUsage is the single stderr line for a malformed `board lease` command line.
-const LeaseUsage = "usage: board lease start <task> \"<intent>\" [--ttl D] [--res r]... [--json] | renew [<L…>|<task>] [--ttl D] [--intent text] [--json] | end [<L…>|<task>] [\"<outcome>\"] [--json] | ack <L…> [--json] | ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]"
+// LeaseUsage is the single stderr line for a malformed `vh lease` command line.
+const LeaseUsage = "usage: vh lease start <task> \"<intent>\" [--ttl D] [--res r]... [--json] | renew [<L…>|<task>] [--ttl D] [--intent text] [--json] | end [<L…>|<task>] [\"<outcome>\"] [--json] | ack <L…> [--json] | ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]"
 
-// leaseSubcommands are the words after `board lease` and what runs each.
+// leaseSubcommands are the words after `vh lease` and what runs each.
 var leaseSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"start": leaseStart,
 	"renew": leaseRenew,
@@ -30,7 +30,7 @@ var leaseSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"ls":    leaseLs,
 }
 
-// leaseCmd runs `board lease ...` against the server named by VH_URL.
+// leaseCmd runs `vh lease ...` against the server named by VH_URL.
 func leaseCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, LeaseUsage)
@@ -63,7 +63,7 @@ var (
 	taskRefPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*-[0-9]+$`)
 )
 
-// leaseStart runs `board lease start <task> "<intent>"`.
+// leaseStart runs `vh lease start <task> "<intent>"`.
 func leaseStart(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, leaseStartFlags)
 	if !ok || len(p.pos) != 2 {
@@ -112,17 +112,17 @@ func startFailure(err error, task string) error {
 	}
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	case http.StatusConflict:
 		if strings.HasSuffix(ae.Detail, ": it is done") {
-			return conflictError(ae, "board task reopen "+strings.ToLower(task)+" first")
+			return conflictError(ae, "vh task reopen "+strings.ToLower(task)+" first")
 		}
-		return conflictError(ae, "board task show "+strings.ToLower(task))
+		return conflictError(ae, "vh task show "+strings.ToLower(task))
 	}
 	return err
 }
 
-// leaseRenew runs `board lease renew [<L…>|<task>]`.
+// leaseRenew runs `vh lease renew [<L…>|<task>]`.
 func leaseRenew(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, leaseRenewFlags)
 	if !ok || len(p.pos) > 1 {
@@ -206,7 +206,7 @@ func (c *client) leaseOf(ctx context.Context, arg string) (string, error) {
 		return "", err
 	}
 	if len(items) == 0 {
-		return "", &apiError{Status: http.StatusNotFound, Detail: "you hold no lease on task " + strings.ToLower(arg), Next: "board lease ls --task " + strings.ToLower(arg)}
+		return "", &apiError{Status: http.StatusNotFound, Detail: "you hold no lease on task " + strings.ToLower(arg), Next: "vh lease ls --task " + strings.ToLower(arg)}
 	}
 	var l leaseView
 	if err := json.Unmarshal(items[len(items)-1], &l); err != nil {
@@ -230,7 +230,7 @@ func (c *client) myLive(ctx context.Context) ([]string, error) {
 		refs = append(refs, l.Ref)
 	}
 	if len(refs) == 0 {
-		return nil, &apiError{Status: http.StatusNotFound, Detail: "you hold no live lease", Next: "board lease ls"}
+		return nil, &apiError{Status: http.StatusNotFound, Detail: "you hold no live lease", Next: "vh lease ls"}
 	}
 	return refs, nil
 }
@@ -239,7 +239,7 @@ func (c *client) myLive(ctx context.Context) ([]string, error) {
 func targetFailure(err error) error {
 	var ae *apiError
 	if errors.As(err, &ae) && ae.Status == http.StatusNotFound && strings.Contains(ae.Detail, "no task") {
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	}
 	return err
 }
@@ -254,7 +254,7 @@ func (c *client) renewFailure(ctx context.Context, err error, ref string) error 
 	}
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board lease ls")
+		return withNext(err, ae.Status, "vh lease ls")
 	case http.StatusGone:
 		return &apiError{Status: ae.Status, Detail: expiredDetail(ae, ref, nowFn()), Next: c.restartNext(ctx, ref), Exit: ExitConflict}
 	case http.StatusConflict:
@@ -279,10 +279,10 @@ func (c *client) restartNext(ctx context.Context, ref string) string {
 	if err := c.do(ctx, "GET", "/api/v1/leases/"+url.PathEscape(ref), nil, nil, &l); err == nil && l.Task != "" {
 		task = l.Task
 	}
-	return "board lease start " + task + ` "<intent>"`
+	return "vh lease start " + task + ` "<intent>"`
 }
 
-// leaseEnd runs `board lease end [<L…>|<task>] ["<outcome>"]`.
+// leaseEnd runs `vh lease end [<L…>|<task>] ["<outcome>"]`.
 func leaseEnd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, leaseEndFlags)
 	target, outcome, okArgs := endArgs(p.pos)
@@ -356,7 +356,7 @@ func (c *client) endTarget(ctx context.Context, target string) (string, error) {
 		return "", err
 	}
 	if len(refs) > 1 {
-		return "", &apiError{Status: http.StatusBadRequest, Detail: "you hold " + fmt.Sprint(len(refs)) + " live leases: " + strings.Join(refs, ", "), Next: "board lease end <L…>", Exit: ExitUsage}
+		return "", &apiError{Status: http.StatusBadRequest, Detail: "you hold " + fmt.Sprint(len(refs)) + " live leases: " + strings.Join(refs, ", "), Next: "vh lease end <L…>", Exit: ExitUsage}
 	}
 	return refs[0], nil
 }
@@ -370,14 +370,14 @@ func endFailure(err error) error {
 	}
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board lease ls")
+		return withNext(err, ae.Status, "vh lease ls")
 	case http.StatusConflict:
-		return conflictError(ae, "board lease ls --mine --state all")
+		return conflictError(ae, "vh lease ls --mine --state all")
 	}
 	return err
 }
 
-// leaseAck runs `board lease ack <L…>`.
+// leaseAck runs `vh lease ack <L…>`.
 func leaseAck(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, leaseEndFlags)
 	if !ok || len(p.pos) != 1 || !leaseRefPattern.MatchString(p.pos[0]) {

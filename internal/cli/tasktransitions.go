@@ -14,7 +14,7 @@ import (
 // resolutions are the four ways a task closes; completed is the default.
 var resolutions = []string{"completed", "dropped", "superseded", "duplicate"}
 
-// operatorActor is the one actor `board task close --for` names.
+// operatorActor is the one actor `vh task close --for` names.
 const operatorActor = "operator"
 
 // transitionVerbs is the word the `ok` line ends with, by command.
@@ -62,7 +62,7 @@ func closeBody(p parsedArgs) (map[string]any, string, error) {
 	return map[string]any{"resolution": res}, who, nil
 }
 
-// taskTransition runs `board task done|reopen|close <ref>`.
+// taskTransition runs `vh task done|reopen|close <ref>`.
 func taskTransition(cmd string, args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, transitionFlags(cmd))
 	if !ok || !transitionArity(cmd, len(p.pos)) {
@@ -97,12 +97,12 @@ func transitionFailure(err error, cmd, ref string) error {
 	}
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	case http.StatusConflict:
 		if cmd == "done" && strings.HasPrefix(ae.Next, "wait for L") {
 			return conflictError(ae, ae.Next)
 		}
-		return conflictError(ae, "board task show "+ref)
+		return conflictError(ae, "vh task show "+ref)
 	}
 	return err
 }

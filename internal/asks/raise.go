@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // New is the request to raise an ask. Task is a task ref or ULID and Initiative

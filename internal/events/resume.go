@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // ResumeLimit is the most events a resuming stream replays: a client that missed

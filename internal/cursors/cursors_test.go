@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/notes"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/notes"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 var (

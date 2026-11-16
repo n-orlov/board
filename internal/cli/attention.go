@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// AttentionUsage is the single stderr line for a malformed `board attention`.
-const AttentionUsage = "usage: board attention [--tag t]... [--init slug] [--limit N|--all] [--json]"
+// AttentionUsage is the single stderr line for a malformed `vh attention`.
+const AttentionUsage = "usage: vh attention [--tag t]... [--init slug] [--limit N|--all] [--json]"
 
-// DefaultAttentionCap is how many items each section of `board attention` shows (SPEC §8.1).
+// DefaultAttentionCap is how many items each section of `vh attention` shows (SPEC §8.1).
 const DefaultAttentionCap = 5
 
 // attentionActor is an actor of an item and the way back the board has for it.
@@ -104,7 +104,7 @@ func attentionCap(p parsedArgs) (int, bool) {
 	return listCap(p)
 }
 
-// attentionCmd runs `board attention`: the five sections of what needs the operator.
+// attentionCmd runs `vh attention`: the five sections of what needs the operator.
 func attentionCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, attentionFlags)
 	limit, okCap := attentionCap(p)
@@ -144,14 +144,14 @@ func fetchAttention(p parsedArgs, env Env) (json.RawMessage, error) {
 	}
 	var raw json.RawMessage
 	if err := c.do(ctx, "GET", "/api/v1/attention", q, nil, &raw); err != nil {
-		return nil, withNext(err, 404, "board init ls")
+		return nil, withNext(err, 404, "vh init ls")
 	}
 	return raw, nil
 }
 
-// attentionCommand is the `board attention` line with the same filters, for a `+K more` line.
+// attentionCommand is the `vh attention` line with the same filters, for a `+K more` line.
 func attentionCommand(p parsedArgs) string {
-	cmd := "board attention"
+	cmd := "vh attention"
 	for _, t := range p.values["--tag"] {
 		cmd += " --tag " + quoteArg(t)
 	}

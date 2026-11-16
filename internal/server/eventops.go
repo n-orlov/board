@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/cursors"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (p problemResponse) VisitListEventsResponse(w http.ResponseWriter) error     { return p.write(w) }

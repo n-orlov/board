@@ -8,7 +8,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/n-orlov/board/internal/cli"
+	"github.com/n-orlov/village-hall/internal/cli"
 )
 
 // stdoutNamesOnlyKnownCommands parses the `board …` commands and --flags out of
@@ -23,7 +23,7 @@ func (h *harness) stdoutNamesOnlyKnownCommands() error {
 // stdoutNamesCommands checks that the text names at least n commands, so the
 // resolution above is not vacuous.
 func (h *harness) stdoutNamesCommands(n int) error {
-	if got := strings.Count(h.stdout, "`board "); got < n {
+	if got := strings.Count(h.stdout, "`vh "); got < n {
 		return fmt.Errorf("stdout names %d commands in backticks, want at least %d", got, n)
 	}
 	return nil
@@ -66,7 +66,7 @@ func (h *harness) noActorRow(ctx context.Context, handle string) error {
 }
 
 // responseVersionIsStdout checks the response's version against what the last
-// command printed, which the scenario makes `board version`.
+// command printed, which the scenario makes `vh version`.
 func (h *harness) responseVersionIsStdout() error {
 	doc, err := h.bodyMap()
 	if err != nil {

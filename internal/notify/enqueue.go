@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 var columns = []string{"id", "kind", "event_id", "payload", "state", "attempts", "next_attempt_at", "created_at"}

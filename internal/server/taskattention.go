@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // apiTaskAttention is the attention list of a task and the lease behind its

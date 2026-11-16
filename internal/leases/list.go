@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // State filters of a list. The empty state is StateLive.

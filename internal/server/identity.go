@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/village-hall/internal/auth"
 )
 
 type identityContextKey struct{}

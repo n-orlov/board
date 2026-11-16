@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (p problemResponse) VisitCreateTaskResponse(w http.ResponseWriter) error { return p.write(w) }

@@ -51,7 +51,7 @@ func (h *harness) runClientNamed(ctx context.Context, line string, actor, wayBac
 		return err
 	}
 	words := splitQuoted(strings.ReplaceAll(strings.ReplaceAll(line, "<event>", h.eventRef), "<file>", h.textFile))
-	if len(words) == 0 || words[0] != "board" {
+	if len(words) == 0 || words[0] != "vh" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
 	extra := []string{prefix + "URL=http://" + h.addr, prefix + "API_KEY=" + h.key}

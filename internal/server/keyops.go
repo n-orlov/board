@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/village-hall/internal/auth"
 )
 
 func (p problemResponse) VisitListKeysResponse(w http.ResponseWriter) error  { return p.write(w) }

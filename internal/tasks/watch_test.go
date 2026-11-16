@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // fixed returns the store s with a clock that stands at *at until the test moves

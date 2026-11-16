@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 func leaseRefs(list []leases.Lease) []string {

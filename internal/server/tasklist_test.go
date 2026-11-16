@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 func TestListTasksAnswers503WithoutAStore(t *testing.T) {

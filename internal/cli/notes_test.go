@@ -67,11 +67,11 @@ func TestNoteQueryValuesAndCommand(t *testing.T) {
 	if v.Has("ack") {
 		t.Errorf("ack must not be sent: the cursor moves past the shown notes only: %v", v)
 	}
-	want := "board notes --since last --task aa-1 --init aa --mention nik --broadcast --res host:x --res host:y --ack"
+	want := "vh notes --since last --task aa-1 --init aa --mention nik --broadcast --res host:x --res host:y --ack"
 	if got := q.command(); got != want {
 		t.Errorf("command: got %q, want %q", got, want)
 	}
-	if got := (noteQuery{}).command(); got != "board notes" {
+	if got := (noteQuery{}).command(); got != "vh notes" {
 		t.Errorf("empty command: %q", got)
 	}
 	if got := (noteQuery{}).values(); len(got) != 0 {

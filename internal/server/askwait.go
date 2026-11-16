@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/feed"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/feed"
 )
 
 // The seconds an ask long-poll may hold (SPEC 7.2).

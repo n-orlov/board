@@ -302,9 +302,9 @@ func TestAskPollKeepsTheRequestedDeadlineToTheMicrosecond(t *testing.T) {
 		endAt             time.Time
 		code              int
 	}{
-		{"answered", "answered_at", "A1 still open → board ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
-		{"withdrawn", "withdrawn_at", "A1 still open → board ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
-		{"answered", "answered_at", "A1 still open → board ask show A1\n", deadline.Add(time.Nanosecond), ExitTimeout},
+		{"answered", "answered_at", "A1 still open → vh ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
+		{"withdrawn", "withdrawn_at", "A1 still open → vh ask show A1\n", deadline.Add(200 * time.Microsecond), ExitTimeout},
+		{"answered", "answered_at", "A1 still open → vh ask show A1\n", deadline.Add(time.Nanosecond), ExitTimeout},
 		{"answered", "answered_at", "ok A1 answered by nik: x\n", deadline.Add(-50 * time.Microsecond), ExitOK},
 		{"withdrawn", "withdrawn_at", "A1 withdrawn\n", deadline.Add(-50 * time.Microsecond), ExitConflict},
 		{"answered", "answered_at", "ok A1 answered by nik: x\n", deadline.Add(-300 * time.Millisecond), ExitOK},
@@ -379,7 +379,7 @@ func TestAskPollAnAnswerAfterTheDeadlineExitsThree(t *testing.T) {
 		code, out, _ := runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "10m")
 		nowFn = old
 		srv.Close()
-		if code != ExitTimeout || out != "A1 still open → board ask show A1\n" {
+		if code != ExitTimeout || out != "A1 still open → vh ask show A1\n" {
 			t.Errorf("%s after the deadline: got %d %q", c.state, code, out)
 		}
 	}
@@ -436,7 +436,7 @@ func TestPollEndLinesAndExitCodes(t *testing.T) {
 		{askView{Ref: "A3", State: "answered", AnsweredBy: "nik", Answer: "8080"}, "ok A3 answered by nik: 8080", ExitOK},
 		{askView{Ref: "A3", State: "withdrawn", WithdrawReason: "moot"}, "A3 withdrawn: moot", ExitConflict},
 		{askView{Ref: "A3", State: "withdrawn"}, "A3 withdrawn", ExitConflict},
-		{askView{Ref: "A3", State: "open"}, "A3 still open → board ask show A3", ExitTimeout},
+		{askView{Ref: "A3", State: "open"}, "A3 still open → vh ask show A3", ExitTimeout},
 	} {
 		if got := pollLine(c.a); got != c.line {
 			t.Errorf("line %q, want %q", got, c.line)
@@ -529,7 +529,7 @@ func TestAskPollWithdrawnExitsSixAndATimeoutExitsThree(t *testing.T) {
 	nowFn = func() time.Time { clock = clock.Add(400 * time.Second); return clock }
 	defer func() { nowFn = old }()
 	code, out, _ = runEnv(f.env(srv), "ask", "aa-1", "q", "--poll", "10m")
-	if code != ExitTimeout || out != "A1 still open → board ask show A1\n" {
+	if code != ExitTimeout || out != "A1 still open → vh ask show A1\n" {
 		t.Errorf("timeout: got %d %q", code, out)
 	}
 	if len(*waits) != 1 || (*waits)[0] != "200" {
@@ -542,7 +542,7 @@ func TestAskPollRefusalsKeepTheirExitCodes(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "ask", "zz-9", "q", "--poll", "5m")
-	if code != ExitNotFound || out != "" || !strings.Contains(errs, "board task ls") {
+	if code != ExitNotFound || out != "" || !strings.Contains(errs, "vh task ls") {
 		t.Errorf("got %d %q %q", code, out, errs)
 	}
 }

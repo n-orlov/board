@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // DroppedResolution is the resolution a forced initiative close gives the tasks

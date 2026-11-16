@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/n-orlov/board/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/oidc"
 )
 
 const keyID = "mock-key-1"

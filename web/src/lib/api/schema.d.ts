@@ -829,7 +829,7 @@ export interface paths {
         };
         /**
          * Describe the server and the caller
-         * @description The server's version, the agent protocol version its binary embeds (the one `board help agent` prints), and who the caller is: the principal that authenticated and the actor it acts as. Reads nothing from the database.
+         * @description The server's version, the agent protocol version its binary embeds (the one `vh help agent` prints), and who the caller is: the principal that authenticated and the actor it acts as. Reads nothing from the database.
          */
         get: operations["getMeta"];
         put?: never;
@@ -1954,11 +1954,11 @@ export interface components {
         };
         /** @description The server and the caller. */
         Meta: {
-            /** @description The version the server binary was built as (`board version`'s first field). */
+            /** @description The version the server binary was built as (`vh version`'s first field). */
             version: string;
             /** @description The commit the server binary was built from, as the image build stamped it (the VERSION and REVISION build args); absent when the build recorded none. */
             revision?: string;
-            /** @description The agent protocol version the server binary embeds (`board help agent`). */
+            /** @description The agent protocol version the server binary embeds (`vh help agent`). */
             protocol: number;
             /** @description Who authenticated, such as `key:workstation` or `oidc:<email>`. */
             principal: string;
@@ -1967,7 +1967,7 @@ export interface components {
         };
         /** @description The agent protocol version the caller has read. */
         ProtocolSeenRequest: {
-            /** @description The protocol version, as `board help agent --version` prints it. */
+            /** @description The protocol version, as `vh help agent --version` prints it. */
             version: number;
         };
         /** @description An actor and the highest agent protocol version it has read. */

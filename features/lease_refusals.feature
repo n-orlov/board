@@ -7,8 +7,8 @@ Feature: A refused lease write changes nothing
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port with BOARD_SWEEP_INTERVAL=off
     And I create the initiative "aa" titled "First" with no tags as actor "claude@laptop"
@@ -166,7 +166,7 @@ Feature: A refused lease write changes nothing
   Scenario Outline: a refused <what> with a never-used key changes no row in any table
     Given I end the lease "L2" without a body as actor "claude@laptop"
     And the lease "L1" ran out 30 seconds ago
-    And I run "board admin keys create fresh"
+    And I run "vh admin keys create fresh"
     And I remember the key stdout printed
     And the key "fresh" has never been used
     And I note every row of every table
@@ -190,7 +190,7 @@ Feature: A refused lease write changes nothing
   Scenario: a refused start on a closed task with a never-used key changes no row
     Given I close the task "aa-3" with body "{'resolution':'dropped'}" as actor "claude@laptop"
     And the lease "L1" ran out 30 seconds ago
-    And I run "board admin keys create fresh"
+    And I run "vh admin keys create fresh"
     And I remember the key stdout printed
     And I note every row of every table
     When I start a lease with body "{'task':'aa-3','intent':'x'}" as actor "codex@laptop"
@@ -199,7 +199,7 @@ Feature: A refused lease write changes nothing
 
   Scenario: a refusal does not suppress the key's usage bump on its next successful request
     Given the lease "L1" ran out 30 seconds ago
-    And I run "board admin keys create fresh"
+    And I run "vh admin keys create fresh"
     And I remember the key stdout printed
     When I renew the lease "L9" without a body as actor "codex@laptop"
     Then the response status is 404

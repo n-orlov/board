@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/internal/roster"
+	"github.com/n-orlov/village-hall/internal/roster"
 )
 
 func TestActorOperationsAnswer503WithoutAStore(t *testing.T) {

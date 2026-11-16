@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Query selects a page of notes (SPEC 6.2). Every filter combines with AND and

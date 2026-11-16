@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/internal/envvar"
+	"github.com/n-orlov/village-hall/internal/envvar"
 )
 
 // ExitAuth is the exit code of a refused or missing key (SPEC §8.1).
@@ -96,7 +96,7 @@ func (e *apiError) exitCode() int {
 }
 
 // authNext is what an agent does about a key the server refused (SPEC §8.1).
-const authNext = "check VH_API_KEY (board admin keys list shows which keys are active)"
+const authNext = "check VH_API_KEY (vh admin keys list shows which keys are active)"
 
 // withNext replaces the suggested next action of an apiError with the given
 // status by a command the CLI knows to be the right one: the server's own
@@ -197,7 +197,7 @@ func (c *client) headers(req *http.Request, hasBody bool) {
 func (c *client) finish(req *http.Request, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("server unreachable at %s → check %s and that board serve is running", c.base, envvar.URL.Name())
+		return fmt.Errorf("server unreachable at %s → check %s and that vh serve is running", c.base, envvar.URL.Name())
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

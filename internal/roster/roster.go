@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // ErrNotFound is a handle that names no actor.

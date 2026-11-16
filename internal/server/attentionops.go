@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/attention"
+	"github.com/n-orlov/village-hall/internal/attention"
 )
 
 func (p problemResponse) VisitGetAttentionResponse(w http.ResponseWriter) error { return p.write(w) }

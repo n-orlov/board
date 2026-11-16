@@ -51,7 +51,7 @@ func TestHelpAgentTextFitsTheLineBudget(t *testing.T) {
 
 func TestHelpAgentTextCoversIdentityWhoamiAndInitiatives(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"BOARD_URL", "BOARD_API_KEY", "BOARD_ACTOR", "BOARD_WAY_BACK", "`board whoami`", "`board init add ", "`board init ls", "`board init show "} {
+	for _, want := range []string{"BOARD_URL", "BOARD_API_KEY", "BOARD_ACTOR", "BOARD_WAY_BACK", "`vh whoami`", "`vh init add ", "`vh init ls", "`vh init show "} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
 		}
@@ -60,7 +60,7 @@ func TestHelpAgentTextCoversIdentityWhoamiAndInitiatives(t *testing.T) {
 
 func TestHelpAgentTextCoversTasksLeasesConflictsAndClosing(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"`board task add ", "`board task done ", "`board lease start ", "`board lease renew`", "`board lease end ", "`board now --resources ", "`board milestone ", "`board check ", "CONFLICT", "exit 7", "`board task close <ref> --for operator`", "never close"} {
+	for _, want := range []string{"`vh task add ", "`vh task done ", "`vh lease start ", "`vh lease renew`", "`vh lease end ", "`vh now --resources ", "`vh milestone ", "`vh check ", "CONFLICT", "exit 7", "`vh task close <ref> --for operator`", "never close"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
 		}
@@ -77,9 +77,9 @@ func TestHelpAgentTextNamesOnlyCommandsAndFlagsThisBuildHas(t *testing.T) {
 }
 
 func TestUnknownReferencesFindsAnUnknownCommandAndAnUnknownFlag(t *testing.T) {
-	text := "run `board start <task>` or `board init ls --nope` or `board whoami` or `board init ls --all`"
+	text := "run `vh start <task>` or `vh init ls --nope` or `vh whoami` or `vh init ls --all`"
 	got := UnknownReferences(text, Commands())
-	if len(got) != 2 || !strings.Contains(got[0], `unknown command "board start"`) || !strings.Contains(got[1], "unknown flag --nope") {
+	if len(got) != 2 || !strings.Contains(got[0], `unknown command "vh start"`) || !strings.Contains(got[1], "unknown flag --nope") {
 		t.Fatalf("got %v", got)
 	}
 }
@@ -172,7 +172,7 @@ func TestHelpUsageErrors(t *testing.T) {
 
 func TestHelpAgentTextCoversAsksNotesAndAttention(t *testing.T) {
 	text := ProtocolText()
-	for _, want := range []string{"`board ask <task> ", "(stop, the default)", "--poll 10m", "exit 0 answered", "3 still", "`board answer ", "--relay", "`board note ", "`board notes --since last --ack`", "`board attention`", "`board note show "} {
+	for _, want := range []string{"`vh ask <task> ", "(stop, the default)", "--poll 10m", "exit 0 answered", "3 still", "`vh answer ", "--relay", "`vh note ", "`vh notes --since last --ack`", "`vh attention`", "`vh note show "} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text does not mention %s", want)
 		}

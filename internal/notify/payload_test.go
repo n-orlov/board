@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 var holder = audit.Actor{Handle: "claude@host", WayBack: "tmux attach -t work"}

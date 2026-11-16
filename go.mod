@@ -1,4 +1,4 @@
-module github.com/n-orlov/board
+module github.com/n-orlov/village-hall
 
 go 1.26.0
 

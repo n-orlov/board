@@ -8,8 +8,8 @@ Feature: API keys over HTTP
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
 
@@ -46,7 +46,7 @@ Feature: API keys over HTTP
     Then the response status is 200
     And the response does not contain the created key
     And the response lists the key "laptop" with a display prefix and no key field
-    When I run "board admin keys list"
+    When I run "vh admin keys list"
     Then stdout does not contain the created key
     And the api_keys row named "laptop" holds the SHA-256 hash of the created key and nowhere the key itself
 

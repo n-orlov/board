@@ -130,17 +130,22 @@
                 "attention.go",
                 "cli.go",
                 "client.go",
+                "events.go",
+                "helpagent.go",
                 "initedit.go",
                 "initiatives.go",
+                "leasels.go",
                 "leases.go",
                 "login.go",
                 "notes.go",
                 "now.go",
                 "taskattention.go",
+                "taskdeps.go",
                 "tasks.go",
                 "tasktransitions.go",
                 "taskview.go",
-                "tree.go"
+                "tree.go",
+                "whoami.go"
             ],
             "internal/initiatives": [
                 "inbox.go"
@@ -195,15 +200,20 @@
                     "args.go",
                     "cli.go",
                     "client.go",
+                    "helpagent.go",
                     "initedit.go",
                     "initiatives.go",
                     "login.go",
-                    "tree.go"
+                    "taskdeps.go",
+                    "tree.go",
+                    "whoami.go"
                 ],
                 "views": [
                     "askpoll.go",
                     "asks.go",
                     "attention.go",
+                    "events.go",
+                    "leasels.go",
                     "leases.go",
                     "notes.go",
                     "now.go",

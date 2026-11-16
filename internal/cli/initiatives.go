@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// InitUsage is the single stderr line for a malformed `board init` command line.
-const InitUsage = "usage: board init add <slug> \"<title>\" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug> | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end] | close <slug> [--force] | reopen <slug>"
+// InitUsage is the single stderr line for a malformed `vh init` command line.
+const InitUsage = "usage: vh init add <slug> \"<title>\" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug> | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end] | close <slug> [--force] | reopen <slug>"
 
-// WhoamiUsage is the single stderr line for a malformed `board whoami`.
-const WhoamiUsage = "usage: board whoami"
+// WhoamiUsage is the single stderr line for a malformed `vh whoami`.
+const WhoamiUsage = "usage: vh whoami"
 
 // DefaultListCap is how many items a plain list command shows (SPEC §8.1).
 const DefaultListCap = 20
@@ -55,7 +55,7 @@ func clientContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// initCmd runs `board init ...` against the server named by VH_URL.
+// initCmd runs `vh init ...` against the server named by VH_URL.
 func initCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) == 0 {
 		return usageLine(stderr, InitUsage)
@@ -100,7 +100,7 @@ func initAdd(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	var raw json.RawMessage
 	if err := c.do(ctx, "POST", "/api/v1/initiatives", nil, body, &raw); err != nil {
-		return report(stderr, withNext(err, http.StatusConflict, "board init show "+p.pos[0]))
+		return report(stderr, withNext(err, http.StatusConflict, "vh init show "+p.pos[0]))
 	}
 	if p.has("--json") {
 		_, _ = fmt.Fprintln(stdout, string(raw))
@@ -229,7 +229,7 @@ func initShow(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	var raw json.RawMessage
 	if err := c.do(ctx, "GET", "/api/v1/initiatives/"+url.PathEscape(p.pos[0]), nil, nil, &raw); err != nil {
-		return report(stderr, withNext(err, http.StatusNotFound, "board init ls"))
+		return report(stderr, withNext(err, http.StatusNotFound, "vh init ls"))
 	}
 	if p.has("--json") {
 		_, _ = fmt.Fprintln(stdout, string(raw))

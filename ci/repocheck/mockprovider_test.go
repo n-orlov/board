@@ -1,6 +1,6 @@
 // mockprovider_test.go keeps the mock OIDC provider test-only (SPEC 3.2): the
 // release binary and so the release image must not hold it. `go list -deps`
-// of cmd/board names every package the binary is built from.
+// of cmd/vh names every package the binary is built from.
 package repocheck
 
 import (
@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const mockProviderPackage = "github.com/n-orlov/board/internal/oidc/oidctest"
+const mockProviderPackage = "github.com/n-orlov/village-hall/internal/oidc/oidctest"
 
 // goListDeps returns the import paths `go list -deps args...` prints.
 func goListDeps(t *testing.T, args ...string) []string {
@@ -38,12 +38,12 @@ func importsMockProvider(deps []string) bool {
 }
 
 func TestReleaseBinaryDoesNotImportTheMockProvider(t *testing.T) {
-	deps := goListDeps(t, "./cmd/board")
+	deps := goListDeps(t, "./cmd/vh")
 	if len(deps) < 10 {
-		t.Fatalf("go list -deps ./cmd/board printed %d packages: the probe sees nothing", len(deps))
+		t.Fatalf("go list -deps ./cmd/vh printed %d packages: the probe sees nothing", len(deps))
 	}
 	if importsMockProvider(deps) {
-		t.Fatalf("cmd/board depends on %s: the mock provider must stay test-only", mockProviderPackage)
+		t.Fatalf("cmd/vh depends on %s: the mock provider must stay test-only", mockProviderPackage)
 	}
 }
 
@@ -58,15 +58,15 @@ func TestMockProviderProbeSeesATestImport(t *testing.T) {
 	}
 }
 
-const fakeOIDCCommand = "github.com/n-orlov/board/cmd/fake-oidc"
+const fakeOIDCCommand = "github.com/n-orlov/village-hall/cmd/fake-oidc"
 
 // TestFakeOIDCCommandIsTestOnly keeps the process that wraps the mock provider for the
 // Playwright specs (cmd/fake-oidc) out of the release binary, and proves the probe can
 // see it: the command itself does import the mock provider.
 func TestFakeOIDCCommandIsTestOnly(t *testing.T) {
-	for _, d := range goListDeps(t, "./cmd/board") {
+	for _, d := range goListDeps(t, "./cmd/vh") {
 		if d == fakeOIDCCommand {
-			t.Fatalf("cmd/board depends on %s: the mock provider's process must stay test-only", fakeOIDCCommand)
+			t.Fatalf("cmd/vh depends on %s: the mock provider's process must stay test-only", fakeOIDCCommand)
 		}
 	}
 	if !importsMockProvider(goListDeps(t, "./cmd/fake-oidc")) {

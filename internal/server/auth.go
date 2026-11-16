@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/n-orlov/board/internal/auth"
+	"github.com/n-orlov/village-hall/internal/auth"
 )
 
 // KeyVerifier checks a presented API key and returns the key's name. It
@@ -35,7 +35,7 @@ const problemType = "about:blank"
 func defaultNext(status int) string {
 	switch {
 	case status == http.StatusUnauthorized:
-		return "Send an API key as 'Authorization: Bearer <key>' and your handle as 'Board-Actor' (create a key with 'board admin keys create <name>')."
+		return "Send an API key as 'Authorization: Bearer <key>' and your handle as 'Board-Actor' (create a key with 'vh admin keys create <name>')."
 	case status == http.StatusNotFound:
 		return "Check the path and the ref, then try again."
 	case status == http.StatusConflict:

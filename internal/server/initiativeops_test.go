@@ -10,8 +10,8 @@ import (
 
 	"github.com/oapi-codegen/runtime"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/initiatives"
 )
 
 func (s *keyServer) create(slug, extra string) *httptest.ResponseRecorder {

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func TestServeRejectsAWordOutsideStrandedAskingDone(t *testing.T) {

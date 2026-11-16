@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/notify"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/notify"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // receiver is an httptest server that answers with the next status of its script

@@ -17,12 +17,12 @@ import (
 // MilestoneUsage, CheckUsage and EventsUsage are the stderr lines for a
 // malformed command line.
 const (
-	MilestoneUsage = "usage: board milestone <task> \"<summary>\" [--json]"
-	CheckUsage     = "usage: board check <task> \"<summary>\" [--next D] [--json]"
-	EventsUsage    = "usage: board events [--since E<n>|time] [--task ref] [--initiative slug] [--type t]... [--actor handle] [--limit N|--all] [--json]"
+	MilestoneUsage = "usage: vh milestone <task> \"<summary>\" [--json]"
+	CheckUsage     = "usage: vh check <task> \"<summary>\" [--next D] [--json]"
+	EventsUsage    = "usage: vh events [--since E<n>|time] [--task ref] [--initiative slug] [--type t]... [--actor handle] [--limit N|--all] [--json]"
 )
 
-// milestoneCmd runs `board milestone <task> "<summary>"`.
+// milestoneCmd runs `vh milestone <task> "<summary>"`.
 func milestoneCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, milestoneFlags)
 	if !ok || len(p.pos) != 2 {
@@ -32,7 +32,7 @@ func milestoneCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	return writeTaskNote(p, "milestones", body, "milestone recorded", stdout, stderr, env)
 }
 
-// checkCmd runs `board check <task> "<summary>" [--next D]`.
+// checkCmd runs `vh check <task> "<summary>" [--next D]`.
 func checkCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, checkFlags)
 	if !ok || len(p.pos) != 2 {
@@ -76,9 +76,9 @@ func noteFailure(err error, ref string) error {
 	}
 	switch ae.Status {
 	case http.StatusNotFound:
-		return withNext(err, ae.Status, "board task ls")
+		return withNext(err, ae.Status, "vh task ls")
 	case http.StatusConflict:
-		return conflictError(ae, "board task show "+strings.ToLower(ref))
+		return conflictError(ae, "vh task show "+strings.ToLower(ref))
 	}
 	return err
 }
@@ -88,7 +88,7 @@ func eventLine(now time.Time, e eventView) string {
 	return e.Ref + "  " + ago(now, e.At) + "  " + e.Actor + "  " + e.Summary
 }
 
-// eventQuery is what `board events` asks the server for.
+// eventQuery is what `vh events` asks the server for.
 type eventQuery struct {
 	since, task, initiative, actor string
 	types                          []string
@@ -127,9 +127,9 @@ func (q eventQuery) values() url.Values {
 	return v
 }
 
-// command is the `board events` line that shows the same events, with --all.
+// command is the `vh events` line that shows the same events, with --all.
 func (q eventQuery) command() string {
-	cmd := "board events"
+	cmd := "vh events"
 	for _, f := range []struct{ flag, val string }{{"since", q.since}, {"task", q.task}, {"initiative", q.initiative}, {"actor", q.actor}} {
 		if f.val != "" {
 			cmd += " --" + f.flag + " " + quoteArg(f.val)
@@ -141,7 +141,7 @@ func (q eventQuery) command() string {
 	return cmd
 }
 
-// eventsCmd runs `board events`.
+// eventsCmd runs `vh events`.
 func eventsCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, eventsFlags)
 	limit, okCap := listCap(p)
@@ -155,7 +155,7 @@ func eventsCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	return listEvents(p, "/api/v1/events", q.values(), limit, q.command(), stdout, stderr, env)
 }
 
-// taskEvents runs `board task events <ref>`.
+// taskEvents runs `vh task events <ref>`.
 func taskEvents(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, taskEventsFlags)
 	limit, okCap := listCap(p)
@@ -164,7 +164,7 @@ func taskEvents(args []string, stdout, stderr io.Writer, env Env) int {
 	}
 	ref := strings.ToLower(p.pos[0])
 	path := "/api/v1/tasks/" + url.PathEscape(p.pos[0]) + "/events"
-	return listEvents(p, path, url.Values{}, limit, "board task events "+ref, stdout, stderr, env)
+	return listEvents(p, path, url.Values{}, limit, "vh task events "+ref, stdout, stderr, env)
 }
 
 // listEvents prints the events at path, oldest first, capped at limit (0 for
@@ -202,9 +202,9 @@ func listEvents(p parsedArgs, path string, q url.Values, limit int, cmd string, 
 func eventsFailure(err error) error {
 	var ae *apiError
 	if errors.As(err, &ae) && ae.Status == http.StatusNotFound && strings.HasPrefix(ae.Detail, "there is no initiative") {
-		return withNext(err, ae.Status, "board init ls")
+		return withNext(err, ae.Status, "vh init ls")
 	}
-	return withNext(err, http.StatusNotFound, "board task ls")
+	return withNext(err, http.StatusNotFound, "vh task ls")
 }
 
 // allPages follows next_after until the last page of the list at path.

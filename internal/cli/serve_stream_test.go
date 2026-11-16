@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func TestServeRejectsAnUnreadableStreamHeartbeat(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/oidc"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Session lifetimes when none is configured (SPEC 3.2).

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 // conflicts lists the resources that two or more live leases hold, the one with

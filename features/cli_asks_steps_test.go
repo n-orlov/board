@@ -60,7 +60,7 @@ func (h *harness) startClientInBackground(ctx context.Context, line, actor strin
 		return err
 	}
 	words := splitQuoted(line)
-	if len(words) == 0 || words[0] != "board" {
+	if len(words) == 0 || words[0] != "vh" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
 	bg := &backgroundClient{done: make(chan struct{})}

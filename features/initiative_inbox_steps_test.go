@@ -7,9 +7,9 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // seedInbox migrates the scenario's database and creates the initiative inbox

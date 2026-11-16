@@ -72,12 +72,12 @@ func Commands() map[string][]string {
 }
 
 var (
-	commandSpan = regexp.MustCompile("`(board [^`]*)`")
+	commandSpan = regexp.MustCompile("`(vh [^`]*)`")
 	flagToken   = regexp.MustCompile(`--[a-z][a-z-]*`)
 	wordToken   = regexp.MustCompile(`^[a-z]+$`)
 )
 
-// UnknownReferences reads text, which names commands as `board <words> …` in
+// UnknownReferences reads text, which names commands as `vh <words> …` in
 // backticks, and returns one message for each command the tree does not have
 // and each flag the named command does not take. No message means the text
 // mentions only what this build has.
@@ -95,12 +95,12 @@ func UnknownReferences(text string, tree map[string][]string) []string {
 		cmd := strings.Join(words, " ")
 		flags, ok := tree[cmd]
 		if !ok {
-			problems = append(problems, fmt.Sprintf("unknown command %q in `%s`", "board "+cmd, span))
+			problems = append(problems, fmt.Sprintf("unknown command %q in `%s`", "vh "+cmd, span))
 			continue
 		}
 		for _, f := range flagToken.FindAllString(span, -1) {
 			if !slices.Contains(flags, f) {
-				problems = append(problems, fmt.Sprintf("unknown flag %s for %q in `%s`", f, "board "+cmd, span))
+				problems = append(problems, fmt.Sprintf("unknown flag %s for %q in `%s`", f, "vh "+cmd, span))
 			}
 		}
 	}

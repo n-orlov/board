@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/notify"
+	"github.com/n-orlov/village-hall/internal/notify"
 )
 
 func (p problemResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {

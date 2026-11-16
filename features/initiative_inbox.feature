@@ -1,5 +1,5 @@
 Feature: The built-in inbox initiative
-  `board serve` creates the initiative inbox (title Inbox, description "Work
+  `vh serve` creates the initiative inbox (title Inbox, description "Work
   that fits no other initiative yet.", no tags) when none exists, with one
   initiative_created event made by the operator actor under the principal
   system:bootstrap. An inbox that exists is never changed, whatever its title,

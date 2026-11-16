@@ -14,7 +14,7 @@ import (
 // leaseStates are the values of --state.
 var leaseStates = []string{"live", "ended", "expired", "all"}
 
-// leaseQuery is what `board lease ls` asks the server for.
+// leaseQuery is what `vh lease ls` asks the server for.
 type leaseQuery struct {
 	state, task, resource string
 	mine                  bool
@@ -29,9 +29,9 @@ func leaseFilter(p parsedArgs) (leaseQuery, bool) {
 	return q, q.state == "" || slices.Contains(leaseStates, q.state)
 }
 
-// command is the `board lease ls` line that shows the same leases, with --all.
+// command is the `vh lease ls` line that shows the same leases, with --all.
 func (q leaseQuery) command() string {
-	cmd := "board lease ls"
+	cmd := "vh lease ls"
 	if q.state != "" {
 		cmd += " --state " + q.state
 	}
@@ -54,7 +54,7 @@ func leaseListArgs(p parsedArgs, parsed bool) (leaseQuery, int, bool) {
 	return filter, limit, parsed && okCap && okFilter && len(p.pos) == 0
 }
 
-// leaseLs runs `board lease ls`.
+// leaseLs runs `vh lease ls`.
 func leaseLs(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, leaseLsFlags)
 	filter, limit, ok := leaseListArgs(p, ok)
@@ -69,7 +69,7 @@ func leaseLs(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	items, err := c.allPages(ctx, "/api/v1/leases", filter.values(c.id.Actor))
 	if err != nil {
-		return report(stderr, withNext(err, 404, "board task ls"))
+		return report(stderr, withNext(err, 404, "vh task ls"))
 	}
 	items, more := capItems(items, limit)
 	if p.has("--json") {

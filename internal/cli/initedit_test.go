@@ -167,13 +167,13 @@ func TestInitWriteFailuresNameTheNextCommand(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{[]string{"edit", "zz", "--title", "T"}, 404, notFound, ExitNotFound, "no initiative zz → board init ls\n"},
-		{[]string{"close", "zz"}, 404, notFound, ExitNotFound, "no initiative zz → board init ls\n"},
-		{[]string{"reopen", "zz"}, 404, notFound, ExitNotFound, "no initiative zz → board init ls\n"},
-		{[]string{"close", "aa"}, 409, forceNeeded, ExitConflict, "cannot close initiative aa: 1 of its tasks are not closed → board init close aa --force\n"},
-		{[]string{"close", "aa", "--force"}, 409, closed, ExitConflict, "initiative aa is already closed → board init reopen aa\n"},
-		{[]string{"close", "aa"}, 409, closed, ExitConflict, "initiative aa is already closed → board init reopen aa\n"},
-		{[]string{"reopen", "aa"}, 409, open, ExitConflict, "initiative aa is open → board init show aa\n"},
+		{[]string{"edit", "zz", "--title", "T"}, 404, notFound, ExitNotFound, "no initiative zz → vh init ls\n"},
+		{[]string{"close", "zz"}, 404, notFound, ExitNotFound, "no initiative zz → vh init ls\n"},
+		{[]string{"reopen", "zz"}, 404, notFound, ExitNotFound, "no initiative zz → vh init ls\n"},
+		{[]string{"close", "aa"}, 409, forceNeeded, ExitConflict, "cannot close initiative aa: 1 of its tasks are not closed → vh init close aa --force\n"},
+		{[]string{"close", "aa", "--force"}, 409, closed, ExitConflict, "initiative aa is already closed → vh init reopen aa\n"},
+		{[]string{"close", "aa"}, 409, closed, ExitConflict, "initiative aa is already closed → vh init reopen aa\n"},
+		{[]string{"reopen", "aa"}, 409, open, ExitConflict, "initiative aa is open → vh init show aa\n"},
 		{[]string{"edit", "aa", "--title", "T"}, 400, `{"detail":"title is empty","next":"fix it"}`, ExitError, "title is empty → fix it\n"},
 		{[]string{"edit", "aa", "--title", "T"}, 401, `{}`, ExitAuth, "server answered 401 → " + authNext + "\n"},
 		{[]string{"close", "aa"}, 500, `{"detail":"boom"}`, ExitError, "boom\n"},
@@ -242,7 +242,7 @@ func TestInitLsMoreLineKeepsTheFilters(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	_, out, _ := runEnv(f.env(srv), "init", "ls", "--status", "all", "--closed-within", "30d", "--tag", "a", "--limit", "2")
-	want := "+1 more → board init ls --tag a --status all --closed-within 30d --all\n"
+	want := "+1 more → vh init ls --tag a --status all --closed-within 30d --all\n"
 	if !strings.HasSuffix(out, want) {
 		t.Errorf("got %q, want the suffix %q", out, want)
 	}

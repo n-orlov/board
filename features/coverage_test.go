@@ -112,7 +112,7 @@ func TestStoppedServerFlushesItsCoverage(t *testing.T) {
 	}
 	h.stopServer()
 	if got := counterFiles(t, dir); len(got) == 0 {
-		t.Fatalf("a stopped board serve left no counter data in %s", dir)
+		t.Fatalf("a stopped vh serve left no counter data in %s", dir)
 	}
 }
 

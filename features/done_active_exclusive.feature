@@ -7,8 +7,8 @@ Feature: A task is never done or closed while it has a live lease
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
     And I create the initiative "aa" titled "First" with no tags as actor "claude@laptop"
@@ -20,7 +20,7 @@ Feature: A task is never done or closed while it has a live lease
     When I start a lease with body "{'task':'aa-1','intent':'x'}" as actor "codex@laptop"
     Then the response status is 409
     And the response path "detail" is "cannot start a lease on task aa-1: it is done"
-    And the response path "next" is "Run board task reopen aa-1 first, or start the lease on an open task."
+    And the response path "next" is "Run vh task reopen aa-1 first, or start the lease on an open task."
     And there are 0 leases in the database
     And the counts of tasks, dependencies, events and actors are unchanged
 

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // Identity is who made a request (SPEC 3.1): the principal that authenticated,

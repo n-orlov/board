@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/roster"
+	"github.com/n-orlov/village-hall/internal/roster"
 )
 
 func (p problemResponse) VisitListActorsResponse(w http.ResponseWriter) error { return p.write(w) }

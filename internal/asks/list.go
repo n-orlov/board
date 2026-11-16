@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/initiatives"
 )
 
 // State filters of a list. The empty state is StateOpen.

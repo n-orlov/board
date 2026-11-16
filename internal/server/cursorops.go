@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/n-orlov/board/internal/cursors"
+	"github.com/n-orlov/village-hall/internal/cursors"
 )
 
 func (p problemResponse) VisitPutCursorResponse(w http.ResponseWriter) error { return p.write(w) }

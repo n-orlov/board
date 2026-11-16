@@ -21,11 +21,11 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/n-orlov/board/internal/oidc/oidctest"
+	"github.com/n-orlov/village-hall/internal/oidc/oidctest"
 	_ "modernc.org/sqlite" // the driver the schema-version step writes through
 )
 
-const usageLine = "usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
+const usageLine = "usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>"
 
 // dbLeg returns the database leg named by BOARD_DB_LEG.
 func dbLeg() (string, error) {
@@ -40,7 +40,7 @@ func dbLeg() (string, error) {
 }
 
 // boardPackage is the import path of the binary every scenario drives.
-const boardPackage = "github.com/n-orlov/board/cmd/board"
+const boardPackage = "github.com/n-orlov/village-hall/cmd/vh"
 
 // boardBuildArgs is the `go build` argument list for the black-box board
 // binary. With a coverDir (the suite's GOCOVERDIR) the binary is built with
@@ -177,7 +177,7 @@ func (h *harness) runWithVar(ctx context.Context, line, name, value string) erro
 
 func (h *harness) runWith(ctx context.Context, line string, extra ...string) error {
 	fields := strings.Fields(line)
-	if len(fields) == 0 || fields[0] != "board" {
+	if len(fields) == 0 || fields[0] != "vh" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
 	return h.runArgs(ctx, fields[1:], extra...)
@@ -209,7 +209,7 @@ func (h *harness) runArgs(ctx context.Context, args []string, extra ...string) e
 	return nil
 }
 
-// startServer starts `board serve` on a free port and waits until it accepts.
+// startServer starts `vh serve` on a free port and waits until it accepts.
 func (h *harness) startServer(ctx context.Context) (context.Context, error) {
 	return h.startServerWith(ctx)
 }
@@ -542,7 +542,7 @@ func registerSteps(sc *godog.ScenarioContext, h *harness) {
 	})
 }
 
-// endServer stops a started `board serve` so that it can flush the coverage
+// endServer stops a started `vh serve` so that it can flush the coverage
 // counters an instrumented build holds: SIGTERM first, which the server
 // handles by shutting down and exiting, and a kill only when it does not
 // exit in time.

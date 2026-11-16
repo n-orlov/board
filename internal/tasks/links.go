@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // Link is a task on the other end of a dependency: its ref, title and status.

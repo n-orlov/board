@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// NowUsage is the single stderr line for a malformed `board now`.
-const NowUsage = "usage: board now [--resources r1,r2] [--json]"
+// NowUsage is the single stderr line for a malformed `vh now`.
+const NowUsage = "usage: vh now [--resources r1,r2] [--json]"
 
-// nowCap is how many lines each section of `board now` shows (SPEC §8.1).
+// nowCap is how many lines each section of `vh now` shows (SPEC §8.1).
 const nowCap = 5
 
 // nowView is what GET /api/v1/now answers.
@@ -42,7 +42,7 @@ type nowLease struct {
 	Title string `json:"title"`
 }
 
-// nowCmd runs `board now [--resources r1,r2]`: the check-in. It exits 7 when a
+// nowCmd runs `vh now [--resources r1,r2]`: the check-in. It exits 7 when a
 // conflict touches one of my live leases or a resource given.
 func nowCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, nowFlags)
@@ -102,11 +102,11 @@ func nowText(v nowView, now time.Time) string {
 		conflicts[i] = conflictLine(c, now)
 	}
 	return "you: " + v.Actor + "\n" +
-		nowSection("my leases", mine, 0, "board lease ls --mine") +
-		nowSection("others", others, 0, "board lease ls") +
-		nowSection("conflicts", conflicts, 0, "board lease ls") +
-		nowSection("my asks", myAskLines(v.MyAsks, now), 0, "board ask ls --mine") +
-		nowSection("notes", noteLines(v.Notes, now), v.NotesMore, "board notes --since last") +
+		nowSection("my leases", mine, 0, "vh lease ls --mine") +
+		nowSection("others", others, 0, "vh lease ls") +
+		nowSection("conflicts", conflicts, 0, "vh lease ls") +
+		nowSection("my asks", myAskLines(v.MyAsks, now), 0, "vh ask ls --mine") +
+		nowSection("notes", noteLines(v.Notes, now), v.NotesMore, "vh notes --since last") +
 		attentionLine(v.Attention) + "\n"
 }
 
@@ -123,7 +123,7 @@ func myAskLines(asks []askView, now time.Time) []string {
 	return lines
 }
 
-// noteLines is one line per note, as `board notes` prints it.
+// noteLines is one line per note, as `vh notes` prints it.
 func noteLines(notes []noteView, now time.Time) []string {
 	lines := make([]string, len(notes))
 	for i, n := range notes {

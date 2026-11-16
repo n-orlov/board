@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/api"
+	"github.com/n-orlov/village-hall/api"
 	"go.yaml.in/yaml/v3"
 )
 

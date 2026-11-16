@@ -75,7 +75,7 @@ These names are fixed. Code, API, UI and skill text use exactly these words.
 
 | Term | Meaning |
 |---|---|
-| **Board** | The service, its CLI (`board`) and its UI. |
+| **Board** | The service, its CLI (`vh`) and its UI. |
 | **Initiative** | A group of tasks: a bounded effort ("onboard the new phone") or an ongoing area ("vulnerability hygiene"). Flat, never nested. Carries free-form **tags** (`work`, `personal`, `homelab`, …) used for filtering. |
 | **Task** | A unit of work inside exactly one initiative. Status is **open → done → closed** (§4.3). May depend on other tasks ("blocked by"). Kind is `work` (default) or `watch`. |
 | **Watch task** | A task of kind `watch`: an ongoing duty with a check-in **cadence** and a `next_check_at`. Recording a check moves `next_check_at` forward. Overdue checks appear in the attention view. |
@@ -184,11 +184,11 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   endpoint that checks the client secret, the single-use code and that the `code_verifier` hashes to
   the challenge. Its RSA key is generated when it starts and nothing is committed. Knobs let a
   test sign in an unverified email, reuse an earlier login's nonce, or rewrite a signed token's
-  email. `cmd/board` never imports it, so the release image does not hold it
-  (`ci/repocheck` checks `go list -deps ./cmd/board`). CI contacts no external identity provider.
+  email. `cmd/vh` never imports it, so the release image does not hold it
+  (`ci/repocheck` checks `go list -deps ./cmd/vh`). CI contacts no external identity provider.
   `cmd/fake-oidc` runs it as a process for the Playwright specs (`e2e/serve.sh` starts it beside the
   real binary with a client secret made up for the run and passed through the environment, and
-  points `VH_OIDC_ISSUER` at it); it is a test fixture like `cmd/fake-*`, and `cmd/board` never
+  points `VH_OIDC_ISSUER` at it); it is a test fixture like `cmd/fake-*`, and `cmd/vh` never
   imports it either.
 - **The UI's login**: the UI has no login form of its own. A navigation without a session never
   reaches the app: it is redirected to `/auth/login`, which starts the flow above and ends on `/`
@@ -220,8 +220,8 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   gets 400.
 - Management:
   - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
-  - **Bootstrap, no HTTP**: `board admin keys create <name> [--expires 90d]`, `board admin keys
-    list`, `board admin keys revoke <name>`, run inside the container against `VH_DB_URL`
+  - **Bootstrap, no HTTP**: `vh admin keys create <name> [--expires 90d]`, `vh admin keys
+    list`, `vh admin keys revoke <name>`, run inside the container against `VH_DB_URL`
     directly. This is how the first key is made, and the recovery path if SSO is broken. The
     commands are described in §8.
   - API (any authenticated principal, v1 has no ACL; all three are in `api/openapi.yaml`):
@@ -235,18 +235,18 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
     - A **Key** is `{id, name, display_prefix, status, created_at, created_by, last_used_at?, expires_at?, revoked_at?}`:
       `status` is `active`, `expired` or `revoked`, timestamps are RFC 3339, an absent date is omitted, `created_by`
       is the creating principal (`key:<name>`, `oidc:<email>`, or `admin-cli` for the command line). A Key never holds the
-      key: not in `GET /api/v1/keys`, not in `board admin keys list`, not in the `api_keys` row.
+      key: not in `GET /api/v1/keys`, not in `vh admin keys list`, not in the `api_keys` row.
     - A creation and a revocation that happens each append an event in the same transaction as the row, `key_created` and
       `key_revoked` (§4.6), with `ref_id` the key's id, `principal` the caller's principal (`key:<name>` or
       `oidc:<email>`) and `actor_id` the actor it acted as (the `Board-Actor` handle, or the operator for a session), in
       separate columns. Their `data` holds the key's `name` (and `expires_at` for a creation), never the key. The actor
-      is upserted on first use. `board admin keys` has no actor and records no event.
+      is upserted on first use. `vh admin keys` has no actor and records no event.
 - **Swagger UI** declares a `bearerAuth` security scheme, so "Authorize" accepts a key; inside a
   logged-in browser session it also works with the session cookie and CSRF header.
 
 ### 3.4 Rules of use
 
-Conventions are carried by the agent protocol (`board help agent`, §8.6), not enforced by the server:
+Conventions are carried by the agent protocol (`vh help agent`, §8.6), not enforced by the server:
 
 - Agents mark tasks **done**; they **close** a task only when the operator explicitly asked
   them to. A close event records the acting actor and an optional `on_behalf_of` actor
@@ -255,7 +255,7 @@ Conventions are carried by the agent protocol (`board help agent`, §8.6), not e
   (`answered_by` = the agent, `on_behalf_of` = operator, `channel = "relay"`).
 - Agents never end or expire another actor's lease. The operator may end any lease from the UI
   (recorded as `lease_ended` with `ended_by`).
-- `--force` on done (`board task done <ref> --force`) ends every live lease on the task, another actor's too, and marks it
+- `--force` on done (`vh task done <ref> --force`) ends every live lease on the task, another actor's too, and marks it
   done. It is the operator's action, like `--for operator` on close: an agent uses it only when the operator told it to, and
   otherwise waits for the other lease to end.
 
@@ -274,7 +274,7 @@ formed (§8.2):
 initiative `slug`, task `<initiative-slug>-<n>` (per-initiative counter `seq`, e.g.
 `phone-onboard-3`), lease `L<n>`, ask `A<n>`, note `N<n>`, event `E<n>`.
 
-**Start-up bootstrap.** When `board serve` starts on a migrated database it creates the built-in initiative `inbox`
+**Start-up bootstrap.** When `vh serve` starts on a migrated database it creates the built-in initiative `inbox`
 (title `Inbox`, description `Work that fits no other initiative yet.`, no tags, status `open`) when no initiative with
 that slug exists, in one transaction with its one `initiative_created` event: the actor is the operator actor
 (`VH_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
@@ -298,7 +298,7 @@ exists.
 | way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
 | meta | json text | free-form environment facts the agent chose to send; a JSON object set from `Board-Actor-Meta` (§6.1), `{}` until one is sent |
 | first_seen_at, last_seen_at | ts | the full product bumps `last_seen_at` on any API call with this handle (coalesced, §14); Phase 0 bumps it on every write that records the actor, uncoalesced, and a read does not |
-| protocol_seen | int, nullable | highest agent protocol version this actor has read (`board help agent`, §8.6) |
+| protocol_seen | int, nullable | highest agent protocol version this actor has read (`vh help agent`, §8.6) |
 
 An actor row is created on first use of a handle (upsert). In Phase 0 a use is a **write**: an operation that
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
@@ -379,7 +379,7 @@ transaction (a lease past its `expires_at` is expired first, with its `lease_exp
   its writes are already serial.
 Every other transition ends nothing.
 
-**Upgrade step on start (R14).** A database written by a Phase 2 release can hold a `done` task that has a live lease. `board serve`
+**Upgrade step on start (R14).** A database written by a Phase 2 release can hold a `done` task that has a live lease. `vh serve`
 settles each one when it starts, after the schema is migrated and before it listens (`internal/tasks` `ReopenLeased`), in one
 transaction: every `done` task that holds a live lease (state `live`, `expires_at` not before now) goes back to `open` with `resolution`,
 `done_at`, `done_by`, `closed_at` and `closed_by` cleared, and `task_reopened` is appended for it with the actor the holder of the task's
@@ -439,7 +439,7 @@ Both tables exist (migration `00004_leases`, in both dialects) with `n` (the sho
 on `leases(task_id)` and `leases(actor_id)`. The database holds the ttl within [60, 43200] and the state to the three values.
 
 A lease is started only on an `open` task: a `done` or a `closed` task is `ErrConflict` (`cannot start a lease on task aa-1: it is
-done`, next `Run board task reopen aa-1 first, or start the lease on an open task.`) and nothing is written. A task never
+done`, next `Run vh task reopen aa-1 first, or start the lease on an open task.`) and nothing is written. A task never
 holds a live lease once it is done or closed: both transitions end the leases on it (§4.3). An actor may hold several live leases (different tasks). Starting a lease on a task where the
 same actor already has a live lease **renews** that lease instead (idempotent start).
 
@@ -505,7 +505,7 @@ apply) in the same transaction as the change. `answered_at` and `withdrawn_at` a
 commits; once it has committed, `Answer` and `Withdraw` read the clock again and store it, rounded up to the next whole
 millisecond, as `ended_at`, so `ended_at` is never earlier than the moment the end took effect (became visible to readers),
 however long the commit took. It is an upper bound only: that clock read can itself come arbitrarily late, so `ended_at`
-does not say when the end took effect, and nothing decides a deadline by it (`board ask --poll` uses §7.2's `until`). `ended_at` is null while the ask is open; it is written once, and a failure to write it
+does not say when the end took effect, and nothing decides a deadline by it (`vh ask --poll` uses §7.2's `until`). `ended_at` is null while the ask is open; it is written once, and a failure to write it
 leaves the end standing without one (as do ends recorded before the column existed). The end's commit mark `end_commit_ns` is read only after the transaction's COMMIT has
 returned: `Answer` and `Withdraw` read the server's real clock (not the store's injectable one, since the deadlines it is compared with
 are real instants), to the nanosecond, and write it in a statement of its own, before the clock read for `ended_at`, so a
@@ -646,7 +646,7 @@ reads a handle's position (empty when none is set, which reads from the start). 
 
 `api_keys(n, id, name unique, key_hash unique, display_prefix, created_at, created_by,
 last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key. `created_by` is the creating principal, `key:<name>` or `oidc:<email>` for a key made over
-HTTP and `admin-cli` for one made by `board admin keys create`. `expires_at` is when the key stops working; the
+HTTP and `admin-cli` for one made by `vh admin keys create`. `expires_at` is when the key stops working; the
 verifier answers 401 `key expired` from that instant on.
 
 `sessions(id_hash pk, email, csrf_token, created_at, last_seen_at, expires_at)`. Rows past
@@ -708,8 +708,8 @@ leaves none, and nothing deletes or cancels a row afterwards.
   visible on the timeline.
 - **End** `POST /api/v1/leases/{id}/end {outcome?}`.
 - **Expire**: a sweeper marks `live` leases with `expires_at < now` as `expired` and writes
-  `lease_expired`. `board serve` runs it every `VH_SWEEP_INTERVAL` (default `15s`; any Go duration
-  above zero; `off`, `0` or `0s` turns the sweeper off, and any other value makes `board serve` exit 1
+  `lease_expired`. `vh serve` runs it every `VH_SWEEP_INTERVAL` (default `15s`; any Go duration
+  above zero; `off`, `0` or `0s` turns the sweeper off, and any other value makes `vh serve` exit 1
   naming the variable). It also runs lazily first on every read that returns leases (`GET /leases`,
   `GET /leases/{ref}`, and the live leases of `GET /tasks/{ref}`), so a read never shows a lease as live past
   its expiry even with the sweeper off. Expiry is idempotent and safe with several replicas (conditional
@@ -880,7 +880,7 @@ event, the task, initiative, ask, lease and actor rows named above.
   an API key and tries an operation from the page. The page and the assets reference no external
   host (no CDN) and need a key or session like every route but `/healthz`. A Go test fails on an
   `http(s)://` URL in the served page, and `e2e/swagger.spec.ts` opens `/api/docs` with a key
-  minted by `board admin keys create` and asserts the rendered operations are those of
+  minted by `vh admin keys create` and asserts the rendered operations are those of
   `api/openapi.yaml`.
 - Authentication per §3: session cookie (+ `X-CSRF-Token` on writes) or `Authorization: Bearer`.
   The OpenAPI document declares both schemes (`cookieAuth`, `bearerAuth`); only `/healthz` and the six public PWA files (§12.3) are
@@ -1177,7 +1177,7 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   1 to 200 characters, `ttl_seconds` an integer clamped to [60, 43200] (7200 when absent), `resources` at most 20
   strings of 1 to 100 characters, repeats dropped, kept sorted. A missing body, a missing `task`, a bad intent or a
   bad resource is **400**, an unknown task **404**, and a **done** or **closed** task **409** (`cannot start a lease on task aa-1: it is
-  done` or `… it is closed`; `next` says to run `board task reopen aa-1` first). When the caller already holds a live lease on the task, that lease is renewed
+  done` or `… it is closed`; `next` says to run `vh task reopen aa-1` first). When the caller already holds a live lease on the task, that lease is renewed
   instead: **200**, the same lease, `lease_renewed`, its intent replaced and its resources replaced only when
   `resources` was sent. Otherwise it is **201**, a new lease and `lease_started`. The answer is `{lease, conflicts}`
   (§5.2). A refusal changes nothing: no lease, event or actor. In one transaction the server upserts the actor
@@ -1512,7 +1512,7 @@ message is flushed as it is written. A server with no change feed answers 503.
   (10 s) before every write; a client that stops reading ends it. It ends, releasing its goroutine and its
   subscription to the change feed (§7.3), when the client disconnects, when the feed stops, and when the server
   shuts down (`http.Server.Shutdown` does not end a handler by itself, so the stream watches the shutdown).
-  `board serve` refuses a `VH_STREAM_HEARTBEAT` that is not a Go duration above zero (one stderr line,
+  `vh serve` refuses a `VH_STREAM_HEARTBEAT` that is not a Go duration above zero (one stderr line,
   exit 1). The UI uses this stream; nothing in the UI polls.
 
 ### 7.2 Ask long-poll
@@ -1534,7 +1534,7 @@ answered ended: the response is the still-open ask, without the end's fields. `a
 clock read inside the end's transaction (including a mark taken before the COMMIT) are no such proof, however early they are and however late the server
 finds the end committed. When neither (a) nor (b) holds, the end is not counted. That is the case where the end committed
 before `until` but the server's first read of the ask and every real-clock reading made after the end's COMMIT both fall after `until`:
-no input the server holds then tells it from an end that committed after `until`, so it answers the still-open ask, and `board ask --poll` (§8.3)
+no input the server holds then tells it from an end that committed after `until`, so it answers the still-open ask, and `vh ask --poll` (§8.3)
 exits 3 on it. That strict case is a disclosed residual, not a promise. The read as `until` passes runs on the
 readers, by its own timer, armed as the request is handled, before the wait makes any write (marking the poll at the start
 waits for the database's writer), but whether that read comes late does not change the answer: neither the timer's
@@ -1552,7 +1552,7 @@ The mark is judged as it stands when the response is finalized, not as it stood 
 precede the write of a mark that was sampled after the end's COMMIT and at or before `until` (the mark's write waits for the
 database's writer like any other). So once the wait has marked the poll at its end (that write queues behind a mark write
 already in flight), it reads the ask once more and takes the end from that read when its mark is there and at or before
-`until`; the end counts, and `board ask --poll` exits 0 or 6, however far past `until` the mark's write ran. A mark after `until`,
+`until`; the end counts, and `vh ask --poll` exits 0 or 6, however far past `until` the mark's write ran. A mark after `until`,
 or none within the 5 seconds the wait allows the writer, leaves the end uncounted, as does any other read: only such a mark or a
 read that came back by `until` is proof, so an end whose COMMIT returned after `until` is still answered open (exit 3)
 and the strict case above stays a residual.
@@ -1586,7 +1586,7 @@ wait, and requires the label to read "asker waiting" within five seconds with no
 ### 7.3 The change feed
 
 The source of every live signal is the `events` table, tailed by `n` (the order of insertion) by the
-change feed of `internal/feed/`, one per `board serve`. It reads the rows after the last one it delivered
+change feed of `internal/feed/`, one per `vh serve`. It reads the rows after the last one it delivered
 every `VH_STREAM_POLL` (default `1s`, §13) and a write made through the same server wakes it at once,
 so a local write reaches a subscriber without waiting for the interval. Each subscriber (an SSE stream,
 §7.1; an ask waiter, §7.2) gets every event after the position its subscription began at, in order of `n`,
@@ -1603,7 +1603,7 @@ rolls back. When a read shows a gap, the feed notes which transactions hold that
 missing `n` below the highest one read was drawn by one of them or by a transaction already ended. The
 feed holds the later rows, however long that takes, until each noted transaction has ended. Then it reads
 the table once more: a missing row that committed is delivered in its place, and one still missing rolled
-back, so the feed moves past it. On SQLite there is one writer and no such gap. `board serve` refuses a
+back, so the feed moves past it. On SQLite there is one writer and no such gap. `vh serve` refuses a
 `VH_STREAM_POLL` that is not a Go duration above zero (one stderr line, exit 1). A
 server started with `VH_MIGRATE=off` on a database it cannot read yet still serves: the feed starts at the
 newest event as of its first successful read.
@@ -1612,16 +1612,16 @@ newest event as of its first successful read.
 
 ## 8. CLI
 
-One binary, same Go module: `board serve` runs the server, every other subcommand is a client
-(`board admin …` excepted, below). Static builds for linux/darwin × amd64/arm64.
+One binary, same Go module: `vh serve` runs the server, every other subcommand is a client
+(`vh admin …` excepted, below). Static builds for linux/darwin × amd64/arm64.
 
 Configuration: `VH_URL`, `VH_ACTOR` (handle; if unset, the CLI derives one with the
 built-in fallback rule, §9), `VH_WAY_BACK`, `VH_API_KEY` (the environment's key, §3.3;
 never accepted as a flag, so it does not land in shell history or process lists).
-`board admin …` subcommands talk to the database directly (`VH_DB_URL`) and need no key.
+`vh admin …` subcommands talk to the database directly (`VH_DB_URL`) and need no key.
 
-`board serve` starts the HTTP server on `VH_LISTEN` (default `:8080`) and shuts down gracefully on
-SIGINT or SIGTERM, exiting 0. `board version` prints one line: the version, then a space and the commit the binary was built from
+`vh serve` starts the HTTP server on `VH_LISTEN` (default `:8080`) and shuts down gracefully on
+SIGINT or SIGTERM, exiting 0. `vh version` prints one line: the version, then a space and the commit the binary was built from
 when the version does not already name it. A binary built by the container image build carries the
 image's `VERSION` and `REVISION` build args (§13), stamped with the linker, and prints `<VERSION> <REVISION>`
 and `GET /meta` reports both (§8.6). Without them the version is read from the Go build info embedded in the
@@ -1629,46 +1629,46 @@ binary (a tag or pseudo-version, or `devel+<short commit>` for a plain checkout 
 when the build came from a modified tree, and `devel` when there is neither. The first field is always the
 version. A subcommand the binary does not know, a missing
 subcommand, or extra arguments to `serve` or `version` exit 2 and print exactly one usage line on stderr,
-`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+`usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
-`board serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
+`vh serve` opens the database named by `VH_DB_URL` (default `sqlite:///data/board.db`) and, unless
 `VH_MIGRATE=off`, applies the embedded goose migrations before it listens; a migration failure exits 1.
 `VH_MIGRATE=off` starts the server on the database as it is, migrated or not. `GET /healthz` answers 200
 whenever the process is up, whatever the database state. `GET /readyz` answers 200 only when the database is
 reachable and carries every embedded migration, and 503 otherwise (unmigrated, behind the embedded migrations,
 or unreachable); it never writes. A value of `VH_MIGRATE` other than `auto` or `off` exits 1.
 
-`board serve` refuses a database whose recorded goose version is newer than the highest migration the binary
+`vh serve` refuses a database whose recorded goose version is newer than the highest migration the binary
 embeds (a newer board migrated it): whatever `VH_MIGRATE` says, it exits 1 before it listens, printing exactly
-one stderr line that names both versions (`board: database schema is newer than this binary: database is at
+one stderr line that names both versions (`vh: database schema is newer than this binary: database is at
 version 9999, this binary embeds up to 2: upgrade board`). `GET /readyz` also answers 503 for such a database.
 
-`board admin migrate` opens `VH_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
+`vh admin migrate` opens `VH_DB_URL` (default `sqlite:///data/board.db`), applies every embedded migration
 that is not applied yet, and prints `ok migrated, schema version <N>` on stdout (exit 0); running it again is a
 no-op that prints the same line. It refuses a newer schema the same way `serve` does (one stderr line, exit 1),
-and any other failure is one stderr line and exit 1. `board admin` with no subcommand, a subcommand other than
-`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
+and any other failure is one stderr line and exit 1. `vh admin` with no subcommand, a subcommand other than
+`migrate` and `keys`, or extra arguments to `migrate`, is the exit-2 usage error (`usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`).
 
-`board admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
-refuses a database that is not migrated (one stderr line ending `→ board admin migrate`, exit 1). A key name is
+`vh admin keys` opens `VH_DB_URL` (default `sqlite:///data/board.db`), needs no server and no key, and
+refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
 1 to 64 characters of `a-z A-Z 0-9 . _ -`, starting with a letter or digit.
 
-- `board admin keys create <name> [--expires 90d]` makes a key and prints exactly one stdout line, with the
+- `vh admin keys create <name> [--expires 90d]` makes a key and prints exactly one stdout line, with the
   key as its last field and nowhere else: `ok key <name> created brd_…`, or `ok key <name> created exp
   <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
   positive count of days (`90d`) or hours (`12h`), at most 36500 days in either unit (`36500d`, `876000h`), and the flag may come before or
   after the name; without it the key never expires. `created_by` is `admin-cli`. A name that already exists
-  exits 1 with the single stderr line `board: key "<name>" already exists → board admin keys list`, and
+  exits 1 with the single stderr line `board: key "<name>" already exists → vh admin keys list`, and
   stores nothing.
-- `board admin keys list` prints one line per key, oldest first, and never the key:
+- `vh admin keys list` prints one line per key, oldest first, and never the key:
   `<name> brd_<display prefix> <active|expired|revoked> created <YYYY-MM-DD>`, followed by ` exp <date>`,
   ` used <date>` and ` revoked <date>` for the dates the key has. No keys prints nothing (exit 0).
-- `board admin keys revoke <name>` sets `revoked_at` and prints `ok key <name> revoked`. Revoking a
+- `vh admin keys revoke <name>` sets `revoked_at` and prints `ok key <name> revoked`. Revoking a
   revoked key prints `ok key <name> already revoked` (exit 0) and keeps the first `revoked_at`. An unknown
-  name exits 4 with `board: key "<name>" not found → board admin keys list`.
+  name exits 4 with `board: key "<name>" not found → vh admin keys list`.
 - A malformed command line (missing or extra arguments, an unknown flag) exits 2 with the single stderr line
-  `usage: board admin keys create <name> [--expires 90d] | list | revoke <name>`. An invalid name or
-  `--expires` value exits 2 with one `board: …` stderr line.
+  `usage: vh admin keys create <name> [--expires 90d] | list | revoke <name>`. An invalid name or
+  `--expires` value exits 2 with one `vh: …` stderr line.
 
 ### 8.1 Output rules
 
@@ -1681,13 +1681,13 @@ The CLI is written for agents first: every line costs context.
   `ok lease L7 phone-onboard-3 exp 2h`, `ok task phone-onboard-4 created`,
   `ok ask A12 raised`, `ok note N40 → host:gw1`.
 - **Every error is one line, on stderr, with the next action** after `→` when there is one:
-  `lease L7 expired 14m ago → board lease start phone-onboard-3 "<intent>"`,
+  `lease L7 expired 14m ago → vh lease start phone-onboard-3 "<intent>"`,
   `no VH_API_KEY → export VH_API_KEY (this environment's key)`,
-  `task phone-onboard-9 not found → board task ls phone-onboard`.
+  `task phone-onboard-9 not found → vh task ls phone-onboard`.
   The server's problem documents carry a machine-readable `next` field the CLI renders.
-- **List caps**: each list section in `board now`, `board attention`, `board notes` and
-  `board catchup` shows at most **5** items, then `+K more → <command that shows them>`.
-  `--limit N` changes the cap, `--all` removes it. Plain list commands (`board task ls`, …) cap
+- **List caps**: each list section in `vh now`, `vh attention`, `vh notes` and
+  `vh catchup` shows at most **5** items, then `+K more → <command that shows them>`.
+  `--limit N` changes the cap, `--all` removes it. Plain list commands (`vh task ls`, …) cap
   at 20 by the same rule.
 
 Exit codes:
@@ -1697,17 +1697,17 @@ Exit codes:
 | 0 | success | a command did what was asked (a write printed its `ok` line, a list printed, possibly nothing) |
 | 1 | error (server, network, unexpected) | the server cannot be reached, `VH_URL` is unset, the server refused the request (a bad slug or tag), a database or schema failure of `serve` or `admin` |
 | 2 | usage error (bad flags or arguments) | an unknown subcommand or flag, a missing or extra argument, an invalid `--limit` or `--expires` value, one usage line on stderr |
-| 3 | timed out waiting (`--poll`), the ask stays open | `board ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → board ask show A<n>`; the stop-mode `board ask` never waits) |
-| 4 | not found (unknown ref) | `board init show` of an unknown slug, `board task show` of an unknown task, `board admin keys revoke` of an unknown name, `board ask show`, `board ask withdraw` and `board answer` of an unknown `A<n>`, `board note show` of an unknown `N<n>`, `board ask`, `board note` and `board notes` on an unknown task or initiative |
+| 3 | timed out waiting (`--poll`), the ask stays open | `vh ask <task> "<question>" --poll D` when the deadline D passes with the ask still open (it prints `A<n> still open → vh ask show A<n>`; the stop-mode `vh ask` never waits) |
+| 4 | not found (unknown ref) | `vh init show` of an unknown slug, `vh task show` of an unknown task, `vh admin keys revoke` of an unknown name, `vh ask show`, `vh ask withdraw` and `vh answer` of an unknown `A<n>`, `vh note show` of an unknown `N<n>`, `vh ask`, `vh note` and `vh notes` on an unknown task or initiative |
 | 5 | authentication failed (missing, revoked or expired key) | `VH_API_KEY` is unset, or the server answers 401 to the key |
-| 6 | state conflict (expired lease, task closed, dependency cycle) | `board init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `board init reopen` of an open one; `board task add` in a closed initiative and `board task edit` of a closed task; `board task done` while another actor holds a live lease and `--force` is not given (`→ wait for L<n> to end, or --force`) and `board lease start` on a done task (`→ board task reopen <ref> first`); `board lease ack` of a lease that has not expired (live or ended); `board ask` on a closed task and `board answer` or `board ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
-| 7 | succeeded **with a conflict warning** (`board start`, `board lease start/renew`, `board now --resources`): the action happened, live leases overlap | `board lease start` and `board lease renew` when a live lease of another holds a resource of the lease; `board now --resources` and `board now` when a conflict touches one of my live leases or a resource given; `board start` arrives later |
+| 6 | state conflict (expired lease, task closed, dependency cycle) | `vh init close` of an initiative with open or done tasks and no `--force`, of a closed one, and `vh init reopen` of an open one; `vh task add` in a closed initiative and `vh task edit` of a closed task; `vh task done` while another actor holds a live lease and `--force` is not given (`→ wait for L<n> to end, or --force`) and `vh lease start` on a done task (`→ vh task reopen <ref> first`); `vh lease ack` of a lease that has not expired (live or ended); `vh ask` on a closed task and `vh answer` or `vh ask withdraw` of an ask that is not open; the rest arrives with leases and the other task commands (a taken initiative slug is a plain error, exit 1) |
+| 7 | succeeded **with a conflict warning** (`vh start`, `vh lease start/renew`, `vh now --resources`): the action happened, live leases overlap | `vh lease start` and `vh lease renew` when a live lease of another holds a resource of the lease; `vh now --resources` and `vh now` when a conflict touches one of my live leases or a resource given; `vh start` arrives later |
 
 `features/cli_output.feature` holds one scenario per Phase 0 code 0, 1, 2, 4 and 5, and two list scenarios: 20
-items print without a `more` line, 21 print 20 plus `+1 more → board init ls --all`.
+items print without a `more` line, 21 print 20 plus `+1 more → vh init ls --all`.
 
-The CLI words the next action itself: the `→ <next>` of a client error is a command (`→ board init ls` for an
-unknown initiative, `→ board init show <slug>` for a taken slug, `→ check VH_API_KEY (board admin keys list
+The CLI words the next action itself: the `→ <next>` of a client error is a command (`→ vh init ls` for an
+unknown initiative, `→ vh init show <slug>` for a taken slug, `→ check VH_API_KEY (vh admin keys list
 shows which keys are active)` for a refused key), not the server's HTTP-flavoured `next`, which stays in the
 problem document for other clients. A status the CLI has no command for prints the server's own `next`.
 
@@ -1740,53 +1740,53 @@ walks every registered flag and fails on a key-like name). With `VH_ACTOR` unset
 and, unless `VH_WAY_BACK` is set, the way back is `pid <ppid> on <hostname>, cwd <cwd>` (§9). With
 no `VH_API_KEY` a client command exits 5 with `no VH_API_KEY → export VH_API_KEY (this environment's
 key)`, with no `VH_URL` it exits 1 with `no VH_URL → export VH_URL (the address of the board server)`, and
-an unreachable server exits 1 with `server unreachable at <url> → check VH_URL and that board serve is running`.
+an unreachable server exits 1 with `server unreachable at <url> → check VH_URL and that vh serve is running`.
 A server problem document is printed as one line, `<detail> → <next>`, with the server's `next` except where the
-CLI names its own: a 401 always ends `→ check VH_API_KEY (board admin keys list shows which keys are active)`, a
-taken slug on `init add` ends `→ board init show <slug>` and an unknown slug on `init show` ends `→ board init ls`.
+CLI names its own: a 401 always ends `→ check VH_API_KEY (vh admin keys list shows which keys are active)`, a
+taken slug on `init add` ends `→ vh init show <slug>` and an unknown slug on `init show` ends `→ vh init ls`.
 It exits by its status: 401 is 5, 404 is 4,
 anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `task add` (a closed initiative), `task edit` (a closed task or initiative) and `task done|reopen|close` (a status that does not allow the move, or for done another actor's live lease without `--force`) and `task dep add` (a cycle) and `check` (a task that is not an open watch task) and `lease start` (a closed or done task) and `lease renew` (an expired or ended lease) and `lease end` (a lease that is not live) and `lease ack` (a lease that has not expired) and `ask` (a closed task) and `answer` and `ask withdraw` (an ask that is not open), which is 6, and except that `lease start`, `lease renew` and `now` exit 7 when they print a conflict (a taken slug on `init add` is a plain 409 and exits 1). The flags may come before or after the positional arguments, as `--flag value` or
 `--flag=value`; an unknown flag or a wrong argument count exits 2 with the command's usage line on stderr.
 
-- `board init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
+- `vh init add <slug> "<title>" [--tag t]... [--json]` creates the initiative and prints `ok initiative <slug>
   created` (`--json`: the created object instead). A taken slug, a bad slug and a bad tag each exit 1 with the server's
-  message and, for a taken slug, `→ board init show <slug>`.
-- `board init ls [--tag t]... [--limit N|--all] [--json]` prints one line per initiative in creation order,
+  message and, for a taken slug, `→ vh init show <slug>`.
+- `vh init ls [--tag t]... [--limit N|--all] [--json]` prints one line per initiative in creation order,
   `<slug>  <status>  <title>` followed by `  [tag,tag]` when it has tags, and nothing when there are none. A line
   ends with ` !<count>` when the initiative's `attention_count` (§6.3, the number of its tasks that need attention)
-  is not zero and carries nothing for a zero count; `board init show` prints the same line. A tag
+  is not zero and carries nothing for a zero count; `vh init show` prints the same line. A tag
   given more than once keeps the initiatives that carry every tag. It shows 20 by default, `--limit N` (N ≥ 1)
   changes the cap and `--all` removes it (both together are a usage error); when more exist the last line is
-  `+K more → board init ls … --all`. `--json` prints the shown initiatives as one JSON array. `--status
+  `+K more → vh init ls … --all`. `--json` prints the shown initiatives as one JSON array. `--status
   open|closed|all` (default `open`) picks the initiatives by status and `--closed-within N` (N days, or `Nd`) keeps
   the ones closed in the last N days; it needs `--status closed` or `all` (with `all` the open ones stay). A status
   other than the three, a window that is not a positive number of days and a window without `--status closed|all`
   exit 2. The `+K more` line repeats `--tag`, `--status` and `--closed-within`.
-- `board init show <slug> [--json]` prints the one-line form, then `targets: <start> → <end>` when it has either,
+- `vh init show <slug> [--json]` prints the one-line form, then `targets: <start> → <end>` when it has either,
   `created by <handle> <relative time>`, `closed by <handle> <relative time>` when closed, and the description. An
-  unknown slug exits 4 with `<detail> → board init ls`, whatever `next` the server sent.
-- `board init edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D]
+  unknown slug exits 4 with `<detail> → vh init ls`, whatever `next` the server sent.
+- `vh init edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D]
   [--clear-start] [--clear-end] [--json]` sends only the fields it is given (`PATCH /api/v1/initiatives/<slug>`) and
   prints `ok initiative <slug> updated` (`--json`: the object). `--description` reads the text from the named file,
   or from standard input for `-`; `--tag` (repeatable) replaces the tag set and `--no-tags` empties it; `--start` and
   `--end` take `YYYY-MM-DD` and `--clear-start` and `--clear-end` remove the date. No field to change, `--tag` with
   `--no-tags`, and a date with the flag that clears it are exit 2. A value the server refuses (a date that does not
-  exist, a bad tag) exits 1 with its message; an unknown slug exits 4 with `<detail> → board init ls`; an
+  exist, a bad tag) exits 1 with its message; an unknown slug exits 4 with `<detail> → vh init ls`; an
   unreadable description file exits 1.
-- `board init close <slug> [--force] [--json]` prints `ok initiative <slug> closed`. With an open or done task left
-  and no `--force` it exits 6 with `<detail> → board init close <slug> --force`; with `--force` every task not
-  closed is dropped first. Closing a closed initiative exits 6 with `<detail> → board init reopen <slug>`. An
-  unknown slug exits 4 with `→ board init ls`.
-- `board init reopen <slug> [--json]` prints `ok initiative <slug> reopened`; reopening an open initiative exits 6
-  with `<detail> → board init show <slug>`, an unknown slug exits 4 with `→ board init ls`.
-- `board task add <initiative> "<title>" [--description file|-] [--kind work|watch] [--cadence D] [--after <ref>]...
+- `vh init close <slug> [--force] [--json]` prints `ok initiative <slug> closed`. With an open or done task left
+  and no `--force` it exits 6 with `<detail> → vh init close <slug> --force`; with `--force` every task not
+  closed is dropped first. Closing a closed initiative exits 6 with `<detail> → vh init reopen <slug>`. An
+  unknown slug exits 4 with `→ vh init ls`.
+- `vh init reopen <slug> [--json]` prints `ok initiative <slug> reopened`; reopening an open initiative exits 6
+  with `<detail> → vh init show <slug>`, an unknown slug exits 4 with `→ vh init ls`.
+- `vh task add <initiative> "<title>" [--description file|-] [--kind work|watch] [--cadence D] [--after <ref>]...
   [--start T] [--end T] [--link label=url]... [--json]` creates the task and prints `ok task <ref> created`
   (`--json`: the created object). `--after` (repeatable) names the tasks it starts out blocked by, `--link` (repeatable)
   an external link, `--description` is read as for `init edit`. A watch task needs `--cadence`; a work task refuses it
   (exit 1 with the server's message, as for any value the server refuses). An unknown initiative exits 4 with
-  `<detail> → board init ls`, an unknown `--after` task exits 4 with `→ board task ls <initiative>`, a closed initiative
-  exits 6 with `→ board init show <initiative>`.
-- `board task ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked]
+  `<detail> → vh init ls`, an unknown `--after` task exits 4 with `→ vh task ls <initiative>`, a closed initiative
+  exits 6 with `→ vh init show <initiative>`.
+- `vh task ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked]
   [--overdue] [--attention] [--q text] [--limit N|--all] [--json]` prints one line per task, `<ref>  <status>  <title>`
   followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. The tasks that
   need attention (§5.3, `attention` on the task, §6.4) come first: stranded, then asking with the blocking ones first,
@@ -1798,113 +1798,113 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   `attention` and, for a stranded task, `stranded_lease`. The status is
   `not_closed` by default; `--active`, `--blocked` and `--overdue` keep the tasks that have a live lease, an open
   dependency or a missed check; `--q` keeps the tasks whose title or description contains the text, in either case.
-  It shows 20 by default, counted over the ordered list; the last line is `+K more → board task ls … --all` repeating the
+  It shows 20 by default, counted over the ordered list; the last line is `+K more → vh task ls … --all` repeating the
   initiative and every filter, `--attention` included.
-  `--json` prints the shown tasks as one JSON array. An unknown initiative exits 4 with `→ board init ls`; a status or
+  `--json` prints the shown tasks as one JSON array. An unknown initiative exits 4 with `→ vh init ls`; a status or
   kind the server does not know, a `--limit` below 1 and `--all` with `--limit` exit 2.
-- `board task show <ref> [--json]` prints the one-line form, then `initiative:`, `planned: <start> → <end>` when it has
+- `vh task show <ref> [--json]` prints the one-line form, then `initiative:`, `planned: <start> → <end>` when it has
   either, `cadence: <D>, next check <relative time>` for a watch task, a `link: <label> <url>` line per link,
   `created by`, `done by` and `closed (<resolution>) by` lines, `blocked by <ref> (<status>) <title>` per open or
   closed dependency, `blocking <ref> (<status>) <title>` per task it blocks, `lease L<n> by <handle>: <intent> (expires in
   …)` per live lease, an `attention: <markers>` line (the markers of `task ls`) after `initiative:` when the task
   needs attention, and for a stranded task a line `stranded: L<n> by <holder>: "<intent>" expired <age> ago → board
   lease ack L<n>` after it (`<holder>` is the handle; `<age>` is `2m`, `3h` or `4d`), the description, then `events:`
-  and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → board task ls`.
-- `board task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
+  and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → vh task ls`.
+- `vh task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
   [--no-links] [--json]` sends only the fields given (`PATCH /api/v1/tasks/<ref>`) and prints `ok task <ref> updated`
   (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
-  `--link` with `--no-links` are exit 2 with the usage line. An unknown task exits 4 with `→ board task ls`; a closed task
-  or a task of a closed initiative exits 6 with `→ board task show <ref>`.
-- `board task done <ref> ["outcome"] [--force] [--json]`, `board task reopen <ref> [--json]` and `board task close <ref> [--resolution
+  `--link` with `--no-links` are exit 2 with the usage line. An unknown task exits 4 with `→ vh task ls`; a closed task
+  or a task of a closed initiative exits 6 with `→ vh task show <ref>`.
+- `vh task done <ref> ["outcome"] [--force] [--json]`, `vh task reopen <ref> [--json]` and `vh task close <ref> [--resolution
   completed|dropped|superseded|duplicate] [--for operator] [--json]` call `POST /api/v1/tasks/<ref>/done|reopen|close` and
   print `ok task <ref> done`, `ok task <ref> reopened` and `ok task <ref> closed` (`--json`: the task after the move).
   `close` sends the resolution, `completed` when `--resolution` is not given. `--for operator` sends
   `Board-On-Behalf-Of: operator`, which the server stores as the `on_behalf_of` of the `task_closed` event; an agent
   uses it only when the operator told it to close. A resolution outside the four and a `--for` other than `operator` are
-  exit 2 with `board: --resolution: invalid resolution …` or `board: --for: invalid actor …`, before any request is
+  exit 2 with `board: --resolution: invalid resolution …` or `vh: --for: invalid actor …`, before any request is
   sent; `--resolution` and `--for` belong to `close` alone. A move the task's status does not allow (done on a done or
   closed task, reopen on an open task or in a closed initiative, close on a closed task) exits 6 with `<detail> → board
-  task show <ref>`; an unknown task exits 4 with `→ board task ls`. Done and close end the live leases on the task (§4.3, §6.4).
+  task show <ref>`; an unknown task exits 4 with `→ vh task ls`. Done and close end the live leases on the task (§4.3, §6.4).
   `done` takes an optional outcome after the ref and sends it as `outcome`; the caller's own live lease ends with it (`done`
   when none is given). `--force` sends `force: true`, which ends every live lease on the task, the caller's own too, with
   `ended_by` the caller. While another actor holds a live lease and `--force` is not given, done exits 6 with the server's
   detail naming the holder, the lease and its intent, and `→ wait for L<n> to end, or --force`; nothing changes. `--force` and
   the outcome belong to `done` alone.
-- `board task dep add <ref> <blocked-by-ref> [--json]` and `board task dep rm <ref> <blocked-by-ref> [--json]` call
+- `vh task dep add <ref> <blocked-by-ref> [--json]` and `vh task dep rm <ref> <blocked-by-ref> [--json]` call
   `POST` and `DELETE /api/v1/tasks/<ref>/deps/<blocked-by-ref>` (the refs in either letter case, the two tasks possibly in
   different initiatives) and print `ok task <ref> blocked by <blocked-by-ref>` and `ok task <ref> no longer blocked by
   <blocked-by-ref>` (`--json`: the dependent task). Adding a dependency that exists prints the same line. A dependency that
   would close a cycle exits 6 with the server's path (`dependency would close a cycle: aa-1 is blocked by aa-2 is blocked by
-  aa-1`) and `→ board task show <ref>`; removing a dependency that does not exist exits 4 with `→ board task show <ref>`, an
-  unknown task exits 4 with `→ board task ls`, and a task blocked by itself exits 1. A wrong argument count or an unknown
+  aa-1`) and `→ vh task show <ref>`; removing a dependency that does not exist exits 4 with `→ vh task show <ref>`, an
+  unknown task exits 4 with `→ vh task ls`, and a task blocked by itself exits 1. A wrong argument count or an unknown
   subcommand is exit 2 with the usage line.
-- `board lease start <task> "<intent>" [--ttl D] [--res r]... [--json]` calls `POST /api/v1/leases` (the task as a ref in either
+- `vh lease start <task> "<intent>" [--ttl D] [--res r]... [--json]` calls `POST /api/v1/leases` (the task as a ref in either
   letter case; `--ttl` a duration such as `90m` or `4h`, clamped by the server to 60 s to 12 h, 2 h without it; `--res` repeatable)
   and prints `ok lease L<n> <task> exp <ttl>` (`exp 2h`, `exp 1h30m`: the time from the lease's last renewal to its expiry),
   then one line per conflict (below). A start on a task where I already hold a live lease renews that lease and prints the same
-  line. An unknown task exits 4 with `→ board task ls`, a closed task exits 6 with `<detail> → board task show <task>`, a done task exits 6 with `<detail> → board task reopen <task> first`, a bad
-  `--ttl` is exit 2 with `board: --ttl: invalid duration …` before any request is sent. `--json` prints the server's
+  line. An unknown task exits 4 with `→ vh task ls`, a closed task exits 6 with `<detail> → vh task show <task>`, a done task exits 6 with `<detail> → vh task reopen <task> first`, a bad
+  `--ttl` is exit 2 with `vh: --ttl: invalid duration …` before any request is sent. `--json` prints the server's
   `{lease, conflicts}` object.
-- `board lease renew [<L…>|<task>] [--ttl D] [--intent text] [--json]` calls `POST /api/v1/leases/<ref>/renew` and prints
+- `vh lease renew [<L…>|<task>] [--ttl D] [--intent text] [--json]` calls `POST /api/v1/leases/<ref>/renew` and prints
   `ok lease L<n> <task> exp <ttl>` and the conflict lines, once for the lease it names. The argument is a lease ref (`L7`, either
   letter case) or a task ref, which means my latest lease on that task. With **no argument it renews every live lease of mine**
   (listed from `GET /api/v1/leases?state=live&actor=<me>`), one `ok` line each in lease order, and `--json` then prints an array
   of `{lease, conflicts}`. `--ttl` and `--intent` are sent only when given. A lease that ran out exits 6 with
-  `lease L7 expired 14m ago → board lease start <task> "<intent>"` (the task is the lease's own; `<intent>` stays the
+  `lease L7 expired 14m ago → vh lease start <task> "<intent>"` (the task is the lease's own; `<intent>` stays the
   placeholder), a lease that ended exits 6 with the server's detail and the same start, an unknown lease exits 4 with `→ board
-  lease ls`, an unknown task with `→ board task ls`, and no lease of mine on the task or no live lease with no argument exits 4
-  (`you hold no live lease → board lease ls`).
-- `board lease end [<L…>|<task>] ["<outcome>"] [--json]` calls `POST /api/v1/leases/<ref>/end` and prints `ok lease L<n> ended`
+  lease ls`, an unknown task with `→ vh task ls`, and no lease of mine on the task or no live lease with no argument exits 4
+  (`you hold no live lease → vh lease ls`).
+- `vh lease end [<L…>|<task>] ["<outcome>"] [--json]` calls `POST /api/v1/leases/<ref>/end` and prints `ok lease L<n> ended`
   (`--json`: the lease). The target is chosen as for `renew`; with no target it is my only live lease, and several live leases
-  are exit 2 (`you hold 2 live leases: L1, L2 → board lease end <L…>`). A single word is the target when it looks like a lease
-  ref (`L7`) or a task ref (`aa-1`) and the outcome otherwise, so `board lease end "shipped it"` ends my only lease with that
-  outcome; two words are the target and the outcome. A lease that is not live exits 6 with `→ board lease ls --mine --state
-  all`, an unknown lease exits 4 with `→ board lease ls`.
-- `board lease ack <L…> [--json]` calls `POST /api/v1/leases/<ref>/ack` (§6.5) and prints `ok lease L<n> acknowledged` (`--json`:
+  are exit 2 (`you hold 2 live leases: L1, L2 → vh lease end <L…>`). A single word is the target when it looks like a lease
+  ref (`L7`) or a task ref (`aa-1`) and the outcome otherwise, so `vh lease end "shipped it"` ends my only lease with that
+  outcome; two words are the target and the outcome. A lease that is not live exits 6 with `→ vh lease ls --mine --state
+  all`, an unknown lease exits 4 with `→ vh lease ls`.
+- `vh lease ack <L…> [--json]` calls `POST /api/v1/leases/<ref>/ack` (§6.5) and prints `ok lease L<n> acknowledged` (`--json`:
   the lease). The argument is a lease ref (`L7`, either letter case); anything else is exit 2 with the usage line. Acknowledging
   an expired lease records it (§4.4) and clears the `stranded` reason of its task; acknowledging it again prints the same line
-  and changes nothing. A lease that has not expired (live or ended) exits 6 with `→ board lease ls --mine --state all`, an
-  unknown lease exits 4 with `→ board lease ls`.
-- `board lease ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]` calls `GET
+  and changes nothing. A lease that has not expired (live or ended) exits 6 with `→ vh lease ls --mine --state all`, an
+  unknown lease exits 4 with `→ vh lease ls`.
+- `vh lease ls [--state live|ended|expired|all] [--mine] [--task ref] [--res r] [--limit N|--all] [--json]` calls `GET
   /api/v1/leases` and prints one line per lease, oldest first, `L<n>  <state>  <task>  <holder>  "<intent>"  res a,b  exp
   41m` (the `res` part only when it holds resources; `expired 14m ago` or `ended 3m ago` in place of `exp` for the other
   states). The state is `live` by default, `--mine` keeps the leases I hold, `--task` and `--res` filter by task and resource;
-  the cap is 20 as for the other lists with a `+K more → board lease ls … --all` line, and an unknown task exits 4 with `→ board
+  the cap is 20 as for the other lists with a `+K more → vh lease ls … --all` line, and an unknown task exits 4 with `→ board
   task ls`. A `--state` outside the four is exit 2.
 - **Conflicts.** `lease start` and `lease renew` print each conflict the server answers on its own line after the `ok` line,
   `CONFLICT <shared resources>: L<n> <holder> (<task>) "<intent>" exp <time left>` (resources joined by `,`, one line for
   each conflicting lease, in lease order), and **exit 7** when there is any, 0 when there is none. The action has happened
   either way; `--json` prints no `CONFLICT` line (the `conflicts` array carries them) and still exits 7. A no-argument renewal
   counts the conflicts of every lease it renewed.
-- `board now [--resources r1,r2] [--json]` calls `GET /api/v1/now` (`--resources` is sent as the `resources` query, repeated
+- `vh now [--resources r1,r2] [--json]` calls `GET /api/v1/now` (`--resources` is sent as the `resources` query, repeated
   flags joined by `,`) and prints the check-in: `you: <handle>`, then five sections in this order, each a heading line and one
   line per item indented by two spaces, then the `attention` line. `my leases:` lists my live leases as `L<n>  <task>
   <title>  "<intent>"  res a,b  exp 1h52m`, `others:` lists the live leases of other actors as `L<n>  <task>  <holder>  "<intent>"
   res a,b  exp 41m` and `conflicts:` lists the conflicts as the `CONFLICT` lines of `lease start` (the live leases that hold a
   resource of one of my live leases, and those of others that hold a resource given with `--resources`). `my asks:` lists
   `my_asks` of the answer, the asks I raised that are open and those answered since my `notes` cursor or in the last 24 hours, in
-  the line form of `board ask ls` (`A<n>  open  <task>  <asker>  "<question>"  asked 3m ago`); an answered ask starts with
+  the line form of `vh ask ls` (`A<n>  open  <task>  <asker>  "<question>"  asked 3m ago`); an answered ask starts with
   `ANSWERED ` and ends with the answer, on one line (white space collapsed) and quoted: `ANSWERED A2  answered  aa-2  me  "Ship
   it?"  answered by nik@phone 1m ago: "yes, ship"`. `notes:` lists the notes of the answer, the unread ones that concern me, in the
-  line form of `board notes` (`N<n>  3m ago  <author>  <task|initiative|broadcast>  [<resource>]  <summary>`, ending `  +` when the
-  note has a body). Reading `now` moves no cursor; `board notes --since last --ack` does. The `res` part is absent for a lease
+  line form of `vh notes` (`N<n>  3m ago  <author>  <task|initiative|broadcast>  [<resource>]  <summary>`, ending `  +` when the
+  note has a body). Reading `now` moves no cursor; `vh notes --since last --ack` does. The `res` part is absent for a lease
   without resources, and an empty section is its heading and `none` on one line (`others: none`, `my asks: none`, `notes: none`).
-  Each section shows at most 5 lines (§8.1), then `  +K more → <command>`: `board lease ls --mine` for my leases, `board lease
-  ls` for the others and the conflicts, `board ask ls --mine` for my asks, and for the notes `board notes --since last`, where `K`
+  Each section shows at most 5 lines (§8.1), then `  +K more → <command>`: `vh lease ls --mine` for my leases, `vh lease
+  ls` for the others and the conflicts, `vh ask ls --mine` for my asks, and for the notes `vh notes --since last`, where `K`
   also counts the `notes_more` notes the server left out; `now` has no `--limit` or `--all`. The last line is always
-  `attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1`, the counts of the five sections of `board attention` for the
+  `attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1`, the counts of the five sections of `vh attention` for the
   whole board (all zeros when nothing needs the operator). **Exit 7** when the answer holds any conflict, else 0; the output is
   printed either way, and `--json` prints the server's answer as it came (all items, no cap) and exits 7 the same. A resource list
   the server refuses (an empty entry, over 20 resources) exits 1 with its message; extra arguments or an unknown flag exit 2 with
-  `usage: board now [--resources r1,r2] [--json]`.
-- `board ask <task> "<question>" [--details file|-] [--option a]... [--stop] [--blocking] [--json]` calls `POST /api/v1/asks` (the task
+  `usage: vh now [--resources r1,r2] [--json]`.
+- `vh ask <task> "<question>" [--details file|-] [--option a]... [--stop] [--blocking] [--json]` calls `POST /api/v1/asks` (the task
   as a ref in either letter case, `--details` the text of a file or, with `-`, of standard input, `--option` repeatable) and prints
   `ok ask A<n> raised` (`--json`: the ask). The ask is a `stop` ask: `--stop`, the default, is accepted for clarity, and the ask is
   `blocking` only with `--blocking` (its task is then `blocked` while the ask is open). A `--details` file that cannot be read exits 1
-  with `cannot read the details file <path>`, before any request. An unknown task exits 4 with `→ board task ls`, a closed task exits
-  6 with `<detail> → board task show <task>`, a question or option the server refuses exits 1 with its message. A first word of
+  with `cannot read the details file <path>`, before any request. An unknown task exits 4 with `→ vh task ls`, a closed task exits
+  6 with `<detail> → vh task show <task>`, a question or option the server refuses exits 1 with its message. A first word of
   `show`, `ls` or `withdraw` is the subcommand and any other starts a new ask; flags may precede the task.
-- `board ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
+- `vh ask <task> "<question>" … --poll D [--json]` (`D` a whole number and a unit `s`, `m`, `h` or `d`; `--poll` with `--stop`, or a
   bad `D`, is exit 2 with the usage line) raises the ask as a `poll` ask, prints nothing yet, then waits for its end with repeated
   `GET /api/v1/asks/<ref>?wait=N&until=<deadline>` calls (§7.2) until the deadline: exactly `D` after the raise, to the
   nanosecond, never rounded to the server's millisecond or moved in any other way. Every call carries the deadline as `until`
@@ -1927,12 +1927,12 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   case it does not give exit 0 or 6 for is an end whose COMMIT returned before the deadline but with every server read of
   the ask and every real-clock reading after that COMMIT falling after the deadline: no input the server holds tells that end
   from one committed after the deadline, so the call answers the still-open ask and the poll exits 3 (a disclosed residual, §7.2);
-  an ask still open at the deadline gives the line `A<n> still open → board ask show A<n>` and exit **3** even when
+  an ask still open at the deadline gives the line `A<n> still open → vh ask show A<n>` and exit **3** even when
   its end commits a moment later, with a stamp from before the deadline and before that answer arrives, even when that end's
   transaction was already holding the database's writer, so that the server's first write for the poll waited for it, before
   the poll's first call reached the server, even when that first call reaches the server only after the deadline, by which
   time the end has committed, and even when every reader of the server is busy across the deadline, so that the server's
-  read at the deadline finds the end; `board ask show` then shows the later end. The end's stamp is used only to drop an end it
+  read at the deadline finds the end; `vh ask show` then shows the later end. The end's stamp is used only to drop an end it
   places after the deadline (for an end the server holds no commit mark for): the server floors it to the millisecond, so a
   stamp `s` at or after the deadline (the end happened at `s` or up to 1 ms later) gives exit 3, and so does a stamp with its
   own sub-millisecond part after the deadline (taken as exact). A stamp in the deadline's own millisecond but before the
@@ -1941,31 +1941,31 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   read is printed with the same exit code. The client's request timeout for a call is its wait plus 30 s. The end is one stdout
   line (`--json`: the last ask read, same exit codes): an answer is `ok A<n> answered by <handle>: <answer>` and exits 0, a
   withdrawal is `A<n> withdrawn` with `: <reason>` when one was given and exits 6, and the deadline is
-  `A<n> still open → board ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
+  `A<n> still open → vh ask show A<n>` and exits **3**, the ask staying open (its `asker_waiting` stays true for 60 s after the
   last wait, §7.2). Refusals of the raise are those of the stop-mode ask (4 for an unknown task, 6 for a closed one).
-- `board ask show <A…> [--json]` calls `GET /api/v1/asks/<ref>` and prints the one-line form `A<n>  <state>  <task>  <asker>
+- `vh ask show <A…> [--json]` calls `GET /api/v1/asks/<ref>` and prints the one-line form `A<n>  <state>  <task>  <asker>
   "<question>"  (blocking, poll)  <when>` (`-` for an ask on no task; the marks only when they apply; `asked 3m ago`, `answered by
   <handle> 3m ago` or `withdrawn 3m ago`), then `initiative: <slug>` when it has one, one `option: <text>` line per option, the
   details, and `answer (<channel>): <text>` (`answer (relay for <handle>): …` for a relayed one) or `reason: <text>` for a
-  withdrawal that gave one. An unknown ask exits 4 with `→ board ask ls`.
-- `board ask ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json]` calls `GET /api/v1/asks`
+  withdrawal that gave one. An unknown ask exits 4 with `→ vh ask ls`.
+- `vh ask ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json]` calls `GET /api/v1/asks`
   and prints one line per ask in raising order, in the one-line form of `ask show`. The state is `open` by default, `--mine` keeps
-  the asks I raised, `--task` those on one task; the cap is 20 as for the other lists with a `+K more → board ask ls … --all` line.
-  An unknown task exits 4 with `→ board task ls`; a `--state` outside the four is exit 2.
-- `board ask withdraw <A…> ["<reason>"] [--json]` calls `POST /api/v1/asks/<ref>/withdraw` and prints `ok ask A<n> withdrawn`
-  (`--json`: the ask). An ask that is not open exits 6 with `<detail> → board ask show A<n>`; an unknown ask exits 4 with `→ board
+  the asks I raised, `--task` those on one task; the cap is 20 as for the other lists with a `+K more → vh ask ls … --all` line.
+  An unknown task exits 4 with `→ vh task ls`; a `--state` outside the four is exit 2.
+- `vh ask withdraw <A…> ["<reason>"] [--json]` calls `POST /api/v1/asks/<ref>/withdraw` and prints `ok ask A<n> withdrawn`
+  (`--json`: the ask). An ask that is not open exits 6 with `<detail> → vh ask show A<n>`; an unknown ask exits 4 with `→ board
   ask ls`.
-- `board answer <A…> "<answer>" [--relay] [--for <handle>] [--json]` calls `POST /api/v1/asks/<ref>/answer` and prints `ok ask A<n>
+- `vh answer <A…> "<answer>" [--relay] [--for <handle>] [--json]` calls `POST /api/v1/asks/<ref>/answer` and prints `ok ask A<n>
   answered` (`--json`: the ask). The channel is `api`; with `--relay` it is `relay`, and `--for` names the person the relayed answer
-  came from (`on_behalf_of`): `--for` without `--relay` is exit 2. An ask that is not open exits 6 with `<detail> → board ask show
-  A<n>`; an unknown ask exits 4 with `→ board ask ls`.
-- `board note "<summary>" [--body file|-] [--task ref] [--init slug] [--res r] [--mention h]... [--json]` calls `POST /api/v1/notes`
+  came from (`on_behalf_of`): `--for` without `--relay` is exit 2. An ask that is not open exits 6 with `<detail> → vh ask show
+  A<n>`; an unknown ask exits 4 with `→ vh ask ls`.
+- `vh note "<summary>" [--body file|-] [--task ref] [--init slug] [--res r] [--mention h]... [--json]` calls `POST /api/v1/notes`
   and prints `ok note N<n> posted` (`--json`: the note). `--body` is the text of a file or, with `-`, of standard input (a file that
   cannot be read exits 1 with `cannot read the body file <path>`, before any request); `--task`, `--init` and `--res` each take one value;
   `--mention` is repeatable. A note with neither `--task` nor `--init` is a broadcast, with or without `--res` (§4.7). An unknown task exits
-  4 with `→ board task ls`, an unknown initiative exits 4 with `→ board init ls`, and a summary or body the server refuses exits 1 with its
+  4 with `→ vh task ls`, an unknown initiative exits 4 with `→ vh init ls`, and a summary or body the server refuses exits 1 with its
   message. A first word of `show` is the subcommand and any other starts a new note.
-- `board notes [--since last|<time>|<N…>] [--task ref] [--init slug] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all] [--json]`
+- `vh notes [--since last|<time>|<N…>] [--task ref] [--init slug] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all] [--json]`
   calls `GET /api/v1/notes` and prints one line per matching note, oldest first:
   `N<n>  <when>  <author>  <scope>  [<resource>]  <summary>`, where `<when>` is `3m ago`, `<scope>` is the note's task ref, else its
   initiative slug, else `broadcast`, the resource appears in brackets only when the note has one, and the line ends `  +` when the note has a
@@ -1973,71 +1973,71 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   those after that note, and `--since` with an RFC 3339 time or a `YYYY-MM-DD` date those at or after it. The filters combine: `--task` and
   `--init` keep the notes on them, `--broadcast` only the broadcasts, `--res` (repeatable) the notes on any of the resources and `--mention` the
   notes that mention one handle. The cap is **5** (§8.1), changed by `--limit N` (N ≥ 1) and removed by `--all` (both together are exit 2), and
-  when more match the last line is `+K more → board notes … --all` repeating every filter. `--ack` moves the caller's `notes` cursor (`PUT
-  /api/v1/cursors/notes`) to the last note **shown**, so the notes left out by the cap stay unread and `board notes --since last --ack` again
+  when more match the last line is `+K more → vh notes … --all` repeating every filter. `--ack` moves the caller's `notes` cursor (`PUT
+  /api/v1/cursors/notes`) to the last note **shown**, so the notes left out by the cap stay unread and `vh notes --since last --ack` again
   shows the next ones; nothing moves when no note matched. `--json` prints the shown notes as one JSON array (without bodies, with
-  `has_body`). An unknown task exits 4 with `→ board task ls`, an unknown initiative with `→ board init ls`.
-- `board note show <N…> [--json]` calls `GET /api/v1/notes/<ref>` (either letter case) and prints the one-line form of `board notes`, then
+  `has_body`). An unknown task exits 4 with `→ vh task ls`, an unknown initiative with `→ vh init ls`.
+- `vh note show <N…> [--json]` calls `GET /api/v1/notes/<ref>` (either letter case) and prints the one-line form of `vh notes`, then
   `initiative: <slug>` when the note is on a task, `mentions: a, b` when it has any, then the body (nothing more when it has none).
-  `--json` prints the note with its body. An unknown note exits 4 with `<detail> → board notes`.
-- `board milestone <task> "<summary>" [--json]` calls `POST /api/v1/tasks/<task>/milestones` and prints `ok task <ref>
+  `--json` prints the note with its body. An unknown note exits 4 with `<detail> → vh notes`.
+- `vh milestone <task> "<summary>" [--json]` calls `POST /api/v1/tasks/<task>/milestones` and prints `ok task <ref>
   milestone recorded` (`--json`: the task). It works on a task of any kind and status. An unknown task exits 4 with
-  `→ board task ls`; a summary the server refuses (empty, over 200 characters) exits 1 with its message.
-- `board check <task> "<summary>" [--next D] [--json]` calls `POST /api/v1/tasks/<task>/checks` and prints `ok task <ref>
+  `→ vh task ls`; a summary the server refuses (empty, over 200 characters) exits 1 with its message.
+- `vh check <task> "<summary>" [--next D] [--json]` calls `POST /api/v1/tasks/<task>/checks` and prints `ok task <ref>
   checked` (`--json`: the task). `--next` takes a duration (`24h`) and sends `next_check_at` as that long from now; without
   it the server moves the next check on by the task's cadence. A task that is not a watch task, or is closed, exits 6 with
-  `<detail> → board task show <ref>`; an unknown task exits 4 with `→ board task ls`; a bad `--next` is exit 2 with `board:
+  `<detail> → vh task show <ref>`; an unknown task exits 4 with `→ vh task ls`; a bad `--next` is exit 2 with `board:
   --next: invalid duration …`, before any request is sent.
-- `board task events <ref> [--limit N|--all] [--json]` and `board events [--since S] [--task ref] [--initiative slug]
+- `vh task events <ref> [--limit N|--all] [--json]` and `vh events [--since S] [--task ref] [--initiative slug]
   [--type t]... [--actor handle] [--limit N|--all] [--json]` call `GET /api/v1/tasks/<ref>/events` and `GET /api/v1/events`
   and print one line per event, oldest first: `E<n>  <relative time>  <handle>  <summary>` (the line `task show` prints
   under `events:`), and nothing when there are none. `--since` takes an event ref (`E42`, either letter case), an event id,
   an RFC 3339 time or a `YYYY-MM-DD` date (midnight UTC), and keeps the events after that event or from that time on;
   `--type` is repeatable and keeps the events of any of the types given; the filters combine. Both list 20 by default as the
   other list commands do: `--limit N` changes the cap, `--all` removes it, and when more exist the last line is `+K more →
-  board events … --all` (or `board task events <ref> --all`) repeating every filter. `--json` prints the shown events as one
-  JSON array. An unknown initiative exits 4 with `→ board init ls`, an unknown task with `→ board task ls`; a `--since` the
+  vh events … --all` (or `vh task events <ref> --all`) repeating every filter. `--json` prints the shown events as one
+  JSON array. An unknown initiative exits 4 with `→ vh init ls`, an unknown task with `→ vh task ls`; a `--since` the
   server cannot read exits 1 with its message.
 - Durations (`--cadence`) are a whole number and a unit, `s`, `m`, `h` or `d` (`90s`, `45m`, `2h`, `7d`); a missing unit, a
   sign, a fraction or zero is refused. Times (`--start`, `--end`) are RFC 3339 or `YYYY-MM-DD` (midnight UTC). A malformed
-  duration, time, link (`label=url`) or kind is exit 2 with the single line `board: <flag>: invalid <what> …`, before any
+  duration, time, link (`label=url`) or kind is exit 2 with the single line `vh: <flag>: invalid <what> …`, before any
   request is sent.
-- `board whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
+- `vh whoami` prints `you: <handle> (key <name>)  way back: <way back>  server ok` and exits 0. The key name is
   the one of the key whose display prefix matches `VH_API_KEY` in `GET /api/v1/keys`; the call also proves the
   server answers and accepts the key. A revoked or unknown key exits 5, an unreachable server exits 1.
-- The usage line for an unknown subcommand is `usage: board <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
+- The usage line for an unknown subcommand is `usage: vh <serve|version|help|whoami|init|task|lease|now|milestone|check|events|ask|answer|note|notes|attention|admin>`.
 
 ```
-board version | update [--check] [--version vX.Y.Z]
-board help agent [--version]            # the agent protocol cheat sheet (§8.6)
-board whoami                            # handle, way back, key name, server reachability
-board now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
-board attention [--tag t]... [--init slug] [--limit N|--all]   # the five §5.3 sections, one line per item
-board init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
+vh version | update [--check] [--version vX.Y.Z]
+vh help agent [--version]            # the agent protocol cheat sheet (§8.6)
+vh whoami                            # handle, way back, key name, server reachability
+vh now [--resources r1,r2]           # check-in: my leases, others' live leases, conflicts, my asks, new notes
+vh attention [--tag t]... [--init slug] [--limit N|--all]   # the five §5.3 sections, one line per item
+vh init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
                 | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
                 | close <slug> [--force] | reopen <slug>
-board task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
-board task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] | show <ref>
+vh task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
+vh task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] | show <ref>
                 | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links]
-board task done <ref> ["outcome"] [--force] | reopen <ref> | close <ref> [--resolution dropped] [--for operator]
-board lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
-board lease renew [<L…>|<task>] [--ttl 4h] [--intent …]      # no argument: all my live leases
-board lease end   [<L…>|<task>] ["<outcome>"]
-board ask <task> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
-board answer <A…> "<answer>" [--relay] [--for <handle>]
-board ask show <A…> | ls [--state open|answered|withdrawn|all] [--mine] [--task <ref>] | withdraw <A…> ["<reason>"]
-board note "<summary>" [--body file|-] [--task <ref>] [--init <slug>] [--res r] [--mention h]...
-board notes [--since last|<time>|<N…>] [--task <ref>] [--init <slug>] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all]
-board note show <N…>
-board milestone <task> "<summary>"
-board check <task> "<summary>" [--next 24h]
-board admin keys create <name> [--expires 90d] | list | revoke <name>   # direct DB, no HTTP
-board admin migrate | backup <dest>
+vh task done <ref> ["outcome"] [--force] | reopen <ref> | close <ref> [--resolution dropped] [--for operator]
+vh lease start <task> "<intent>" [--ttl 2h] [--res host:x --res repo:y]
+vh lease renew [<L…>|<task>] [--ttl 4h] [--intent …]      # no argument: all my live leases
+vh lease end   [<L…>|<task>] ["<outcome>"]
+vh ask <task> "<question>" [--details file|-] [--option a --option b] [--poll 10m | --stop] [--blocking]
+vh answer <A…> "<answer>" [--relay] [--for <handle>]
+vh ask show <A…> | ls [--state open|answered|withdrawn|all] [--mine] [--task <ref>] | withdraw <A…> ["<reason>"]
+vh note "<summary>" [--body file|-] [--task <ref>] [--init <slug>] [--res r] [--mention h]...
+vh notes [--since last|<time>|<N…>] [--task <ref>] [--init <slug>] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all]
+vh note show <N…>
+vh milestone <task> "<summary>"
+vh check <task> "<summary>" [--next 24h]
+vh admin keys create <name> [--expires 90d] | list | revoke <name>   # direct DB, no HTTP
+vh admin migrate | backup <dest>
 ```
 
-`board ask --poll D` prints the answer (exit 0), the withdrawal (exit 6), or exits 3 on timeout with the ask still open.
+`vh ask --poll D` prints the answer (exit 0), the withdrawal (exit 6), or exits 3 on timeout with the ask still open.
 
-`board attention [--tag t]... [--init slug] [--limit N|--all] [--json]` reads `GET /api/v1/attention` (§6.8) and prints the five
+`vh attention [--tag t]... [--init slug] [--limit N|--all] [--json]` reads `GET /api/v1/attention` (§6.8) and prints the five
 sections of §5.3 in this order, each a heading `<name>: <count>` (a section with nothing in it is just `<name>: 0`) and one
 indented line per item, newest relevant first, with each actor shown as `handle` or `handle (way back)`:
 
@@ -2060,10 +2060,10 @@ and, when a lease on the task ended, `  L<n> "<outcome>"` (`L<n> ended` when the
 `L<n>  <task>  <holder>  "<intent>"  renewed <age>`. The watch line is `<task>  <title>  <owner>  due <age>` and, when a check
 was ever recorded, `  last check "<summary>" by <actor> <age>`. The conflict line is `CONFLICT <resource>: ` and each holder as
 `L<n> <actor> <task>`, comma separated. `--tag` (repeated: the initiative carries every tag) and `--init` narrow it as the API's
-`tag` and `initiative` do; each section shows at most 5 lines, then `  +K more → board attention <same filters> --all`, and
+`tag` and `initiative` do; each section shows at most 5 lines, then `  +K more → vh attention <same filters> --all`, and
 `--limit N` or `--all` change that cap. `--json` prints the API document, every item and no cap. An unknown `--init` exits 4
-with `→ board init ls`; a malformed command line (an argument, an unknown flag, `--limit 0`) exits 2 with the usage line
-`usage: board attention [--tag t]... [--init slug] [--limit N|--all] [--json]`.
+with `→ vh init ls`; a malformed command line (an argument, an unknown flag, `--limit 0`) exits 2 with the usage line
+`usage: vh attention [--tag t]... [--init slug] [--limit N|--all] [--json]`.
 
 ### 8.4 Shortcuts
 
@@ -2072,17 +2072,17 @@ calls, the server has a composite endpoint doing it in **one round trip and one 
 
 | shortcut | does | primitives | endpoint |
 |---|---|---|---|
-| `board start <task> "<intent>" [--res r]… [--ttl D]` | check in and start (or renew) a lease; prints the lease line, conflicts, and the `now` summary | `whoami` + `now --resources` + `lease start` | `POST /api/v1/start` |
-| `board finish [<task>] "<outcome>" [--done]` | end my lease on the task (my only live lease if omitted), write the outcome as a note on the task, optionally mark done | `lease end` + `note --task` + `task done` | `POST /api/v1/finish` |
-| `board new <initiative> "<title>" --start "<intent>" [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
-| `board ping ["<progress>"]` | renew all my live leases; with text, also a milestone on each leased task | `lease renew` (all) + `milestone` | `POST /api/v1/ping` |
-| `board block <task> "<question>" [--poll D \| --stop]` | raise an ask on the task; `--poll` keeps the lease and waits (renewing it while waiting); `--stop` ends the lease with outcome "blocked on A…" | `ask` + `lease end` (stop) | `POST /api/v1/asks` with `lease_action` |
-| `board catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `GET /api/v1/catchup` |
+| `vh start <task> "<intent>" [--res r]… [--ttl D]` | check in and start (or renew) a lease; prints the lease line, conflicts, and the `now` summary | `whoami` + `now --resources` + `lease start` | `POST /api/v1/start` |
+| `vh finish [<task>] "<outcome>" [--done]` | end my lease on the task (my only live lease if omitted), write the outcome as a note on the task, optionally mark done | `lease end` + `note --task` + `task done` | `POST /api/v1/finish` |
+| `vh new <initiative> "<title>" --start "<intent>" [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
+| `vh ping ["<progress>"]` | renew all my live leases; with text, also a milestone on each leased task | `lease renew` (all) + `milestone` | `POST /api/v1/ping` |
+| `vh block <task> "<question>" [--poll D \| --stop]` | raise an ask on the task; `--poll` keeps the lease and waits (renewing it while waiting); `--stop` ends the lease with outcome "blocked on A…" | `ask` + `lease end` (stop) | `POST /api/v1/asks` with `lease_action` |
+| `vh catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `GET /api/v1/catchup` |
 
 Shortcuts print the same `ok …` lines as the primitives they replace (one per effect, so
-`board finish --done` prints two lines) and follow the same exit codes.
+`vh finish --done` prints two lines) and follow the same exit codes.
 
-Example `board now` output:
+Example `vh now` output:
 
 ```
 you: claude:ws1:3f2a (key workstation)  leases: L7 phone-onboard-3 exp 1h52m
@@ -2092,7 +2092,7 @@ CONFLICT host:gw1: L7 (you, phone-onboard-3) and L5 deck:personal/vpn-debug (hom
 asks: A12 answered: "use the rack AP"
 notes since 10:42: N40 [broadcast] ralph:trip-m6 "registry slow, builds may time out"
       N41 [host:gw1] deck:personal/vpn-debug "gw1 reboot at 11:30"
-      +3 more → board notes --since last
+      +3 more → vh notes --since last
 attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1
 ```
 
@@ -2106,16 +2106,16 @@ curl -fsSL https://raw.githubusercontent.com/<owner>/board/main/install.sh | sh
 
 - Detects OS (linux, darwin) and arch (amd64, arm64), downloads `board_<os>_<arch>.tar.gz` and
   `checksums.txt` from the GitHub release over HTTPS only, verifies SHA-256, installs to
-  `~/.local/bin/board` (copy then rename, so a running binary is replaced safely).
+  `~/.local/bin/vh` (copy then rename, so a running binary is replaced safely).
 - `VH_VERSION=vX.Y.Z` pins a release (default latest); `VH_INSTALL_DIR` changes the
   directory.
 - **Immutability**: before installing it asks the GitHub release API whether the release is
   immutable and refuses one that is not confirmed, as `deck update` does;
   `VH_REQUIRE_IMMUTABLE=0` (exactly `0`) opts out with a note. (deck's own `install.sh` does
   not check this yet; board's does.)
-- Prints the installed `board version` and warns if the directory is not on `PATH`.
+- Prints the installed `vh version` and warns if the directory is not on `PATH`.
 
-**`board update`** replaces the running binary with the latest (or `--version`) release, with
+**`vh update`** replaces the running binary with the latest (or `--version`) release, with
 the same checksum and immutability checks; `--check` only reports. It refuses dev builds,
 package-managed installs and unwritable directories, like `deck update`.
 
@@ -2128,10 +2128,10 @@ Numbered steps the agent runs and checks itself, each with the command and the e
 4. Confirm the release is immutable (API field), and stop if not.
 5. Download the asset and `checksums.txt`; verify the SHA-256 of the asset.
 6. Extract and install to `~/.local/bin` (or the chosen directory); make it executable.
-7. Run `board version` and compare with the release tag.
+7. Run `vh version` and compare with the release tag.
 8. Configure `VH_URL` and `VH_API_KEY` (from the operator's secret store, never pasted
    into files under version control), and `VH_ACTOR` per the identity rules (§9).
-9. Run `board whoami` and expect the handle, key name and `server ok`.
+9. Run `vh whoami` and expect the handle, key name and `server ok`.
 
 The README says: *"or ask your agent: install board following
 `<repo URL>/INSTALL-AGENT.md`"*.
@@ -2141,92 +2141,92 @@ the asset name pattern, supported OS/arch list, checksum file name, default inst
 the environment variable names. Where releases come from while the repository is private is the
 operator's deployment concern, not part of this spec.
 
-### 8.6 Agent protocol: `board help agent`
+### 8.6 Agent protocol: `vh help agent`
 
 The rules an agent follows live **in the binary**, not in a skill file each operator copies and
-lets drift. `board help agent` prints a cheat sheet of about 40 lines, headed
+lets drift. `vh help agent` prints a cheat sheet of about 40 lines, headed
 `board protocol vN`, that is the whole working protocol:
 
 - **identity**: export `VH_URL`, `VH_API_KEY`, `VH_ACTOR`, `VH_WAY_BACK` per the
-  operator's instructions (§9); check with `board whoami`; subagents use the parent's handle;
-- **start**: `board start <task> "<intent>" --res …` (or `board new`) once the task is
+  operator's instructions (§9); check with `vh whoami`; subagents use the parent's handle;
+- **start**: `vh start <task> "<intent>" --res …` (or `vh new`) once the task is
   understood; search before creating, never duplicate an open task;
-- **ping**: `board ping` at each milestone and at least every half TTL; once per iteration in
+- **ping**: `vh ping` at each milestone and at least every half TTL; once per iteration in
   autonomous loops;
-- **shared-resource check**: `board now --resources …` before any risky shared action
+- **shared-resource check**: `vh now --resources …` before any risky shared action
   (reboot, deploy, force-push, migration);
 - **conflict handling**: exit code 7 / a `CONFLICT` line means read the other lease and its
   notes, leave a note on the resource, then wait, coordinate or ask; never proceed silently
   through a conflict on a destructive action;
-- **block**: `board block <task> "<question>" --stop | --poll D`; record answers given in
-  conversation with `board answer <A…> "<answer>" --relay`;
-- **finish**: `board finish "<outcome>" [--done]`;
-- **catchup**: `board catchup` at check-in and after long waits; open note bodies only when
+- **block**: `vh block <task> "<question>" --stop | --poll D`; record answers given in
+  conversation with `vh answer <A…> "<answer>" --relay`;
+- **finish**: `vh finish "<outcome>" [--done]`;
+- **catchup**: `vh catchup` at check-in and after long waits; open note bodies only when
   the summary concerns you;
 - **close only when asked**: any actor may close, but agents do so only on the operator's
   explicit instruction, with `--for operator`.
 
 The text is a Go `embed`ded file (`internal/cli/protocol.txt`) with its version number `N`, a
 small integer bumped whenever an agent would have to behave differently (wording fixes don't
-bump it). `board help agent --version` prints just `N` and records nothing. Running
-`board help agent` prints the text, then records the version as read for the actor
+bump it). `vh help agent --version` prints just `N` and records nothing. Running
+`vh help agent` prints the text, then records the version as read for the actor
 (`PUT /actors/me/protocol-seen`, best effort: with no `VH_URL` or `VH_API_KEY`, an unreachable
 server or a refused key it still prints the text, prints nothing on stderr and exits 0). Any other
-argument to `board help` is the exit-2 usage error `usage: board help agent [--version]`.
+argument to `vh help` is the exit-2 usage error `usage: vh help agent [--version]`.
 
-**Protocol v0** was the text of Phase 0: identity, `board whoami`, the initiative commands and the
+**Protocol v0** was the text of Phase 0: identity, `vh whoami`, the initiative commands and the
 output rules.
 
 **Protocol v1** was the text of Phase 1. It was headed `board protocol v1`, fit 45 lines of 100 columns
 (a test holds the budget) and named no command or flag the build lacked (a test and the
-`help_agent.feature` scenario check each `` `board …` `` span against the command tree). On top of
+`help_agent.feature` scenario check each `` `vh …` `` span against the command tree). On top of
 v0 it covers:
 
-- the tasks: `board task ls`, `board task add`, `board task done` (agents mark done) and
+- the tasks: `vh task ls`, `vh task add`, `vh task done` (agents mark done) and
   `--json`;
-- the leases: `board lease start <task> "<intent>" --res … --ttl …`, `board lease renew` at each
+- the leases: `vh lease start <task> "<intent>" --res … --ttl …`, `vh lease renew` at each
   milestone and at least every half TTL (with no argument it renews all the actor's leases),
-  `board lease end "<outcome>"`, `board lease ls`, and that an unrenewed lease expires on its own;
-- `board milestone <task> "<summary>"` and `board check <task> "<summary>"` (watch tasks);
-- the shared-resource check `board now --resources …` before a risky action (reboot, deploy,
+  `vh lease end "<outcome>"`, `vh lease ls`, and that an unrenewed lease expires on its own;
+- `vh milestone <task> "<summary>"` and `vh check <task> "<summary>"` (watch tasks);
+- the shared-resource check `vh now --resources …` before a risky action (reboot, deploy,
   force-push, migration);
 - conflict handling: a `CONFLICT <resources>: L<n> <holder> (<task>) "<intent>" exp <time>` line
   and exit 7 mean another actor holds a lease on a resource; the lease is started anyway, so read
   the intent, then wait, coordinate or ask, and never go on through a conflict on a destructive
   action;
 - closing only when asked: agents never close a task unless the operator asked, and then use
-  `board task close <ref> --for operator`;
+  `vh task close <ref> --for operator`;
 - the exit codes 6 (state conflict) and 7 (conflict) next to those of v0.
 
 **Protocol v2** was the text of Phase 2. It was headed `board protocol v2`, replaces v1's wording
 rather than adding to it so as to keep the same budget (45 lines of 100 columns, held by a test),
 and names no command or flag the build lacks (the `help_agent.feature` scenario checks each
-`` `board …` `` span against the command tree, which lists `ask`, `ask show|ls|withdraw`,
+`` `vh …` `` span against the command tree, which lists `ask`, `ask show|ls|withdraw`,
 `answer`, `note`, `note show`, `notes` and `attention`). On top of v1 it covers:
 
-- asks: `board ask <task> "<question>" --option …` raises a `stop` ask (the default) and returns, so
-  the agent ends its turn and reads the answer in a later session with `board ask show A<n>` or
-  `board ask ls`; `--poll D` waits instead, exit 0 answered, 6 withdrawn and **3** still open at the
+- asks: `vh ask <task> "<question>" --option …` raises a `stop` ask (the default) and returns, so
+  the agent ends its turn and reads the answer in a later session with `vh ask show A<n>` or
+  `vh ask ls`; `--poll D` waits instead, exit 0 answered, 6 withdrawn and **3** still open at the
   deadline (go on without the answer and check back); `--blocking` blocks the task meanwhile;
-  `board ask withdraw A<n>` when it no longer matters;
-- `board answer A<n> "<answer>" --relay` to record an answer a human gave in conversation;
-- notes: `board note "<summary>" --task <ref> --body -` (a broadcast without `--task` or `--init`),
-  `board notes --since last --ack` at check-in (`--ack` moves the cursor past the notes shown, a
-  `+` marks a body, `board note show N<n>` prints it) and `board attention` for what needs a human;
+  `vh ask withdraw A<n>` when it no longer matters;
+- `vh answer A<n> "<answer>" --relay` to record an answer a human gave in conversation;
+- notes: `vh note "<summary>" --task <ref> --body -` (a broadcast without `--task` or `--init`),
+  `vh notes --since last --ack` at check-in (`--ack` moves the cursor past the notes shown, a
+  `+` marks a body, `vh note show N<n>` prints it) and `vh attention` for what needs a human;
 - exit code 3 (an ask still open) next to the others.
 
 **Protocol v3** is the current text. It is headed `board protocol v3`, replaces wording rather than
 adding to it so as to keep the same budget (45 lines of 100 columns, held by a test), and names no
-command or flag the build lacks (`board lease ack` and `board task done --force` are in the command
+command or flag the build lacks (`vh lease ack` and `vh task done --force` are in the command
 tree). On top of v2 it carries exactly four changes, each one something an agent would otherwise
 do wrong:
 
-- `board task done <ref> ["outcome"]` ends your own live lease on the task, with the outcome as the
+- `vh task done <ref> ["outcome"]` ends your own live lease on the task, with the outcome as the
   lease's closing text (§3.4);
-- `board lease start` on a done task is refused: reopen it first with `board task reopen <ref>`;
-- `board lease ack L<n>` acknowledges a lease that ran out, so the task stops needing attention
+- `vh lease start` on a done task is refused: reopen it first with `vh task reopen <ref>`;
+- `vh lease ack L<n>` acknowledges a lease that ran out, so the task stops needing attention
   for it (§8.1);
-- `board task done --force` only when the operator says so: it is the way past another actor's
+- `vh task done --force` only when the operator says so: it is the way past another actor's
   live lease and ends that lease.
 
 `features/help_agent.feature` asserts the version line `board protocol v3`, the version number 3
@@ -2237,7 +2237,7 @@ The shortcuts of §8.4 (`start`, `ping`, `block`, `finish`, `catchup`, …) arri
 commands, each bumping the version.
 
 **Server side.** `GET /meta` answers `{version, revision, protocol, principal, actor}`: the server binary's
-version (as `board version` prints it first), the commit it was built from (`revision`, omitted when the
+version (as `vh version` prints it first), the commit it was built from (`revision`, omitted when the
 build recorded none), the protocol version its binary embeds, the principal
 that authenticated (`key:<name>` or `oidc:<email>`) and the actor the request acts as. It reads
 nothing from the database. `PUT /actors/me/protocol-seen` takes `{"version": N}` (an integer of
@@ -2247,11 +2247,11 @@ version read and a repeated or older call changes nothing. It answers
 `{actor, protocol_seen}` with the value stored.
 
 **Staleness hint.** `GET /meta` returns the server's protocol version (the one its own binary
-embeds). `board start` (and `board new`) prints at most one extra line when either is newer:
+embeds). `vh start` (and `vh new`) prints at most one extra line when either is newer:
 
 ```
-hint: board protocol v4 on the server, you have v3 → board update, then board help agent
-hint: board protocol v4 changed since you last read it → board help agent
+hint: board protocol v4 on the server, you have v3 → vh update, then vh help agent
+hint: board protocol v4 changed since you last read it → vh help agent
 ```
 
 The hint never changes the exit code and never blocks the command.
@@ -2260,7 +2260,7 @@ The hint never changes the exit code and never blocks the command.
 - Golden file: the exact text (`internal/cli/testdata/help-agent.golden`), updated deliberately with
   `go test -update`. A changed golden file shows up in review, where the version bump is decided.
 - E2E (Godog, `features/help_agent.feature`): the text the binary prints is parsed for every
-  `board …` command (written in backticks) and every `--flag` in it, and each is resolved against the
+  `vh …` command (written in backticks) and every `--flag` in it, and each is resolved against the
   CLI's command tree (`cli.Commands()`, which holds the flag tables the parsers read); an unknown
   command or flag fails the build. The same feature checks that reading the text records
   `protocol_seen` and that the text prints with the server unreachable; `features/meta.feature`
@@ -2281,7 +2281,7 @@ Template for the operator's instructions (first matching rule wins; adapt to you
 
 ```markdown
 ## board identity
-Before using `board`, export VH_URL, VH_API_KEY (this environment's key,
+Before using `vh`, export VH_URL, VH_API_KEY (this environment's key,
 from your secret store), VH_ACTOR and VH_WAY_BACK:
 1. Autonomous run (e.g. RALPHD_RUN_ID set):   ralph:<run-id>
    way back: `ralphctl status <run-id>`
@@ -2301,7 +2301,7 @@ back `pid <ppid> on <hostname>, cwd <cwd>`. It never reads tool-specific variabl
 
 ## 10. Agent skill
 
-The skill is a thin pointer; the protocol itself is `board help agent` (§8.6), so it updates
+The skill is a thin pointer; the protocol itself is `vh help agent` (§8.6), so it updates
 with the binary instead of with every operator's copy. `skill/SKILL.md` (generic; operators copy
 it once):
 
@@ -2311,12 +2311,12 @@ name: board
 description: Shared work board. Use at the start of any task, before risky shared actions,
   when you need the operator, and when you finish.
 ---
-Run `board help agent` once per session and follow it.
+Run `vh help agent` once per session and follow it.
 Set your identity per the operator's AGENTS.md ("board identity") before the first command.
-If `board` is missing, install it following <repo URL>/INSTALL-AGENT.md.
+If `vh` is missing, install it following <repo URL>/INSTALL-AGENT.md.
 ```
 
-The previous long outline is now the content of `board help agent`.
+The previous long outline is now the content of `vh help agent`.
 
 ---
 
@@ -2575,7 +2575,7 @@ out and was not acknowledged"); `asking` is labelled "waiting on you", with " ·
 " · agent waiting" when `asker_waiting` is true (name "Waiting on you, blocking, agent waiting"); `done` is labelled "done, not
 closed". `orderNeedsAttention(tasks)` returns the Needs attention order without changing its input: stranded, then asking with a
 blocking ask first, then asking, then done, each group by `updated_at` newest first; a task with several reasons is in the group of
-its first reason, and equal keys keep their input order. It is the same order `board task ls` uses (§8.3).
+its first reason, and equal keys keep their input order. It is the same order `vh task ls` uses (§8.3).
 **The Needs attention section** (R2, `web/src/lib/needsAttention.ts`, `NeedsAttention.svelte`). The Tasks view and the initiative page
 show a Needs attention section above their tasks table. Each reads `GET /tasks` under the filters of its own view (the Tasks view's
 filters; the initiative page's initiative and task filter) with `attention=true` and `limit=200`, and orders the answer with
@@ -3321,7 +3321,7 @@ network requests (all assets embedded).
   (DDL identical in both databases) plus `sqlite` and `postgres` (only where the DDL must differ: today
   the identity column `n` and the primary key of the tables that have one). A dialect applies its own
   directory merged with `common`, one version sequence across both. Applied on start
-  (`VH_MIGRATE=auto`, default) or by `board admin migrate`. A database whose goose version is above the
+  (`VH_MIGRATE=auto`, default) or by `vh admin migrate`. A database whose goose version is above the
   highest embedded one is refused (§8).
 - SQLite settings: WAL, `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=NORMAL`, applied to every
   connection through the DSN, with one writer connection (`MaxOpenConns=1`, `BEGIN IMMEDIATE`) plus a read
@@ -3367,7 +3367,7 @@ network requests (all assets embedded).
   build takes `GOOS=$TARGETOS GOARCH=$TARGETARCH`; the final stage only `COPY`s, so no platform is
   built under emulation. Every `FROM` is pinned by digest. CI (`ci/image-build.sh`,
   `ci/image-check.sh`, docs/ci.md) builds both platforms on every build, loads and runs the amd64
-  image (`board version`, `GET /healthz`) and inspects both platforms' manifests; it pushes
+  image (`vh version`, `GET /healthz`) and inspects both platforms' manifests; it pushes
   nothing (the registry push is the release job's, Phase 4). `ci/repocheck` fails a final stage
   that is not scratch or distroless static, a root user, or a builder stage without
   `--platform=$BUILDPLATFORM`.
@@ -3394,8 +3394,8 @@ also accepted (§13.1).
 | `VH_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
-| `VH_SWEEP_INTERVAL` | `15s` | how often `board serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
-| `VH_SQLITE_CHECKPOINT` | `10m` | how often `board serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
+| `VH_SWEEP_INTERVAL` | `15s` | how often `vh serve` expires due leases and deletes expired sessions (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
+| `VH_SQLITE_CHECKPOINT` | `10m` | how often `vh serve` on SQLite runs `PRAGMA wal_checkpoint(TRUNCATE)` so the `-wal` file shrinks back to nothing, and it runs once more on clean shutdown (SIGINT or SIGTERM), after the sweeper and the change feed stopped. A Go duration; `0` (also `0s` or `off`) turns the timer off, and the shutdown checkpoint still runs. A reader holding the log open leaves it for the next tick. Postgres is unaffected. Any other value exits 1 |
 | `VH_STREAM_POLL` | `1s` | how often the change feed (§7.3) reads new `events` rows; a write through the same server wakes it at once. A Go duration above zero; any other value exits 1 |
 | `VH_NOTIFY_URL` | (unset: alerts off) | where `serve` POSTs an alert (§5.4). Unset, no write enqueues a notification and no row is written. It comes from the environment only |
 | `VH_NOTIFY_ON` | `stranded,asking,done` | the kinds of alert that are enqueued: a comma list of `stranded`, `asking` and `done` (§5.4). Any other word, or an empty one, exits 1, whether or not `VH_NOTIFY_URL` is set |
@@ -3423,9 +3423,9 @@ proxy, since the session cookie is `Secure`. Register the redirect URI
 
 **Image version.** The root `Dockerfile` takes two build args, `VERSION` (default `devel`) and `REVISION`
 (default empty), and passes them to `go build` as the linker flags
-`-X github.com/n-orlov/board/internal/version.version=$VERSION` and
-`-X github.com/n-orlov/board/internal/version.revision=$REVISION`: the image has no `.git`, so build info
-cannot name its commit. `board version` and `GET /meta` (§8.3, §8.6) report them, and a linker value wins over
+`-X github.com/n-orlov/village-hall/internal/version.version=$VERSION` and
+`-X github.com/n-orlov/village-hall/internal/version.revision=$REVISION`: the image has no `.git`, so build info
+cannot name its commit. `vh version` and `GET /meta` (§8.3, §8.6) report them, and a linker value wins over
 build info. CI (`ci/image-build.sh`) passes the tag the commit carries or else its short sha as `VERSION`
 and the full commit as `REVISION`; `ci/repocheck` fails a `Dockerfile` that stops declaring either arg or stops
 passing them as those two flags.
@@ -3485,7 +3485,7 @@ Reference host: a 4-core arm64 board with 4 GB RAM, SQLite on flash.
 | `GET /now`, `GET /attention` p99 | ≤ 20 ms at 1 M events, 50 k notes, 200 live leases |
 | lease renew p99 | ≤ 10 ms |
 | sustained load | 200 req/s mixed (80 % reads) without errors; 500 concurrent SSE clients |
-| CLI | `board now` round trip ≤ 100 ms on a LAN; binary start ≤ 20 ms |
+| CLI | `vh now` round trip ≤ 100 ms on a LAN; binary start ≤ 20 ms |
 
 Hot-path rules: `last_seen_at` updates are coalesced (at most one write per actor per 30 s; Phase 0 updates it on writes only and does not coalesce, §4.1);
 attention counts are cached and invalidated by the writes that change them; reads never take
@@ -3539,11 +3539,11 @@ whole-run repeat took the Suite past its 45-minute bound. No spec, assertion or 
 Headline scenarios that define the product (must exist from the first iteration):
 
 1. Two agents start leases on different tasks declaring the same `host:` resource → both see
-   the conflict in `board now`, the operator sees it in attention; one ends → conflict clears.
+   the conflict in `vh now`, the operator sees it in attention; one ends → conflict clears.
 2. An agent starts a lease with TTL 1 min and stops renewing → after expiry the lease is
    `expired`, appears in attention with holder and way back, and renewing returns 410.
 3. An agent raises a polling ask; the operator answers in the UI → the agent's
-   `board ask --poll` returns the answer; a second ask answered via `--relay` records
+   `vh ask --poll` returns the answer; a second ask answered via `--relay` records
    `on_behalf_of=operator`, `channel=relay`.
 4. Agent posts notes (task-bound, resource-bound, broadcast); another agent reads
    `notes --since last` → sees exactly the relevant summaries, `--ack` advances its cursor.
@@ -3554,7 +3554,7 @@ Headline scenarios that define the product (must exist from the first iteration)
    disallowed or unverified email gets 403; bad `state`, reused `nonce`, missing PKCE verifier
    and a tampered ID token are rejected; a cookie write without CSRF token or with a foreign
    `Origin` is rejected; logout invalidates the session; idle and absolute expiry. Keys:
-   `board admin keys create` → key works; revoke (UI, API and admin CLI) → 401; expired key →
+   `vh admin keys create` → key works; revoke (UI, API and admin CLI) → 401; expired key →
    401; the key is never retrievable after creation; events record `principal` and actor
    separately; `/healthz` answers without credentials and nothing else does (every OpenAPI
    operation is probed unauthenticated and must return 401).
@@ -3631,26 +3631,26 @@ present, enabled and at its threshold.
 
 Everything below exists and the gates measure real code before any product feature is built.
 
-- **Module layout**: `cmd/board/` (main), `internal/server/` (HTTP, generated handlers),
+- **Module layout**: `cmd/vh/` (main), `internal/server/` (HTTP, generated handlers),
   `internal/store/` (dialect layer, queries), `internal/store/migrations/{common,sqlite,postgres}/`,
   `internal/domain/`, `internal/cli/`, `api/openapi.yaml`, `web/` (Vite + Svelte + TS),
   `features/` (Godog), `e2e/` (Playwright), `ci/` (deck-equivalent scripts), `Dockerfile`,
   `Jenkinsfile`, `Jenkinsfile.release`.
-- **One binary** `board`: `board serve` and CLI subcommands, version stamped from build info.
+- **One binary** `vh`: `vh serve` and CLI subcommands, version stamped from build info.
 - `/healthz`, `/readyz`.
 - **Authentication** (§3) complete: OIDC login with the mock provider in tests, sessions, CSRF,
-  API keys with `board admin keys` and the UI page. The vertical slice is authenticated from the
+  API keys with `vh admin keys` and the UI page. The vertical slice is authenticated from the
   start.
 - **OpenAPI** spec checked in, Go server code and TS types generated, drift check; Swagger UI at
   `/api/docs`.
 - **goose migrations + dialect layer** running on SQLite and Postgres.
 - **One thin vertical slice**: initiatives create / list / get, via API, via CLI
-  (`board init add`, `board init ls`, `board init show`), and a minimal Svelte page listing and
+  (`vh init add`, `vh init ls`, `vh init show`), and a minimal Svelte page listing and
   creating initiatives. Enough real code for every gate to measure. The slice already follows the
   CLI output rules (§8.1): `ok` confirmation lines, one-line errors with `→ next`, the exit codes,
   list caps.
-- **`board help agent`** (§8.6) with protocol **v0**: only what Phase 0 has (identity,
-  `board whoami`, initiatives; Phase 1 publishes v1, see §8.6), plus `GET /meta`, the `protocol_seen` column, the golden test and
+- **`vh help agent`** (§8.6) with protocol **v0**: only what Phase 0 has (identity,
+  `vh whoami`, initiatives; Phase 1 publishes v1, see §8.6), plus `GET /meta`, the `protocol_seen` column, the golden test and
   the command/flag existence e2e. Each later phase extends the text with its commands and bumps
   the version, so the cheat sheet never describes commands that do not exist yet.
 - Svelte/Vite shell embedded via `go:embed`.
@@ -3668,10 +3668,10 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 
 | phase | scope |
 |---|---|
-| 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `board now` (lease/conflict parts), task and lease CLI. |
+| 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `vh now` (lease/conflict parts), task and lease CLI. |
 | 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
 | 3 | **Phase 3 is shipped.** Timeline UI (`vis-timeline` bundled with the app; filters: initiative, tag, actor and closed within, in the fragment; zoom hour to quarter, panning refetch, live refresh), archive window, remaining UI views. |
-| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `board start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `board update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
+| 4 | CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `vh start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `vh update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment. |
 
 Each phase ends on a green `main` build with all gates still enforced.
 

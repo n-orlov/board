@@ -110,7 +110,7 @@ func TestInitAddRefusals(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "init", "add", "xx", "T")
-	if code != ExitError || out != "" || errs != "initiative \"x\" already exists → board init show xx\n" {
+	if code != ExitError || out != "" || errs != "initiative \"x\" already exists → vh init show xx\n" {
 		t.Fatalf("got %d %q %q", code, out, errs)
 	}
 	f.handler = func(w http.ResponseWriter, _ *http.Request) {
@@ -145,7 +145,7 @@ func TestInitCommandsKeepPhaseZeroExitCodes(t *testing.T) {
 }
 
 // TestInitAddTakenSlugNamesTheSlugItWasGiven checks the 409 error stays
-// actionable for any slug: it points at 'board init show <that slug>'.
+// actionable for any slug: it points at 'vh init show <that slug>'.
 func TestInitAddTakenSlugNamesTheSlugItWasGiven(t *testing.T) {
 	for _, slug := range []string{"a", "phone-app", "x9"} {
 		f := &fakeBoard{handler: func(w http.ResponseWriter, _ *http.Request) {
@@ -155,7 +155,7 @@ func TestInitAddTakenSlugNamesTheSlugItWasGiven(t *testing.T) {
 		srv := httptest.NewServer(f)
 		code, out, errs := runEnv(f.env(srv), "init", "add", slug, "T")
 		srv.Close()
-		if code != ExitError || out != "" || errs != "initiative taken → board init show "+slug+"\n" {
+		if code != ExitError || out != "" || errs != "initiative taken → vh init show "+slug+"\n" {
 			t.Errorf("%s: got %d %q %q", slug, code, out, errs)
 		}
 	}
@@ -167,7 +167,7 @@ func TestInitLsPagesAndCaps(t *testing.T) {
 	defer srv.Close()
 	code, out, _ := runEnv(f.env(srv), "init", "ls")
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if code != ExitOK || len(lines) != 21 || lines[0] != "slug-01  open  Title 1  [t]" || lines[20] != "+5 more → board init ls --all" {
+	if code != ExitOK || len(lines) != 21 || lines[0] != "slug-01  open  Title 1  [t]" || lines[20] != "+5 more → vh init ls --all" {
 		t.Fatalf("got %d %d lines, last %q", code, len(lines), lines[len(lines)-1])
 	}
 	if len(f.requests) != 4 {
@@ -177,7 +177,7 @@ func TestInitLsPagesAndCaps(t *testing.T) {
 		t.Fatalf("second page query %v", q)
 	}
 	_, out, _ = runEnv(f.env(srv), "init", "ls", "--limit", "2", "--tag", "t", "--tag", "u")
-	if out != "slug-01  open  Title 1  [t]\nslug-02  open  Title 2  [t]\n+23 more → board init ls --tag t --tag u --all\n" {
+	if out != "slug-01  open  Title 1  [t]\nslug-02  open  Title 2  [t]\n+23 more → vh init ls --tag t --tag u --all\n" {
 		t.Fatalf("limit 2: %q", out)
 	}
 	if got := f.requests[len(f.requests)-1].URL.Query()["tag"]; strings.Join(got, ",") != "t,u" {
@@ -250,7 +250,7 @@ func TestInitShow(t *testing.T) {
 	if code, out, _ := runEnv(f.env(srv), "init", "show", "phone", "--json"); code != ExitOK || !strings.HasPrefix(out, `{"slug":"phone"`) {
 		t.Fatalf("json: %d %q", code, out)
 	}
-	if code, _, errs := runEnv(f.env(srv), "init", "show", "missing"); code != ExitNotFound || errs != "initiative missing not found → board init ls\n" {
+	if code, _, errs := runEnv(f.env(srv), "init", "show", "missing"); code != ExitNotFound || errs != "initiative missing not found → vh init ls\n" {
 		t.Fatalf("404: %d %q", code, errs)
 	}
 	if got := f.requests[0].URL.Path; got != "/api/v1/initiatives/phone" {

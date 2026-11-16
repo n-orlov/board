@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 var (
@@ -585,7 +585,7 @@ func TestStartOnADoneTaskIsRefusedAndWritesNothing(t *testing.T) {
 	_, err := e.S.Start(ctx, bob, "key:b", leases.Start{Task: "aa-1", Intent: "x"})
 	var ce leases.ConflictError
 	if !errors.Is(err, leases.ErrConflict) || !errors.As(err, &ce) || !strings.Contains(ce.Msg, "aa-1") || !strings.Contains(ce.Msg, "done") ||
-		ce.Next != "Run board task reopen aa-1 first, or start the lease on an open task." {
+		ce.Next != "Run vh task reopen aa-1 first, or start the lease on an open task." {
 		t.Fatalf("err = %v, next %q", err, ce.Next)
 	}
 	var n int

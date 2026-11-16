@@ -11,13 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // KeysUsage is the single line printed to stderr for a malformed
-// `board admin keys` command line.
-const KeysUsage = "usage: board admin keys create <name> [--expires 90d] | list | revoke <name>"
+// `vh admin keys` command line.
+const KeysUsage = "usage: vh admin keys create <name> [--expires 90d] | list | revoke <name>"
 
 // ExitNotFound is the exit code for an unknown name (SPEC §8.1).
 const ExitNotFound = 4
@@ -71,7 +71,7 @@ func createArg(args []string, i int, name string, ttl time.Duration) (string, ti
 
 var errUsage = errors.New("usage")
 
-// keysAction is one `board admin keys` subcommand, parsed and ready to run on
+// keysAction is one `vh admin keys` subcommand, parsed and ready to run on
 // an open database.
 type keysAction func(context.Context, auth.Keys) int
 
@@ -99,7 +99,7 @@ func parseKeys(args []string, stdout, stderr io.Writer) (keysAction, error) {
 	return nil, errUsage
 }
 
-// adminKeys runs `board admin keys ...` against the database directly.
+// adminKeys runs `vh admin keys ...` against the database directly.
 func adminKeys(args []string, stdout, stderr io.Writer, env Env) int {
 	run, err := parseKeys(args, stdout, stderr)
 	if err != nil {
@@ -117,7 +117,7 @@ func keysArgError(stderr io.Writer, err error) int {
 	if errors.Is(err, errUsage) {
 		return keysUsage(stderr)
 	}
-	_, _ = fmt.Fprintf(stderr, "board: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "vh: %v\n", err)
 	return ExitUsage
 }
 
@@ -132,7 +132,7 @@ func withKeys(env Env, stderr io.Writer, f keysAction) int {
 	defer func() { _ = st.Close() }()
 	if err := st.Ready(ctx); err != nil {
 		if errors.Is(err, store.ErrNotMigrated) {
-			err = fmt.Errorf("%w → board admin migrate", err)
+			err = fmt.Errorf("%w → vh admin migrate", err)
 		}
 		return fail(stderr, err)
 	}
@@ -145,7 +145,7 @@ func createKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, name 
 	case errors.Is(err, auth.ErrInvalidName):
 		return keysArgError(stderr, err)
 	case errors.Is(err, auth.ErrKeyExists):
-		_, _ = fmt.Fprintf(stderr, "board: key %q already exists → board admin keys list\n", name)
+		_, _ = fmt.Fprintf(stderr, "vh: key %q already exists → vh admin keys list\n", name)
 		return ExitError
 	case err != nil:
 		return fail(stderr, err)
@@ -190,7 +190,7 @@ func revokeKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, name 
 	already, err := k.Revoke(ctx, name)
 	switch {
 	case errors.Is(err, auth.ErrKeyNotFound):
-		_, _ = fmt.Fprintf(stderr, "board: key %q not found → board admin keys list\n", name)
+		_, _ = fmt.Fprintf(stderr, "vh: key %q not found → vh admin keys list\n", name)
 		return ExitNotFound
 	case err != nil:
 		return fail(stderr, err)

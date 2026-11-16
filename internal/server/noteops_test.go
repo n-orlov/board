@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/notes"
+	"github.com/n-orlov/village-hall/internal/notes"
 )
 
 func TestNoteOperationsAnswer503WithoutAStore(t *testing.T) {

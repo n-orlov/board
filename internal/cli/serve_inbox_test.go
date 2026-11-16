@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func inboxCreator(t *testing.T, st *store.Store) (handle, kind, principal string) {

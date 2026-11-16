@@ -85,7 +85,7 @@ scenario.
 ## Disposable-clone measurement: `ci/review.sh`
 
 `ci/review.sh` clones the repository into the git-ignored `.review-clone/` and,
-through `ci/run.sh`, asserts that the module path is `github.com/n-orlov/board`
+through `ci/run.sh`, asserts that the module path is `github.com/n-orlov/village-hall`
 and that `go list ./internal/...` resolves only to directories under the clone,
 never the original checkout. With no argument (or `--smoke`) it stops there and
 exits 0; any other arguments are passed to `go test` inside the same clone.

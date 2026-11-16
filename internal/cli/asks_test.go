@@ -110,15 +110,15 @@ func TestAskRefusalsWordTheirNext(t *testing.T) {
 		code   int
 		want   string
 	}{
-		{[]string{"ask", "AA-1", "q"}, http.StatusNotFound, ExitNotFound, "no such → board task ls\n"},
-		{[]string{"ask", "AA-1", "q"}, http.StatusConflict, ExitConflict, "no such → board task show aa-1\n"},
+		{[]string{"ask", "AA-1", "q"}, http.StatusNotFound, ExitNotFound, "no such → vh task ls\n"},
+		{[]string{"ask", "AA-1", "q"}, http.StatusConflict, ExitConflict, "no such → vh task show aa-1\n"},
 		{[]string{"ask", "AA-1", "q"}, http.StatusBadRequest, ExitError, "no such\n"},
-		{[]string{"ask", "show", "a9"}, http.StatusNotFound, ExitNotFound, "no such → board ask ls\n"},
-		{[]string{"answer", "a9", "x"}, http.StatusNotFound, ExitNotFound, "no such → board ask ls\n"},
-		{[]string{"answer", "a9", "x"}, http.StatusConflict, ExitConflict, "no such → board ask show A9\n"},
-		{[]string{"ask", "withdraw", "a9"}, http.StatusConflict, ExitConflict, "no such → board ask show A9\n"},
+		{[]string{"ask", "show", "a9"}, http.StatusNotFound, ExitNotFound, "no such → vh ask ls\n"},
+		{[]string{"answer", "a9", "x"}, http.StatusNotFound, ExitNotFound, "no such → vh ask ls\n"},
+		{[]string{"answer", "a9", "x"}, http.StatusConflict, ExitConflict, "no such → vh ask show A9\n"},
+		{[]string{"ask", "withdraw", "a9"}, http.StatusConflict, ExitConflict, "no such → vh ask show A9\n"},
 		{[]string{"ask", "withdraw", "a9"}, http.StatusBadRequest, ExitError, "no such\n"},
-		{[]string{"ask", "ls", "--task", "zz-1"}, http.StatusNotFound, ExitNotFound, "no such → board task ls\n"},
+		{[]string{"ask", "ls", "--task", "zz-1"}, http.StatusNotFound, ExitNotFound, "no such → vh task ls\n"},
 	} {
 		f := answering(c.status, `{"detail":"no such"}`)
 		srv := httptest.NewServer(f)
@@ -218,7 +218,7 @@ func TestAskLsSendsTheFiltersAndCapsTheList(t *testing.T) {
 		t.Fatalf("got %d %q %q query %v", code, out, errs, q)
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[0], "A1  open  aa-1  me  ") || lines[2] != "+1 more → board ask ls --state all --mine --task aa-1 --all" {
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "A1  open  aa-1  me  ") || lines[2] != "+1 more → vh ask ls --state all --mine --task aa-1 --all" {
 		t.Errorf("got %q", out)
 	}
 	f2 := answering(200, page(1, 2))

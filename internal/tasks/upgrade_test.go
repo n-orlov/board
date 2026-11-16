@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/leases"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 // forceDone writes a task straight to done, the way a Phase 2 database came to

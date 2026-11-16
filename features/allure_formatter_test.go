@@ -53,7 +53,7 @@ import (
 // allure formatter at all.
 const allureDirEnv = "BOARD_GODOG_ALLURE"
 
-const allureIssueURLPrefix = "https://github.com/n-orlov/board/issues/"
+const allureIssueURLPrefix = "https://github.com/n-orlov/village-hall/issues/"
 
 func init() {
 	godog.Format("allure", "Writes Allure 2 results into $"+allureDirEnv+"; the output file only receives a one-line summary", newAllureFormatter)

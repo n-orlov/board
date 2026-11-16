@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // LiveOnTaskIn lists the live leases on the task taskID inside the transaction

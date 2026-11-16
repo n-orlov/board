@@ -28,7 +28,7 @@ func (l keyList) keyName(key string) string {
 	return "unknown"
 }
 
-// whoami runs `board whoami`: it prints the handle, the way back and the key
+// whoami runs `vh whoami`: it prints the handle, the way back and the key
 // name, and asks the server with the key, so a line that prints says the
 // server is reachable and accepts the key.
 func whoami(args []string, stdout, stderr io.Writer, env Env) int {

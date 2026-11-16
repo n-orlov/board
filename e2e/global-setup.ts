@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 // Mints the API key every spec authenticates with, at test time, with the same
-// `board admin keys create` an operator runs: against the store of the server
+// `vh admin keys create` an operator runs: against the store of the server
 // serve.sh started, which is up by now. The key lives in this run's
 // environment only; nothing commits it.
 export default function globalSetup(): void {
@@ -15,6 +15,6 @@ export default function globalSetup(): void {
   env.BOARD_DB_URL = `sqlite://${join(work, 'board.db')}`;
   const out = execFileSync(join(work, 'board'), ['admin', 'keys', 'create', 'e2e'], { env, encoding: 'utf8' });
   const key = out.trim().split(/\s+/).pop() ?? '';
-  if (!/^brd_[0-9a-z]{52}$/.test(key)) throw new Error('board admin keys create did not print a key');
+  if (!/^brd_[0-9a-z]{52}$/.test(key)) throw new Error('vh admin keys create did not print a key');
   process.env.E2E_API_KEY = key;
 }

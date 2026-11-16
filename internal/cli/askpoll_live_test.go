@@ -12,17 +12,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/feed"
-	"github.com/n-orlov/board/internal/initiatives"
-	"github.com/n-orlov/board/internal/server"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/feed"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/server"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // liveAskBoard is the real server over a real SQLite store, in real time:
-// `board ask --poll` raises and waits through it, while the test answers or
+// `vh ask --poll` raises and waits through it, while the test answers or
 // withdraws the ask straight through the store (w), as another server on the
 // same database would. The change feed is never woken by those writes (it
 // polls once an hour), so the server learns of an end only by reading the ask:
@@ -232,7 +232,7 @@ func (b *liveAskBoard) stateAt(start time.Time, after time.Duration) <-chan stri
 	return out
 }
 
-// runLivePoll runs `board ask aa-1 "Which port?" --poll 1s` against b, and
+// runLivePoll runs `vh ask aa-1 "Which port?" --poll 1s` against b, and
 // returns its exit code and output and how long it took. The poll's deadline is
 // a second after the raise returns, so it is later than start plus a second.
 func (b *liveAskBoard) runLivePoll() (int, string, time.Duration) {
@@ -253,9 +253,9 @@ var endCases = []pollCase{
 	{true, ExitConflict, "A1 withdrawn: moved on\n"},
 }
 
-const stillOpen = "A1 still open → board ask show A1\n"
+const stillOpen = "A1 still open → vh ask show A1\n"
 
-// An answer or withdrawal committed before the deadline ends `board ask --poll
+// An answer or withdrawal committed before the deadline ends `vh ask --poll
 // 1s` with exit 0 or 6, on the real clock against the real server and store.
 func TestAskPollLiveCountsAnEndCommittedBeforeTheDeadline(t *testing.T) {
 	t.Parallel()

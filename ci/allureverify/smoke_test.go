@@ -24,7 +24,7 @@ func goodSmokeCases() []smokeCase {
 		{
 			"name":      "passes with tags",
 			"testStage": map[string]any{"steps": []any{smokeStep("a passing step"), smokeStep("a passing step"), smokeStep("a passing step")}},
-			"links":     []any{map[string]any{"name": "gh-61", "type": "issue", "url": "https://github.com/n-orlov/board/issues/61"}},
+			"links":     []any{map[string]any{"name": "gh-61", "type": "issue", "url": "https://github.com/n-orlov/village-hall/issues/61"}},
 		},
 		{
 			"name":      "fails with an attachment",

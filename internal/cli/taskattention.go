@@ -54,7 +54,7 @@ func strandedText(t task, now time.Time) string {
 		return ""
 	}
 	return "stranded: " + s.Ref + " by " + s.Holder.Handle + ": \"" + s.Intent + "\" expired " +
-		ago(now, s.ExpiredAt) + " → board lease ack " + s.Ref + "\n"
+		ago(now, s.ExpiredAt) + " → vh lease ack " + s.Ref + "\n"
 }
 
 // attentionRank is where a task's first reason puts it: stranded, asking (blocking first), done.

@@ -12,13 +12,13 @@ import (
 	"time"
 )
 
-// NoteUsage is the single stderr line for a malformed `board note` command line.
-const NoteUsage = "usage: board note \"<summary>\" [--body file|-] [--task ref] [--init slug] [--res r] [--mention h]... [--json] | show <N…> [--json]"
+// NoteUsage is the single stderr line for a malformed `vh note` command line.
+const NoteUsage = "usage: vh note \"<summary>\" [--body file|-] [--task ref] [--init slug] [--res r] [--mention h]... [--json] | show <N…> [--json]"
 
-// NotesUsage is the single stderr line for a malformed `board notes` command line.
-const NotesUsage = "usage: board notes [--since last|<time>|<N…>] [--task ref] [--init slug] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all] [--json]"
+// NotesUsage is the single stderr line for a malformed `vh notes` command line.
+const NotesUsage = "usage: vh notes [--since last|<time>|<N…>] [--task ref] [--init slug] [--broadcast] [--res r]... [--mention h] [--ack] [--limit N|--all] [--json]"
 
-// DefaultNotesCap is how many notes `board notes` shows unless --limit or --all says otherwise (SPEC §8.1).
+// DefaultNotesCap is how many notes `vh notes` shows unless --limit or --all says otherwise (SPEC §8.1).
 const DefaultNotesCap = 5
 
 // noteView is the part of a note the text output shows.
@@ -36,7 +36,7 @@ type noteView struct {
 	CreatedAt  string   `json:"created_at"`
 }
 
-// noteCmd runs `board note ...`: a first word of `show` is the subcommand, any
+// noteCmd runs `vh note ...`: a first word of `show` is the subcommand, any
 // other word starts a new note.
 func noteCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) > 0 && args[0] == "show" {
@@ -45,7 +45,7 @@ func noteCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	return notePost(args, stdout, stderr, env)
 }
 
-// notePost runs `board note "<summary>"` and prints `ok note N<n> posted`.
+// notePost runs `vh note "<summary>"` and prints `ok note N<n> posted`.
 func notePost(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, noteFlags)
 	if !ok || len(p.pos) != 1 {
@@ -112,7 +112,7 @@ func noteBody(p parsedArgs) (map[string]any, error) {
 	return body, nil
 }
 
-// noteShow runs `board note show <N…>`.
+// noteShow runs `vh note show <N…>`.
 func noteShow(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, noteShowFlags)
 	if !ok || len(p.pos) != 1 {
@@ -126,7 +126,7 @@ func noteShow(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	var raw json.RawMessage
 	if err := c.do(ctx, "GET", "/api/v1/notes/"+url.PathEscape(p.pos[0]), nil, nil, &raw); err != nil {
-		return report(stderr, withNext(err, http.StatusNotFound, "board notes"))
+		return report(stderr, withNext(err, http.StatusNotFound, "vh notes"))
 	}
 	return printNote(p, raw, func(n noteView) string { return noteDetail(n, nowFn()) }, stdout, stderr)
 }
@@ -176,7 +176,7 @@ func noteDetail(n noteView, now time.Time) string {
 	return b.String()
 }
 
-// noteQuery is what `board notes` asks the server for.
+// noteQuery is what `vh notes` asks the server for.
 type noteQuery struct {
 	since, task, initiative, mention string
 	broadcast, ack                   bool
@@ -201,7 +201,7 @@ func noteSince(s string) string {
 	return s
 }
 
-// notesFilter reads the filters of `board notes`.
+// notesFilter reads the filters of `vh notes`.
 func notesFilter(p parsedArgs) noteQuery {
 	return noteQuery{
 		since: noteSince(last(p.values["--since"])), task: last(p.values["--task"]),
@@ -226,9 +226,9 @@ func (q noteQuery) values() url.Values {
 	return v
 }
 
-// command is the `board notes` line that shows the same notes, with --all.
+// command is the `vh notes` line that shows the same notes, with --all.
 func (q noteQuery) command() string {
-	cmd := "board notes"
+	cmd := "vh notes"
 	since := q.since
 	if since == "cursor" {
 		since = "last"
@@ -258,7 +258,7 @@ func notesCap(p parsedArgs) (int, bool) {
 	return listCap(p)
 }
 
-// notesCmd runs `board notes`.
+// notesCmd runs `vh notes`.
 func notesCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, notesFlags)
 	limit, okCap := notesCap(p)

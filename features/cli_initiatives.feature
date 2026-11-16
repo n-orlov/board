@@ -7,31 +7,31 @@ Feature: Initiatives from the command line
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
 
   Scenario: init add creates an initiative and confirms it in one line
-    When I run the client 'board init add phone-onboard "Onboard the new phone" --tag Work --tag homelab' as actor "claude@laptop"
+    When I run the client 'vh init add phone-onboard "Onboard the new phone" --tag Work --tag homelab' as actor "claude@laptop"
     Then the exit code is 0
     And stdout is exactly "ok initiative phone-onboard created"
     And stderr is empty
     And neither stdout nor stderr contains the remembered key
     And the initiative_created event for "phone-onboard" has principal "key:workstation" and actor "claude@laptop"
-    When I run the client 'board init add phone-onboard "Again"' as actor "claude@laptop"
+    When I run the client 'vh init add phone-onboard "Again"' as actor "claude@laptop"
     Then the exit code is 1
     And stdout is empty
     And stderr is exactly one line containing "→"
-    When I run the client 'board init add X "Bad slug"' as actor "claude@laptop"
+    When I run the client 'vh init add X "Bad slug"' as actor "claude@laptop"
     Then the exit code is 1
     And stderr is exactly one line containing "slug"
 
   Scenario: init ls lists in creation order, filters by tag and caps the list
-    When I run the client 'board init add alpha "First one" --tag work' as actor "claude@laptop"
-    And I run the client 'board init add beta "Second one" --tag work --tag homelab' as actor "claude@laptop"
-    And I run the client 'board init add gamma "Third one"' as actor "claude@laptop"
-    And I run the client 'board init ls' as actor "claude@laptop"
+    When I run the client 'vh init add alpha "First one" --tag work' as actor "claude@laptop"
+    And I run the client 'vh init add beta "Second one" --tag work --tag homelab' as actor "claude@laptop"
+    And I run the client 'vh init add gamma "Third one"' as actor "claude@laptop"
+    And I run the client 'vh init ls' as actor "claude@laptop"
     Then the exit code is 0
     And stdout is:
       """
@@ -40,62 +40,62 @@ Feature: Initiatives from the command line
       beta  open  Second one  [homelab,work]
       gamma  open  Third one
       """
-    When I run the client 'board init ls --tag work --tag homelab' as actor "claude@laptop"
+    When I run the client 'vh init ls --tag work --tag homelab' as actor "claude@laptop"
     Then stdout is:
       """
       beta  open  Second one  [homelab,work]
       """
-    When I run the client 'board init ls --limit 2' as actor "claude@laptop"
+    When I run the client 'vh init ls --limit 2' as actor "claude@laptop"
     Then stdout is:
       """
       inbox  open  Inbox
       alpha  open  First one  [work]
-      +2 more → board init ls --all
+      +2 more → vh init ls --all
       """
-    When I run the client 'board init ls --tag nothing' as actor "claude@laptop"
+    When I run the client 'vh init ls --tag nothing' as actor "claude@laptop"
     Then the exit code is 0
     And stdout is empty
 
   Scenario: init show prints one initiative, takes a slug that reads as a ULID or a reference in capitals, and exits 4 for an unknown slug
-    When I run the client 'board init add phone-onboard "Onboard the new phone" --tag work' as actor "claude@laptop"
-    And I run the client 'board init show phone-onboard' as actor "claude@laptop"
+    When I run the client 'vh init add phone-onboard "Onboard the new phone" --tag work' as actor "claude@laptop"
+    And I run the client 'vh init show phone-onboard' as actor "claude@laptop"
     Then the exit code is 0
     And stdout line 1 matches "^phone-onboard  open  Onboard the new phone  \[work\]$"
     And stdout line 2 matches "^created by claude@laptop (just now|[0-9]+m ago)$"
-    When I run the client 'board init show nope-nope' as actor "claude@laptop"
+    When I run the client 'vh init show nope-nope' as actor "claude@laptop"
     Then the exit code is 4
     And stdout is empty
-    And stderr is exactly one line containing "→ board init ls"
-    When I run the client 'board init show phone-onboard --api-key brd_nope' as actor "claude@laptop"
+    And stderr is exactly one line containing "→ vh init ls"
+    When I run the client 'vh init show phone-onboard --api-key brd_nope' as actor "claude@laptop"
     Then the exit code is 2
-    And stderr is exactly one line containing "usage: board init"
+    And stderr is exactly one line containing "usage: vh init"
     And neither stdout nor stderr contains the remembered key
-    When I run the client 'board init add 01234567890123456789012345 "Digits"' as actor "claude@laptop"
+    When I run the client 'vh init add 01234567890123456789012345 "Digits"' as actor "claude@laptop"
     Then the exit code is 0
     And stdout is exactly "ok initiative 01234567890123456789012345 created"
-    When I run the client 'board init show 01234567890123456789012345' as actor "claude@laptop"
+    When I run the client 'vh init show 01234567890123456789012345' as actor "claude@laptop"
     Then the exit code is 0
     And stdout line 1 matches "^01234567890123456789012345  open  Digits$"
-    When I run the client 'board init add phone-ref "Phone"' as actor "claude@laptop"
-    And I run the client 'board init show Phone-Ref' as actor "claude@laptop"
+    When I run the client 'vh init add phone-ref "Phone"' as actor "claude@laptop"
+    And I run the client 'vh init show Phone-Ref' as actor "claude@laptop"
     Then the exit code is 0
     And stdout line 1 matches "^phone-ref  open  Phone$"
 
   Scenario: whoami prints the handle, the way back, the key name and server ok
-    When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc"
+    When I run the client 'vh whoami' as actor "claude@laptop" with way back "claude --resume abc"
     Then the exit code is 0
     And stdout is exactly "you: claude@laptop (key workstation)  way back: claude --resume abc  server ok"
     And neither stdout nor stderr contains the remembered key
-    When I run the client 'board whoami' with no actor
+    When I run the client 'vh whoami' with no actor
     Then the exit code is 0
     And stdout line 1 matches "^you: agent:[^:]+:[0-9]+ \(key workstation\)  way back: pid [0-9]+ on .+, cwd .+  server ok$"
 
   Scenario: the BOARD_ names and the VH_ names answer whoami alike
-    When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only BOARD_ variables including a task "t-1"
+    When I run the client 'vh whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only BOARD_ variables including a task "t-1"
     Then the exit code is 0
     And stdout is exactly "you: claude@laptop (key workstation)  way back: claude --resume abc  server ok"
     And stderr is empty
-    When I run the client 'board whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only VH_ variables including a task "t-1"
+    When I run the client 'vh whoami' as actor "claude@laptop" with way back "claude --resume abc" setting only VH_ variables including a task "t-1"
     Then the exit code is 0
     And stdout is exactly "you: claude@laptop (key workstation)  way back: claude --resume abc  server ok"
     And stderr is empty

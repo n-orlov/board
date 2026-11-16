@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // DefaultPoll is the poll interval when VH_STREAM_POLL is unset.

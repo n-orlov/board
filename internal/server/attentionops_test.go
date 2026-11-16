@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 func TestAttentionAnswers503WithoutAStore(t *testing.T) {

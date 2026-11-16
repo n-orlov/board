@@ -3,7 +3,7 @@ package asks
 import (
 	"testing"
 
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func blockedOf(t *testing.T, e env, ref string) bool {

@@ -55,7 +55,7 @@ steps = steps_of(case)
 if steps.count("a passing step") != 3:
     sys.exit("ci/allure-smoke.sh: \"passes with tags\" should carry its 3 steps (Background first), report has %r" % steps)
 
-want = "https://github.com/n-orlov/board/issues/61"
+want = "https://github.com/n-orlov/village-hall/issues/61"
 links = [l.get("url") for l in case.get("links") or []]
 if want not in links:
     sys.exit("ci/allure-smoke.sh: \"passes with tags\" lacks the @gh-61 link %s, report has %r" % (want, links))

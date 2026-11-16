@@ -15,9 +15,9 @@ import (
 
 	_ "modernc.org/sqlite" // the driver the store registers, for the schema-version fixture
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/version"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/version"
 )
 
 func run(args ...string) (int, string, string) {
@@ -56,7 +56,7 @@ func TestServeRejectsUnknownMigrateMode(t *testing.T) {
 
 func envWith(kv map[string]string) Env { return func(k string) string { return kv[k] } }
 
-// serveRefusalBound is how long runServe waits for `board serve` to return.
+// serveRefusalBound is how long runServe waits for `vh serve` to return.
 // A refusal returns in milliseconds; the bound only turns a serve that started
 // serving instead into a failure.
 const serveRefusalBound = 10 * time.Second
@@ -64,7 +64,7 @@ const serveRefusalBound = 10 * time.Second
 // serveReadyBound is how long serveReady waits for the listener to answer.
 const serveReadyBound = 30 * time.Second
 
-// runServe runs `board serve` with env and returns its exit code and stderr.
+// runServe runs `vh serve` with env and returns its exit code and stderr.
 // Each caller expects serve to refuse and return at once. A serve that starts
 // serving instead stops only on SIGINT or SIGTERM, so without a bound the test
 // would block until the package's own timeout (gremlins sets that to 60 times
@@ -79,7 +79,7 @@ func runServe(t *testing.T, env Env) (int, string) {
 	case code := <-done:
 		return code, errb.String()
 	case <-time.After(serveRefusalBound):
-		t.Fatalf("board serve did not return within %v: it is serving instead of refusing", serveRefusalBound)
+		t.Fatalf("vh serve did not return within %v: it is serving instead of refusing", serveRefusalBound)
 		return 0, ""
 	}
 }
@@ -189,7 +189,7 @@ func TestServeUntilFailsWithOneLineOnABadDatabaseOrAddress(t *testing.T) {
 		"unusable address":     {sqliteURL(t), "not-an-address"},
 	} {
 		code, errs := serveRefused(t, tc.url, tc.addr, true)
-		if code != ExitError || !strings.HasPrefix(errs, "board: ") || strings.Count(errs, "\n") != 1 {
+		if code != ExitError || !strings.HasPrefix(errs, "vh: ") || strings.Count(errs, "\n") != 1 {
 			t.Errorf("%s: code=%d err=%q", name, code, errs)
 		}
 	}
@@ -292,11 +292,11 @@ func TestSweeperReportsAFailingJobOnStderr(t *testing.T) {
 	_ = st.Close()
 	stop := startSweeper(context.Background(), &errb, envWith(map[string]string{"BOARD_SWEEP_INTERVAL": "5ms"}), st)
 	deadline := time.Now().Add(3 * time.Second)
-	for !strings.Contains(errb.String(), "board: sweep:") && time.Now().Before(deadline) {
+	for !strings.Contains(errb.String(), "vh: sweep:") && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	stop()
-	if !strings.Contains(errb.String(), "board: sweep:") {
+	if !strings.Contains(errb.String(), "vh: sweep:") {
 		t.Fatalf("stderr %q", errb.String())
 	}
 }

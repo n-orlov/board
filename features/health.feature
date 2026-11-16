@@ -2,7 +2,7 @@ Feature: Liveness and readiness
   GET /healthz answers while the process is up and is the only route that needs
   no credential. GET /readyz needs an API key (and a Board-Actor header) and
   then answers 200 only when the database is reachable and migrated, and 503
-  otherwise. A key is made by `board admin keys create` on a migrated database.
+  otherwise. A key is made by `vh admin keys create` on a migrated database.
 
   Scenario: /healthz answers 200 without credentials
     Given the board server is running on a free port
@@ -16,8 +16,8 @@ Feature: Liveness and readiness
 
   Scenario: /readyz answers 200 with a key on a migrated store
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
     And I request GET "/readyz" with the remembered key
@@ -25,8 +25,8 @@ Feature: Liveness and readiness
 
   Scenario: /readyz answers 400 with a key and no Board-Actor header
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
     And I request GET "/readyz" with the remembered key and no Board-Actor header
@@ -46,8 +46,8 @@ Feature: Liveness and readiness
   @postgres @dedicated-database
   Scenario: /readyz answers 503 once the Postgres database is stopped
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
     And I request GET "/readyz" with the remembered key

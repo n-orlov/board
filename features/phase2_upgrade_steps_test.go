@@ -8,7 +8,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // phase1Head is the last migration the Phase 1 release shipped.

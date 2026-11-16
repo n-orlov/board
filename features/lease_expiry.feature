@@ -1,5 +1,5 @@
 Feature: Lease expiry by the sweeper and on read
-  board serve marks a live lease past its expiry as expired and writes one lease_expired event, in the
+  vh serve marks a live lease past its expiry as expired and writes one lease_expired event, in the
   background at BOARD_SWEEP_INTERVAL (default 15s; "off" turns the sweeper off). Every read that returns leases
   does the same first, so with the sweeper off GET /leases, GET /leases/{ref} and GET /tasks/{ref} still show a
   lease expired, and the event is written once however many reads follow. Expiry is made by backdating the
@@ -7,8 +7,8 @@ Feature: Lease expiry by the sweeper and on read
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
 
   Scenario: the sweeper expires a backdated lease within its interval and writes one event
@@ -25,7 +25,7 @@ Feature: Lease expiry by the sweeper and on read
     And exactly 1 lease_expired event exists for the lease "L1"
 
   Scenario: a malformed interval stops the server with one error line
-    When I run "board serve" with BOARD_SWEEP_INTERVAL=soon
+    When I run "vh serve" with BOARD_SWEEP_INTERVAL=soon
     Then the exit code is 1
     And stderr is exactly one line containing "VH_SWEEP_INTERVAL"
 

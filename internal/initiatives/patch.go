@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // EventUpdated is the type of the event an edit appends.

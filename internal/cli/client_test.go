@@ -105,7 +105,7 @@ func TestAPIErrorConflictKeepsOneLineNext(t *testing.T) {
 }
 
 func TestAPIErrorText(t *testing.T) {
-	if got := newAPIError(404, []byte(`{"title":"Not Found","detail":"initiative x not found","next":"board init ls"}`)).Error(); got != "initiative x not found → board init ls" {
+	if got := newAPIError(404, []byte(`{"title":"Not Found","detail":"initiative x not found","next":"vh init ls"}`)).Error(); got != "initiative x not found → vh init ls" {
 		t.Fatalf("got %q", got)
 	}
 	if got := newAPIError(400, []byte(`{"title":"Bad Request"}`)).Error(); got != "Bad Request" {
@@ -231,10 +231,10 @@ func TestAgo(t *testing.T) {
 
 func TestWithNextReplacesOnlyTheMatchingStatus(t *testing.T) {
 	err := error(&apiError{Status: 404, Detail: "gone", Next: "GET /x"})
-	if got := withNext(err, 404, "board init ls").Error(); got != "gone → board init ls" {
+	if got := withNext(err, 404, "vh init ls").Error(); got != "gone → vh init ls" {
 		t.Fatalf("got %q", got)
 	}
-	if got := withNext(err, 409, "board init ls"); !errors.Is(got, err) {
+	if got := withNext(err, 409, "vh init ls"); !errors.Is(got, err) {
 		t.Fatalf("a different status changed the error: %v", got)
 	}
 	plain := errors.New("boom")

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/tasks"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (e env) reasons(t *testing.T, q Query) Derivation {

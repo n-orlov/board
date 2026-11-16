@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/oidc"
-	"github.com/n-orlov/board/internal/oidc/oidctest"
+	"github.com/n-orlov/village-hall/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/oidc/oidctest"
 )
 
 const clientID, secret = "board", "s3cret"

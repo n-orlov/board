@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/n-orlov/board/internal/cli"
+	"github.com/n-orlov/village-hall/internal/cli"
 )
 
 // exit ends the process; a test replaces it.

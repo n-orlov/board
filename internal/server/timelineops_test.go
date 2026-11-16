@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/leases"
-	"github.com/n-orlov/board/internal/store"
-	"github.com/n-orlov/board/internal/timeline"
+	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/timeline"
 )
 
 func TestGetTimelineAnswers503WithoutItsStores(t *testing.T) {

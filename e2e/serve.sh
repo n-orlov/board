@@ -3,7 +3,7 @@
 # when it is missing, build the binary and the mock OIDC provider into $E2E_WORK,
 # migrate a fresh SQLite store there, and serve on $E2E_PORT, with browser login
 # against the mock provider, until Playwright stops this script. The
-# store holds no key: global-setup.ts mints one with `board admin keys create`
+# store holds no key: global-setup.ts mints one with `vh admin keys create`
 # once this server is up, and global-teardown.ts removes $E2E_WORK.
 set -eu
 
@@ -28,7 +28,7 @@ cd "$root"
 if [ ! -f internal/webui/dist/index.html ]; then
     (cd web && npm ci --no-audit --no-fund && npm run build) >&2
 fi
-go build -o "$work/board" ./cmd/board
+go build -o "$work/board" ./cmd/vh
 go build -o "$work/fake-oidc" ./cmd/fake-oidc
 
 # Only the variables this store needs: nothing from the caller's BOARD_* or VH_* leaks in.

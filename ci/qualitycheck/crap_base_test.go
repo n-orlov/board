@@ -21,7 +21,7 @@ func writeCrapConfig(t *testing.T, ceiling string) string {
 func oneBlockProfile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "coverage-merged.out")
-	seeded := "mode: set\ngithub.com/n-orlov/board/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
+	seeded := "mode: set\ngithub.com/n-orlov/village-hall/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
 	if err := os.WriteFile(path, []byte(seeded), 0o644); err != nil {
 		t.Fatal(err)
 	}

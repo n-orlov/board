@@ -9,8 +9,8 @@ Feature: GET /api/v1/now, the check-in
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port with BOARD_SWEEP_INTERVAL=off
     And I create the initiative "aa" titled "First" with no tags as actor "claude@laptop"

@@ -13,8 +13,8 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // markHold holds the write of an end's commit mark (end_commit_ns), which is

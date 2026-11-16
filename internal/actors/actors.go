@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/n-orlov/board/internal/audit"
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // ErrNegativeVersion is the error for a protocol version below 0.

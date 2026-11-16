@@ -52,7 +52,7 @@ func TestQualityShSeededFailingGateExitsNonZero(t *testing.T) {
 	// so this seed is guaranteed to fail without depending on any
 	// particular function in the tree.
 	seeded := "mode: set\n" +
-		"github.com/n-orlov/board/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
+		"github.com/n-orlov/village-hall/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
 	if err := os.WriteFile(filepath.Join(outdir, "coverage-merged.out"), []byte(seeded), 0o644); err != nil {
 		t.Fatalf("writing seeded profile: %v", err)
 	}
@@ -208,7 +208,7 @@ func runQualitySh(t *testing.T, outdir, configJSON string) (stdout, report strin
 }
 
 const seededOneBlockProfile = "mode: set\n" +
-	"github.com/n-orlov/board/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
+	"github.com/n-orlov/village-hall/ci/qualitycheck/main.go:1.1,1.1 0 0\n"
 
 // TestQualityShWritesReportOnSeededFailingGate: the report the job summary
 // shows (outdir/quality-report.txt) holds the failing gate's whole section

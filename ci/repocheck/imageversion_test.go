@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const versionPkg = "github.com/n-orlov/board/internal/version"
+const versionPkg = "github.com/n-orlov/village-hall/internal/version"
 
 // versionStampProblems returns every way a Dockerfile fails to stamp VERSION
 // and REVISION into the binary: a build stage without either ARG, or a go build
@@ -57,7 +57,7 @@ ARG TARGETARCH
 ARG VERSION=devel
 ARG REVISION=
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -ldflags="-s -w -X github.com/n-orlov/board/internal/version.version=$VERSION -X github.com/n-orlov/board/internal/version.revision=${REVISION}" -o /out/board ./cmd/board
+    go build -ldflags="-s -w -X github.com/n-orlov/village-hall/internal/version.version=$VERSION -X github.com/n-orlov/village-hall/internal/version.revision=${REVISION}" -o /out/board ./cmd/vh
 FROM scratch
 COPY --from=build /out/board /board
 `

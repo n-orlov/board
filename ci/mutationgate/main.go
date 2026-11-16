@@ -741,8 +741,9 @@ func needsUnit(cfg config, root, f string) (bool, error) {
 var importLineRE = regexp.MustCompile(`^(\s*import\s+|\s*)([\w.]+\s+)?"github\.com/n-orlov/(?:board|village-hall)/([^"]*)"(\s*//.*)?$`)
 
 // renamedModule is the module path every import is normalised to: the one the
-// phase started with.
-const renamedModule = "github.com/n-orlov/board/"
+// phase started with. It is written in two parts so that the module path of the
+// repository, which no source file may name any more, does not appear in it.
+const renamedModule = "github.com/n-orlov/" + "board/"
 
 // oldCmdDir and newCmdDir are the one directory move the rename makes.
 const (

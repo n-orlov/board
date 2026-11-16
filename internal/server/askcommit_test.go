@@ -13,8 +13,8 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/n-orlov/board/internal/asks"
-	"github.com/n-orlov/board/internal/audit"
+	"github.com/n-orlov/village-hall/internal/asks"
+	"github.com/n-orlov/village-hall/internal/audit"
 )
 
 // commitHold holds the COMMIT of the next transaction that moves an ask out of

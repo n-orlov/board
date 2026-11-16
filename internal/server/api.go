@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/n-orlov/board/api"
-	"github.com/n-orlov/board/internal/swaggerui"
+	"github.com/n-orlov/village-hall/api"
+	"github.com/n-orlov/village-hall/internal/swaggerui"
 )
 
 // readyTimeout bounds one readiness check.

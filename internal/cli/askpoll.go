@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// ExitTimeout is the exit code of `board ask --poll` when the deadline passes
+// ExitTimeout is the exit code of `vh ask --poll` when the deadline passes
 // with the ask still open (SPEC §8.1).
 const ExitTimeout = 3
 
@@ -172,7 +172,7 @@ func waitFetch(ctx context.Context, c *client, ref string) askFetch {
 
 // printPollEnd prints how the wait ended and returns the exit code: an answer
 // is `ok A<n> answered by <h>: <answer>` (0), a withdrawal `A<n> withdrawn`
-// with its reason (6), the deadline `A<n> still open → board ask show A<n>` (3).
+// with its reason (6), the deadline `A<n> still open → vh ask show A<n>` (3).
 // With --json the last ask is printed instead, with the same exit code.
 func printPollEnd(a askView, raw json.RawMessage, asJSON bool, stdout io.Writer) int {
 	code := pollExit(a.State)
@@ -206,5 +206,5 @@ func pollLine(a askView) string {
 		}
 		return a.Ref + " withdrawn"
 	}
-	return fmt.Sprintf("%s still open → board ask show %s", a.Ref, a.Ref)
+	return fmt.Sprintf("%s still open → vh ask show %s", a.Ref, a.Ref)
 }

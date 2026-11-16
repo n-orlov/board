@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/n-orlov/board/internal/attention"
+	"github.com/n-orlov/village-hall/internal/attention"
 )
 
 // AttentionRecheck is the longest a stream with the attention topic goes

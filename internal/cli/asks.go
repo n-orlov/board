@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// AskUsage is the single stderr line for a malformed `board ask` command line.
-const AskUsage = "usage: board ask <task> \"<question>\" [--details file|-] [--option a]... [--poll D | --stop] [--blocking] [--json] | show <A…> [--json] | ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json] | withdraw <A…> [\"<reason>\"] [--json]"
+// AskUsage is the single stderr line for a malformed `vh ask` command line.
+const AskUsage = "usage: vh ask <task> \"<question>\" [--details file|-] [--option a]... [--poll D | --stop] [--blocking] [--json] | show <A…> [--json] | ls [--state open|answered|withdrawn|all] [--mine] [--task ref] [--limit N|--all] [--json] | withdraw <A…> [\"<reason>\"] [--json]"
 
-// AnswerUsage is the single stderr line for a malformed `board answer` command line.
-const AnswerUsage = "usage: board answer <A…> \"<answer>\" [--relay] [--for <handle>] [--json]"
+// AnswerUsage is the single stderr line for a malformed `vh answer` command line.
+const AnswerUsage = "usage: vh answer <A…> \"<answer>\" [--relay] [--for <handle>] [--json]"
 
 // askStates are the values of --state of ask ls.
 var askStates = []string{"open", "answered", "withdrawn", "all"}
@@ -45,7 +45,7 @@ type askView struct {
 	EndedAt        string   `json:"ended_at"`
 }
 
-// askSubcommands are the words after `board ask` and what runs each; any
+// askSubcommands are the words after `vh ask` and what runs each; any
 // other first word starts a new ask.
 var askSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"show":     askShow,
@@ -53,7 +53,7 @@ var askSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"withdraw": askWithdraw,
 }
 
-// askCmd runs `board ask ...` against the server named by VH_URL.
+// askCmd runs `vh ask ...` against the server named by VH_URL.
 func askCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if len(args) > 0 {
 		if run, ok := askSubcommands[args[0]]; ok {
@@ -63,7 +63,7 @@ func askCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	return askRaise(args, stdout, stderr, env)
 }
 
-// askRaise runs `board ask <task> "<question>"`.
+// askRaise runs `vh ask <task> "<question>"`.
 func askRaise(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, askFlags)
 	if !ok || len(p.pos) != 2 {
@@ -137,9 +137,9 @@ func raiseFailure(task string) func(error) error {
 		}
 		switch ae.Status {
 		case http.StatusNotFound:
-			return withNext(err, ae.Status, "board task ls")
+			return withNext(err, ae.Status, "vh task ls")
 		case http.StatusConflict:
-			return conflictError(ae, "board task show "+strings.ToLower(task))
+			return conflictError(ae, "vh task show "+strings.ToLower(task))
 		}
 		return err
 	}
@@ -155,9 +155,9 @@ func askRefFailure(ref string) func(error) error {
 		}
 		switch ae.Status {
 		case http.StatusNotFound:
-			return withNext(err, ae.Status, "board ask ls")
+			return withNext(err, ae.Status, "vh ask ls")
 		case http.StatusConflict:
-			return conflictError(ae, "board ask show "+strings.ToUpper(ref))
+			return conflictError(ae, "vh ask show "+strings.ToUpper(ref))
 		}
 		return err
 	}
@@ -172,7 +172,7 @@ func askPath(ref, action string) string {
 	return path
 }
 
-// askWithdraw runs `board ask withdraw <A…> ["<reason>"]`.
+// askWithdraw runs `vh ask withdraw <A…> ["<reason>"]`.
 func askWithdraw(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, askDropFlags)
 	if !ok || len(p.pos) < 1 || len(p.pos) > 2 {
@@ -185,7 +185,7 @@ func askWithdraw(args []string, stdout, stderr io.Writer, env Env) int {
 	return askWrite(p, "POST", askPath(p.pos[0], "withdraw"), body, askRefFailure(p.pos[0]), "withdrawn", stdout, stderr, env)
 }
 
-// answerCmd runs `board answer <A…> "<answer>" [--relay] [--for <handle>]`.
+// answerCmd runs `vh answer <A…> "<answer>" [--relay] [--for <handle>]`.
 func answerCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, answerFlags)
 	if !ok || len(p.pos) != 2 || (p.has("--for") && !p.has("--relay")) {
@@ -201,7 +201,7 @@ func answerCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	return askWrite(p, "POST", askPath(p.pos[0], "answer"), body, askRefFailure(p.pos[0]), "answered", stdout, stderr, env)
 }
 
-// askShow runs `board ask show <A…>`.
+// askShow runs `vh ask show <A…>`.
 func askShow(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, askShowFlags)
 	if !ok || len(p.pos) != 1 {
@@ -229,7 +229,7 @@ func askShow(args []string, stdout, stderr io.Writer, env Env) int {
 	return ExitOK
 }
 
-// askQuery is what `board ask ls` asks the server for.
+// askQuery is what `vh ask ls` asks the server for.
 type askQuery struct {
 	state, task string
 	mine        bool
@@ -241,9 +241,9 @@ func askFilter(p parsedArgs) (askQuery, bool) {
 	return q, q.state == "" || slices.Contains(askStates, q.state)
 }
 
-// command is the `board ask ls` line that shows the same asks, with --all.
+// command is the `vh ask ls` line that shows the same asks, with --all.
 func (q askQuery) command() string {
-	cmd := "board ask ls"
+	cmd := "vh ask ls"
 	if q.state != "" {
 		cmd += " --state " + q.state
 	}
@@ -278,7 +278,7 @@ func askListArgs(p parsedArgs, parsed bool) (askQuery, int, bool) {
 	return filter, limit, parsed && okCap && okFilter && len(p.pos) == 0
 }
 
-// askLs runs `board ask ls`.
+// askLs runs `vh ask ls`.
 func askLs(args []string, stdout, stderr io.Writer, env Env) int {
 	p, ok := parseArgs(args, askLsFlags)
 	filter, limit, ok := askListArgs(p, ok)
@@ -293,7 +293,7 @@ func askLs(args []string, stdout, stderr io.Writer, env Env) int {
 	defer stop()
 	items, err := c.allPages(ctx, "/api/v1/asks", filter.values(c.id.Actor))
 	if err != nil {
-		return report(stderr, withNext(err, http.StatusNotFound, "board task ls"))
+		return report(stderr, withNext(err, http.StatusNotFound, "vh task ls"))
 	}
 	items, more := capItems(items, limit)
 	if p.has("--json") {

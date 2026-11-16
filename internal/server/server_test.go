@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/auth"
-	"github.com/n-orlov/board/internal/webui"
+	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/webui"
 )
 
 func ok(context.Context) error { return nil }

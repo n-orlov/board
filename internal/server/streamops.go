@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/n-orlov/board/internal/attention"
-	"github.com/n-orlov/board/internal/events"
-	"github.com/n-orlov/board/internal/feed"
+	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/events"
+	"github.com/n-orlov/village-hall/internal/feed"
 )
 
 // DefaultHeartbeat is the interval between `: ping` comments when

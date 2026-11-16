@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/n-orlov/board/internal/oidc"
+	"github.com/n-orlov/village-hall/internal/oidc"
 )
 
 func start(t *testing.T) *Provider {

@@ -3,7 +3,7 @@ package asks
 import (
 	"time"
 
-	"github.com/n-orlov/board/internal/domain"
+	"github.com/n-orlov/village-hall/internal/domain"
 )
 
 // AsOf is k as it stood at the instant at, by its commit mark alone: k itself

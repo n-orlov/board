@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/asks"
+	"github.com/n-orlov/village-hall/internal/asks"
 )
 
 func TestAskOperationsAnswer503WithoutAStore(t *testing.T) {

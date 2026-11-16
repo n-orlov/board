@@ -8,8 +8,8 @@ Feature: Editing an initiative over HTTP
 
   Background:
     Given a new database for the board commands
-    When I run "board admin migrate"
-    And I run "board admin keys create workstation"
+    When I run "vh admin migrate"
+    And I run "vh admin keys create workstation"
     And I remember the key stdout printed
     And the board server is running on a free port
     And I create the initiative with body "{'slug':'aa','title':'First','description':'one','tags':['work','home'],'target_start':'2026-03-01','target_end':'2026-04-01'}" as actor "claude@laptop"

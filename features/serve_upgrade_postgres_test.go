@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/n-orlov/board/internal/store"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // TestTwoServersStartedTogetherOnOnePostgresReopenATaskOnce is the two-server
-// case of the start-up upgrade (SPEC 4.3): two `board serve` processes start at
+// case of the start-up upgrade (SPEC 4.3): two `vh serve` processes start at
 // the same moment on a database holding a done task with a live lease, and the
 // conditional update lets exactly one of them reopen it and write its one
 // task_reopened event.
@@ -86,7 +86,7 @@ func waitListening(t *testing.T, addr string, logs *bytes.Buffer) {
 }
 
 // TestTwoServersStartedTogetherOnOnePostgresCreateOneInbox is the two-server
-// case of the inbox bootstrap (SPEC 4.2): two `board serve` processes start at
+// case of the inbox bootstrap (SPEC 4.2): two `vh serve` processes start at
 // the same moment on a migrated database with no inbox, and the unique slug
 // leaves one inbox initiative and one initiative_created event.
 func TestTwoServersStartedTogetherOnOnePostgresCreateOneInbox(t *testing.T) {

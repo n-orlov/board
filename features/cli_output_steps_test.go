@@ -13,7 +13,7 @@ import (
 // environment override: BOARD_URL set to url, or BOARD_API_KEY left out.
 func (h *harness) runClientWith(ctx context.Context, line, actor string, override func(extra []string) []string) error {
 	words := splitQuoted(line)
-	if len(words) == 0 || words[0] != "board" {
+	if len(words) == 0 || words[0] != "vh" {
 		return fmt.Errorf("command %q must start with board", line)
 	}
 	extra := override([]string{"BOARD_ACTOR=" + actor})

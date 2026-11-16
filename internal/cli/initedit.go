@@ -25,7 +25,7 @@ const maxDescriptionBytes = 4*20000 + 1
 
 var withinPattern = regexp.MustCompile(`^[1-9][0-9]*d?$`)
 
-// lsQuery is what `board init ls` asks the server for.
+// lsQuery is what `vh init ls` asks the server for.
 type lsQuery struct {
 	tags   []string
 	status string
@@ -64,10 +64,10 @@ func (q lsQuery) values() url.Values {
 	return v
 }
 
-// command is the `board init ls` line that shows the same initiatives, with
+// command is the `vh init ls` line that shows the same initiatives, with
 // --all, for the `+K more` line.
 func (q lsQuery) command() string {
-	cmd := "board init ls"
+	cmd := "vh init ls"
 	for _, t := range q.tags {
 		cmd += " --tag " + t
 	}
@@ -215,7 +215,7 @@ func patchInitiative(p parsedArgs, method, suffix string, body any, verb string,
 // writeFailure words the next action of a refused edit, close or reopen: an
 // unknown slug exits 4 and a 409 exits 6.
 func writeFailure(err error, slug, suffix string) error {
-	err = withNext(err, http.StatusNotFound, "board init ls")
+	err = withNext(err, http.StatusNotFound, "vh init ls")
 	var ae *apiError
 	if !errors.As(err, &ae) || ae.Status != http.StatusConflict {
 		return err
@@ -229,10 +229,10 @@ func writeFailure(err error, slug, suffix string) error {
 func conflictNext(ae *apiError, slug, suffix string) string {
 	switch {
 	case suffix == "/close" && strings.Contains(ae.Next, "force"):
-		return "board init close " + slug + " --force"
+		return "vh init close " + slug + " --force"
 	case suffix == "/close":
-		return "board init reopen " + slug
+		return "vh init reopen " + slug
 	default:
-		return "board init show " + slug
+		return "vh init show " + slug
 	}
 }
