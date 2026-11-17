@@ -715,7 +715,7 @@ leaves none, and nothing deletes or cancels a row afterwards.
 | created_at | timestamp | when the key was first used; a row older than 24 hours is stale |
 
 The Idempotency-Key rows (§6.1). A request claims its key with one insert that does nothing on a conflict, so two requests with
-one key never both run; the answer is stored, or the claim released, when the request ends. A row older than 24
+one key never both run; the answer is stored, or the claim released, when the request ends (a success whose answer cannot be stored keeps the claim, so it is never run twice). A row older than 24
 hours is replaced by the next use of its key and deleted by the sweeper (§5.1); the index on `created_at` is for that
 sweep. `00010_idempotency` creates it, with the same DDL on SQLite and Postgres, and is additive: no existing table
 changes.
@@ -940,7 +940,12 @@ event, the task, initiative, ask, lease and actor rows named above.
     receiving it finds the answer, never a running request.
   - A 5xx answer, or a request that panics, is not stored and releases the key: the retry runs the request again
     (the CLI's retry on 502, 503 or 504 relies on this). A server that stops between starting a request and
-    storing its answer leaves the key running until it is 24 hours old.
+    storing its answer leaves the key running until it is 24 hours old. A refusal below 500 whose answer cannot be
+    stored wrote nothing, so it releases the key too.
+  - A success (below 400) is answered only once its answer is stored, so its status, body and replay state are one
+    durable outcome. When storing it fails the effect has already committed: the key stays held, the client gets a 503
+    with a `next` (do not resend with a new key; the request is done), and every retry with that key within 24 hours
+    is 409, never a second run and never a new row of any kind.
   - A key older than 24 hours counts as new, whether or not the sweeper has deleted its row yet. The sweeper
     (§5.1) deletes the rows older than 24 hours on each `VH_SWEEP_INTERVAL` tick.
   - A request without the header behaves as always. The header on a request that is not a `POST` under `/api/v1`

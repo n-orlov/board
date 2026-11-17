@@ -132,17 +132,32 @@ func (s Store) existing(ctx context.Context, r Request, id string) (Outcome, Ans
 	return Replay, Answer{Status: int(status.Int64), ContentType: contentType.String, Body: plain}, nil
 }
 
-// Complete stores the answer to the request that holds the key.
+// ErrNotHeld is what Complete returns for a key the caller does not hold: its
+// row is gone or already answered, so no answer was stored.
+var ErrNotHeld = errors.New("the idempotency key is not held")
+
+// Complete stores the answer to the request that holds the key. It returns
+// ErrNotHeld when there is no running row to store it in.
 func (s Store) Complete(ctx context.Context, r Request, a Answer) error {
 	sealed, err := seal(r, a.Body)
 	if err != nil {
 		return err
 	}
-	_, err = s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
+	res, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
 		`UPDATE idempotency_keys SET state = 'done', status = ?, content_type = ?, body = ?
 		 WHERE principal = ? AND key_hash = ? AND state = 'running'`),
 		a.Status, a.ContentType, sealed, r.Principal, hash(r.Principal, r.Key))
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotHeld
+	}
+	return nil
 }
 
 // Release gives the key up, for a request that failed before it answered: the

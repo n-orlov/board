@@ -653,3 +653,126 @@ func TestOnlyAPostUnderAPIV1IsInScope(t *testing.T) {
 		}
 	}
 }
+
+// failAnswers makes every write of a replay answer (the update that marks a key
+// done) fail in the database itself, on either leg, and returns the function
+// that lifts the fault.
+func failAnswers(t *testing.T, w *idemWorld) (lift func()) {
+	t.Helper()
+	var set, unset []string
+	if w.st.Dialect().Name() == "postgres" {
+		set = []string{
+			`CREATE FUNCTION idem_fail() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'injected answer failure'; END $$ LANGUAGE plpgsql`,
+			`CREATE TRIGGER idem_fail BEFORE UPDATE ON idempotency_keys FOR EACH ROW WHEN (NEW.state = 'done') EXECUTE FUNCTION idem_fail()`,
+		}
+		unset = []string{`DROP TRIGGER idem_fail ON idempotency_keys`, `DROP FUNCTION idem_fail()`}
+	} else {
+		set = []string{`CREATE TRIGGER idem_fail BEFORE UPDATE ON idempotency_keys WHEN NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'injected answer failure'); END`}
+		unset = []string{`DROP TRIGGER idem_fail`}
+	}
+	run := func(stmts []string) {
+		for _, q := range stmts {
+			if _, err := w.st.Writer().ExecContext(context.Background(), q); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+	}
+	run(set)
+	return func() { run(unset) }
+}
+
+func TestAnAnswerThatCannotBeStoredNeverAdmitsASecondRunOfACommittedWrite(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		w := newIdemWorld(t, dbs)
+		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
+		lift := failAnswers(t, w)
+		path, body := "/api/v1/tasks", `{"initiative":"aa","title":"once"}`
+		tasks, events := w.count("tasks"), w.count("events")
+		first := w.post(path, body, "claude@host", "k1")
+		if first.Code != http.StatusServiceUnavailable || first.Header().Get(ReplayedHeader) != "" || strings.Contains(first.Body.String(), `"ref"`) {
+			t.Fatalf("send with an answer that cannot be stored = %d %s, want a 503 that is not the success", first.Code, first.Body)
+		}
+		if doc := decode(t, first); doc["next"] == nil || doc["next"] == "" {
+			t.Errorf("the 503 has no next: %s", first.Body)
+		}
+		if w.count("tasks") != tasks+1 || w.count("events") != events+1 {
+			t.Fatalf("the first send wrote %d tasks and %d events, want 1 and 1", w.count("tasks")-tasks, w.count("events")-events)
+		}
+		// Retries with the key, while the fault lasts and after it is lifted,
+		// are never a new run: 409, and no further row of any kind.
+		for step, fix := range []func(){func() {}, lift} {
+			fix()
+			for i := 0; i < 2; i++ {
+				retry := w.post(path, body, "claude@host", "k1")
+				if retry.Code != http.StatusConflict || retry.Header().Get(ReplayedHeader) != "" {
+					t.Errorf("retry %d of step %d = %d %s, want 409", i, step, retry.Code, retry.Body)
+				}
+			}
+		}
+		if w.count("tasks") != tasks+1 || w.count("events") != events+1 {
+			t.Errorf("retries wrote %d tasks and %d events in all, want 1 and 1", w.count("tasks")-tasks, w.count("events")-events)
+		}
+		// Another principal's use of the key, and another key, are new requests.
+		other := w.call(w.otherToken, http.MethodPost, path, body, "claude@host", "k1")
+		fresh := w.post(path, body, "claude@host", "k2")
+		if other.Code != http.StatusCreated || fresh.Code != http.StatusCreated || w.count("tasks") != tasks+3 {
+			t.Errorf("other principal %d, new key %d, tasks +%d, want 201, 201 and +3", other.Code, fresh.Code, w.count("tasks")-tasks)
+		}
+		// With the fault lifted ordinary replay still works for the new key.
+		again := w.post(path, body, "claude@host", "k2")
+		if again.Code != http.StatusCreated || again.Header().Get(ReplayedHeader) != "true" || again.Body.String() != fresh.Body.String() || w.count("tasks") != tasks+3 {
+			t.Errorf("replay after the fault = %d %s (%q), want %d %s replayed", again.Code, again.Body, again.Header().Get(ReplayedHeader), fresh.Code, fresh.Body)
+		}
+	})
+}
+
+func TestAnAnswerThatCannotBeStoredHoldsTheKeyForEveryKindOfSuccess(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		w := newIdemWorld(t, dbs)
+		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
+		ref := w.newTask("to close")
+		lift := failAnswers(t, w)
+		cases := []struct{ name, path, body string }{
+			{"note", "/api/v1/notes", fmt.Sprintf(`{"summary":"hello about %s"}`, ref)},
+			{"done", "/api/v1/tasks/" + ref + "/done", ""},
+		}
+		for i, c := range cases {
+			key := fmt.Sprintf("held-%d", i)
+			events := w.count("events")
+			first := w.post(c.path, c.body, "claude@host", key)
+			wrote := w.count("events") - events
+			retry := w.post(c.path, c.body, "claude@host", key)
+			if first.Code != http.StatusServiceUnavailable || wrote == 0 {
+				t.Errorf("%s: first = %d %s with %d events, want a 503 after the write committed", c.name, first.Code, first.Body, wrote)
+			}
+			if retry.Code != http.StatusConflict || w.count("events")-events != wrote {
+				t.Errorf("%s: retry = %d %s, events +%d, want 409 and +%d", c.name, retry.Code, retry.Body, w.count("events")-events, wrote)
+			}
+		}
+		lift()
+	})
+}
+
+func TestARefusalThatCannotBeStoredWroteNothingSoItsKeyIsReleased(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		w := newIdemWorld(t, dbs)
+		lift := failAnswers(t, w)
+		first := w.post("/api/v1/tasks/aa-9/done", "", "claude@host", "gone")
+		if first.Code != http.StatusNotFound || first.Header().Get(ReplayedHeader) != "" || w.count("idempotency_keys") != 0 {
+			t.Fatalf("refusal with the fault = %d %s, %d keys, want the 404 and the key released", first.Code, first.Body, w.count("idempotency_keys"))
+		}
+		lift()
+		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
+		for i := 0; i < 9; i++ {
+			w.newTask("t")
+		}
+		retry := w.post("/api/v1/tasks/aa-9/done", "", "claude@host", "gone")
+		replay := w.post("/api/v1/tasks/aa-9/done", "", "claude@host", "gone")
+		if retry.Code != http.StatusOK || replay.Code != http.StatusOK || replay.Header().Get(ReplayedHeader) != "true" || replay.Body.String() != retry.Body.String() {
+			t.Errorf("retry = %d %s, replay = %d %s (%q), want the run and then its replay", retry.Code, retry.Body, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader))
+		}
+	})
+}

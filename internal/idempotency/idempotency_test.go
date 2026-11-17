@@ -3,6 +3,7 @@ package idempotency
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -226,8 +227,8 @@ func TestFingerprintSeparatesMethodTargetActorAndBody(t *testing.T) {
 
 func TestCompleteOfAnUnclaimedKeyWritesNothing(t *testing.T) {
 	e := newEnv(t)
-	if err := e.Complete(ctx, req, Answer{Status: 200}); err != nil || e.rows(t) != 0 {
-		t.Errorf("Complete without a claim = %v with %d rows", err, e.rows(t))
+	if err := e.Complete(ctx, req, Answer{Status: 200}); !errors.Is(err, ErrNotHeld) || e.rows(t) != 0 {
+		t.Errorf("Complete without a claim = %v with %d rows, want ErrNotHeld and none", err, e.rows(t))
 	}
 }
 
@@ -267,5 +268,20 @@ func TestTheStoreReadsTheSystemClockWhenNoneIsSet(t *testing.T) {
 	}
 	if n, err := s.DeleteExpired(ctx); err != nil || n != 0 {
 		t.Errorf("DeleteExpired of a fresh row = %d, %v, want 0", n, err)
+	}
+}
+
+func TestCompleteOfAnAnsweredKeyIsNotHeldAndKeepsTheFirstAnswer(t *testing.T) {
+	e := newEnv(t)
+	claim(t, e, req)
+	first := Answer{Status: 201, ContentType: "application/json", Body: []byte(`{"n":1}`)}
+	if err := e.Complete(ctx, req, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Complete(ctx, req, Answer{Status: 200, Body: []byte(`{"n":2}`)}); !errors.Is(err, ErrNotHeld) {
+		t.Fatalf("second Complete = %v, want ErrNotHeld", err)
+	}
+	if o, got := claim(t, e, req); o != Replay || got.Status != 201 || !bytes.Equal(got.Body, first.Body) {
+		t.Errorf("claim = %v %+v, want the first answer replayed", o, got)
 	}
 }

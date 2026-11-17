@@ -114,13 +114,17 @@ func serveIdempotent(next http.Handler, st *idempotency.Store, principal, actor,
 
 // runClaimed runs the request that holds the key, holding its response back
 // until the answer is stored so that a retry sent on receiving it finds the
-// answer and not a running request.
+// answer and not a running request. The answer is the outcome: a success is
+// returned only once its answer is stored. When storing it fails, the request
+// has already committed its effect, so the key stays held (a retry is then 409,
+// never a second run) and the client is told with a 503. A refusal that cannot
+// be stored wrote nothing, so its key is released, as a 5xx or a panic does.
 func runClaimed(next http.Handler, st *idempotency.Store, req idempotency.Request, w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
 	held := &heldResponse{header: http.Header{}}
-	stored := false
+	keep := false
 	defer func() {
-		if !stored {
+		if !keep {
 			_ = st.Release(ctx, req)
 		}
 	}()
@@ -128,7 +132,13 @@ func runClaimed(next http.Handler, st *idempotency.Store, req idempotency.Reques
 	status := held.code()
 	contentType := held.header.Get("Content-Type")
 	if status < http.StatusInternalServerError {
-		stored = st.Complete(ctx, req, idempotency.Answer{Status: status, ContentType: contentType, Body: held.body.Bytes()}) == nil
+		err := st.Complete(ctx, req, idempotency.Answer{Status: status, ContentType: contentType, Body: held.body.Bytes()})
+		keep = err == nil || status < http.StatusBadRequest
+		if err != nil && keep {
+			writeProblemNext(w, http.StatusServiceUnavailable, "the request was carried out but its answer could not be stored",
+				"Do not send it again with a new Idempotency-Key: it is done. Read the state it changed to see the result.")
+			return
+		}
 	}
 	deliver(w, status, contentType, held.body.Bytes())
 }
