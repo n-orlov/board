@@ -927,3 +927,38 @@ func TestUnmeasuredFlagsAnImportWhoseTailChanged(t *testing.T) {
 		t.Fatalf("unmeasured = %v, want %v", got, want)
 	}
 }
+
+// R15: blank, dot and backquoted import specs are real imports, so rewriting
+// their module path is only the rename.
+func TestUnmeasuredIgnoresRewrittenBlankDotAndBackquotedImports(t *testing.T) {
+	oldImps := "import (\n\t_ \"github.com/n-orlov/" + "board/internal/a\"\n\t. \"github.com/n-orlov/" + "board/internal/b\"\n\t`github.com/n-orlov/" + "board/internal/c`\n)"
+	newImps := "import (\n\t_ \"github.com/n-orlov/village-hall/internal/a\"\n\t. \"github.com/n-orlov/village-hall/internal/b\"\n\t`github.com/n-orlov/village-hall/internal/c`\n)"
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": src("package x\n\n" + oldImps + "\n")},
+		map[string]*string{"internal/a/a.go": src("package x\n\n" + newImps + "\n")})
+	if len(got) != 0 {
+		t.Fatalf("rename-only imports were flagged: %v", got)
+	}
+}
+
+// R15: a changed raw-string value in a file moved from cmd/board/ to cmd/vh/
+// is a change, though the move itself and its imports are discounted.
+func TestUnmeasuredFlagsAChangedRawStringInTheMovedCmdFile(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"cmd/board/main.go": goFile(oldImport, rawOld+"\nfunc main() {}")},
+		map[string]*string{"cmd/board/main.go": nil, "cmd/vh/main.go": goFile(newImport, rawNew+"\nfunc main() {}")})
+	if want := []string{"cmd/vh/main.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
+
+// R15: an import under a module that merely shares the village-hall prefix is
+// not the renamed module, so it is a change.
+func TestUnmeasuredFlagsAnImportOfALookalikeModule(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(`import "github.com/n-orlov/village-hallway/x"`, "var V = x.X")},
+		map[string]*string{"internal/a/a.go": goFile(`import "github.com/n-orlov/village-hall/x"`, "var V = x.X")})
+	if want := []string{"internal/a/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
