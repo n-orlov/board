@@ -608,6 +608,10 @@ func TestInstallShRefusesANonLoopbackHTTPOverride(t *testing.T) {
 			"http://[::1]x", "http://[::1]:80@[::2]", "http://localhost:80:90", "http://127.0.0.1:", "http://localhost:8a",
 			"http://LOCALHOST:80", "http://127.0.0.1 @example.com", "http://[::1", "http://::1", "http://127.1",
 			"http://0.0.0.0:80", "http://localhost%2540example.com", "http://[::1]%25x",
+			// malformed port: outside 1-65535, however many digits or leading zeros it has
+			"http://localhost:65536/path", "http://[::1]:65536/path", "http://127.0.0.1:9999999999999999999999/path",
+			"http://localhost:99999", "http://127.0.0.1:0", "http://[::1]:000", "http://localhost:100000/x",
+			"http://[::1]:0065536", "http://localhost:4294967376", "http://127.0.0.1:18446744073709551697",
 		} {
 			t.Run(variable+"="+url, func(t *testing.T) {
 				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{variable + "=" + url}})
@@ -647,6 +651,7 @@ func TestInstallShAcceptsEveryLoopbackAuthorityForm(t *testing.T) {
 	for _, url := range []string{
 		"http://127.0.0.1", "http://127.0.0.1:1", "http://127.0.0.1:1/", "http://127.0.0.1/x",
 		"http://localhost", "http://localhost:1", "http://localhost:1/x", "http://[::1]", "http://[::1]:1/x",
+		"http://localhost:65535", "http://127.0.0.1:00001/x", "http://[::1]:0001",
 		"https://example.com", "https://127.0.0.1:1", "https://user@example.com",
 	} {
 		for _, variable := range []string{"VH_API_URL", "VH_DOWNLOAD_URL"} {

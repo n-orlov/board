@@ -40,7 +40,7 @@ trap 'exit 1' INT TERM
 die() { echo "vh install: $*" >&2; exit 1; }
 
 # base_ok accepts an https:// URL, or an http:// URL whose parsed authority is a loopback
-# host: exactly 127.0.0.1, localhost or [::1], no userinfo, and a numeric port if any.
+# host: exactly 127.0.0.1, localhost or [::1], no userinfo, and a port, if any, of 1-65535.
 base_ok() {
   case $1 in
     https://?*) return 0 ;;
@@ -64,7 +64,13 @@ base_ok() {
   case $port in
     '' | *[!0-9]*) return 1 ;;
   esac
-  return 0
+  while :; do # drop leading zeros, so the length test below bounds the value
+    case $port in
+      0?*) port=${port#0} ;;
+      *) break ;;
+    esac
+  done
+  [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
 }
 base_ok "$api_base" || die "VH_API_URL '$api_base' is refused: only https is allowed (http only for 127.0.0.1, localhost or [::1])"
 base_ok "$dl_base" || die "VH_DOWNLOAD_URL '$dl_base' is refused: only https is allowed (http only for 127.0.0.1, localhost or [::1])"
