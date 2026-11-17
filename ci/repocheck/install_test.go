@@ -608,6 +608,8 @@ func TestInstallShRefusesANonLoopbackHTTPOverride(t *testing.T) {
 			"http://[::1]x", "http://[::1]:80@[::2]", "http://localhost:80:90", "http://127.0.0.1:", "http://localhost:8a",
 			"http://LOCALHOST:80", "http://127.0.0.1 @example.com", "http://[::1", "http://::1", "http://127.1",
 			"http://0.0.0.0:80", "http://localhost%2540example.com", "http://[::1]%25x",
+			// loopback text after the authority's end (query or fragment) does not make the host loopback
+			"http://example.com?@localhost", "http://example.com#127.0.0.1", "http://example.com/?h=[::1]",
 			// malformed port: outside 1-65535, however many digits or leading zeros it has
 			"http://localhost:65536/path", "http://[::1]:65536/path", "http://127.0.0.1:9999999999999999999999/path",
 			"http://localhost:99999", "http://127.0.0.1:0", "http://[::1]:000", "http://localhost:100000/x",
@@ -652,6 +654,7 @@ func TestInstallShAcceptsEveryLoopbackAuthorityForm(t *testing.T) {
 		"http://127.0.0.1", "http://127.0.0.1:1", "http://127.0.0.1:1/", "http://127.0.0.1/x",
 		"http://localhost", "http://localhost:1", "http://localhost:1/x", "http://[::1]", "http://[::1]:1/x",
 		"http://localhost:65535", "http://127.0.0.1:00001/x", "http://[::1]:0001",
+		"http://localhost?x=1", "http://127.0.0.1:8080#frag", "http://[::1]/p?q=@example.com",
 		"https://example.com", "https://127.0.0.1:1", "https://user@example.com",
 	} {
 		for _, variable := range []string{"VH_API_URL", "VH_DOWNLOAD_URL"} {
