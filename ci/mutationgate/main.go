@@ -53,6 +53,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -735,11 +737,6 @@ func needsUnit(cfg config, root, f string) (bool, error) {
 	return !generated, err
 }
 
-// importLineRE matches one import spec line of a Go file that names a package
-// of the module, under its old path or its new one: an optional "import ", an
-// optional alias, the quoted path, an optional trailing comment.
-var importLineRE = regexp.MustCompile(`^(\s*import\s+|\s*)([\w.]+\s+)?"github\.com/n-orlov/(?:board|village-hall)/([^"]*)"(\s*//.*)?$`)
-
 // renamedModule is the module path every import is normalised to: the one the
 // phase started with. It is written in two parts so that the module path of the
 // repository, which no source file may name any more, does not appear in it.
@@ -751,17 +748,37 @@ const (
 	newCmdDir = "cmd/vh/"
 )
 
-// normaliseImports rewrites each import spec line of src to the module path
-// the phase started with, so a file that differs only by the rename reads the
-// same as its base. A line that is not an import spec is left as it is.
+// newModule is the module path the rename moved the repository to, written in
+// two parts for the same reason as renamedModule.
+const newModule = "github.com/n-orlov/" + "village-hall/"
+
+// normaliseImports rewrites, in src, the path of each real Go import
+// declaration that names a package of the renamed module back to the path the
+// phase started with, so a file that differs only by the rename reads the same
+// as its base. Only the parsed import specs are touched: a line inside a
+// string literal or a comment that merely looks like an import stays as it is,
+// and so does every other byte. Source that does not parse is returned as it
+// is.
 func normaliseImports(src string) string {
-	lines := strings.Split(src, "\n")
-	for i, l := range lines {
-		if m := importLineRE.FindStringSubmatch(l); m != nil {
-			lines[i] = m[1] + m[2] + "\"" + renamedModule + m[3] + "\"" + m[4]
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ImportsOnly)
+	if err != nil {
+		return src
+	}
+	out := src
+	for i := len(f.Imports) - 1; i >= 0; i-- {
+		lit := f.Imports[i].Path
+		start := fset.Position(lit.Pos()).Offset
+		end := fset.Position(lit.End()).Offset
+		val := src[start:end]
+		if len(val) < 2 {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(val[1:len(val)-1], newModule); ok {
+			out = out[:start] + val[:1] + renamedModule + rest + val[len(val)-1:] + out[end:]
 		}
 	}
-	return strings.Join(lines, "\n")
+	return out
 }
 
 // baseCounterpart is the path f had at the phase base: the same path, except
@@ -792,7 +809,7 @@ func unchangedModuloRename(root, base, f string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return normaliseImports(string(cur)) == normaliseImports(string(old)), nil
+	return normaliseImports(string(cur)) == string(old), nil
 }
 
 // isGenerated reports whether the Go file at path carries the generated-code

@@ -867,3 +867,63 @@ func TestUnmeasuredFlagsAnUnrelatedMove(t *testing.T) {
 		t.Fatalf("unmeasured = %v, want %v", got, want)
 	}
 }
+
+const (
+	rawOld = "var Doc = `\n\t\"github.com/n-orlov/" + "board/internal/domain\"\n`"
+	rawNew = "var Doc = `\n\t\"github.com/n-orlov/village-hall/internal/domain\"\n`"
+)
+
+// R15: an import-looking line inside a raw string is data, so changing its
+// module path is a change even when the file's real imports are rewritten.
+func TestUnmeasuredFlagsAChangedRawStringValue(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, rawOld)},
+		map[string]*string{"internal/a/a.go": goFile(newImport, rawNew)})
+	if want := []string{"internal/a/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
+
+// R15: the same applies to a changed value in a comment, an interpreted string
+// and a file with no real import at all.
+func TestUnmeasuredFlagsImportLookingTextThatChanged(t *testing.T) {
+	cases := map[string][2]string{
+		"comment":     {"// \"github.com/n-orlov/" + "board/x\"\nvar V = 1", "// \"github.com/n-orlov/village-hall/x\"\nvar V = 1"},
+		"interpreted": {"var V = \"github.com/n-orlov/" + "board/x\"", "var V = \"github.com/n-orlov/village-hall/x\""},
+		"no import":   {"var V = `\n\"github.com/n-orlov/" + "board/x\"\n`", "var V = `\n\"github.com/n-orlov/village-hall/x\"\n`"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := unmeasuredAfterRename(t,
+				map[string]*string{"internal/a/a.go": src("package x\n\n" + c[0] + "\n")},
+				map[string]*string{"internal/a/a.go": src("package x\n\n" + c[1] + "\n")})
+			if want := []string{"internal/a/a.go"}; !slices.Equal(got, want) {
+				t.Fatalf("unmeasured = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// R15: a raw string that holds import-looking text unchanged, beside a real
+// rewritten import, is still only the rename; so are grouped and aliased
+// imports.
+func TestUnmeasuredIgnoresRewrittenGroupedAndAliasedImports(t *testing.T) {
+	oldGroup := "import (\n\tfoo \"github.com/n-orlov/" + "board/internal/foo\" // the foo\n\t\"fmt\"\n\t\"github.com/n-orlov/" + "board/internal/bar\"\n)"
+	newGroup := "import (\n\tfoo \"github.com/n-orlov/village-hall/internal/foo\" // the foo\n\t\"fmt\"\n\t\"github.com/n-orlov/village-hall/internal/bar\"\n)"
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": src("package x\n\n" + oldGroup + "\n\n" + rawOld + "\n"), "internal/b/b.go": src("package x\n\n" + oldGroup + "\n")},
+		map[string]*string{"internal/a/a.go": src("package x\n\n" + newGroup + "\n\n" + rawOld + "\n"), "internal/b/b.go": src("package x\n\n" + newGroup + "\n")})
+	if len(got) != 0 {
+		t.Fatalf("rename-only files were flagged: %v", got)
+	}
+}
+
+// R15: an import whose path changes by more than the module prefix is a change.
+func TestUnmeasuredFlagsAnImportWhoseTailChanged(t *testing.T) {
+	got := unmeasuredAfterRename(t,
+		map[string]*string{"internal/a/a.go": goFile(oldImport, "var V = domain.X")},
+		map[string]*string{"internal/a/a.go": goFile(`import "github.com/n-orlov/village-hall/internal/other"`, "var V = domain.X")})
+	if want := []string{"internal/a/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("unmeasured = %v, want %v", got, want)
+	}
+}
