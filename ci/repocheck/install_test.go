@@ -808,6 +808,31 @@ func TestEveryInstallerRunWithAnExternalBaseNeverReachesTheNetwork(t *testing.T)
 	}
 }
 
+func TestInstallerRunsWithoutAnyBaseOverrideNeverReachTheNetwork(t *testing.T) {
+	// The production defaults (no VH_API_URL, no VH_DOWNLOAD_URL), alone and combined
+	// with a pinned version or the immutability opt-out, are recorded as blocked
+	// https destinations and never requested.
+	for name, env := range map[string][]string{
+		"defaults":           nil,
+		"pinned version":     {"VH_VERSION=v1.4.0"},
+		"immutable opt-out":  {"VH_REQUIRE_IMMUTABLE=0"},
+		"pinned and opt-out": {"VH_VERSION=v1.4.0", "VH_REQUIRE_IMMUTABLE=0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: env})
+			if run.code == 0 || len(run.blocked) == 0 {
+				t.Fatalf("exit %d, blocked %q: want a failure at the stub's refusal", run.code, run.blocked)
+			}
+			for _, b := range run.blocked {
+				if !strings.HasPrefix(b, "https://") {
+					t.Fatalf("blocked %q is not an https URL", b)
+				}
+			}
+			run.nothingInstalled(t)
+		})
+	}
+}
+
 func TestInstallShSendsNoCredential(t *testing.T) {
 	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv})
