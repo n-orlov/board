@@ -233,16 +233,16 @@ func (s Store) read(ctx context.Context, q queryer, ref, lock string) (Task, err
 // Get returns the task whose ref (`<slug>-<seq>`) or ULID is ref, in either
 // letter case, or ErrNotFound.
 func (s Store) Get(ctx context.Context, ref string) (Task, error) {
-	return s.find(ctx, s.Store.Reader(), ref)
+	return s.find(ctx, s.Store.ReaderFor(ctx), ref)
 }
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
 func (s Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
-	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := f(tx); err != nil {
+	if err := f(tx.Tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

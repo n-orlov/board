@@ -20,6 +20,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/auth"
 	"github.com/n-orlov/village-hall/internal/idempotency"
 	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // idemWorld is a key server with a second principal, "other", and helpers that
@@ -654,20 +655,38 @@ func TestOnlyAPostUnderAPIV1IsInScope(t *testing.T) {
 	}
 }
 
+// answerFault is how the write of a replay answer fails: raised fails the
+// statement with an error, and silent drops the update without one, so that
+// it changes no row.
+type answerFault string
+
+const (
+	raisedFault answerFault = "raised"
+	silentFault answerFault = "silent"
+)
+
 // failAnswers makes every write of a replay answer (the update that marks a key
-// done) fail in the database itself, on either leg, and returns the function
-// that lifts the fault.
-func failAnswers(t *testing.T, w *idemWorld) (lift func()) {
+// done) fail in the database itself, on either leg, the way fault says, and
+// returns the function that lifts the fault.
+func failAnswers(t *testing.T, w *idemWorld, fault answerFault) (lift func()) {
 	t.Helper()
 	var set, unset []string
 	if w.st.Dialect().Name() == "postgres" {
+		body := `RAISE EXCEPTION 'injected answer failure'`
+		if fault == silentFault {
+			body = `RETURN NULL`
+		}
 		set = []string{
-			`CREATE FUNCTION idem_fail() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'injected answer failure'; END $$ LANGUAGE plpgsql`,
+			`CREATE FUNCTION idem_fail() RETURNS trigger AS $$ BEGIN ` + body + `; END $$ LANGUAGE plpgsql`,
 			`CREATE TRIGGER idem_fail BEFORE UPDATE ON idempotency_keys FOR EACH ROW WHEN (NEW.state = 'done') EXECUTE FUNCTION idem_fail()`,
 		}
 		unset = []string{`DROP TRIGGER idem_fail ON idempotency_keys`, `DROP FUNCTION idem_fail()`}
 	} else {
-		set = []string{`CREATE TRIGGER idem_fail BEFORE UPDATE ON idempotency_keys WHEN NEW.state = 'done' BEGIN SELECT RAISE(ABORT, 'injected answer failure'); END`}
+		raise := `RAISE(ABORT, 'injected answer failure')`
+		if fault == silentFault {
+			raise = `RAISE(IGNORE)`
+		}
+		set = []string{`CREATE TRIGGER idem_fail BEFORE UPDATE ON idempotency_keys WHEN NEW.state = 'done' BEGIN SELECT ` + raise + `; END`}
 		unset = []string{`DROP TRIGGER idem_fail`}
 	}
 	run := func(stmts []string) {
@@ -681,77 +700,141 @@ func failAnswers(t *testing.T, w *idemWorld) (lift func()) {
 	return func() { run(unset) }
 }
 
-func TestAnAnswerThatCannotBeStoredNeverAdmitsASecondRunOfACommittedWrite(t *testing.T) {
+// notCarriedOut checks that rec is the 503 of a request whose answer could not
+// be stored: no success, no replay, and a next that says to send it again.
+func notCarriedOut(t *testing.T, what string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get(ReplayedHeader) != "" {
+		t.Errorf("%s = %d %s (%s %q), want a 503 that is not a replay", what, rec.Code, rec.Body, ReplayedHeader, rec.Header().Get(ReplayedHeader))
+		return
+	}
+	if doc := decode(t, rec); doc["next"] == nil || doc["next"] == "" {
+		t.Errorf("%s: the 503 has no next: %s", what, rec.Body)
+	}
+}
+
+func TestEveryWritingPostWhoseAnswerCannotBeStoredWritesNothingAndItsRetryRunsOnceThenReplays(t *testing.T) {
 	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newIdemWorld(t, dbs)
 		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
-		lift := failAnswers(t, w)
-		path, body := "/api/v1/tasks", `{"initiative":"aa","title":"once"}`
-		tasks, events := w.count("tasks"), w.count("events")
-		first := w.post(path, body, "claude@host", "k1")
-		if first.Code != http.StatusServiceUnavailable || first.Header().Get(ReplayedHeader) != "" || strings.Contains(first.Body.String(), `"ref"`) {
-			t.Fatalf("send with an answer that cannot be stored = %d %s, want a 503 that is not the success", first.Code, first.Body)
+		ops := make([]string, 0, len(idemCases))
+		for op := range idemCases {
+			ops = append(ops, op)
 		}
-		if doc := decode(t, first); doc["next"] == nil || doc["next"] == "" {
-			t.Errorf("the 503 has no next: %s", first.Body)
-		}
-		if w.count("tasks") != tasks+1 || w.count("events") != events+1 {
-			t.Fatalf("the first send wrote %d tasks and %d events, want 1 and 1", w.count("tasks")-tasks, w.count("events")-events)
-		}
-		// Retries with the key, while the fault lasts and after it is lifted,
-		// are never a new run: 409, and no further row of any kind.
-		for step, fix := range []func(){func() {}, lift} {
-			fix()
-			for i := 0; i < 2; i++ {
-				retry := w.post(path, body, "claude@host", "k1")
-				if retry.Code != http.StatusConflict || retry.Header().Get(ReplayedHeader) != "" {
-					t.Errorf("retry %d of step %d = %d %s, want 409", i, step, retry.Code, retry.Body)
-				}
+		sort.Strings(ops)
+		for i, op := range ops {
+			c := idemCases[op]
+			fault := []answerFault{raisedFault, silentFault}[i%2]
+			path, body, actor := c.build(w)
+			key := fmt.Sprintf("unstored-%d", i)
+			events, keys := w.count("events"), w.count("idempotency_keys")
+			lift := failAnswers(t, w, fault)
+			for try := 0; try < 2; try++ {
+				notCarriedOut(t, fmt.Sprintf("%s (%s) send %d", op, fault, try), w.post(path, body, actor, key))
 			}
-		}
-		if w.count("tasks") != tasks+1 || w.count("events") != events+1 {
-			t.Errorf("retries wrote %d tasks and %d events in all, want 1 and 1", w.count("tasks")-tasks, w.count("events")-events)
-		}
-		// Another principal's use of the key, and another key, are new requests.
-		other := w.call(w.otherToken, http.MethodPost, path, body, "claude@host", "k1")
-		fresh := w.post(path, body, "claude@host", "k2")
-		if other.Code != http.StatusCreated || fresh.Code != http.StatusCreated || w.count("tasks") != tasks+3 {
-			t.Errorf("other principal %d, new key %d, tasks +%d, want 201, 201 and +3", other.Code, fresh.Code, w.count("tasks")-tasks)
-		}
-		// With the fault lifted ordinary replay still works for the new key.
-		again := w.post(path, body, "claude@host", "k2")
-		if again.Code != http.StatusCreated || again.Header().Get(ReplayedHeader) != "true" || again.Body.String() != fresh.Body.String() || w.count("tasks") != tasks+3 {
-			t.Errorf("replay after the fault = %d %s (%q), want %d %s replayed", again.Code, again.Body, again.Header().Get(ReplayedHeader), fresh.Code, fresh.Body)
+			if got := w.count("events") - events; got != 0 {
+				t.Errorf("%s (%s): sends whose answer was not stored wrote %d events rows, want none", op, fault, got)
+			}
+			if got := w.count("idempotency_keys"); got != keys {
+				t.Errorf("%s (%s): %d keys after the sends, want %d: the key is released", op, fault, got, keys)
+			}
+			lift()
+			run := w.post(path, body, actor, key)
+			replay := w.post(path, body, actor, key)
+			if run.Code/100 != 2 || run.Header().Get(ReplayedHeader) != "" {
+				t.Errorf("%s (%s): the send after the fault = %d %s, want the request run", op, fault, run.Code, run.Body)
+				continue
+			}
+			if replay.Code != run.Code || replay.Body.String() != run.Body.String() || replay.Header().Get(ReplayedHeader) != "true" {
+				t.Errorf("%s (%s): retry = %d %s (%q), want the replay of %d %s", op, fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader), run.Code, run.Body)
+			}
+			if got := w.count("events") - events; got != c.events {
+				t.Errorf("%s (%s): %d events rows in all, want the %d of one run", op, fault, got, c.events)
+			}
 		}
 	})
 }
 
-func TestAnAnswerThatCannotBeStoredHoldsTheKeyForEveryKindOfSuccess(t *testing.T) {
+func TestAKeyCreationWhoseAnswerCannotBeStoredLeavesNoKeyAndItsRetryReplaysTheOneSecret(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		for _, fault := range []answerFault{silentFault, raisedFault} {
+			w := newIdemWorld(t, dbs)
+			keys, events := w.count("api_keys"), w.count("events")
+			lift := failAnswers(t, w, fault)
+			notCarriedOut(t, string(fault)+" first send", w.post("/api/v1/keys", `{"name":"laptop"}`, "claude@host", "make-laptop"))
+			if w.count("api_keys") != keys || w.count("events") != events || w.count("idempotency_keys") != 0 {
+				t.Fatalf("%s: keys +%d, events +%d, idempotency rows %d after a send whose answer was not stored, want nothing",
+					fault, w.count("api_keys")-keys, w.count("events")-events, w.count("idempotency_keys"))
+			}
+			lift()
+			run := w.post("/api/v1/keys", `{"name":"laptop"}`, "claude@host", "make-laptop")
+			replay := w.post("/api/v1/keys", `{"name":"laptop"}`, "claude@host", "make-laptop")
+			secret, _ := decode(t, run)["key"].(string)
+			if run.Code != http.StatusCreated || !auth.WellFormed(secret) || run.Header().Get(ReplayedHeader) != "" {
+				t.Fatalf("%s: retry after the fault = %d %s, want the key created", fault, run.Code, run.Body)
+			}
+			if replay.Code != http.StatusCreated || replay.Header().Get(ReplayedHeader) != "true" || decode(t, replay)["key"] != secret {
+				t.Errorf("%s: second retry = %d %s (%q), want the replay of the one secret", fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader))
+			}
+			if w.count("api_keys") != keys+1 || w.count("events") != events+1 {
+				t.Errorf("%s: keys +%d, events +%d in all, want one of each", fault, w.count("api_keys")-keys, w.count("events")-events)
+			}
+		}
+	})
+}
+
+func TestADuplicateOfAKeyedWriteStillUncommittedIs409AndSeesNothingOfIt(t *testing.T) {
 	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newIdemWorld(t, dbs)
-		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
-		ref := w.newTask("to close")
-		lift := failAnswers(t, w)
-		cases := []struct{ name, path, body string }{
-			{"note", "/api/v1/notes", fmt.Sprintf(`{"summary":"hello about %s"}`, ref)},
-			{"done", "/api/v1/tasks/" + ref + "/done", ""},
+		if _, err := w.st.Writer().ExecContext(context.Background(), `CREATE TABLE idem_probe (v TEXT)`); err != nil {
+			t.Fatal(err)
 		}
-		for i, c := range cases {
-			key := fmt.Sprintf("held-%d", i)
-			events := w.count("events")
-			first := w.post(c.path, c.body, "claude@host", key)
-			wrote := w.count("events") - events
-			retry := w.post(c.path, c.body, "claude@host", key)
-			if first.Code != http.StatusServiceUnavailable || wrote == 0 {
-				t.Errorf("%s: first = %d %s with %d events, want a 503 after the write committed", c.name, first.Code, first.Body, wrote)
+		st := &idempotency.Store{Store: w.st, Now: w.clock.Now}
+		probe := func(ctx context.Context) int {
+			var n int
+			if err := w.st.ReaderFor(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM idem_probe`).Scan(&n); err != nil {
+				t.Error(err)
 			}
-			if retry.Code != http.StatusConflict || w.count("events")-events != wrote {
-				t.Errorf("%s: retry = %d %s, events +%d, want 409 and +%d", c.name, retry.Code, retry.Body, w.count("events")-events, wrote)
-			}
+			return n
 		}
-		lift()
+		wrote, release := make(chan struct{}), make(chan struct{})
+		var calls atomic.Int32
+		h := idempotent(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if _, err := w.st.WriterFor(r.Context()).ExecContext(r.Context(), `INSERT INTO idem_probe (v) VALUES ('x')`); err != nil {
+				t.Error(err)
+			}
+			if probe(r.Context()) != 1 {
+				t.Error("the request does not see its own uncommitted write")
+			}
+			close(wrote)
+			<-release
+			rw.WriteHeader(http.StatusCreated)
+		}), st)
+		firstDone := make(chan *httptest.ResponseRecorder)
+		go func() {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, directRequest(strings.NewReader("{}"), "k"))
+			firstDone <- rec
+		}()
+		<-wrote
+		dup := httptest.NewRecorder()
+		h.ServeHTTP(dup, directRequest(strings.NewReader("{}"), "k"))
+		outside := probe(context.Background())
+		close(release)
+		first := <-firstDone
+		if dup.Code != http.StatusConflict || outside != 0 {
+			t.Errorf("duplicate while the first is uncommitted = %d %s, outside sees %d rows, want 409 and none", dup.Code, dup.Body, outside)
+		}
+		again := httptest.NewRecorder()
+		h.ServeHTTP(again, directRequest(strings.NewReader("{}"), "k"))
+		if first.Code != http.StatusCreated || again.Code != http.StatusCreated || again.Header().Get(ReplayedHeader) != "true" || calls.Load() != 1 || probe(context.Background()) != 1 {
+			t.Errorf("first %d, retry %d (%q), %d runs, %d rows, want 201, its replay, one run and one row",
+				first.Code, again.Code, again.Header().Get(ReplayedHeader), calls.Load(), probe(context.Background()))
+		}
 	})
 }
 
@@ -759,7 +842,7 @@ func TestARefusalThatCannotBeStoredWroteNothingSoItsKeyIsReleased(t *testing.T) 
 	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		w := newIdemWorld(t, dbs)
-		lift := failAnswers(t, w)
+		lift := failAnswers(t, w, raisedFault)
 		first := w.post("/api/v1/tasks/aa-9/done", "", "claude@host", "gone")
 		if first.Code != http.StatusNotFound || first.Header().Get(ReplayedHeader) != "" || w.count("idempotency_keys") != 0 {
 			t.Fatalf("refusal with the fault = %d %s, %d keys, want the 404 and the key released", first.Code, first.Body, w.count("idempotency_keys"))
@@ -773,6 +856,62 @@ func TestARefusalThatCannotBeStoredWroteNothingSoItsKeyIsReleased(t *testing.T) 
 		replay := w.post("/api/v1/tasks/aa-9/done", "", "claude@host", "gone")
 		if retry.Code != http.StatusOK || replay.Code != http.StatusOK || replay.Header().Get(ReplayedHeader) != "true" || replay.Body.String() != retry.Body.String() {
 			t.Errorf("retry = %d %s, replay = %d %s (%q), want the run and then its replay", retry.Code, retry.Body, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader))
+		}
+	})
+}
+
+func TestAKeyedEndOfAnAskIsStampedOnceItsUnitHasCommitted(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		w := newIdemWorld(t, dbs)
+		w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
+		for i, c := range []struct{ verb, body, actor string }{
+			{"answer", `{"answer":"this one"}`, "nik@phone"},
+			{"withdraw", `{"reason":"not needed"}`, "claude@host"},
+		} {
+			ref := w.newAsk()
+			ended := w.post("/api/v1/asks/"+ref+"/"+c.verb, c.body, c.actor, "end-"+ref)
+			doc := decode(t, ended)
+			if ended.Code != http.StatusOK || doc["state"] == "open" || doc["ended_at"] != nil {
+				t.Errorf("%s: keyed end = %d %s, want the ended ask without ended_at", c.verb, ended.Code, ended.Body)
+			}
+			read := w.call(w.token, http.MethodGet, "/api/v1/asks/"+ref, "", "claude@host")
+			if at, _ := decode(t, read)["ended_at"].(string); at == "" {
+				t.Errorf("%s: a read after the commit = %s, want ended_at", c.verb, read.Body)
+			}
+			if marked := w.count("asks WHERE end_commit_ns IS NOT NULL"); marked != i+1 {
+				t.Errorf("%s: %d asks carry an end mark, want %d: the mark is written after the commit", c.verb, marked, i+1)
+			}
+		}
+	})
+}
+
+func TestAKeyedWriteWakesTheStreamOnceItHasCommitted(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		// A poll of an hour: only the wake after the unit commits delivers the event in time.
+		r := newRig(t, dbs, streamSettings{poll: time.Hour, heartbeat: time.Minute, extra: func(st *store.Store) []Option {
+			return []Option{WithIdempotency(&idempotency.Store{Store: st})}
+		}})
+		s := r.openStream("/api/v1/stream?topics=events")
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, r.base+"/api/v1/initiatives", strings.NewReader(`{"slug":"kk","title":"Keyed"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+r.token)
+		req.Header.Set(ActorHeader, "tester@host")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(IdempotencyKeyHeader, "wake-after-commit")
+		resp, err := noKeepAlive.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("keyed create = %d", resp.StatusCode)
+		}
+		if msg := s.nextMessage(); !strings.Contains(msg, `"initiative_created"`) {
+			t.Errorf("stream message = %q, want the keyed write's event", msg)
 		}
 	})
 }

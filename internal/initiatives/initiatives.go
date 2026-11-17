@@ -195,11 +195,11 @@ func (s Store) insert(ctx context.Context, tx *sql.Tx, actor audit.Actor, princi
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
 func (s Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
-	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := f(tx); err != nil {
+	if err := f(tx.Tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -237,7 +237,7 @@ func scan(r rowScanner) (Initiative, error) {
 // case, or ErrNotFound. The row is found by looking the text up as an id and as
 // a slug (domain.RefLookups), not by guessing its kind from its shape.
 func (s Store) Get(ctx context.Context, ref string) (Initiative, error) {
-	return s.find(ctx, s.Store.Reader(), ref)
+	return s.find(ctx, s.Store.ReaderFor(ctx), ref)
 }
 
 // find is Get reading through q, which may be a transaction.
@@ -263,7 +263,7 @@ type querier interface {
 
 // getBy reads the one initiative whose column (i.id or i.slug) equals value.
 func (s Store) getBy(ctx context.Context, column, value string) (Initiative, error) {
-	return s.getVia(ctx, s.Store.Reader(), column, value)
+	return s.getVia(ctx, s.Store.ReaderFor(ctx), column, value)
 }
 
 // getVia is getBy reading through q, which may be a transaction.
@@ -287,7 +287,7 @@ func (s Store) getVia(ctx context.Context, q querier, column, value string) (Ini
 // tags returns the sorted tags of each initiative id; an id with none maps to
 // an empty slice.
 func (s Store) tags(ctx context.Context, ids []string) (map[string][]string, error) {
-	return s.tagsVia(ctx, s.Store.Reader(), ids)
+	return s.tagsVia(ctx, s.Store.ReaderFor(ctx), ids)
 }
 
 // tagsVia is tags reading through q, which may be a transaction.
@@ -376,7 +376,7 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 
 // rows runs a query of selectInitiative's columns and scans every row.
 func (s Store) rows(ctx context.Context, query string, args []any) ([]Initiative, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list initiatives: %w", err)
 	}

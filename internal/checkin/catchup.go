@@ -73,7 +73,7 @@ func (s Store) unread(ctx context.Context, handle string) (CatchupResult, int64,
 // so that every answer up to it is delivered now and none is skipped later.
 func (s Store) answeredThrough(ctx context.Context) (int64, error) {
 	var n int64
-	err := s.Cursors.Store.Reader().QueryRowContext(ctx, `SELECT COALESCE(MAX(n), 0) FROM events`).Scan(&n)
+	err := s.Cursors.Store.ReaderFor(ctx).QueryRowContext(ctx, `SELECT COALESCE(MAX(n), 0) FROM events`).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("read newest event: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s Store) answers(ctx context.Context, handle string, through int64) ([]ask
 func (s Store) previousCatchup(ctx context.Context, handle string) (int64, bool, error) {
 	d := s.Cursors.Store.Dialect()
 	var data string
-	err := s.Cursors.Store.Reader().QueryRowContext(ctx, d.Rebind(
+	err := s.Cursors.Store.ReaderFor(ctx).QueryRowContext(ctx, d.Rebind(
 		`SELECT e.data FROM events e JOIN actors a ON a.id = e.actor_id WHERE e.type = ? AND a.handle = ? ORDER BY e.n DESC LIMIT 1`),
 		EventCatchup, handle).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -119,11 +119,11 @@ func (s Store) previousCatchup(ctx context.Context, handle string) (int64, bool,
 // record moves the notes cursor to the last note of the catch-up and appends
 // its catchup event, in one transaction.
 func (s Store) record(ctx context.Context, actor audit.Actor, principal string, r CatchupResult, through int64) error {
-	tx, err := s.Cursors.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Cursors.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := s.recordIn(ctx, tx, actor, principal, r, through); err != nil {
+	if err := s.recordIn(ctx, tx.Tx, actor, principal, r, through); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

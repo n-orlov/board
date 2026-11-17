@@ -90,7 +90,7 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 // rows runs a query of selectTask's columns and scans its rows in order, keeping
 // the tasks keep accepts until limit are kept.
 func (s Store) rows(ctx context.Context, query string, args []any, now time.Time, keep func(Task) bool, limit int) ([]Task, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}

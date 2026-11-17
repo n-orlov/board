@@ -507,7 +507,7 @@ commits; once it has committed, `Answer` and `Withdraw` read the clock again and
 millisecond, as `ended_at`, so `ended_at` is never earlier than the moment the end took effect (became visible to readers),
 however long the commit took. It is an upper bound only: that clock read can itself come arbitrarily late, so `ended_at`
 does not say when the end took effect, and nothing decides a deadline by it (`vh ask --poll` uses §7.2's `until`). `ended_at` is null while the ask is open; it is written once, and a failure to write it
-leaves the end standing without one (as do ends recorded before the column existed). The end's commit mark `end_commit_ns` is read only after the transaction's COMMIT has
+leaves the end standing without one (as do ends recorded before the column existed). Under an Idempotency-Key the end commits with the request's unit of work (§6.1), so both stamps are taken once that unit has committed, and the answer to that request leaves `ended_at` out. The end's commit mark `end_commit_ns` is read only after the transaction's COMMIT has
 returned: `Answer` and `Withdraw` read the server's real clock (not the store's injectable one, since the deadlines it is compared with
 are real instants), to the nanosecond, and write it in a statement of its own, before the clock read for `ended_at`, so a
 delayed read of that clock cannot delay it. The end had therefore committed by its mark: a mark at or before an instant proves the end
@@ -715,7 +715,7 @@ leaves none, and nothing deletes or cancels a row afterwards.
 | created_at | timestamp | when the key was first used; a row older than 24 hours is stale |
 
 The Idempotency-Key rows (§6.1). A request claims its key with one insert that does nothing on a conflict, so two requests with
-one key never both run; the answer is stored, or the claim released, when the request ends (a success whose answer cannot be stored keeps the claim, so it is never run twice). A row older than 24
+one key never both run; the answer is stored, in the same transaction as everything the request wrote, or the claim released, when the request ends (an answer that cannot be stored rolls back what the request wrote and releases the claim, so no write ever stands without its answer). A row older than 24
 hours is replaced by the next use of its key and deleted by the sweeper (§5.1); the index on `created_at` is for that
 sweep. `00010_idempotency` creates it, with the same DDL on SQLite and Postgres, and is additive: no existing table
 changes.
@@ -936,16 +936,24 @@ event, the task, initiative, ask, lease and actor rows named above.
   - The same key with a different request (another method, path, query, actor or body) is 422 with a `next`, and
     nothing is written.
   - A duplicate that arrives while the first request with the key is still running is 409 with a `next` (send the
-    same request again shortly). The server holds a response back until its answer is stored, so a retry sent on
-    receiving it finds the answer, never a running request.
+    same request again shortly), and sees nothing the running request has written. The server holds a response back
+    until its answer is stored, so a retry sent on receiving it finds the answer, never a running request.
   - A 5xx answer, or a request that panics, is not stored and releases the key: the retry runs the request again
     (the CLI's retry on 502, 503 or 504 relies on this). A server that stops between starting a request and
     storing its answer leaves the key running until it is 24 hours old. A refusal below 500 whose answer cannot be
     stored wrote nothing, so it releases the key too.
-  - A success (below 400) is answered only once its answer is stored, so its status, body and replay state are one
-    durable outcome. When storing it fails the effect has already committed: the key stays held, the client gets a 503
-    with a `next` (do not resend with a new key; the request is done), and every retry with that key within 24 hours
-    is 409, never a second run and never a new row of any kind.
+  - A request with a new key runs in one unit of work: every row it writes (its task, lease, ask, note, key, event or
+    actor rows) and the answer stored for the key commit in one database transaction, on SQLite and on Postgres alike,
+    and the response is sent only after that commit. A success's status, body and replay state are therefore one
+    durable outcome: once the effect has committed, every retry with the key within 24 hours is its replay, with
+    `Idempotent-Replayed: true` and no new row of any kind. When the answer cannot be stored (the write fails, or
+    changes no row) the transaction rolls back, so the request has written nothing, the key is released, and a success
+    is answered 503 with a `next` (send the same request again with the same key): the retry runs the request once,
+    and the retries after it are its replay. A refusal below 500 whose answer cannot be stored in that transaction is
+    stored on its own, as it wrote nothing. Reads inside the unit see what it has written; other requests see none of
+    it until it commits. An ask's `ended_at` and end mark (§4.5) are stamped once the unit has committed, so the
+    answer of a keyed answer or withdrawal, and its replay, leave `ended_at` out, as for an end whose stamp was never
+    written; a later read of the ask shows it.
   - A key older than 24 hours counts as new, whether or not the sweeper has deleted its row yet. The sweeper
     (§5.1) deletes the rows older than 24 hours on each `VH_SWEEP_INTERVAL` tick.
   - A request without the header behaves as always. The header on a request that is not a `POST` under `/api/v1`

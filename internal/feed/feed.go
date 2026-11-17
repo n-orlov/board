@@ -81,7 +81,7 @@ func (s StoreSource) After(ctx context.Context, n int64, limit int) ([]events.Ev
 // Last implements Source.
 func (s StoreSource) Last(ctx context.Context) (int64, error) {
 	var n sql.NullInt64
-	if err := s.Store.Reader().QueryRowContext(ctx, `SELECT MAX(n) FROM events`).Scan(&n); err != nil {
+	if err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, `SELECT MAX(n) FROM events`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("read last event: %w", err)
 	}
 	return n.Int64, nil
@@ -93,7 +93,7 @@ func (s StoreSource) Writers(ctx context.Context) ([]string, error) {
 	if q == "" {
 		return nil, nil
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, q)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("read event writers: %w", err)
 	}

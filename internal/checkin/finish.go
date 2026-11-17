@@ -48,11 +48,11 @@ func (s Store) Finish(ctx context.Context, actor audit.Actor, principal string, 
 	}
 	var ended leases.Lease
 	var note notes.Note
-	tx, err := s.Leases.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Leases.Store.Begin(ctx)
 	if err != nil {
 		return FinishResult{}, fmt.Errorf("begin: %w", err)
 	}
-	if ended, note, err = s.finish(ctx, tx, actor, principal, in); err != nil {
+	if ended, note, err = s.finish(ctx, tx.Tx, actor, principal, in); err != nil {
 		_ = tx.Rollback()
 		return FinishResult{}, err
 	}

@@ -106,7 +106,7 @@ func (k Keys) Create(ctx context.Context, name, createdBy string, ttl time.Durat
 	if err != nil {
 		return "", Key{}, err
 	}
-	if err := k.insert(ctx, k.Store.Writer(), row, HashKey(plain)); err != nil {
+	if err := k.insert(ctx, k.Store.WriterFor(ctx), row, HashKey(plain)); err != nil {
 		return "", Key{}, err
 	}
 	return plain, row, nil
@@ -138,11 +138,11 @@ func (k Keys) CreateAs(ctx context.Context, who Identity, name string, ttl time.
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
 func (k Keys) inTx(ctx context.Context, f func(*sql.Tx) error) error {
-	tx, err := k.Store.Writer().BeginTx(ctx, nil)
+	tx, err := k.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := f(tx); err != nil {
+	if err := f(tx.Tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -238,7 +238,7 @@ func (k Keys) List(ctx context.Context) ([]Key, error) {
 
 func (k Keys) query(ctx context.Context, where string, args ...any) ([]Key, error) {
 	d := k.Store.Dialect()
-	rows, err := k.Store.Reader().QueryContext(ctx, d.Rebind(
+	rows, err := k.Store.ReaderFor(ctx).QueryContext(ctx, d.Rebind(
 		`SELECT id, name, display_prefix, created_at, created_by, last_used_at, expires_at, revoked_at FROM api_keys`+where+` ORDER BY n`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list keys: %w", err)

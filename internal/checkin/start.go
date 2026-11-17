@@ -52,11 +52,11 @@ func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, i
 			Next: "Send {\"task\": \"<ref>\", \"intent\": \"...\"} or {\"new_task\": {\"initiative\": \"<slug>\", \"title\": \"...\"}, \"intent\": \"...\"}."}
 	}
 	var out StartResult
-	tx, err := s.Leases.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Leases.Store.Begin(ctx)
 	if err != nil {
 		return StartResult{}, fmt.Errorf("begin: %w", err)
 	}
-	if out.Lease, out.TaskCreated, err = s.write(ctx, tx, actor, principal, in); err != nil {
+	if out.Lease, out.TaskCreated, err = s.write(ctx, tx.Tx, actor, principal, in); err != nil {
 		_ = tx.Rollback()
 		return StartResult{}, err
 	}
@@ -89,7 +89,7 @@ func (s Store) write(ctx context.Context, tx *sql.Tx, actor audit.Actor, princip
 func (s Store) protocolSeen(ctx context.Context, handle string) (int, error) {
 	st := s.Leases.Store
 	var seen sql.NullInt64
-	err := st.Reader().QueryRowContext(ctx, st.Dialect().Rebind(`SELECT protocol_seen FROM actors WHERE handle = ?`), handle).Scan(&seen)
+	err := st.ReaderFor(ctx).QueryRowContext(ctx, st.Dialect().Rebind(`SELECT protocol_seen FROM actors WHERE handle = ?`), handle).Scan(&seen)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("read protocol seen: %w", err)
 	}

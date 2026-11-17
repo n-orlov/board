@@ -13,7 +13,7 @@ import (
 
 // each runs query with args on the reader and calls scan on every row.
 func (s Store) each(ctx context.Context, what, query string, args []any, scan func(*sql.Rows) error) error {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return fmt.Errorf("read timeline %s: %w", what, err)
 	}

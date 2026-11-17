@@ -146,17 +146,28 @@ func (s Store) endTx(ctx context.Context, f func(*sql.Tx) (Ask, error)) (Ask, er
 //
 // Both write once, even when the caller has gone; if one fails, the end stands
 // without it.
+//
+// Under a unit of work (an Idempotency-Key request, SPEC 6.1) the end commits
+// only with the unit, so both stamps are written once the unit has committed,
+// and k is returned without them, as an end whose stamps were never written is.
 func (s Store) stampEnd(ctx context.Context, k Ask) Ask {
+	stamped := k
+	s.Store.AfterCommit(ctx, func(ctx context.Context) { stamped = s.stamp(ctx, k) })
+	return stamped
+}
+
+// stamp writes the commit mark and ended_at of k, as stampEnd describes.
+func (s Store) stamp(ctx context.Context, k Ask) Ask {
 	ctx = context.WithoutCancel(ctx)
 	d := s.Store.Dialect()
 	mark := s.markNow()
 	q := d.Rebind(`UPDATE asks SET end_commit_ns = ? WHERE id = ? AND end_commit_ns IS NULL`)
-	if _, err := s.Store.Writer().ExecContext(ctx, q, mark.UnixNano(), k.ID); err == nil {
+	if _, err := s.Store.WriterFor(ctx).ExecContext(ctx, q, mark.UnixNano(), k.ID); err == nil {
 		k.EndCommitAt = &mark
 	}
 	ms := store.EncodeBound(s.now())
 	q = d.Rebind(`UPDATE asks SET ended_at = ? WHERE id = ? AND ended_at IS NULL`)
-	if _, err := s.Store.Writer().ExecContext(ctx, q, ms, k.ID); err == nil {
+	if _, err := s.Store.WriterFor(ctx).ExecContext(ctx, q, ms, k.ID); err == nil {
 		at := store.DecodeTime(ms)
 		k.EndedAt = &at
 	}

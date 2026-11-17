@@ -327,7 +327,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 // collect runs a section and scans its rows in order.
 func collect[T any](ctx context.Context, s Store, c section, scan func(rowScanner) (T, error)) ([]T, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(c.list()), c.args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(c.list()), c.args...)
 	if err != nil {
 		return nil, fmt.Errorf("read attention: %w", err)
 	}
@@ -348,7 +348,7 @@ func collect[T any](ctx context.Context, s Store, c section, scan func(rowScanne
 
 func (s Store) count(ctx context.Context, c section) (int, error) {
 	var n int
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(c.count()), c.args...).Scan(&n)
+	err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(c.count()), c.args...).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count attention: %w", err)
 	}

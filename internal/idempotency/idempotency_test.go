@@ -234,8 +234,8 @@ func TestCompleteOfAnUnclaimedKeyWritesNothing(t *testing.T) {
 
 func TestAKeyThatVanishesBetweenTheInsertAndTheReadIsInFlight(t *testing.T) {
 	e := newEnv(t)
-	if o, _, err := e.existing(ctx, req, hash(req.Principal, req.Key)); err != nil || o != InFlight {
-		t.Errorf("existing on a missing row = %v, %v, want InFlight", o, err)
+	if o, _, found, err := e.judge(ctx, e.Store.Store.Writer(), req, hash(req.Principal, req.Key)); err != nil || o != InFlight || found {
+		t.Errorf("judge on a missing row = %v, found %v, %v, want InFlight, not found", o, found, err)
 	}
 }
 
@@ -283,5 +283,68 @@ func TestCompleteOfAnAnsweredKeyIsNotHeldAndKeepsTheFirstAnswer(t *testing.T) {
 	}
 	if o, got := claim(t, e, req); o != Replay || got.Status != 201 || !bytes.Equal(got.Body, first.Body) {
 		t.Errorf("claim = %v %+v, want the first answer replayed", o, got)
+	}
+}
+
+// exec runs a statement on the writer of e's database.
+func (e *env) exec(t *testing.T, q string) {
+	t.Helper()
+	if _, err := e.Store.Store.Writer().ExecContext(ctx, q); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+}
+
+func TestAKeyClaimedBetweenTheReadAndTheInsertIsInFlight(t *testing.T) {
+	e := newEnv(t)
+	// The trigger stands for another request that claims the key after this
+	// one found no row on the readers and before its own insert.
+	e.exec(t, `CREATE TRIGGER race BEFORE INSERT ON idempotency_keys
+		WHEN NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key_hash = NEW.key_hash)
+		BEGIN INSERT INTO idempotency_keys (principal, key_hash, fingerprint, state, created_at)
+		VALUES (NEW.principal, NEW.key_hash, NEW.fingerprint, 'running', NEW.created_at); END`)
+	if o, _ := claim(t, e, req); o != InFlight || e.rows(t) != 1 {
+		t.Errorf("claim that lost the race = %v with %d rows, want InFlight and the other's row", o, e.rows(t))
+	}
+	other := req
+	other.Fingerprint = "f2"
+	if o, _ := claim(t, e, other); o != Mismatch {
+		t.Errorf("a different request on the raced key = %v, want Mismatch", o)
+	}
+}
+
+func TestAClaimWhoseStatementsFailIsAnError(t *testing.T) {
+	t.Run("read", func(t *testing.T) {
+		e := newEnv(t)
+		_ = e.Store.Store.Close()
+		if o, _, err := e.Claim(ctx, req); err == nil {
+			t.Errorf("claim on a closed store = %v, nil, want an error", o)
+		}
+	})
+	t.Run("delete", func(t *testing.T) {
+		e := newEnv(t)
+		claim(t, e, req)
+		e.now = t0.Add(Retention + time.Minute)
+		e.exec(t, `CREATE TRIGGER nodelete BEFORE DELETE ON idempotency_keys BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+		if o, _, err := e.Claim(ctx, req); err == nil {
+			t.Errorf("claim whose expired row cannot be deleted = %v, nil, want an error", o)
+		}
+	})
+	t.Run("insert", func(t *testing.T) {
+		e := newEnv(t)
+		e.exec(t, `CREATE TRIGGER noinsert BEFORE INSERT ON idempotency_keys BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+		if o, _, err := e.Claim(ctx, req); err == nil || e.rows(t) != 0 {
+			t.Errorf("claim whose insert fails = %v, %v, %d rows, want an error and none", o, err, e.rows(t))
+		}
+	})
+}
+
+func TestAnExpiredKeyIsNotJudgedOnTheReadersAndIsClaimedAfresh(t *testing.T) {
+	e := newEnv(t)
+	claim(t, e, req)
+	e.now = t0.Add(Retention + time.Second)
+	other := req
+	other.Fingerprint = "f2"
+	if o, _ := claim(t, e, other); o != Claimed || e.rows(t) != 1 {
+		t.Errorf("claim of an expired key with another request = %v with %d rows, want Claimed over the old row", o, e.rows(t))
 	}
 }

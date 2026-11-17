@@ -54,7 +54,7 @@ func (s Store) expireAt(ctx context.Context, now time.Time) (int, error) {
 // anyDue reports whether a live lease expired before now, without the writer.
 func (s Store) anyDue(ctx context.Context, now time.Time) (bool, error) {
 	var one int
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(
+	err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT 1 FROM leases WHERE state = 'live' AND expires_at < ? LIMIT 1`), store.EncodeBound(now)).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

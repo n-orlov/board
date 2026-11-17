@@ -42,11 +42,11 @@ func (s Store) Ping(ctx context.Context, actor audit.Actor, principal string, in
 		in.Progress = &p
 	}
 	var out PingResult
-	tx, err := s.Leases.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Leases.Store.Begin(ctx)
 	if err != nil {
 		return PingResult{}, fmt.Errorf("begin: %w", err)
 	}
-	if out, err = s.ping(ctx, tx, actor, principal, in); err != nil {
+	if out, err = s.ping(ctx, tx.Tx, actor, principal, in); err != nil {
 		_ = tx.Rollback()
 		return PingResult{}, err
 	}

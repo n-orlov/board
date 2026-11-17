@@ -23,7 +23,7 @@ func (s Store) CountsFor(ctx context.Context, initiativeIDs []string) (map[strin
 		args[i] = id
 		out[id] = Counts{}
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT initiative_id, status, COUNT(*) FROM tasks WHERE initiative_id IN (`+
 			strings.TrimSuffix(strings.Repeat("?, ", len(args)), ", ")+`) GROUP BY initiative_id, status`), args...)
 	if err != nil {

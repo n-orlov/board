@@ -201,7 +201,7 @@ func (s Store) find(ctx context.Context, q queryer, ref string) (Lease, error) {
 // Get returns the lease whose ref (L<n>) or ULID is ref, or ErrNotFound. It
 // reads the row as stored: ExpireDue and Expired say whether it has run out.
 func (s Store) Get(ctx context.Context, ref string) (Lease, error) {
-	return s.find(ctx, s.Store.Reader(), ref)
+	return s.find(ctx, s.Store.ReaderFor(ctx), ref)
 }
 
 // Current expires the leases that are due, then returns the lease ref names, so
@@ -215,11 +215,11 @@ func (s Store) Current(ctx context.Context, ref string) (Lease, error) {
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
 func (s Store) inTx(ctx context.Context, f func(*sql.Tx) error) error {
-	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := f(tx); err != nil {
+	if err := f(tx.Tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

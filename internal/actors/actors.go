@@ -36,11 +36,11 @@ func (s Store) RecordProtocolSeen(ctx context.Context, actor audit.Actor, versio
 		return 0, ErrNegativeVersion
 	}
 	d := s.Store.Dialect()
-	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin: %w", err)
 	}
-	seen, err := raise(ctx, tx, d, actor, version, s.now())
+	seen, err := raise(ctx, tx.Tx, d, actor, version, s.now())
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err

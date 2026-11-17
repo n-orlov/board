@@ -59,7 +59,7 @@ func (s Store) LiveCountsFor(ctx context.Context, initiativeIDs []string) (map[s
 	for _, id := range initiativeIDs {
 		args = append(args, id)
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT t.initiative_id, COUNT(*) FROM leases l JOIN tasks t ON t.id = l.task_id
 		 WHERE l.state = 'live' AND l.expires_at >= ? AND t.initiative_id IN (`+
 			strings.TrimSuffix(strings.Repeat("?, ", len(initiativeIDs)), ", ")+`) GROUP BY t.initiative_id`), args...)

@@ -140,7 +140,7 @@ func (s Store) actors(ctx context.Context, handle string) ([]Actor, error) {
 	if handle != "" {
 		query, args = query+` WHERE handle = ?`, []any{handle}
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY last_seen_at DESC, handle`), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY last_seen_at DESC, handle`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read actors: %w", err)
 	}

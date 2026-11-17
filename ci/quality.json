@@ -59,7 +59,9 @@
             "internal/cli",
             "internal/envvar",
             "internal/sweep",
-            "internal/update"
+            "internal/update",
+            "internal/auth",
+            "internal/actors"
         ],
         "lanes": {
             "base": [
@@ -85,7 +87,9 @@
                 "internal/version",
                 "internal/envvar",
                 "internal/sweep",
-                "internal/update"
+                "internal/update",
+                "internal/auth",
+                "internal/actors"
             ],
             "server-ops": [
                 "internal/server#ops"
@@ -164,10 +168,13 @@
                 "whoami.go"
             ],
             "internal/initiatives": [
-                "inbox.go"
+                "inbox.go",
+                "initiatives.go"
             ],
             "internal/tasks": [
+                "counts.go",
                 "leaseend.go",
+                "links.go",
                 "list.go",
                 "task.go",
                 "tasks.go",
@@ -178,9 +185,17 @@
             "internal/leases": [
                 "end.go",
                 "expire.go",
+                "leases.go",
                 "list.go",
+                "live.go",
                 "ontask.go",
                 "write.go"
+            ],
+            "internal/auth": [
+                "keys.go"
+            ],
+            "internal/actors": [
+                "actors.go"
             ]
         },
         "parts": {

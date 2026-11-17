@@ -222,7 +222,7 @@ func (b *builder) types(types []string) error {
 
 // rows runs a query of selectEvent's columns and scans every row.
 func (s Store) rows(ctx context.Context, query string, args []any) ([]Event, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}

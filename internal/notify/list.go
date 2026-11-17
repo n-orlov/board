@@ -133,7 +133,7 @@ func (s Store) cursor(ctx context.Context, after string) (int64, string, error) 
 		return 0, "", invalid
 	}
 	var at int64
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(`SELECT created_at FROM notifications WHERE id = ?`), id).Scan(&at)
+	err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(`SELECT created_at FROM notifications WHERE id = ?`), id).Scan(&at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", invalid
 	}
@@ -144,7 +144,7 @@ func (s Store) cursor(ctx context.Context, after string) (int64, string, error) 
 }
 
 func (s Store) rows(ctx context.Context, query string, args []any) ([]Notification, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read notifications: %w", err)
 	}

@@ -115,7 +115,7 @@ func (s Store) resolve(ctx context.Context, st stream, position string) (string,
 		id string
 		n  int64
 	)
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(query), arg).Scan(&id, &n)
+	err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(query), arg).Scan(&id, &n)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", 0, InvalidError{Msg: fmt.Sprintf("position %q names no %s", position, strings.TrimSuffix(st.table, "s")), Next: st.next}
@@ -132,11 +132,11 @@ func (s Store) Ack(ctx context.Context, actor audit.Actor, name, id string) erro
 	if _, err := lookup(name); err != nil {
 		return err
 	}
-	tx, err := s.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	if err := s.write(ctx, tx, actor, name, id); err != nil {
+	if err := s.write(ctx, tx.Tx, actor, name, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -179,7 +179,7 @@ func (s Store) Get(ctx context.Context, handle, name string) (string, error) {
 		return "", err
 	}
 	var position string
-	err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(
+	err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT c.position FROM cursors c JOIN actors a ON a.id = c.actor_id WHERE a.handle = ? AND c.stream = ?`),
 		strings.TrimSpace(handle), name).Scan(&position)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -109,7 +109,7 @@ func (s Store) keptTasks(ctx context.Context, sc scope) (map[string]bool, error)
 		return nil, nil
 	}
 	cond, args := sc.and(`t.initiative_id`)
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(`SELECT t.id FROM tasks t WHERE 1 = 1`+cond), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(`SELECT t.id FROM tasks t WHERE 1 = 1`+cond), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read attention scope: %w", err)
 	}
@@ -135,7 +135,7 @@ func (s Store) wayBacks(ctx context.Context, live []leases.Lease) (map[string]st
 	for _, l := range live {
 		ids = append(ids, l.ActorID)
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT handle, COALESCE(way_back, '') FROM actors WHERE id IN (`+marks(len(ids))+`)`), anys(ids)...)
 	if err != nil {
 		return nil, fmt.Errorf("read attention actors: %w", err)

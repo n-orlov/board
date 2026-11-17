@@ -39,7 +39,7 @@ func (s Store) Links(ctx context.Context, t Task) (Links, error) {
 // linked reads the tasks joined through column other of the dependencies whose
 // column self is id. The two column names are constants of this package.
 func (s Store) linked(ctx context.Context, id, other, self string) ([]Link, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT i.slug, o.seq, o.title, o.status FROM task_deps td JOIN tasks o ON o.id = `+other+`
 		JOIN initiatives i ON i.id = o.initiative_id WHERE `+self+` = ? ORDER BY o.id`), id)
 	if err != nil {

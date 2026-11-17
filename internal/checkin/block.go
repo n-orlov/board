@@ -39,11 +39,11 @@ func (s Store) Block(ctx context.Context, actor audit.Actor, principal string, i
 		k, err := s.Asks.Raise(ctx, actor, principal, in)
 		return BlockResult{Ask: k}, err
 	}
-	tx, err := s.Leases.Store.Writer().BeginTx(ctx, nil)
+	tx, err := s.Leases.Store.Begin(ctx)
 	if err != nil {
 		return BlockResult{}, fmt.Errorf("begin: %w", err)
 	}
-	out, err := s.blockIn(ctx, tx, actor, principal, in)
+	out, err := s.blockIn(ctx, tx.Tx, actor, principal, in)
 	if err != nil {
 		_ = tx.Rollback()
 		return BlockResult{}, err

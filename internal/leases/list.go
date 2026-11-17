@@ -119,7 +119,7 @@ func (s Store) taskFilter(ctx context.Context, f *filter, ref string) error {
 	if ref == "" {
 		return nil
 	}
-	task, err := s.findTask(ctx, s.Store.Reader(), ref)
+	task, err := s.findTask(ctx, s.Store.ReaderFor(ctx), ref)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (s Store) listRows(ctx context.Context, f *filter, limit int) ([]Lease, err
 // readLeases runs a query that selects selectLease's columns and returns the
 // leases with their resources.
 func (s Store) readLeases(ctx context.Context, query string, args []any) ([]Lease, error) {
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read leases: %w", err)
 	}
@@ -202,7 +202,7 @@ func (s Store) resourcesOfAll(ctx context.Context, list []Lease) (map[string][]s
 	for i, l := range list {
 		args[i] = l.ID
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT lease_id, resource FROM lease_resources WHERE lease_id IN (`+marks+`) ORDER BY lease_id, resource`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read lease resources: %w", err)

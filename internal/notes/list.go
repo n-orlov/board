@@ -147,7 +147,7 @@ func (f *filter) resources(rs []string) {
 // resolve a ref to an id.
 func (s Store) scope(ctx context.Context, f *filter, q Query) error {
 	if q.Task != "" {
-		t, err := s.findTask(ctx, s.Store.Reader(), q.Task)
+		t, err := s.findTask(ctx, s.Store.ReaderFor(ctx), q.Task)
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func (s Store) rows(ctx context.Context, f *filter, limit int, full bool) ([]Not
 	if len(f.conds) > 0 {
 		query += ` WHERE ` + strings.Join(f.conds, ` AND `)
 	}
-	rows, err := s.Store.Reader().QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY k.id LIMIT `+fmt.Sprint(limit)), f.args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY k.id LIMIT `+fmt.Sprint(limit)), f.args...)
 	if err != nil {
 		return nil, fmt.Errorf("list notes: %w", err)
 	}

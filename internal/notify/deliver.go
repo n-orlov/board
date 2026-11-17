@@ -94,7 +94,7 @@ func (w *Worker) deliver(ctx context.Context, r row) (bool, error) {
 
 func (w *Worker) due(ctx context.Context) ([]row, error) {
 	now := store.EncodeTime(w.now())
-	rows, err := w.Store.Reader().QueryContext(ctx, w.Store.Dialect().Rebind(`SELECT id, payload, attempts FROM notifications
+	rows, err := w.Store.ReaderFor(ctx).QueryContext(ctx, w.Store.Dialect().Rebind(`SELECT id, payload, attempts FROM notifications
 		WHERE state = 'pending' AND next_attempt_at <= ? AND (claimed_until IS NULL OR claimed_until <= ?)
 		ORDER BY next_attempt_at, id LIMIT `+fmt.Sprint(claimBatch)), now, now)
 	if err != nil {
@@ -116,7 +116,7 @@ func (w *Worker) due(ctx context.Context) ([]row, error) {
 // row still being due and unclaimed, so of several servers one wins.
 func (w *Worker) claim(ctx context.Context, id string) (bool, error) {
 	now := w.now()
-	res, err := w.Store.Writer().ExecContext(ctx, w.Store.Dialect().Rebind(`UPDATE notifications SET claimed_until = ?
+	res, err := w.Store.WriterFor(ctx).ExecContext(ctx, w.Store.Dialect().Rebind(`UPDATE notifications SET claimed_until = ?
 		WHERE id = ? AND state = 'pending' AND next_attempt_at <= ? AND (claimed_until IS NULL OR claimed_until <= ?)`),
 		store.EncodeTime(now.Add(w.Timeout+claimSlack)), id, store.EncodeTime(now), store.EncodeTime(now))
 	if err != nil {
@@ -174,7 +174,7 @@ func (w *Worker) finish(ctx context.Context, r row, failure string) error {
 			state = "failed"
 		}
 	}
-	_, err := w.Store.Writer().ExecContext(ctx, w.Store.Dialect().Rebind(`UPDATE notifications
+	_, err := w.Store.WriterFor(ctx).ExecContext(ctx, w.Store.Dialect().Rebind(`UPDATE notifications
 		SET state = ?, attempts = ?, next_attempt_at = ?, claimed_until = NULL, last_error = COALESCE(CAST(? AS TEXT), last_error), sent_at = ?
 		WHERE id = ?`), state, r.attempts+1, next, lastErr, sentAt, r.id)
 	if err != nil {

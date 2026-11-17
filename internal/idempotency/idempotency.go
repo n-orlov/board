@@ -85,9 +85,16 @@ func hash(principal, key string) string {
 // its row is replaced). For a key already held it returns Mismatch when the
 // request differs, Replay with the stored answer when the first request is
 // answered, and InFlight when it is not.
+//
+// A key already held is judged on the readers first, so a duplicate of a
+// request still running is answered at once even on SQLite, where the running
+// request's unit of work holds the one writer connection until it commits.
 func (s Store) Claim(ctx context.Context, r Request) (Outcome, Answer, error) {
-	db, d := s.Store.Writer(), s.Store.Dialect()
 	id := hash(r.Principal, r.Key)
+	if outcome, answer, found, err := s.judge(ctx, s.Store.ReaderFor(ctx), r, id); err != nil || found {
+		return outcome, answer, err
+	}
+	db, d := s.Store.WriterFor(ctx), s.Store.Dialect()
 	if _, err := db.ExecContext(ctx, d.Rebind(`DELETE FROM idempotency_keys WHERE principal = ? AND key_hash = ? AND created_at < ?`),
 		r.Principal, id, s.cutoff()); err != nil {
 		return 0, Answer{}, err
@@ -101,35 +108,39 @@ func (s Store) Claim(ctx context.Context, r Request) (Outcome, Answer, error) {
 	if n, err := res.RowsAffected(); err != nil || n == 1 {
 		return Claimed, Answer{}, err
 	}
-	return s.existing(ctx, r, id)
+	// Released between the insert and this read, the first request is gone:
+	// still in flight as far as this one can tell.
+	outcome, answer, _, err := s.judge(ctx, db, r, id)
+	return outcome, answer, err
 }
 
-// existing judges a key whose row is already there.
-func (s Store) existing(ctx context.Context, r Request, id string) (Outcome, Answer, error) {
+// judge reads the row of a key that is not older than Retention through q and
+// judges r by it; found is false when there is no such row, and the outcome is
+// then InFlight.
+func (s Store) judge(ctx context.Context, q store.Querier, r Request, id string) (outcome Outcome, answer Answer, found bool, err error) {
 	var (
 		fingerprint, state string
 		status             sql.NullInt64
 		contentType, body  sql.NullString
 	)
-	err := s.Store.Writer().QueryRowContext(ctx, s.Store.Dialect().Rebind(
-		`SELECT fingerprint, state, status, content_type, body FROM idempotency_keys WHERE principal = ? AND key_hash = ?`),
-		r.Principal, id).Scan(&fingerprint, &state, &status, &contentType, &body)
+	err = q.QueryRowContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT fingerprint, state, status, content_type, body FROM idempotency_keys WHERE principal = ? AND key_hash = ? AND created_at >= ?`),
+		r.Principal, id, s.cutoff()).Scan(&fingerprint, &state, &status, &contentType, &body)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		// Released between the insert and this read: the first request is gone.
-		return InFlight, Answer{}, nil
+		return InFlight, Answer{}, false, nil
 	case err != nil:
-		return 0, Answer{}, err
+		return 0, Answer{}, false, err
 	case fingerprint != r.Fingerprint:
-		return Mismatch, Answer{}, nil
+		return Mismatch, Answer{}, true, nil
 	case state != "done":
-		return InFlight, Answer{}, nil
+		return InFlight, Answer{}, true, nil
 	}
 	plain, err := open(r, body.String)
 	if err != nil {
-		return 0, Answer{}, err
+		return 0, Answer{}, false, err
 	}
-	return Replay, Answer{Status: int(status.Int64), ContentType: contentType.String, Body: plain}, nil
+	return Replay, Answer{Status: int(status.Int64), ContentType: contentType.String, Body: plain}, true, nil
 }
 
 // ErrNotHeld is what Complete returns for a key the caller does not hold: its
@@ -143,7 +154,7 @@ func (s Store) Complete(ctx context.Context, r Request, a Answer) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
+	res, err := s.Store.WriterFor(ctx).ExecContext(ctx, s.Store.Dialect().Rebind(
 		`UPDATE idempotency_keys SET state = 'done', status = ?, content_type = ?, body = ?
 		 WHERE principal = ? AND key_hash = ? AND state = 'running'`),
 		a.Status, a.ContentType, sealed, r.Principal, hash(r.Principal, r.Key))
@@ -163,7 +174,7 @@ func (s Store) Complete(ctx context.Context, r Request, a Answer) error {
 // Release gives the key up, for a request that failed before it answered: the
 // same key then starts again.
 func (s Store) Release(ctx context.Context, r Request) error {
-	_, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(
+	_, err := s.Store.WriterFor(ctx).ExecContext(ctx, s.Store.Dialect().Rebind(
 		`DELETE FROM idempotency_keys WHERE principal = ? AND key_hash = ? AND state = 'running'`),
 		r.Principal, hash(r.Principal, r.Key))
 	return err
@@ -171,7 +182,7 @@ func (s Store) Release(ctx context.Context, r Request) error {
 
 // DeleteExpired removes the rows older than Retention and returns how many.
 func (s Store) DeleteExpired(ctx context.Context) (int64, error) {
-	res, err := s.Store.Writer().ExecContext(ctx, s.Store.Dialect().Rebind(`DELETE FROM idempotency_keys WHERE created_at < ?`), s.cutoff())
+	res, err := s.Store.WriterFor(ctx).ExecContext(ctx, s.Store.Dialect().Rebind(`DELETE FROM idempotency_keys WHERE created_at < ?`), s.cutoff())
 	if err != nil {
 		return 0, err
 	}

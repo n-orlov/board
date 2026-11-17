@@ -61,7 +61,7 @@ func (s Store) number(ctx context.Context, id string) (int64, bool, error) {
 		query, arg = `SELECT n FROM events WHERE n = ?`, p.N
 	}
 	var n int64
-	err = s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(query), arg).Scan(&n)
+	err = s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(query), arg).Scan(&n)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}

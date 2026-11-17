@@ -3,12 +3,14 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/n-orlov/village-hall/internal/idempotency"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // IdempotencyKeyHeader carries the key of a safe retry (SPEC 6.1), and
@@ -57,8 +59,10 @@ func writesUnderAPI(r *http.Request) bool {
 // when the same request (method, target, actor and body) came with the key
 // before and was answered within 24 hours; the key of a different request is
 // 422, the key of a request still running is 409, and an invalid key is 400.
-// A new key runs the request and stores its answer, unless the server failed
-// (5xx), when the key is released so the retry runs the request again.
+// A new key runs the request and stores its answer in the same transaction as
+// its writes, unless the server failed (5xx) or the answer could not be stored,
+// when nothing is written and the key is released so the retry runs the
+// request again.
 func idempotent(next http.Handler, st *idempotency.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		values, present := r.Header[IdempotencyKeyHeader]
@@ -112,35 +116,57 @@ func serveIdempotent(next http.Handler, st *idempotency.Store, principal, actor,
 	}
 }
 
-// runClaimed runs the request that holds the key, holding its response back
-// until the answer is stored so that a retry sent on receiving it finds the
-// answer and not a running request. The answer is the outcome: a success is
-// returned only once its answer is stored. When storing it fails, the request
-// has already committed its effect, so the key stays held (a retry is then 409,
-// never a second run) and the client is told with a 503. A refusal that cannot
-// be stored wrote nothing, so its key is released, as a 5xx or a panic does.
+// runClaimed runs the request that holds the key inside a unit of work (SPEC
+// 6.1): everything the request writes and the answer stored for its key commit
+// in one transaction, so a write is never committed without its answer. The
+// response is held back until then, so a retry sent on receiving it finds the
+// answer and not a running request. When the answer cannot be stored the unit
+// rolls back, the request has written nothing, and the key is released: a
+// success is then answered 503, so the client sends the same request again and
+// it runs once. A 5xx or a panic rolls back and releases as well.
 func runClaimed(next http.Handler, st *idempotency.Store, req idempotency.Request, w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
-	held := &heldResponse{header: http.Header{}}
-	keep := false
+	unitCtx, unit, err := st.Store.BeginUnit(r.Context())
+	if err != nil {
+		_ = st.Release(ctx, req)
+		responseFailed(w, r, err)
+		return
+	}
 	defer func() {
-		if !keep {
+		if err := unit.Rollback(); !errors.Is(err, sql.ErrTxDone) {
+			// Still open: the handler panicked before the answer was settled.
 			_ = st.Release(ctx, req)
 		}
 	}()
-	next.ServeHTTP(held, r)
-	status := held.code()
-	contentType := held.header.Get("Content-Type")
-	if status < http.StatusInternalServerError {
-		err := st.Complete(ctx, req, idempotency.Answer{Status: status, ContentType: contentType, Body: held.body.Bytes()})
-		keep = err == nil || status < http.StatusBadRequest
-		if err != nil && keep {
-			writeProblemNext(w, http.StatusServiceUnavailable, "the request was carried out but its answer could not be stored",
-				"Do not send it again with a new Idempotency-Key: it is done. Read the state it changed to see the result.")
+	held := &heldResponse{header: http.Header{}}
+	next.ServeHTTP(held, r.WithContext(unitCtx))
+	answer := idempotency.Answer{Status: held.code(), ContentType: held.header.Get("Content-Type"), Body: held.body.Bytes()}
+	if answer.Status >= http.StatusInternalServerError || !settle(unitCtx, ctx, st, unit, req, answer) {
+		_ = unit.Rollback()
+		_ = st.Release(ctx, req)
+		if answer.Status < http.StatusBadRequest {
+			writeProblemNext(w, http.StatusServiceUnavailable, "the request was not carried out: its answer could not be stored",
+				"Send the same request with the same Idempotency-Key again.")
 			return
 		}
 	}
-	deliver(w, status, contentType, held.body.Bytes())
+	deliver(w, answer.Status, answer.ContentType, answer.Body)
+}
+
+// settle stores the answer in the unit and commits the unit with it, and
+// reports whether the answer is stored. A refusal writes nothing, so when it
+// cannot commit with the unit (on Postgres a refused statement can leave the
+// unit unable to commit) its answer is stored on its own instead.
+func settle(unitCtx, ctx context.Context, st *idempotency.Store, unit *store.Unit, req idempotency.Request, answer idempotency.Answer) bool {
+	err := st.Complete(unitCtx, req, answer)
+	if err == nil {
+		err = unit.Commit()
+	}
+	if err == nil {
+		return true
+	}
+	_ = unit.Rollback()
+	return answer.Status >= http.StatusBadRequest && st.Complete(ctx, req, answer) == nil
 }
 
 // deliver writes a response of the status, content type and body.

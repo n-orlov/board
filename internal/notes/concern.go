@@ -65,7 +65,7 @@ func (s Store) countConcerning(ctx context.Context, p concernParts) (int, error)
 	args = append(args, p.after.args...)
 	query := `SELECT COUNT(*) FROM (` + strings.Join(branches, ` UNION ALL `) + `) n`
 	var total int
-	if err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(query), args...).Scan(&total); err != nil {
+	if err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(query), args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count notes: %w", err)
 	}
 	return total, nil
@@ -83,7 +83,7 @@ func (s Store) firstRows(ctx context.Context, f *filter, limit int) ([]Note, int
 		query += ` WHERE ` + strings.Join(f.conds, ` AND `)
 	}
 	var total int
-	if err := s.Store.Reader().QueryRowContext(ctx, s.Store.Dialect().Rebind(query), f.args...).Scan(&total); err != nil {
+	if err := s.Store.ReaderFor(ctx).QueryRowContext(ctx, s.Store.Dialect().Rebind(query), f.args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count notes: %w", err)
 	}
 	return items, total - len(items), nil
@@ -175,7 +175,7 @@ func splitReasons(f *filter) []reason {
 func (s Store) taskIDs(ctx context.Context, refs []string) ([]string, error) {
 	ids := make([]string, len(refs))
 	for i, ref := range refs {
-		t, err := s.findTask(ctx, s.Store.Reader(), ref)
+		t, err := s.findTask(ctx, s.Store.ReaderFor(ctx), ref)
 		if err != nil {
 			return nil, err
 		}
