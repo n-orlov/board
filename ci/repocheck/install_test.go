@@ -170,9 +170,37 @@ func assetBytes(tag, osName, arch string) []byte {
 	return buf.Bytes()
 }
 
-// fakeCurl records each invocation (one line in $FAKE_CURL_LOG), then runs the real curl.
+// fakeCurl records each invocation (one line in $FAKE_CURL_LOG) and hands it to the
+// real curl only when every URL it was given has a loopback authority (127.0.0.1,
+// localhost or [::1], digits-only port, no userinfo). Any other destination is
+// recorded in $FAKE_CURL_BLOCKED and answered like an unresolvable host (exit 6)
+// without a connection, so no installer test can reach a production endpoint,
+// whichever base URL it varies.
 const fakeCurl = `#!/bin/sh
 echo "$*" >> "$FAKE_CURL_LOG"
+for arg in "$@"; do
+  case $arg in
+    *://*) ;;
+    *) continue ;;
+  esac
+  rest=${arg#*://}
+  auth=${rest%%[/?#]*}
+  case $arg in
+    http://* | https://*) ;;
+    *) auth=- ;;
+  esac
+  case $auth in
+    *[!A-Za-z0-9.:[\]]*) auth=- ;;
+  esac
+  case $auth in
+    '[::1]' | '[::1]':[0-9]* | 127.0.0.1 | 127.0.0.1:[0-9]* | localhost | localhost:[0-9]*) ;;
+    *)
+      echo "$arg" >> "$FAKE_CURL_BLOCKED"
+      echo "curl: (6) test stub: refusing a non-loopback destination" >&2
+      exit 6
+      ;;
+  esac
+done
 exec "$FAKE_REAL_CURL" "$@"
 `
 
@@ -187,8 +215,9 @@ esac
 type installRun struct {
 	stdout, stderr string
 	code           int
-	dir            string // the install directory
-	curlCalls      int    // how many times install.sh started curl
+	dir            string   // the install directory
+	curlCalls      int      // how many times install.sh started curl
+	blocked        []string // non-loopback URLs curl was asked for (the stub refused each)
 }
 
 type installSpec struct {
@@ -223,21 +252,23 @@ func runInstall(t *testing.T, spec installSpec) installRun {
 		t.Fatalf("write fake curl: %v", err)
 	}
 	curlLog := filepath.Join(t.TempDir(), "curl.log")
+	blockedLog := filepath.Join(t.TempDir(), "blocked.log")
 	pathValue := fakes + string(os.PathListSeparator) + os.Getenv("PATH")
 	if spec.onPath {
 		pathValue = spec.dir + string(os.PathListSeparator) + pathValue
 	}
 	env := map[string]string{
-		"PATH":           pathValue,
-		"HOME":           t.TempDir(),
-		"TMPDIR":         t.TempDir(),
-		"FAKE_CURL_LOG":  curlLog,
-		"FAKE_REAL_CURL": realCurl,
-		"FAKE_UNAME_S":   spec.sysname,
-		"FAKE_UNAME_M":   spec.machine,
-		"VH_INSTALL_DIR": spec.dir,
-		"GITHUB_TOKEN":   "test-token-that-must-not-be-sent",
-		"GH_TOKEN":       "test-token-that-must-not-be-sent",
+		"PATH":              pathValue,
+		"HOME":              t.TempDir(),
+		"TMPDIR":            t.TempDir(),
+		"FAKE_CURL_LOG":     curlLog,
+		"FAKE_CURL_BLOCKED": blockedLog,
+		"FAKE_REAL_CURL":    realCurl,
+		"FAKE_UNAME_S":      spec.sysname,
+		"FAKE_UNAME_M":      spec.machine,
+		"VH_INSTALL_DIR":    spec.dir,
+		"GITHUB_TOKEN":      "test-token-that-must-not-be-sent",
+		"GH_TOKEN":          "test-token-that-must-not-be-sent",
 	}
 	if spec.server != nil {
 		env["VH_API_URL"] = spec.server.URL
@@ -268,7 +299,14 @@ func runInstall(t *testing.T, spec installSpec) installRun {
 	if data, err := os.ReadFile(curlLog); err == nil {
 		calls = strings.Count(string(data), "\n")
 	}
-	return installRun{stdout: stdout.String(), stderr: stderr.String(), code: code, dir: spec.dir, curlCalls: calls}
+	var blocked []string
+	if data, err := os.ReadFile(blockedLog); err == nil {
+		blocked = strings.Fields(string(data))
+	}
+	if spec.server != nil && len(blocked) != 0 {
+		t.Fatalf("a run against the local release server asked curl for an external URL: %q", blocked)
+	}
+	return installRun{stdout: stdout.String(), stderr: stderr.String(), code: code, dir: spec.dir, curlCalls: calls, blocked: blocked}
 }
 
 func (r installRun) installed(t *testing.T) string {
@@ -659,11 +697,112 @@ func TestInstallShAcceptsEveryLoopbackAuthorityForm(t *testing.T) {
 	} {
 		for _, variable := range []string{"VH_API_URL", "VH_DOWNLOAD_URL"} {
 			t.Run(variable+"="+url, func(t *testing.T) {
-				// Nothing listens on port 1: the run fails later, at the request, never at the check.
-				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: []string{variable + "=" + url}})
+				// Both bases are set, so the run can only reach the URL under test and a
+				// loopback address nothing listens on (port 1): it fails at the request,
+				// never at the check, and never leaves loopback (the curl stub refuses
+				// any other destination, such as https://example.com).
+				other := "VH_DOWNLOAD_URL"
+				if variable == other {
+					other = "VH_API_URL"
+				}
+				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: []string{variable + "=" + url, other + "=http://127.0.0.1:1"}})
 				if strings.Contains(run.stderr, "is refused") {
 					t.Fatalf("%s was refused:\n%s", url, run.stderr)
 				}
+				if run.curlCalls == 0 {
+					t.Fatalf("%s=%s was accepted but curl never started:\n%s", variable, url, run.stderr)
+				}
+				for _, b := range run.blocked {
+					if !strings.HasPrefix(url, "https://") || !strings.HasPrefix(b, "https://") {
+						t.Fatalf("a loopback http override reached the non-loopback destination %q", b)
+					}
+				}
+			})
+		}
+	}
+}
+
+// stubProbe runs the fake curl with a sentinel in place of the real curl and reports
+// whether the sentinel (a network-capable curl) was started, and what was blocked.
+func stubProbe(t *testing.T, args ...string) (delegated bool, blocked []string, code int) {
+	t.Helper()
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "curl")
+	sentinel := filepath.Join(dir, "real-curl")
+	for path, body := range map[string]string{stub: fakeCurl, sentinel: "#!/bin/sh\necho started >> \"$SENTINEL_LOG\"\n"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sentinelLog, blockedLog := filepath.Join(dir, "sentinel.log"), filepath.Join(dir, "blocked.log")
+	cmd := exec.Command("sh", append([]string{stub}, args...)...)
+	cmd.Env = []string{
+		"FAKE_CURL_LOG=" + filepath.Join(dir, "calls.log"), "FAKE_CURL_BLOCKED=" + blockedLog,
+		"FAKE_REAL_CURL=" + sentinel, "SENTINEL_LOG=" + sentinelLog,
+	}
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatalf("run curl stub: %v", err)
+		}
+		code = ee.ExitCode()
+	}
+	_, err := os.Stat(sentinelLog)
+	if data, err := os.ReadFile(blockedLog); err == nil {
+		blocked = strings.Fields(string(data))
+	}
+	return err == nil, blocked, code
+}
+
+func TestTheCurlStubNeverDelegatesAnExternalURLToARealCurl(t *testing.T) {
+	external := []string{
+		"https://api.github.com/repos/n-orlov/board/releases/latest", "https://github.com", "https://example.com",
+		"http://example.com", "https://127.0.0.1.example.com/x", "http://127.0.0.1@example.com", "http://127.0.0.1:80@example.com",
+		"https://localhost@example.com", "http://localhost.example.com:80", "ftp://127.0.0.1/x", "https://[::2]",
+		"http://10.0.0.1", "http://127.0.0.1:x", "http://0.0.0.0", `http://127.0.0.1\@example.com`, "gopher://localhost",
+	}
+	for _, url := range external {
+		t.Run(url, func(t *testing.T) {
+			delegated, blocked, code := stubProbe(t, "-fsSL", "-o", "x", url)
+			if delegated {
+				t.Fatalf("the stub delegated %q to the real curl", url)
+			}
+			if code != 6 || len(blocked) != 1 || blocked[0] != url {
+				t.Fatalf("exit %d, blocked %q, want exit 6 and %q recorded", code, blocked, url)
+			}
+		})
+	}
+	// An external URL anywhere among several arguments blocks the whole call.
+	if delegated, blocked, _ := stubProbe(t, "http://127.0.0.1:1/a", "-o", "x", "https://example.com/b"); delegated || len(blocked) != 1 {
+		t.Fatalf("mixed call delegated=%v blocked=%q", delegated, blocked)
+	}
+	for _, url := range []string{"http://127.0.0.1:1/x", "http://localhost", "https://localhost:8443/p?q=@example.com", "http://[::1]:9/x"} {
+		if delegated, blocked, code := stubProbe(t, "-fsSL", url); !delegated || len(blocked) != 0 || code != 0 {
+			t.Fatalf("loopback %q: delegated=%v blocked=%q exit %d, want it passed through", url, delegated, blocked, code)
+		}
+	}
+}
+
+func TestEveryInstallerRunWithAnExternalBaseNeverReachesTheNetwork(t *testing.T) {
+	// Each external base, on either variable and on both, ends at the stub's refusal
+	// with nothing installed and the production destination recorded, not requested.
+	for _, base := range []string{"https://api.github.com", "https://github.com", "https://example.com/base"} {
+		for _, vars := range [][]string{{"VH_API_URL"}, {"VH_DOWNLOAD_URL"}, {"VH_API_URL", "VH_DOWNLOAD_URL"}} {
+			t.Run(base+" via "+strings.Join(vars, "+"), func(t *testing.T) {
+				var env []string
+				for _, v := range vars {
+					env = append(env, v+"="+base)
+				}
+				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: env})
+				if run.code == 0 || len(run.blocked) == 0 {
+					t.Fatalf("exit %d, blocked %q: want a failure at the stub's refusal", run.code, run.blocked)
+				}
+				for _, b := range run.blocked {
+					if !strings.HasPrefix(b, "https://") {
+						t.Fatalf("blocked %q is not an https URL", b)
+					}
+				}
+				run.nothingInstalled(t)
 			})
 		}
 	}
