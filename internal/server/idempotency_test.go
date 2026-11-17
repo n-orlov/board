@@ -724,33 +724,92 @@ func TestEveryWritingPostWhoseAnswerCannotBeStoredWritesNothingAndItsRetryRunsOn
 		}
 		sort.Strings(ops)
 		for i, op := range ops {
-			c := idemCases[op]
-			fault := []answerFault{raisedFault, silentFault}[i%2]
-			path, body, actor := c.build(w)
-			key := fmt.Sprintf("unstored-%d", i)
-			events, keys := w.count("events"), w.count("idempotency_keys")
+			for j, fault := range []answerFault{raisedFault, silentFault} {
+				// a case builds state that exists once, so each fault gets its own world
+				w := newIdemWorld(t, dbs)
+				w.must("/api/v1/initiatives", `{"slug":"aa","title":"A"}`, "claude@host")
+				c := idemCases[op]
+				path, body, actor := c.build(w)
+				key := fmt.Sprintf("unstored-%d-%d", i, j)
+				events, keys := w.count("events"), w.count("idempotency_keys")
+				lift := failAnswers(t, w, fault)
+				for try := 0; try < 2; try++ {
+					notCarriedOut(t, fmt.Sprintf("%s (%s) send %d", op, fault, try), w.post(path, body, actor, key))
+				}
+				if got := w.count("events") - events; got != 0 {
+					t.Errorf("%s (%s): sends whose answer was not stored wrote %d events rows, want none", op, fault, got)
+				}
+				if got := w.count("idempotency_keys"); got != keys {
+					t.Errorf("%s (%s): %d keys after the sends, want %d: the key is released", op, fault, got, keys)
+				}
+				lift()
+				run := w.post(path, body, actor, key)
+				replay := w.post(path, body, actor, key)
+				if run.Code/100 != 2 || run.Header().Get(ReplayedHeader) != "" {
+					t.Errorf("%s (%s): the send after the fault = %d %s, want the request run", op, fault, run.Code, run.Body)
+					continue
+				}
+				if replay.Code != run.Code || replay.Body.String() != run.Body.String() || replay.Header().Get(ReplayedHeader) != "true" {
+					t.Errorf("%s (%s): retry = %d %s (%q), want the replay of %d %s", op, fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader), run.Code, run.Body)
+				}
+				if got := w.count("events") - events; got != c.events {
+					t.Errorf("%s (%s): %d events rows in all, want the %d of one run", op, fault, got, c.events)
+				}
+			}
+		}
+	})
+}
+
+func TestAStoredAnswerStillReplaysAndStillRefusesAMismatchWhileAnswersCannotBeStored(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		for _, fault := range []answerFault{raisedFault, silentFault} {
+			w := newIdemWorld(t, dbs)
+			first := w.post("/api/v1/notes", `{"summary":"one"}`, "nik@phone", "k-"+string(fault))
+			if first.Code != http.StatusCreated {
+				t.Fatalf("%s: first = %d %s", fault, first.Code, first.Body)
+			}
+			events, notes := w.count("events"), w.count("notes")
 			lift := failAnswers(t, w, fault)
-			for try := 0; try < 2; try++ {
-				notCarriedOut(t, fmt.Sprintf("%s (%s) send %d", op, fault, try), w.post(path, body, actor, key))
+			replay := w.post("/api/v1/notes", `{"summary":"one"}`, "nik@phone", "k-"+string(fault))
+			if replay.Code != first.Code || replay.Body.String() != first.Body.String() || replay.Header().Get(ReplayedHeader) != "true" {
+				t.Errorf("%s: replay while answers cannot be stored = %d %s (%q), want the original %d %s", fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader), first.Code, first.Body)
 			}
-			if got := w.count("events") - events; got != 0 {
-				t.Errorf("%s (%s): sends whose answer was not stored wrote %d events rows, want none", op, fault, got)
-			}
-			if got := w.count("idempotency_keys"); got != keys {
-				t.Errorf("%s (%s): %d keys after the sends, want %d: the key is released", op, fault, got, keys)
+			mismatch := w.post("/api/v1/notes", `{"summary":"two"}`, "nik@phone", "k-"+string(fault))
+			if mismatch.Code != http.StatusUnprocessableEntity || mismatch.Header().Get(ReplayedHeader) != "" {
+				t.Errorf("%s: a different body under the stored key = %d %s, want 422", fault, mismatch.Code, mismatch.Body)
 			}
 			lift()
-			run := w.post(path, body, actor, key)
-			replay := w.post(path, body, actor, key)
-			if run.Code/100 != 2 || run.Header().Get(ReplayedHeader) != "" {
-				t.Errorf("%s (%s): the send after the fault = %d %s, want the request run", op, fault, run.Code, run.Body)
-				continue
+			if w.count("events") != events || w.count("notes") != notes {
+				t.Errorf("%s: replay and mismatch wrote: events %d -> %d, notes %d -> %d", fault, events, w.count("events"), notes, w.count("notes"))
 			}
-			if replay.Code != run.Code || replay.Body.String() != run.Body.String() || replay.Header().Get(ReplayedHeader) != "true" {
-				t.Errorf("%s (%s): retry = %d %s (%q), want the replay of %d %s", op, fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader), run.Code, run.Body)
+		}
+	})
+}
+
+func TestAKeyFreedByAnUnstoredAnswerBindsToTheRequestThatThenCommits(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		for _, fault := range []answerFault{raisedFault, silentFault} {
+			w := newIdemWorld(t, dbs)
+			key := "bind-" + string(fault)
+			lift := failAnswers(t, w, fault)
+			notCarriedOut(t, string(fault)+" send of one", w.post("/api/v1/notes", `{"summary":"one"}`, "nik@phone", key))
+			lift()
+			two := w.post("/api/v1/notes", `{"summary":"two"}`, "nik@phone", key)
+			if two.Code != http.StatusCreated || two.Header().Get(ReplayedHeader) != "" {
+				t.Fatalf("%s: a different request after the fault = %d %s, want it run", fault, two.Code, two.Body)
 			}
-			if got := w.count("events") - events; got != c.events {
-				t.Errorf("%s (%s): %d events rows in all, want the %d of one run", op, fault, got, c.events)
+			one := w.post("/api/v1/notes", `{"summary":"one"}`, "nik@phone", key)
+			if one.Code != http.StatusUnprocessableEntity || one.Header().Get(ReplayedHeader) != "" {
+				t.Errorf("%s: the request whose answer was never stored = %d %s, want 422 against the committed one", fault, one.Code, one.Body)
+			}
+			replay := w.post("/api/v1/notes", `{"summary":"two"}`, "nik@phone", key)
+			if replay.Code != two.Code || replay.Body.String() != two.Body.String() || replay.Header().Get(ReplayedHeader) != "true" {
+				t.Errorf("%s: replay of the committed request = %d %s (%q), want %d %s", fault, replay.Code, replay.Body, replay.Header().Get(ReplayedHeader), two.Code, two.Body)
+			}
+			if got := w.count("notes"); got != 1 {
+				t.Errorf("%s: %d notes in all, want the one that committed", fault, got)
 			}
 		}
 	})
