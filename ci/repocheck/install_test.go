@@ -170,6 +170,12 @@ func assetBytes(tag, osName, arch string) []byte {
 	return buf.Bytes()
 }
 
+// fakeCurl records each invocation (one line in $FAKE_CURL_LOG), then runs the real curl.
+const fakeCurl = `#!/bin/sh
+echo "$*" >> "$FAKE_CURL_LOG"
+exec "$FAKE_REAL_CURL" "$@"
+`
+
 const fakeUname = `#!/bin/sh
 case "$1" in
 -s) printf '%s\n' "$FAKE_UNAME_S" ;;
@@ -182,6 +188,7 @@ type installRun struct {
 	stdout, stderr string
 	code           int
 	dir            string // the install directory
+	curlCalls      int    // how many times install.sh started curl
 }
 
 type installSpec struct {
@@ -208,6 +215,14 @@ func runInstall(t *testing.T, spec installSpec) installRun {
 	if err := os.WriteFile(filepath.Join(fakes, "uname"), []byte(fakeUname), 0o755); err != nil {
 		t.Fatalf("write fake uname: %v", err)
 	}
+	realCurl, err := exec.LookPath("curl")
+	if err != nil {
+		t.Fatalf("curl not found: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fakes, "curl"), []byte(fakeCurl), 0o755); err != nil {
+		t.Fatalf("write fake curl: %v", err)
+	}
+	curlLog := filepath.Join(t.TempDir(), "curl.log")
 	pathValue := fakes + string(os.PathListSeparator) + os.Getenv("PATH")
 	if spec.onPath {
 		pathValue = spec.dir + string(os.PathListSeparator) + pathValue
@@ -216,6 +231,8 @@ func runInstall(t *testing.T, spec installSpec) installRun {
 		"PATH":           pathValue,
 		"HOME":           t.TempDir(),
 		"TMPDIR":         t.TempDir(),
+		"FAKE_CURL_LOG":  curlLog,
+		"FAKE_REAL_CURL": realCurl,
 		"FAKE_UNAME_S":   spec.sysname,
 		"FAKE_UNAME_M":   spec.machine,
 		"VH_INSTALL_DIR": spec.dir,
@@ -247,7 +264,11 @@ func runInstall(t *testing.T, spec installSpec) installRun {
 		}
 		code = ee.ExitCode()
 	}
-	return installRun{stdout: stdout.String(), stderr: stderr.String(), code: code, dir: spec.dir}
+	calls := 0
+	if data, err := os.ReadFile(curlLog); err == nil {
+		calls = strings.Count(string(data), "\n")
+	}
+	return installRun{stdout: stdout.String(), stderr: stderr.String(), code: code, dir: spec.dir, curlCalls: calls}
 }
 
 func (r installRun) installed(t *testing.T) string {
@@ -580,11 +601,21 @@ func TestInstallShRefusesANonLoopbackHTTPOverride(t *testing.T) {
 			"http://example.com", "http://example.com:8080/x", "http://127.0.0.1.example.com",
 			"http://127.0.0.1@example.com", "http://localhost.example.com", "http://10.0.0.1:80",
 			"http://[::2]", "ftp://127.0.0.1", "127.0.0.1:80", "http://",
+			// authority confusion: loopback-looking text that is not the authority's host
+			"http://127.0.0.1:80@example.com", "http://127.0.0.1:x@example.com/", "http://localhost:@example.com",
+			"http://[::1]:80@example.com", "http://user:pw@localhost", "http://localhost:80@127.0.0.1",
+			`http://127.0.0.1\@example.com`, `http://localhost\.example.com`, "http://127.0.0.1.:80",
+			"http://[::1]x", "http://[::1]:80@[::2]", "http://localhost:80:90", "http://127.0.0.1:", "http://localhost:8a",
+			"http://LOCALHOST:80", "http://127.0.0.1 @example.com", "http://[::1", "http://::1", "http://127.1",
+			"http://0.0.0.0:80", "http://localhost%2540example.com", "http://[::1]%25x",
 		} {
 			t.Run(variable+"="+url, func(t *testing.T) {
 				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{variable + "=" + url}})
 				run.refused(t, variable+" '"+url+"' is refused: only https is allowed")
 				run.nothingInstalled(t)
+				if run.curlCalls != 0 {
+					t.Fatalf("a refused override started curl %d time(s), want 0", run.curlCalls)
+				}
 			})
 		}
 	}
@@ -609,6 +640,24 @@ func TestInstallShAcceptsLoopbackHTTPOverrides(t *testing.T) {
 	}})
 	if v6.code == 0 || strings.Contains(v6.stderr, "only https is allowed") {
 		t.Fatalf("a [::1] override was refused as non-loopback (exit %d):\n%s", v6.code, v6.stderr)
+	}
+}
+
+func TestInstallShAcceptsEveryLoopbackAuthorityForm(t *testing.T) {
+	for _, url := range []string{
+		"http://127.0.0.1", "http://127.0.0.1:1", "http://127.0.0.1:1/", "http://127.0.0.1/x",
+		"http://localhost", "http://localhost:1", "http://localhost:1/x", "http://[::1]", "http://[::1]:1/x",
+		"https://example.com", "https://127.0.0.1:1", "https://user@example.com",
+	} {
+		for _, variable := range []string{"VH_API_URL", "VH_DOWNLOAD_URL"} {
+			t.Run(variable+"="+url, func(t *testing.T) {
+				// Nothing listens on port 1: the run fails later, at the request, never at the check.
+				run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: []string{variable + "=" + url}})
+				if strings.Contains(run.stderr, "is refused") {
+					t.Fatalf("%s was refused:\n%s", url, run.stderr)
+				}
+			})
+		}
 	}
 }
 

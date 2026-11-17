@@ -2292,7 +2292,9 @@ curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
 - Every `curl` in `install.sh` is `--proto =https` (redirects too). The base URLs of the release
   API and of the downloads default to `https://api.github.com` and `https://github.com`; tests
   override them with `VH_API_URL` and `VH_DOWNLOAD_URL`, which accept `https://`, or `http://`
-  only on `127.0.0.1`, `localhost` or `[::1]`, and anything else is refused before any request.
+  only when the parsed authority's host is exactly `127.0.0.1`, `localhost` or `[::1]` (no
+  userinfo, a numeric port if any), and anything else, including a loopback-looking userinfo such as
+  `http://127.0.0.1:80@example.com`, is refused before any request.
   A static test fails on any `curl` call without `--proto =https`.
 - **Immutability**: before installing it asks the GitHub release API whether the release is
   immutable and refuses one that is not confirmed (the `immutable` member of the release object is not

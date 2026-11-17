@@ -39,13 +39,32 @@ trap 'exit 1' INT TERM
 
 die() { echo "vh install: $*" >&2; exit 1; }
 
-# base_ok accepts an https:// URL, or an http:// URL whose host is loopback.
+# base_ok accepts an https:// URL, or an http:// URL whose parsed authority is a loopback
+# host: exactly 127.0.0.1, localhost or [::1], no userinfo, and a numeric port if any.
 base_ok() {
   case $1 in
     https://?*) return 0 ;;
-    http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]* | 'http://[::1]' | 'http://[::1]'[:/]*) return 0 ;;
+    http://?*) ;;
+    *) return 1 ;;
   esac
-  return 1
+  rest=${1#http://}
+  auth=${rest%%[/?#]*}
+  case $auth in
+    *[!A-Za-z0-9.:[\]]*) return 1 ;; # userinfo (@), backslash, space, control or other characters
+  esac
+  case $auth in
+    '[::1]') return 0 ;;
+    '[::1]':*) port=${auth#'[::1]':} ;;
+    127.0.0.1) return 0 ;;
+    127.0.0.1:*) port=${auth#127.0.0.1:} ;;
+    localhost) return 0 ;;
+    localhost:*) port=${auth#localhost:} ;;
+    *) return 1 ;;
+  esac
+  case $port in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  return 0
 }
 base_ok "$api_base" || die "VH_API_URL '$api_base' is refused: only https is allowed (http only for 127.0.0.1, localhost or [::1])"
 base_ok "$dl_base" || die "VH_DOWNLOAD_URL '$dl_base' is refused: only https is allowed (http only for 127.0.0.1, localhost or [::1])"
