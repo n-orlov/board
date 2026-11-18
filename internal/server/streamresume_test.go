@@ -249,6 +249,10 @@ func TestResumeDoesNotRepeatEventsTheFeedHasNotDeliveredYet(t *testing.T) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		r, st := resumeRig(t, dbs)
 		r.createInitiative("one")
+		// The write only wakes the feed; its read can run after the writes beside
+		// it below and deliver E3 too, which the stream must then replay. Let it
+		// finish first, so that nothing wakes it until "live".
+		r.awaitFeed(1)
 		createBeside(t, st, "b", 2) // E2, E3: committed, the feed has not read them
 		page, err := (&events.Store{Store: st}).List(context.Background(), events.Query{})
 		if err != nil || len(page.Items) != 3 {
