@@ -1,6 +1,6 @@
 #!/bin/sh
 # ci/mutation-merge.sh -- full-mode mutation's last step (SPEC 15.4): the
-# Jenkinsfile runs ci/mutation.sh as four parallel units, each over its own
+# Jenkinsfile runs ci/mutation.sh as three parallel units, each over its own
 # lanes and into its own outdir, and this script judges their union as one
 # gate, the same as a single `ci/mutation.sh` run over the lane "all".
 #

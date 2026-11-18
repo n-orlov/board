@@ -118,16 +118,16 @@ timing table (`ci-results/distributed/timing.md`).
 
 The pipeline runs Core, then Stability and Mutation side by side, then Perf; the
 units of a phase run in parallel, and a phase runs only if every earlier one
-passed (UNSTABLE counts as passed; Perf needs only the stability units to pass).
+passed (UNSTABLE counts as passed; Perf needs only the Stability unit to pass).
 A nightly build takes about an hour with incremental mutation and about 130
 minutes with full mutation, Core about 33 of them:
 
 | phase | units | runs |
 |---|---|---|
 | Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
-| Stability | three units, each `ci/stability.sh 1`, beside Mutation | `EXTENDED=true` or the nightly timer |
-| Mutation | one unit (diff), four units and a gate (full), or a plan, the units it gives work and a gate (incremental), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly of `main` |
-| Perf | the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes), alone, when the stability units passed | `EXTENDED=true` or the nightly timer |
+| Stability | one unit (one executor) running `ci/stability.sh 1` three times side by side, each run in its own clone of the checkout and its own stage (`Stability 1` to `3`), beside Mutation | `EXTENDED=true` or the nightly timer |
+| Mutation | one unit (diff), three units and a gate (full), or a plan, the units it gives work and a gate (incremental), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly of `main` |
+| Perf | the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes), alone, when the Stability unit passed | `EXTENDED=true` or the nightly timer |
 
 Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
 `MUTATION_FULL`; the choice `MUTATION_MODE` (`incremental`, the default, or
@@ -139,6 +139,14 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
   minutes). `EXTENDED=true` and the nightly timer also add `-race` (the Suite's
   limit goes from 45 to 120 minutes) and fresh vulnerability databases to Core.
 - **Stability** is the extended lane: `EXTENDED=true` or the nightly timer.
+  Its one unit holds a single executor and runs the three `ci/stability.sh 1`
+  runs side by side (about 11 minutes), each in a local clone of the checkout
+  (`stability-<i>`, at the build's commit, with the checkout's `origin` URL and
+  refs) with its own `TMPDIR` and log (`ci-results/stability/run-<i>/`); their
+  Postgres testcontainers publish random host ports, so the runs share
+  nothing but the Go and npm caches. Any run failing fails the unit, whose one
+  rerun repeats all three. Until #238 each run was a unit of its own, and the
+  three executors they held kept the mutation units waiting.
   - The **Perf** unit runs the SPEC 14 harness (`ci/perf.sh`, build tag `perf`) after
     the stability and mutation units, alone on the agent so their load is not part of what it
     measures, under a 30-minute bound (about 4 minutes on `int21h-ws`). It seeds 1 M
@@ -160,19 +168,24 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
     only if `web/src/lib` changed.
   - *full* (`MUTATION_FULL=true`, `MUTATION_MODE=full`, Sunday's nightly, or a
     nightly that cannot be incremental): every package
-    plus Stryker in four parallel units (`FULL_MUTATION` in the Jenkinsfile), each
+    plus Stryker in three parallel units (`FULL_MUTATION` in the Jenkinsfile), each
     `ci/run.sh ci/mutation.sh ci-results/mutation-units/<dir> ci/quality.json
     <lane>,<lane>` over its own lanes of `mutation_go.lanes` (every lane in exactly
     one unit, Stryker with lane `base`), then the Mutation gate unit,
     `ci/mutation-merge.sh`, which merges their reports into `ci-results/mutation`
-    and judges every package once. The first unit starts beside the stability
-    units, the other three when those end (4 executors). Each runs `nproc / 3`
-    gremlins workers at GOMAXPROCS 2 per worker (`BOARD_MUTATION_WORKERS`,
-    `BOARD_MUTATION_TEST_CPU`; `nproc / 2` when at most two units run), at
-    `nice 10`, under a 110-minute limit and a single attempt. `ci/mutation.sh`
-    caps one mutant at about 5 minutes (its header): #233's single full unit
-    spent two of its four hours on seven hanging `internal/server` mutants. It
-    takes about 80 minutes after Core (#235: 128 minutes in all).
+    and judges every package once. The three units start together beside the
+    Stability unit (1 + 3 of the 4 executors), each `internal/server` part in a
+    unit of its own. Each runs `nproc / 3` gremlins workers at GOMAXPROCS 2 per
+    worker (`BOARD_MUTATION_WORKERS`, `BOARD_MUTATION_TEST_CPU`; `nproc / 2`
+    when at most two units run), 12 workers on `int21h-ws`, at `nice 10`, under
+    a 110-minute limit and a single attempt; Stryker, at the end of the unit
+    with lane `base`, runs `nproc / 2` test processes at `nice 10`
+    (`BOARD_MUTATION_STRYKER_CONCURRENCY`, read by `web/stryker.config.mjs` as
+    `STRYKER_CONCURRENCY`; Stryker's own default is one per CPU less one).
+    `ci/mutation.sh` caps one mutant at about 5 minutes (its header): #233's
+    single full unit spent two of its four hours on seven hanging
+    `internal/server` mutants. #235 (four units, three of them waiting for the
+    three stability units) took 128 minutes in all.
   - *incremental* (the nightly's default): the reference is the last
     successful build of this job whose description says `mutation(full)`. The
     Mutation plan unit copies its archived reports, Stryker report and commit
@@ -298,7 +311,7 @@ Suite and Image; the Perf unit (30 minutes, after the stability and mutation uni
 booleanParams, `disableConcurrentBuilds`, the 300-minute timeout, the
 per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
 on `main` only); the Quality unit; the three Mutation modes (diff: one 45-minute
-unit over the lines changed since the merge base, `HEAD~1` on `main`; full: four
+unit over the lines changed since the merge base, `HEAD~1` on `main`; full: three
 110-minute single-attempt units whose lanes cover every lane exactly once, Stryker
 included, and the gate over all of them; incremental: the reference search, the
 plan, the selected units and the gate over them and the reused reports) and that
@@ -439,7 +452,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   every file outside the part excluded, with its own report
   (`internal-server-ops.json`) and its own judgement against the same floor.
   `mutation_go.lanes` partitions the packages' units into lanes (a unit in no
-  lane, or two, fails `ci/mutationgate`). Jenkins' full mode runs four units,
+  lane, or two, fails `ci/mutationgate`). Jenkins' full mode runs three units,
   each over a comma-separated list of lanes; a list may also name single units
   (`internal/server#core`), which is how incremental mode runs only the stale
   ones (`ci/mutationgate -stale <ref>` lists them, exit 3 when every unit must

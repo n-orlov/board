@@ -166,8 +166,20 @@ func phaseProblems(jf string) []string {
 	}
 	mutation, _ := jenkinsStage(jf, "Mutation")
 	problems = append(problems, mutationGateProblems(mutation)...)
-	if !strings.Contains(stability, "[1, 2, 3].each { i ->") || strings.Count(stability, "ci/stability.sh 1") != 1 {
-		problems = append(problems, "Stability is not three units, each running ci/stability.sh 1")
+	if !strings.Contains(stability, "def u = [name: 'Stability runs', minutes: 40,") || !strings.Contains(stability, "unitBranch(u).call()") ||
+		strings.Count(stability, "unitBranch(") != 1 || strings.Count(stability, "runUnit(") != 0 {
+		problems = append(problems, "Stability is not one unit (one executor)")
+	}
+	if !strings.Contains(stability, "[1, 2, 3].each { i ->") || strings.Count(stability, "ci/stability.sh 1") != 1 ||
+		!strings.Contains(stability, "parallel runs") || !strings.Contains(stability, `stage("Stability ${i}")`) {
+		problems = append(problems, "Stability's unit does not run ci/stability.sh 1 three times side by side, each in a stage of its own")
+	}
+	if !strings.Contains(stability, `git clone -q --local --no-checkout . "stability-$i"`) || !strings.Contains(stability, "cd stability-${i} && ") ||
+		!strings.Contains(stability, `$BOARD_CI_OUT/stability/run-${i}`) {
+		problems = append(problems, "Stability's runs do not each run in a clone of their own with their own TMPDIR")
+	}
+	if !strings.Contains(stability, "return failed ? 1 : 0") {
+		problems = append(problems, "Stability's unit does not fail when one of its runs fails")
 	}
 	return problems
 }
@@ -178,28 +190,32 @@ func phaseProblems(jf string) []string {
 func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	expectProblems(t, jf, phaseProblems, map[string]string{
-		"Stability before Core":           replaceOnce(t, jf, "    stage('Core') {", "    stage('Stability') {\n      steps { echo 'x' }\n    }\n    stage('Core') {"),
-		"Mutation after Stability":        replaceOnce(t, jf, "    stage('Stability and Mutation') {\n      parallel {", "    stage('Stability and Mutation') {\n      stages {"),
-		"Mutation outside the phase":      replaceOnce(t, jf, "        stage('Mutation') {", "        stage('Mutations') {"),
-		"a fourth phase":                  replaceOnce(t, jf, "    stage('Perf') {", "    stage('Extra') {\n      steps { echo 'x' }\n    }\n    stage('Perf') {"),
-		"Perf before Mutation":            replaceOnce(t, replaceOnce(t, jf, "    stage('Perf') {", "    stage('Late') {"), "    stage('Stability and Mutation') {", "    stage('Perf') {\n      steps { echo 'x' }\n    }\n    stage('Stability and Mutation') {"),
-		"no Lint unit":                    replaceOnce(t, jf, "units << [name: 'Lint'", "units << [name: 'Tidy'"),
-		"no Allure smoke unit":            replaceOnce(t, jf, "units << [name: 'Allure smoke'", "units << [name: 'Smoke'"),
-		"no Image unit":                   replaceOnce(t, jf, "units << [name: 'Image'", "units << [name: 'Picture'"),
-		"Quality not waiting for Image":   replaceOnce(t, jf, " && signals['Image'] == true", ""),
-		"Quality not waiting for Suite":   replaceOnce(t, jf, "signals['Suite'] == true && ", ""),
-		"Lint not running ci/lint.sh":     replaceOnce(t, jf, "ci/run.sh ci/lint.sh", "ci/run.sh true"),
-		"Suite not running ci/suite.sh":   replaceOnce(t, jf, "ci/run.sh ci/suite.sh", "ci/run.sh true"),
-		"Image not checked":               replaceOnce(t, jf, ` && ci/image-check.sh "$BOARD_CI_OUT"`, ""),
-		"smoke not running the fixture":   replaceOnce(t, jf, "TestAllureFormatterWritesResultsForAFixtureRun", "TestNothing"),
-		"Stability on every build":        replaceOnce(t, jf, "expression { env.CI_NIGHTLY == 'true' && currentBuild", "expression { currentBuild"),
-		"Stability after a failed Core":   replaceOnce(t, jf, "env.CI_NIGHTLY == 'true' && currentBuild.currentResult != 'FAILURE'", "env.CI_NIGHTLY == 'true'"),
-		"Mutation on every build":         replaceOnce(t, jf, "expression { env.CI_MUTATION == 'true' && currentBuild", "expression { currentBuild"),
-		"Mutation after a failed phase":   replaceOnce(t, jf, "env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE'", "env.CI_MUTATION == 'true'"),
-		"Mutation on EXTENDED alone":      replaceOnce(t, jf, "expression { env.CI_MUTATION == 'true'", "expression { env.CI_NIGHTLY == 'true'"),
-		"Mutation on a push of main":      replaceOnce(t, jf, "        stage('Mutation') {\n          when {", "        stage('Mutation') {\n          when {\n            branch 'main'"),
-		"two stability units":             replaceOnce(t, jf, "[1, 2, 3].each { i ->", "[1, 2].each { i ->"),
-		"stability running three at once": replaceOnce(t, jf, "ci/stability.sh 1", "ci/stability.sh 3"),
+		"Stability before Core":            replaceOnce(t, jf, "    stage('Core') {", "    stage('Stability') {\n      steps { echo 'x' }\n    }\n    stage('Core') {"),
+		"Mutation after Stability":         replaceOnce(t, jf, "    stage('Stability and Mutation') {\n      parallel {", "    stage('Stability and Mutation') {\n      stages {"),
+		"Mutation outside the phase":       replaceOnce(t, jf, "        stage('Mutation') {", "        stage('Mutations') {"),
+		"a fourth phase":                   replaceOnce(t, jf, "    stage('Perf') {", "    stage('Extra') {\n      steps { echo 'x' }\n    }\n    stage('Perf') {"),
+		"Perf before Mutation":             replaceOnce(t, replaceOnce(t, jf, "    stage('Perf') {", "    stage('Late') {"), "    stage('Stability and Mutation') {", "    stage('Perf') {\n      steps { echo 'x' }\n    }\n    stage('Stability and Mutation') {"),
+		"no Lint unit":                     replaceOnce(t, jf, "units << [name: 'Lint'", "units << [name: 'Tidy'"),
+		"no Allure smoke unit":             replaceOnce(t, jf, "units << [name: 'Allure smoke'", "units << [name: 'Smoke'"),
+		"no Image unit":                    replaceOnce(t, jf, "units << [name: 'Image'", "units << [name: 'Picture'"),
+		"Quality not waiting for Image":    replaceOnce(t, jf, " && signals['Image'] == true", ""),
+		"Quality not waiting for Suite":    replaceOnce(t, jf, "signals['Suite'] == true && ", ""),
+		"Lint not running ci/lint.sh":      replaceOnce(t, jf, "ci/run.sh ci/lint.sh", "ci/run.sh true"),
+		"Suite not running ci/suite.sh":    replaceOnce(t, jf, "ci/run.sh ci/suite.sh", "ci/run.sh true"),
+		"Image not checked":                replaceOnce(t, jf, ` && ci/image-check.sh "$BOARD_CI_OUT"`, ""),
+		"smoke not running the fixture":    replaceOnce(t, jf, "TestAllureFormatterWritesResultsForAFixtureRun", "TestNothing"),
+		"Stability on every build":         replaceOnce(t, jf, "expression { env.CI_NIGHTLY == 'true' && currentBuild", "expression { currentBuild"),
+		"Stability after a failed Core":    replaceOnce(t, jf, "env.CI_NIGHTLY == 'true' && currentBuild.currentResult != 'FAILURE'", "env.CI_NIGHTLY == 'true'"),
+		"Mutation on every build":          replaceOnce(t, jf, "expression { env.CI_MUTATION == 'true' && currentBuild", "expression { currentBuild"),
+		"Mutation after a failed phase":    replaceOnce(t, jf, "env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE'", "env.CI_MUTATION == 'true'"),
+		"Mutation on EXTENDED alone":       replaceOnce(t, jf, "expression { env.CI_MUTATION == 'true'", "expression { env.CI_NIGHTLY == 'true'"),
+		"Mutation on a push of main":       replaceOnce(t, jf, "        stage('Mutation') {\n          when {", "        stage('Mutation') {\n          when {\n            branch 'main'"),
+		"two stability runs":               replaceOnce(t, jf, "[1, 2, 3].each { i ->", "[1, 2].each { i ->"),
+		"stability running three in a row": replaceOnce(t, jf, "ci/stability.sh 1", "ci/stability.sh 3"),
+		"stability runs in series":         replaceOnce(t, jf, "parallel runs\n", "runs.each { k, v -> v.call() }\n"),
+		"stability runs in one tree":       replaceOnce(t, jf, "cd stability-${i} && ", ""),
+		"a failed run that passes":         replaceOnce(t, jf, "return failed ? 1 : 0", "return 0"),
+		"a unit per stability run":         replaceOnce(t, jf, "              unitBranch(u).call()\n              env.STABILITY_RESULT", "              parallel([1, 2, 3].collectEntries { [(\"Stability ${it}\"): unitBranch(u + [name: \"Stability ${it}\"])] })\n              env.STABILITY_RESULT"),
 	})
 	script := readRepoFile(t, "ci", "jenkins-image.sh")
 	for _, v := range []string{"BOARD_CI_CACHE_VOLUME", "BOARD_CI_NPM_VOLUME"} {
@@ -666,7 +682,7 @@ func TestJenkinsfilesNotifyTelegram(t *testing.T) {
 // condition decides it.
 func mutationGateProblems(stageBody string) []string {
 	var problems []string
-	when, _, _ := strings.Cut(stageBody, "steps {") // the steps may read CI_NIGHTLY (full mode waits for Stability)
+	when, _, _ := strings.Cut(stageBody, "steps {") // the steps may read CI_NIGHTLY (the full-mode tuning)
 	lines := jenkinsfileLines(when)
 	if !anyLineContains(lines, "expression { env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE' }") {
 		problems = append(problems, "lacks the CI_MUTATION guard behind a passing earlier phase")
@@ -816,8 +832,8 @@ func fullMutationLanes(jf string) [][]string {
 // base, whose unit runs Stryker, is one of them.
 func fullLaneProblems(units [][]string, lanes map[string][]string) []string {
 	var problems []string
-	if len(units) != 4 {
-		problems = append(problems, "full mode has "+strconv.Itoa(len(units))+" units, want 4")
+	if len(units) != 3 {
+		problems = append(problems, "full mode has "+strconv.Itoa(len(units))+" units, want 3")
 	}
 	seen := map[string]int{}
 	for _, u := range units {
@@ -875,7 +891,7 @@ func fullMutationProblems(jf string) []string {
 	}
 	for _, want := range []string{
 		"String share = selected.size() > 2 ? '3' : '2'",
-		"String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2'",
+		"String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +\n                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'",
 		"selected.each { m ->",
 		"String lanes = plan == null ? m.lanes : plan['group.' + m.dir]",
 		"def u = [name: m.name, minutes: 110, maxAttempts: 1,",
@@ -902,11 +918,11 @@ func fullMutationProblems(jf string) []string {
 	return problems
 }
 
-// TestFullMutationIsFourUnitsOverEveryPackage: full mode is four parallel
+// TestFullMutationIsThreeUnitsOverEveryPackage: full mode is three parallel
 // units whose lanes cover ci/quality.json's mutation_go.lanes exactly once,
 // Stryker (lane base) included, judged together by one gate over lane all;
 // the lanes in turn cover every package, so the union is every package.
-func TestFullMutationIsFourUnitsOverEveryPackage(t *testing.T) {
+func TestFullMutationIsThreeUnitsOverEveryPackage(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	expectProblems(t, jf, fullMutationProblems, map[string]string{
 		"a shorter limit":            replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 30, maxAttempts: 1"),
@@ -935,10 +951,11 @@ func TestFullMutationIsFourUnitsOverEveryPackage(t *testing.T) {
 		t.Error(p)
 	}
 	for name, doctored := range map[string]string{
-		"a lane left out":       replaceOnce(t, jf, "lanes: 'cli,logic'", "lanes: 'cli'"),
-		"a lane twice":          replaceOnce(t, jf, "lanes: 'cli,logic'", "lanes: 'cli,logic,base'"),
-		"Stryker skipped":       replaceOnce(t, jf, "dir: 'base', lanes: 'base'", "dir: 'base', lanes: 'nope'"),
-		"an unknown lane":       replaceOnce(t, jf, "lanes: 'cli,logic'", "lanes: 'cli,logic,extra'"),
+		"a lane left out":       replaceOnce(t, jf, "lanes: 'server-core,logic'", "lanes: 'server-core'"),
+		"a lane twice":          replaceOnce(t, jf, "lanes: 'server-core,logic'", "lanes: 'server-core,logic,base'"),
+		"Stryker skipped":       replaceOnce(t, jf, "dir: 'base', lanes: 'server-ops,base'", "dir: 'base', lanes: 'server-ops,nope'"),
+		"an unknown lane":       replaceOnce(t, jf, "lanes: 'server-core,logic'", "lanes: 'server-core,logic,extra'"),
+		"a fourth unit":         replaceOnce(t, jf, "  [name: 'Mutation ops+base+Stryker', dir: 'base', lanes: 'server-ops,base'],", "  [name: 'Mutation ops+Stryker', dir: 'base', lanes: 'server-ops'],\n  [name: 'Mutation base', dir: 'b', lanes: 'base'],"),
 		"no FULL_MUTATION list": replaceOnce(t, jf, "@Field final List FULL_MUTATION = [", "@Field final List OTHER = ["),
 	} {
 		if len(fullLaneProblems(fullMutationLanes(doctored), lanes)) == 0 {
@@ -1064,7 +1081,7 @@ func TestBadgeLinkProbeCatchesAnUnlinkedOrMisdirectedBadge(t *testing.T) {
 // Stability and Mutation: one unit named Perf with a 30-minute bound, running
 // ci/perf.sh into the build's results directory alone on the agent (never
 // beside the stability or mutation units, whose load would be part of every
-// latency it measures), only when the stability units passed, with perf.json
+// latency it measures), only when the Stability unit passed, with perf.json
 // archived.
 func perfUnitProblems(jf string) []string {
 	var problems []string
@@ -1079,7 +1096,7 @@ func perfUnitProblems(jf string) []string {
 		problems = append(problems, "the Perf unit is not run through unitBranch, so its failure would not fail the build")
 	}
 	if !strings.Contains(perf, "expression { env.CI_NIGHTLY == 'true' && env.STABILITY_RESULT == 'passing' }") {
-		problems = append(problems, "the Perf unit does not wait for passing stability units")
+		problems = append(problems, "the Perf unit does not wait for a passing Stability unit")
 	}
 	if !stageBefore(jf, "Stability and Mutation", "Perf") {
 		problems = append(problems, "the Perf unit does not run after the stability and mutation units")

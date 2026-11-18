@@ -16,5 +16,7 @@ export default {
   thresholds: { high: 90, low: 85, break: 80 },
   coverageAnalysis: 'perTest',
   tempDirName: '.stryker-tmp',
+  // ci/mutation.sh sets STRYKER_CONCURRENCY from the Jenkinsfile's cap (a full-mode unit shares the agent); unset, Stryker picks.
+  ...(process.env.STRYKER_CONCURRENCY ? { concurrency: Number(process.env.STRYKER_CONCURRENCY) } : {}),
   cleanTempDir: true,
 };

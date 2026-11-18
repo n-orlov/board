@@ -29,29 +29,34 @@
 //   1. Core (every build): Lint, Suite, Image, Allure smoke, then Quality
 //      (4 executors: Quality waits for Suite and Image without holding one).
 //   2. Stability and Mutation, side by side, once Core passed:
-//      - Stability (EXTENDED=true, or nightly on main): three stability
-//        runs, one unit each (about 11 minutes); EXTENDED also adds -race and
-//        fresh vulnerability databases to Core.
+//      - Stability (EXTENDED=true, or nightly on main): one unit (one
+//        executor) running the three stability runs side by side, each in its
+//        own clone of the checkout and its own stage (about 11 minutes; until
+//        #238 one unit each, which kept mutation units waiting for an
+//        executor); EXTENDED also adds -race and fresh vulnerability
+//        databases to Core.
 //      - Mutation (MUTATION, MUTATION_FULL, or the nightly of main: the
 //        timer, or EXTENDED=true on main), in one of three modes:
 //        - full (MUTATION_FULL=true, MUTATION_MODE=full, Sunday's nightly,
-//          or a nightly that cannot be incremental): four units in
+//          or a nightly that cannot be incremental): three units in
 //          parallel (FULL_MUTATION below), each ci/mutation.sh over its own
 //          lanes of ci/quality.json into its own outdir, every lane in
 //          exactly one unit and Stryker in the unit with lane base; then the
 //          Mutation gate unit merges their reports and judges every package
-//          once (ci/mutation-merge.sh, lane all). The first unit starts with
-//          the stability units; the other three wait for them, since 3 + 4
-//          units would not fit the 4 executors. Each gremlins runs nproc/3
-//          workers at GOMAXPROCS 2 (nproc/2 when at most two units run;
-//          the units ask for more than the 12 threads, which is fine, since
-//          a mutant spends much of its time waiting for Postgres
-//          testcontainers and nice 10 leaves other jobs ahead). Each unit
+//          once (ci/mutation-merge.sh, lane all). The three units start
+//          together, beside the Stability unit: 1 + 3 units fit the 4
+//          executors. Each gremlins runs nproc/3 workers at GOMAXPROCS 2
+//          (nproc/2 when at most two units run), 12 workers in all on
+//          int21h-ws, plus the three stability runs for their first 11
+//          minutes; Stryker, at the end of its unit, runs nproc/2 test
+//          processes (a mutant spends much of its time waiting for Postgres
+//          testcontainers, and nice 10 leaves other jobs ahead). Each unit
 //          has one attempt under 110 minutes. ci/mutation.sh caps a mutant
 //          at about 5 minutes (its header), which a hanging internal/server
 //          mutant used to hold for an hour: the one full unit of #233 took
-//          3 h 56 min. #235 (four units) ended mutation 80 minutes after
-//          Core, at 128 minutes in all.
+//          3 h 56 min. #235 (four units, three of them waiting for the
+//          stability units, Stryker on 11 processes) ended mutation 80
+//          minutes after Core, at 128 minutes in all.
 //        - incremental (the nightly's default, MUTATION_MODE=incremental):
 //          the reference is the last successful build of this job whose
 //          description says mutation(full). The Mutation plan unit copies
@@ -78,7 +83,7 @@
 //          mutants keeps the 80 efficacy floor; Stryker runs only if
 //          web/src/lib changed.
 //   3. Perf (with Stability): the SPEC 14 harness, 30 minutes, after phase 2,
-//      alone on the agent, when the three stability units passed (a red
+//      alone on the agent, when the Stability unit passed (a red
 //      mutation gate does not cost the build its perf numbers).
 // A phase runs only if every earlier one passed (UNSTABLE counts as passed).
 // Nightly with full mutation: about 130 minutes (Core about 33); incremental
@@ -89,7 +94,7 @@ import groovy.transform.Field
 // Units' results and attempts, shared by the parallel branches.
 @Field def results = [:]        // unit -> 'pass' | 'flaky' | 'fail'
 @Field def attemptLog = [:]     // unit -> [attempt maps]
-@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail); 'Stability' once its units ended
+@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
 @Field String commitSha = ''
 @Field String imageVersion = ''
 @Field String mutationBase = ''  // diff mode: the commit the mutation diff starts from
@@ -97,16 +102,19 @@ import groovy.transform.Field
 @Field final String AMD = 'board-test && amd64 && docker'
 // Full mutation's units (see the header): every lane of ci/quality.json's
 // mutation_go.lanes in exactly one unit (ci/repocheck checks the union), and
-// lane base carries Stryker. Balanced on #233's times at 6 workers (minutes,
-// with the 5-minute mutant cap): server-core about 22 + cli-core 12;
-// server-ops 18 + server-streams 13; cli 14 + logic 16; base 2 + Stryker 19.
-// The first one starts beside the stability units; dir is its outdir under
+// lane base carries Stryker, which ci/mutation.sh runs after the unit's
+// gremlins. Balanced on #235's times (four units of 4 workers; minutes per
+// lane, read off its unit times and #233's split): server-core about 50,
+// server-ops 45, logic 43, cli 37, server-streams 32, cli-core 27, base 5,
+// Stryker 43, so about 93 + 96 + 93 there. Each internal/server part sits in
+// a unit of its own, so an incremental run with internal/server changed
+// runs its three parts side by side. All three start together beside the
+// one Stability unit (4 executors); dir is its outdir under
 // ci-results/mutation-units/.
 @Field final List FULL_MUTATION = [
-  [name: 'Mutation server-core+cli-core', dir: 'server-core', lanes: 'server-core,cli-core'],
-  [name: 'Mutation server-ops+streams', dir: 'server-ops', lanes: 'server-ops,server-streams'],
-  [name: 'Mutation cli+logic', dir: 'cli', lanes: 'cli,logic'],
-  [name: 'Mutation base+Stryker', dir: 'base', lanes: 'base'],
+  [name: 'Mutation server-core+logic', dir: 'server-core', lanes: 'server-core,logic'],
+  [name: 'Mutation streams+cli', dir: 'cli', lanes: 'server-streams,cli,cli-core'],
+  [name: 'Mutation ops+base+Stryker', dir: 'base', lanes: 'server-ops,base'],
 ]
 
 long nowMs() { System.currentTimeMillis() }
@@ -349,21 +357,17 @@ Map mutationPlan() {
 def runFullMutation(Map plan) {
   def selected = FULL_MUTATION.findAll { plan == null || plan['group.' + it.dir] }
   String share = selected.size() > 2 ? '3' : '2'
-  String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2'
+  // Stryker (lane base's unit, after its gremlins) gets half the threads,
+  // beside the other units' gremlins.
+  String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +
+                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'
   def branches = [:]
   selected.each { m ->
-    boolean waits = m.name != selected[0].name
     String lanes = plan == null ? m.lanes : plan['group.' + m.dir]
     def u = [name: m.name, minutes: 110, maxAttempts: 1,
              body: { sh(returnStatus: true, script: fullTune + " ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json '${lanes}'") }]
-    def unitRun = unitBranch(u)
-    branches[u.name] = {
-      // 4 executors: the stability units hold three of them.
-      if (waits && env.CI_NIGHTLY == 'true') {
-        waitUntil(initialRecurrencePeriod: 15000) { signals['Stability'] == true }
-      }
-      unitRun.call()
-    }
+    // 4 executors: Stability holds one, the three units the rest.
+    branches[u.name] = unitBranch(u)
   }
   if (branches) {
     parallel branches
@@ -445,7 +449,7 @@ pipeline {
     booleanParam(name: 'MUTATION', defaultValue: false,
                  description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (beside Stability if extended)')
     booleanParam(name: 'MUTATION_FULL', defaultValue: false,
-                 description: 'Full mutation testing: every package and Stryker in four parallel units and one gate (about 80 minutes after Core, 110-minute limit per unit), as the nightly build of main does on Sundays')
+                 description: 'Full mutation testing: every package and Stryker in three parallel units and one gate (110-minute limit per unit), as the nightly build of main does on Sundays')
     choice(name: 'MUTATION_MODE', choices: ['incremental', 'full'],
            description: 'Mutation of the nightly of main (the timer, or EXTENDED=true on main): incremental reuses the last full run\'s reports of every package no change since could reach and runs the rest (full on Sundays, with no full run to reuse, or when a shared input changed); full runs every package')
   }
@@ -552,26 +556,49 @@ pipeline {
           }
           steps {
             script {
-              try {
-                def branches = [:]
-                // A list, not 1..3: an IntRange is not serializable in CPS.
-                [1, 2, 3].each { i ->
-                  // stability.sh prints only at the end (11 min on int21h-ws alone).
-                  def u = [name: "Stability ${i}", minutes: 40,
-                           body: {
-                             sh(returnStatus: true, script: '''
-                               set -e
-                               mkdir -p "$BOARD_CI_OUT/stability"
-                               TMPDIR="$PWD/$BOARD_CI_OUT/stability" ci/stability.sh 1
-                             ''')
-                           }]
-                  branches[u.name] = unitBranch(u)
-                }
-                parallel branches
-                env.STABILITY_RESULT = ['Stability 1', 'Stability 2', 'Stability 3'].findAll { results[it] != 'pass' && results[it] != 'flaky' }.isEmpty() ? 'passing' : 'failing'
-              } finally {
-                signals['Stability'] = true
-              }
+              // One unit, so one executor: the three runs side by side in it,
+              // each in its own clone of the checkout (its own tree and
+              // TMPDIR; Postgres testcontainers get random host ports), each
+              // its own stage and log (ci-results/stability/run-<i>/). The
+              // unit fails when any run fails, and its one rerun repeats all
+              // three; stability.sh prints only at the end (11 min each).
+              def u = [name: 'Stability runs', minutes: 40,
+                       body: {
+                         sh '''
+                           set -e
+                           for i in 1 2 3; do
+                             rm -rf "stability-$i" "$BOARD_CI_OUT/stability/run-$i"
+                             git clone -q --local --no-checkout . "stability-$i"
+                             git -C "stability-$i" checkout -q --detach "$BOARD_CI_SHA"
+                             # As the checkout: its remote URL and origin/* refs.
+                             git -C "stability-$i" fetch -q --no-tags .. '+refs/remotes/*:refs/remotes/*'
+                             git -C "stability-$i" remote set-url origin "$(git remote get-url origin)"
+                             mkdir -p "$BOARD_CI_OUT/stability/run-$i"
+                           done
+                         '''
+                         def rcs = [:]
+                         def runs = [:]
+                         // A list, not 1..3: an IntRange is not serializable in CPS.
+                         [1, 2, 3].each { i ->
+                           runs["Stability ${i}"] = {
+                             stage("Stability ${i}") {
+                               rcs[i] = sh(returnStatus: true, script: "cd stability-${i} && TMPDIR=\"\$WORKSPACE/\$BOARD_CI_OUT/stability/run-${i}\" ci/stability.sh 1")
+                               if (rcs[i] != 0) {
+                                 // The run's stage turns red; the unit judges the build.
+                                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                   error("Stability ${i}: ci/stability.sh exited ${rcs[i]}")
+                                 }
+                               }
+                             }
+                           }
+                         }
+                         parallel runs
+                         def failed = [1, 2, 3].findAll { rcs[it] != 0 }
+                         echo(failed ? "stability: run ${failed.join(', ')} failed" : 'stability: all three runs passed')
+                         return failed ? 1 : 0
+                       }]
+              unitBranch(u).call()
+              env.STABILITY_RESULT = results['Stability runs'] == 'pass' || results['Stability runs'] == 'flaky' ? 'passing' : 'failing'
             }
           }
         }

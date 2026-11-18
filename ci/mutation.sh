@@ -20,7 +20,7 @@
 #                                             # several lanes in one run
 #
 # A lane is a group of packages that can be run on their own. In full mode the
-# Jenkinsfile runs four units in parallel, each one ci/mutation.sh over a
+# Jenkinsfile runs three units in parallel, each one ci/mutation.sh over a
 # comma-separated list of lanes in its own outdir, and ci/mutation-merge.sh
 # judges the union of their reports; in diff mode one unit runs the lane "all"
 # restricted to the changed lines. The lane "all" (the default) is every
@@ -46,6 +46,10 @@
 # it runs, so workers x test CPUs stays near the core count. Not gremlins'
 # own --test-cpu: v0.6.0 passes it as the single argument "-cpu N", which go
 # test rejects, so every mutant would count as KILLED.
+# BOARD_MUTATION_STRYKER_CONCURRENCY: Stryker's test runner processes
+# (default: Stryker's own, one per CPU less one). The Jenkinsfile caps it so
+# that Stryker, which runs at the end of one full-mode unit while the others
+# still run gremlins, does not take every core beside them.
 set -eu
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -58,6 +62,7 @@ lane=${3:-all}
 # Read before the scrub below (see the header).
 workers=${BOARD_MUTATION_WORKERS:-}
 test_cpu=${BOARD_MUTATION_TEST_CPU:-}
+stryker_concurrency=${BOARD_MUTATION_STRYKER_CONCURRENCY:-}
 diff_ref=${BOARD_MUTATION_DIFF:-}
 # The attempt's run id (ci/run.sh forwards RALPHD_RUN_ID as BOARD_CI_RUN_ID): the
 # tests gremlins runs label their Postgres testcontainers with it, so the
@@ -91,7 +96,7 @@ done
 # (22 s) gets 13, internal/cli (55 s) and internal/server (65 s) get 5, the
 # floor. A mutant that lives runs its package's suite once, about 1.5 times
 # the covered run in #233 (the build of the mutant on top), so the floor of 5
-# keeps every such mutant LIVED instead of TIMED OUT even with the four
+# keeps every such mutant LIVED instead of TIMED OUT even with the three
 # Jenkins units sharing the host; a hanging one is still TIMED OUT, about
 # 5 minutes after it started instead of an hour. No verdict changes kind.
 timeout_coefficient_max=60
@@ -224,7 +229,10 @@ if [ "$stryker" = yes ]; then
     if [ ! -x web/node_modules/.bin/stryker ]; then
         (cd web && npm ci --no-audit --no-fund) || { status=1; stryker_verdict=failed; }
     fi
-    (cd web && rm -f reports/mutation/mutation.json && npm run mutation) || { status=1; stryker_verdict=failed; }
+    # STRYKER_CONCURRENCY: web/stryker.config.mjs reads it; nice as gremlins'.
+    (cd web && rm -f reports/mutation/mutation.json &&
+        env ${stryker_concurrency:+STRYKER_CONCURRENCY=$stryker_concurrency} nice -n 10 npm run mutation) ||
+        { status=1; stryker_verdict=failed; }
     [ -f web/reports/mutation/mutation.json ] && cp web/reports/mutation/mutation.json "$outdir/stryker/mutation.json"
 fi
 printf 'mutation-go: %s\nstryker: %s\n' "$go_verdict" "$stryker_verdict" > "$outdir/unit-verdict.txt"
