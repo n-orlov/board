@@ -144,7 +144,12 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
   (`stability-<i>`, at the build's commit, with the checkout's `origin` URL and
   refs) with its own `TMPDIR` and log (`ci-results/stability/run-<i>/`); their
   Postgres testcontainers publish random host ports, so the runs share
-  nothing but the Go and npm caches. Any run failing fails the unit, whose one
+  nothing but the Go and npm caches. The third runs at `go test -parallel 1`
+  (`BOARD_STABILITY_PARALLEL=1`): there a `t.Parallel` subtest waits behind
+  every other parallel test of its package, so a test that takes a wall-clock
+  instant before it queues sees it pass (the race in `askwait_test.go` that
+  failed #240's `streams+cli` mutation unit, which runs at `-parallel 2` under
+  load, and failed every `-parallel 1` run of `internal/server`). Any run failing fails the unit, whose one
   rerun repeats all three. Until #238 each run was a unit of its own, and the
   three executors they held kept the mutation units waiting.
   - The **Perf** unit runs the SPEC 14 harness (`ci/perf.sh`, build tag `perf`) after

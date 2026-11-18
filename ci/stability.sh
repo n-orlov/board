@@ -24,6 +24,13 @@
 # uncontended product contract. Tests and scenarios within each package remain
 # unchanged and fully executed.
 #
+# BOARD_STABILITY_PARALLEL=N adds -parallel=N (default: GOMAXPROCS). At 1 a
+# t.Parallel subtest waits behind every other parallel test of its package, so
+# one taking a wall-clock instant before it queued sees that instant pass: the
+# race #240's mutation unit hit (askwait_test.go's until), reproduced on every
+# -parallel 1 run of internal/server. The Jenkinsfile runs one of its three
+# stability runs at 1.
+#
 # Self-test / demonstration hook: set BOARD_STABILITY_SELFTEST_FAIL=1 to make
 # every run a deliberate injected failure instead of invoking the real
 # suite, to prove the FAIL path (and non-zero script exit) actually fires.
@@ -40,6 +47,14 @@ if [ "$runs" -lt 1 ]; then
     echo "usage: ci/stability.sh [N]  (N must be >= 1, got '$runs')" >&2
     exit 2
 fi
+
+parallel=${BOARD_STABILITY_PARALLEL:-}
+case "$parallel" in
+    *[!0-9]*)
+        echo "BOARD_STABILITY_PARALLEL must be a positive integer, got '$parallel'" >&2
+        exit 2
+        ;;
+esac
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 outdir=$(mktemp -d "${TMPDIR:-/tmp}/board-stability.XXXXXX")
@@ -78,7 +93,7 @@ while [ "$i" -le "$runs" ]; do
         # features_test_timeout (BOARD_CI_FEATURES_TEST_TIMEOUT there);
         # this direct invocation never goes through that script, so the
         # flag is repeated here rather than shared.
-        (cd "$repo_root" && "$repo_root/ci/run.sh" go test -p=1 -count=1 "-timeout=${BOARD_CI_FEATURES_TEST_TIMEOUT:-25m}" ./...) > "$run_log" 2>&1
+        (cd "$repo_root" && "$repo_root/ci/run.sh" go test -p=1 -count=1 ${parallel:+"-parallel=$parallel"} "-timeout=${BOARD_CI_FEATURES_TEST_TIMEOUT:-25m}" ./...) > "$run_log" 2>&1
         status=$?
     fi
 

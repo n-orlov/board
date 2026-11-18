@@ -178,6 +178,9 @@ func phaseProblems(jf string) []string {
 		!strings.Contains(stability, `$BOARD_CI_OUT/stability/run-${i}`) {
 		problems = append(problems, "Stability's runs do not each run in a clone of their own with their own TMPDIR")
 	}
+	if !strings.Contains(stability, "${i == 3 ? 'BOARD_STABILITY_PARALLEL=1 ' : ''}") {
+		problems = append(problems, "no stability run is at go test -parallel 1 (BOARD_STABILITY_PARALLEL=1)")
+	}
 	if !strings.Contains(stability, "return failed ? 1 : 0") {
 		problems = append(problems, "Stability's unit does not fail when one of its runs fails")
 	}
@@ -214,6 +217,7 @@ func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 		"stability running three in a row": replaceOnce(t, jf, "ci/stability.sh 1", "ci/stability.sh 3"),
 		"stability runs in series":         replaceOnce(t, jf, "parallel runs\n", "runs.each { k, v -> v.call() }\n"),
 		"stability runs in one tree":       replaceOnce(t, jf, "cd stability-${i} && ", ""),
+		"no run at -parallel 1":            replaceOnce(t, jf, "${i == 3 ? 'BOARD_STABILITY_PARALLEL=1 ' : ''}", ""),
 		"a failed run that passes":         replaceOnce(t, jf, "return failed ? 1 : 0", "return 0"),
 		"a unit per stability run":         replaceOnce(t, jf, "              unitBranch(u).call()\n              env.STABILITY_RESULT", "              parallel([1, 2, 3].collectEntries { [(\"Stability ${it}\"): unitBranch(u + [name: \"Stability ${it}\"])] })\n              env.STABILITY_RESULT"),
 	})

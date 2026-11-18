@@ -576,13 +576,15 @@ pipeline {
                              mkdir -p "$BOARD_CI_OUT/stability/run-$i"
                            done
                          '''
+                         // Run 3 at go test -parallel 1 (ci/stability.sh, BOARD_STABILITY_PARALLEL):
+                         // a test racing a wall-clock instant against its queue time fails there every time.
                          def rcs = [:]
                          def runs = [:]
                          // A list, not 1..3: an IntRange is not serializable in CPS.
                          [1, 2, 3].each { i ->
                            runs["Stability ${i}"] = {
                              stage("Stability ${i}") {
-                               rcs[i] = sh(returnStatus: true, script: "cd stability-${i} && TMPDIR=\"\$WORKSPACE/\$BOARD_CI_OUT/stability/run-${i}\" ci/stability.sh 1")
+                               rcs[i] = sh(returnStatus: true, script: "cd stability-${i} && ${i == 3 ? 'BOARD_STABILITY_PARALLEL=1 ' : ''}TMPDIR=\"\$WORKSPACE/\$BOARD_CI_OUT/stability/run-${i}\" ci/stability.sh 1")
                                if (rcs[i] != 0) {
                                  // The run's stage turns red; the unit judges the build.
                                  catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
