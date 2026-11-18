@@ -32,8 +32,10 @@
 //      - Stability (EXTENDED=true, or nightly on main): three stability
 //        runs, one unit each (about 11 minutes); EXTENDED also adds -race and
 //        fresh vulnerability databases to Core.
-//      - Mutation (MUTATION, MUTATION_FULL or nightly), in one of two modes:
-//        - full (nightly on main, or MUTATION_FULL=true): four units in
+//      - Mutation (MUTATION, MUTATION_FULL, or the nightly of main: the
+//        timer, or EXTENDED=true on main), in one of three modes:
+//        - full (MUTATION_FULL=true, MUTATION_MODE=full, Sunday's nightly,
+//          or a nightly that cannot be incremental): four units in
 //          parallel (FULL_MUTATION below), each ci/mutation.sh over its own
 //          lanes of ci/quality.json into its own outdir, every lane in
 //          exactly one unit and Stryker in the unit with lane base; then the
@@ -41,14 +43,28 @@
 //          once (ci/mutation-merge.sh, lane all). The first unit starts with
 //          the stability units; the other three wait for them, since 3 + 4
 //          units would not fit the 4 executors. Each gremlins runs nproc/3
-//          workers at GOMAXPROCS 2 (4 x 2 per unit: the four units ask for
-//          more than the 12 threads, which is fine, since a mutant spends
-//          much of its time waiting for Postgres testcontainers and nice 10
-//          leaves other jobs ahead). Each unit has one attempt under
-//          90 minutes. ci/mutation.sh caps a mutant at about 5 minutes (its
-//          header), which a hanging internal/server mutant used to hold for
-//          an hour: the one full unit of #233 took 3 h 56 min. Mutation ends
-//          about 50 minutes after Core.
+//          workers at GOMAXPROCS 2 (nproc/2 when at most two units run;
+//          the units ask for more than the 12 threads, which is fine, since
+//          a mutant spends much of its time waiting for Postgres
+//          testcontainers and nice 10 leaves other jobs ahead). Each unit
+//          has one attempt under 110 minutes. ci/mutation.sh caps a mutant
+//          at about 5 minutes (its header), which a hanging internal/server
+//          mutant used to hold for an hour: the one full unit of #233 took
+//          3 h 56 min. #235 (four units) ended mutation 80 minutes after
+//          Core, at 128 minutes in all.
+//        - incremental (the nightly's default, MUTATION_MODE=incremental):
+//          the reference is the last successful build of this job whose
+//          description says mutation(full). The Mutation plan unit copies
+//          its mutation reports and commit and runs ci/mutation-plan.sh: a
+//          unit no change since that commit can reach (ci/mutationgate
+//          -stale) reuses its report, the rest run in the full-mode units
+//          (a unit with nothing stale is skipped), Stryker runs only when
+//          web/ changed, and the gate merges the units' reports with the
+//          reused ones, so every package is still judged exactly once. Full
+//          instead on Sunday's nightly, with no reference, or when a shared
+//          input changed (go.mod, go.sum, the CI image, the scripts that run
+//          gremlins, mutation_go's packages, scopes or parts). The build's
+//          description says mutation(incremental: N run, M reused from #K).
 //        - diff (MUTATION=true on any other build): one unit, only the lines
 //          changed since a base, under 45 minutes (minutes when few packages
 //          changed; a changed internal/server still pays its covered suite
@@ -65,7 +81,8 @@
 //      alone on the agent, when the three stability units passed (a red
 //      mutation gate does not cost the build its perf numbers).
 // A phase runs only if every earlier one passed (UNSTABLE counts as passed).
-// Nightly with full mutation: about 80 minutes (Core about 33).
+// Nightly with full mutation: about 130 minutes (Core about 33); incremental
+// with internal/server unchanged: about an hour.
 @Library('homelab') _
 import groovy.transform.Field
 
@@ -76,6 +93,7 @@ import groovy.transform.Field
 @Field String commitSha = ''
 @Field String imageVersion = ''
 @Field String mutationBase = ''  // diff mode: the commit the mutation diff starts from
+@Field String mutationPlanText = ''  // incremental mode: ci/mutation-plan.sh's plan file
 @Field final String AMD = 'board-test && amd64 && docker'
 // Full mutation's units (see the header): every lane of ci/quality.json's
 // mutation_go.lanes in exactly one unit (ci/repocheck checks the union), and
@@ -266,6 +284,113 @@ String mutationDiffBase() {
   return sh(returnStdout: true, script: "git merge-base origin/${target} HEAD").trim()
 }
 
+// Incremental mutation's reference (see the header): the number of the last
+// successful build of this job whose description says mutation(full), or ''
+// when none of the builds kept has one.
+String mutationReference() {
+  def b = currentBuild.previousSuccessfulBuild
+  int left = 30
+  while (b != null && left > 0) {
+    if ((b.description ?: '').contains('mutation(full)')) {
+      return b.number.toString()
+    }
+    b = b.previousSuccessfulBuild
+    left--
+  }
+  return ''
+}
+
+// Replaces the build description's mutation(incremental) with text.
+def describeMutation(String text) {
+  currentBuild.description = currentBuild.description.replace('mutation(incremental)', text)
+}
+
+// Incremental mutation's plan (ci/mutation-plan.sh, see the header) as a map
+// of its key=value lines, or [mode: 'full', reason: ...] when the Mutation
+// plan unit made none. The unit's stash carries the reused reports
+// (ci-results/mutation-ref) to the gate.
+Map mutationPlan() {
+  String groups = FULL_MUTATION.collect { "'" + it.dir + '=' + it.lanes + "'" }.join(' ')
+  boolean timer = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
+  String weekly = timer ? 'BOARD_MUTATION_WEEKLY_FULL=yes ' : ''
+  def u = [name: 'Mutation plan', minutes: 15, maxAttempts: 2,
+           body: {
+             copyArtifacts projectName: env.JOB_NAME, selector: specific(env.CI_MUTATION_REF), optional: true,
+                           filter: 'ci-results/mutation/*.json, ci-results/mutation/unit-verdict.txt, ci-results/mutation/stryker/mutation.json, ci-results/commit.txt, ci-results/release-candidate.json',
+                           target: 'mutation-ref-raw', fingerprintArtifacts: false
+             int rc = sh(returnStatus: true, script: weekly + 'ci/run.sh ci/mutation-plan.sh mutation-ref-raw ci-results/mutation-ref ci/quality.json ci-results/mutation-plan.txt ' + groups)
+             if (rc == 0) {
+               mutationPlanText = readFile('ci-results/mutation-plan.txt')
+             }
+             return rc
+           }]
+  stage(u.name) {
+    // No plan is no failure: the build runs in full instead.
+    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE', catchInterruptions: false) {
+      runUnit(u)
+    }
+  }
+  if (!mutationPlanText) {
+    return [mode: 'full', reason: 'the Mutation plan unit made no plan']
+  }
+  def plan = [:]
+  mutationPlanText.split('\n').each { line ->
+    int i = line.indexOf('=')
+    if (i > 0) {
+      plan[line.substring(0, i)] = line.substring(i + 1)
+    }
+  }
+  return plan
+}
+
+// Full mutation's units, then the gate over their union (see the header).
+// With an incremental plan, only the units it gives work run, each over the
+// lane list it names, and the gate also merges the reports it reused.
+def runFullMutation(Map plan) {
+  def selected = FULL_MUTATION.findAll { plan == null || plan['group.' + it.dir] }
+  String share = selected.size() > 2 ? '3' : '2'
+  String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2'
+  def branches = [:]
+  selected.each { m ->
+    boolean waits = m.name != selected[0].name
+    String lanes = plan == null ? m.lanes : plan['group.' + m.dir]
+    def u = [name: m.name, minutes: 110, maxAttempts: 1,
+             body: { sh(returnStatus: true, script: fullTune + " ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json '${lanes}'") }]
+    def unitRun = unitBranch(u)
+    branches[u.name] = {
+      // 4 executors: the stability units hold three of them.
+      if (waits && env.CI_NIGHTLY == 'true') {
+        waitUntil(initialRecurrencePeriod: 15000) { signals['Stability'] == true }
+      }
+      unitRun.call()
+    }
+  }
+  if (branches) {
+    parallel branches
+  }
+  // Runs whatever the units' results: a unit that left no reports fails here
+  // as a missing report of every package it owned, and the CI summary still
+  // gets one verdict.
+  def gate = [name: 'Mutation gate', minutes: 15,
+              body: {
+                def stashes = selected.collect { it.name } + (plan == null ? [] : ['Mutation plan'])
+                stashes.each { name ->
+                  try {
+                    unstash 'res-' + slug(name)
+                  } catch (Throwable e) {
+                    echo "no results stashed for ${name}"
+                  }
+                }
+                def dirs = selected.collect { 'ci-results/mutation-units/' + it.dir } + (plan == null ? [] : ['ci-results/mutation-ref'])
+                sh(returnStatus: true, script: 'ci/run.sh ci/mutation-merge.sh ci-results/mutation ci/quality.json ' + dirs.join(' '))
+              }]
+  stage(gate.name) {
+    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+      runUnit(gate)
+    }
+  }
+}
+
 // A unit as a parallel branch: its failure fails the stage and the build,
 // never the sibling branches.
 def unitBranch(Map u) {
@@ -307,8 +432,9 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
     // A backstop only: every unit has its own bound. Core (Suite's 120
-    // minutes at worst, then Quality), a 90-minute mutation unit after a
-    // stability wait, the gate, and Perf; a nightly takes about 80 minutes.
+    // minutes at worst, then Quality), the mutation plan, a 110-minute
+    // mutation unit after a stability wait, the gate, and Perf; a nightly
+    // takes about an hour (incremental) to 130 minutes (full).
     timeout(time: 300, unit: 'MINUTES')
     copyArtifactPermission('/board/release,/board/ci/*')
   }
@@ -319,7 +445,9 @@ pipeline {
     booleanParam(name: 'MUTATION', defaultValue: false,
                  description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (beside Stability if extended)')
     booleanParam(name: 'MUTATION_FULL', defaultValue: false,
-                 description: 'Full mutation testing: every package and Stryker in four parallel units and one gate (about 50 minutes after Core, 90-minute limit per unit), as the nightly build of main does')
+                 description: 'Full mutation testing: every package and Stryker in four parallel units and one gate (about 80 minutes after Core, 110-minute limit per unit), as the nightly build of main does on Sundays')
+    choice(name: 'MUTATION_MODE', choices: ['incremental', 'full'],
+           description: 'Mutation of the nightly of main (the timer, or EXTENDED=true on main): incremental reuses the last full run\'s reports of every package no change since could reach and runs the rest (full on Sundays, with no full run to reuse, or when a shared input changed); full runs every package')
   }
 
   triggers {
@@ -341,9 +469,19 @@ pipeline {
           boolean timer = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
           boolean nightly = params.EXTENDED || timer
           env.CI_NIGHTLY = nightly ? 'true' : 'false'
-          boolean full = params.MUTATION_FULL || timer
-          env.CI_MUTATION = (params.MUTATION || full) ? 'true' : 'false'
-          env.CI_MUTATION_MODE = full ? 'full' : 'diff'
+          // Mutation's mode (see the header): MUTATION_FULL forces full, the
+          // nightly of main runs MUTATION_MODE, MUTATION alone is diff mode.
+          boolean nightlyMutation = timer || (params.EXTENDED && env.BRANCH_NAME == 'main')
+          String mode = params.MUTATION_FULL ? 'full' : nightlyMutation ? (params.MUTATION_MODE ?: 'incremental') : params.MUTATION ? 'diff' : ''
+          if (mode == 'incremental') {
+            env.CI_MUTATION_REF = mutationReference()
+            if (!env.CI_MUTATION_REF) {
+              echo 'incremental mutation: no successful full run to reuse; mutation runs in full'
+              mode = 'full'
+            }
+          }
+          env.CI_MUTATION = mode ? 'true' : 'false'
+          env.CI_MUTATION_MODE = mode ?: 'diff'
           env.BOARD_CI_GO_EXTRA_FLAGS = nightly ? '-race' : ''
           def lanes = ['core'] + (nightly ? ['stability'] : []) + (env.CI_MUTATION == 'true' ? ["mutation(${env.CI_MUTATION_MODE})"] : [])
           currentBuild.description = 'int21h-ws: ' + lanes.join(' + ') + (nightly ? ' (-race)' : '')
@@ -449,45 +587,19 @@ pipeline {
               // scrubs BOARD_*, and ci/run.sh forwards only BOARD_* into its
               // container.
               String tune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
-              if (env.CI_MUTATION_MODE == 'full') {
-                // Four units side by side, then one gate over their union (see
-                // the header).
-                String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 3 )) BOARD_MUTATION_TEST_CPU=2'
-                def branches = [:]
-                FULL_MUTATION.each { m ->
-                  boolean waits = m.name != FULL_MUTATION[0].name
-                  def u = [name: m.name, minutes: 90, maxAttempts: 1,
-                           body: { sh(returnStatus: true, script: fullTune + " ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json ${m.lanes}") }]
-                  def unitRun = unitBranch(u)
-                  branches[u.name] = {
-                    // 4 executors: the stability units hold three of them.
-                    if (waits && env.CI_NIGHTLY == 'true') {
-                      waitUntil(initialRecurrencePeriod: 15000) { signals['Stability'] == true }
-                    }
-                    unitRun.call()
-                  }
+              if (env.CI_MUTATION_MODE == 'incremental') {
+                def plan = mutationPlan()
+                if (plan.mode == 'incremental') {
+                  describeMutation("mutation(incremental: ${plan.run} run, ${plan.reused} reused from #${env.CI_MUTATION_REF})")
+                  runFullMutation(plan)
+                } else {
+                  echo "incremental mutation runs in full: ${plan.reason}"
+                  env.CI_MUTATION_MODE = 'full'
+                  describeMutation("mutation(full) [${plan.reason}]")
+                  runFullMutation(null)
                 }
-                parallel branches
-                // Runs whatever the units' results: a unit that left no
-                // reports fails here as a missing report of every package it
-                // owned, and the CI summary still gets one verdict.
-                def gate = [name: 'Mutation gate', minutes: 15,
-                            body: {
-                              FULL_MUTATION.each { m ->
-                                try {
-                                  unstash 'res-' + slug(m.name)
-                                } catch (Throwable e) {
-                                  echo "no results stashed for ${m.name}"
-                                }
-                              }
-                              String dirs = FULL_MUTATION.collect { 'ci-results/mutation-units/' + it.dir }.join(' ')
-                              sh(returnStatus: true, script: 'ci/run.sh ci/mutation-merge.sh ci-results/mutation ci/quality.json ' + dirs)
-                            }]
-                stage(gate.name) {
-                  catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    runUnit(gate)
-                  }
-                }
+              } else if (env.CI_MUTATION_MODE == 'full') {
+                runFullMutation(null)
               } else {
                 def u = [name: 'Mutation diff', minutes: 45,
                          body: {
@@ -598,7 +710,12 @@ pipeline {
                                attemptLog.values().flatten().collect { it.node }.findAll { it }.unique().sort().join(', ') +
                                (flaky ? '; flaky: ' + flaky.join(', ') : '') +
                                ' (<a href="' + env.BUILD_URL + 'artifact/ci-results/distributed/timing.md">timing</a>)')
-              archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/*.cdx.json, ci-results/mutation/*.json, ci-results/stability/**/*.log, ci-results/perf.json, ci-results/distributed/**, ci-summary/**, allure-history/**',
+              // The commit, for a later incremental mutation run that reuses
+              // this build's reports (ci/mutation-plan.sh).
+              if (commitSha) {
+                writeFile file: 'ci-results/commit.txt', text: commitSha + '\n'
+              }
+              archiveArtifacts artifacts: 'ci-results/**/*.txt, ci-results/**/*.xml, ci-results/**/*.out, ci-results/*.cdx.json, ci-results/mutation/*.json, ci-results/mutation/stryker/mutation.json, ci-results/stability/**/*.log, ci-results/perf.json, ci-results/distributed/**, ci-summary/**, allure-history/**',
                                allowEmptyArchive: true
               if (currentBuild.currentResult == 'SUCCESS' && env.BRANCH_NAME == 'main') {
                 writeFile file: 'ci-results/release-candidate.json',

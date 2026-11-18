@@ -119,18 +119,21 @@ timing table (`ci-results/distributed/timing.md`).
 The pipeline runs Core, then Stability and Mutation side by side, then Perf; the
 units of a phase run in parallel, and a phase runs only if every earlier one
 passed (UNSTABLE counts as passed; Perf needs only the stability units to pass).
-A nightly build takes about 80 minutes, Core about 33 of them:
+A nightly build takes about an hour with incremental mutation and about 130
+minutes with full mutation, Core about 33 of them:
 
 | phase | units | runs |
 |---|---|---|
 | Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
 | Stability | three units, each `ci/stability.sh 1`, beside Mutation | `EXTENDED=true` or the nightly timer |
-| Mutation | one unit (diff) or four units and a gate (full), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
+| Mutation | one unit (diff), four units and a gate (full), or a plan, the units it gives work and a gate (incremental), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly of `main` |
 | Perf | the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes), alone, when the stability units passed | `EXTENDED=true` or the nightly timer |
 
 Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
-`MUTATION_FULL`. The nightly timer (`17 3 * * *`, on `main` only; every other
-branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
+`MUTATION_FULL`; the choice `MUTATION_MODE` (`incremental`, the default, or
+`full`) sets the nightly's mutation mode. The nightly timer (`17 3 * * *`, on
+`main` only; every other branch has no timer) counts as `EXTENDED` plus the
+nightly's mutation, and so does `EXTENDED=true` on `main`.
 
 - **Core** runs on every build, a push build of `main` included (about 20-35
   minutes). `EXTENDED=true` and the nightly timer also add `-race` (the Suite's
@@ -146,8 +149,8 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     figure and its gate) is archived with the build. The targets are verified on the
     agent; no baseline is committed. A gate the agent misses is cured in the code or
     petitioned with the `perf.json` numbers, never loosened.
-- **Mutation** is gated on `MUTATION` or `MUTATION_FULL` or the timer and on
-  nothing else: `EXTENDED=true` on its own runs no mutation.
+- **Mutation** is gated on `MUTATION`, `MUTATION_FULL` or the nightly of `main`
+  and on nothing else: `EXTENDED=true` on another branch runs no mutation.
   - *diff* (`MUTATION=true`): only the lines changed since a base, in one
     45-minute unit (`BOARD_MUTATION_DIFF=<base>`). The base is the merge base
     with `origin/<CHANGE_TARGET, or main>` (fetched into the workspace first,
@@ -155,7 +158,8 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     on `main` itself, where the merge base would be `HEAD`. A package with no
     mutant passes; one with mutants keeps the 80 efficacy floor; Stryker runs
     only if `web/src/lib` changed.
-  - *full* (`MUTATION_FULL=true` or the nightly timer on `main`): every package
+  - *full* (`MUTATION_FULL=true`, `MUTATION_MODE=full`, Sunday's nightly, or a
+    nightly that cannot be incremental): every package
     plus Stryker in four parallel units (`FULL_MUTATION` in the Jenkinsfile), each
     `ci/run.sh ci/mutation.sh ci-results/mutation-units/<dir> ci/quality.json
     <lane>,<lane>` over its own lanes of `mutation_go.lanes` (every lane in exactly
@@ -164,10 +168,30 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     and judges every package once. The first unit starts beside the stability
     units, the other three when those end (4 executors). Each runs `nproc / 3`
     gremlins workers at GOMAXPROCS 2 per worker (`BOARD_MUTATION_WORKERS`,
-    `BOARD_MUTATION_TEST_CPU`), at `nice 10`, under a 90-minute limit and a
-    single attempt. `ci/mutation.sh` caps one mutant at about 5 minutes (its
-    header): #233's single full unit spent two of its four hours on seven hanging
-    `internal/server` mutants. It takes about 50 minutes after Core.
+    `BOARD_MUTATION_TEST_CPU`; `nproc / 2` when at most two units run), at
+    `nice 10`, under a 110-minute limit and a single attempt. `ci/mutation.sh`
+    caps one mutant at about 5 minutes (its header): #233's single full unit
+    spent two of its four hours on seven hanging `internal/server` mutants. It
+    takes about 80 minutes after Core (#235: 128 minutes in all).
+  - *incremental* (the nightly's default): the reference is the last
+    successful build of this job whose description says `mutation(full)`. The
+    Mutation plan unit copies its archived reports, Stryker report and commit
+    (`ci-results/commit.txt`) and runs `ci/mutation-plan.sh`: every unit that
+    no change since that commit can reach reuses its report, and the full-mode
+    units run only the stale ones, each named on its own in the lane list (a
+    unit with nothing stale is skipped). `ci/mutationgate -stale <ref>` decides:
+    a unit is stale when a changed file lies in its package's directory (tests
+    and testdata included), or is a non-test file of a module package its
+    package or its tests import (`go list -deps -test`); a split package's parts
+    go stale together. Stryker runs again only when `web/` changed. The gate
+    then merges the units' reports with the reused ones
+    (`ci-results/mutation-ref`), so every package is judged exactly once by
+    this build's thresholds. It runs full instead on Sunday's nightly, with no
+    reference, when the plan fails, or when a shared input changed (`go.mod`,
+    `go.sum`, `ci/Dockerfile`, `ci/run.sh`, `ci/mutation.sh`, or
+    `mutation_go`'s packages, scopes or parts). The build's description says
+    `mutation(incremental: N run, M reused from #K)`, or `mutation(full)
+    [<reason>]` when it fell back.
 
 A red Lint, Suite, Image, Allure smoke, Quality, Stability, Perf or Mutation unit
 fails the build. Within a phase the other units still finish, and a later phase
@@ -184,8 +208,8 @@ fails unless the report carries the fixture's steps and its `@gh-61` link.
 
 **Quality and Mutation.** `ci/mutation.sh` writes the reports that `mutation-go`
 and `stryker` read, in the Mutation phase, which comes after Core (Quality
-included) and runs only when `MUTATION`, `MUTATION_FULL` or the timer asks for
-it. So the Quality unit passes `--mutation-deferred` as `ci/quality.sh`'s third
+included) and runs only when `MUTATION`, `MUTATION_FULL` or the nightly asks
+for it. So the Quality unit passes `--mutation-deferred` as `ci/quality.sh`'s third
 argument: those two rows print "deferred to the Mutation unit" instead of
 reading reports that cannot exist yet. The Mutation unit's `ci/mutation.sh`
 judges the same reports against the same `ci/quality.json` thresholds (efficacy,
@@ -273,11 +297,12 @@ Mutation side by side, then Perf, with the Core units and Quality's wait for
 Suite and Image; the Perf unit (30 minutes, after the stability and mutation units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
 booleanParams, `disableConcurrentBuilds`, the 300-minute timeout, the
 per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
-on `main` only); the Quality unit; the two Mutation modes (diff: one 45-minute
+on `main` only); the Quality unit; the three Mutation modes (diff: one 45-minute
 unit over the lines changed since the merge base, `HEAD~1` on `main`; full: four
-90-minute single-attempt units whose lanes cover every lane exactly once, Stryker
-included, and the gate over all of them) and that
-Mutation runs only for `MUTATION`, `MUTATION_FULL` or the timer; that the job
+110-minute single-attempt units whose lanes cover every lane exactly once, Stryker
+included, and the gate over all of them; incremental: the reference search, the
+plan, the selected units and the gate over them and the reused reports) and that
+Mutation runs only for `MUTATION`, `MUTATION_FULL` or the nightly of `main`; that the job
 never releases; the reports, the badges and `notifyTelegram`. Each property has
 a case that feeds the check a copy of the Jenkinsfile with it removed or
 altered, so a test fails if it is lost. `ci/repocheck/lintgate_test.go` pins that
@@ -364,7 +389,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 
 - `ci/mutation.sh` and `ci/mutationgate`: the Go mutation gate, the command of
   the Jenkins Mutation unit (only with `MUTATION=true`, `MUTATION_FULL=true` or the
-  nightly timer; a push build of `main` skips it). The
+  nightly of `main`; a push build of `main` skips it). The
   script runs `gremlins unleash` over each package in `mutation_go.packages`
   (`internal/domain`, `internal/store`, and the application logic Phase 2
   introduced or changed: `internal/asks`, `internal/attention`,
@@ -414,9 +439,11 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   every file outside the part excluded, with its own report
   (`internal-server-ops.json`) and its own judgement against the same floor.
   `mutation_go.lanes` partitions the packages' units into lanes (a unit in no
-  lane, or two, fails `ci/mutationgate`). Jenkins no longer runs a lane per
-  stage: its full Mutation unit runs lane `all`, every unit of every package plus
-  Stryker, in one go. A lane is the way to run part of it by hand:
+  lane, or two, fails `ci/mutationgate`). Jenkins' full mode runs four units,
+  each over a comma-separated list of lanes; a list may also name single units
+  (`internal/server#core`), which is how incremental mode runs only the stale
+  ones (`ci/mutationgate -stale <ref>` lists them, exit 3 when every unit must
+  run). A lane is also the way to run part of it by hand:
   `ci/mutation.sh [outdir [config [lane]]]` runs one lane (default `all`; Stryker
   also runs in `base`) and `ci/mutationgate -lane` judges only that lane's
   reports; every lane writes into `ci-results/mutation/`, where `ci/quality.sh`

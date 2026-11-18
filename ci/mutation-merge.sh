@@ -14,6 +14,9 @@
 # because its unit died or its lane was left out, fails as "FAILED, report".
 # Stryker's report (stryker/mutation.json) and verdict come from the one unit
 # that ran it; full mode always runs it, so no such unit fails the stryker row.
+# Incremental mode (ci/mutation-plan.sh) passes one more dir: the reference
+# build's reports of the units that did not run, and its Stryker verdict when
+# Stryker did not run either; the merge treats it as one more unit.
 # Writes <outdir>/mutationgate.txt and <outdir>/unit-verdict.txt, the same
 # files ci/mutation.sh writes. Exit 1 when either gate failed.
 set -eu

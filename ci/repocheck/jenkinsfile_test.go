@@ -681,15 +681,22 @@ func mutationGateProblems(stageBody string) []string {
 
 // mutationModeProblems: how the Jenkinsfile picks the mutation mode, and what
 // the diff-mode unit and the base it diffs from look like (full mode is
-// fullMutationProblems).
+// fullMutationProblems, incremental mode incrementalMutationProblems).
+// MUTATION_FULL forces full; the nightly of main (the timer, or EXTENDED on
+// main) runs MUTATION_MODE, incremental by default, full when no reference
+// build exists; MUTATION alone is diff mode.
 func mutationModeProblems(jf string) []string {
 	var problems []string
 	for _, want := range []string{
-		"boolean full = params.MUTATION_FULL || timer",
-		"env.CI_MUTATION = (params.MUTATION || full) ? 'true' : 'false'",
-		"env.CI_MUTATION_MODE = full ? 'full' : 'diff'",
-		"if (env.CI_MUTATION_MODE == 'full') {",
-		"ci-results/mutation/*.json",
+		"boolean nightlyMutation = timer || (params.EXTENDED && env.BRANCH_NAME == 'main')",
+		"String mode = params.MUTATION_FULL ? 'full' : nightlyMutation ? (params.MUTATION_MODE ?: 'incremental') : params.MUTATION ? 'diff' : ''",
+		"choice(name: 'MUTATION_MODE', choices: ['incremental', 'full'],",
+		"env.CI_MUTATION_REF = mutationReference()\n            if (!env.CI_MUTATION_REF) {",
+		"mode = 'full'\n            }",
+		"env.CI_MUTATION = mode ? 'true' : 'false'",
+		"env.CI_MUTATION_MODE = mode ?: 'diff'",
+		"} else if (env.CI_MUTATION_MODE == 'full') {\n                runFullMutation(null)",
+		"ci-results/*.cdx.json, ci-results/mutation/*.json,",
 		// Diff mode: one 45-minute unit over the lines changed since the base.
 		"u = [name: 'Mutation diff', minutes: 45,",
 		"mutationBase = mutationDiffBase()",
@@ -724,8 +731,8 @@ func mutationModeProblems(jf string) []string {
 
 // TestJenkinsfileMutationStageRunsTheMutationGate: the Mutation stage runs
 // after Core (Quality), beside Stability, is gated on CI_MUTATION and on
-// nothing else, picks full or diff mode from MUTATION_FULL, MUTATION and the
-// timer, runs diff mode as one 45-minute unit over the lines changed since the
+// nothing else, picks full, incremental or diff mode from MUTATION_FULL,
+// MUTATION_MODE, MUTATION, EXTENDED on main and the timer, runs diff mode as one 45-minute unit over the lines changed since the
 // merge base with origin/<CHANGE_TARGET or main> (HEAD~1 on main), runs
 // `ci/run.sh ci/mutation.sh` as its command, and lets a red gate fail the build.
 func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
@@ -738,20 +745,23 @@ func TestJenkinsfileMutationStageRunsTheMutationGate(t *testing.T) {
 		t.Errorf("the Mutation stage's when {}: %s:\n%s", problem, body)
 	}
 	expectProblems(t, jf, mutationModeProblems, map[string]string{
-		"full mode without the timer":      replaceOnce(t, jf, "params.MUTATION_FULL || timer", "params.MUTATION_FULL"),
-		"EXTENDED running mutation":        replaceOnce(t, jf, "(params.MUTATION || full) ?", "(params.MUTATION || full || params.EXTENDED) ?"),
-		"the timer not running mutation":   replaceOnce(t, jf, "(params.MUTATION || full) ? 'true'", "(params.MUTATION || params.MUTATION_FULL) ? 'true'"),
-		"every mutation run full":          replaceOnce(t, jf, "env.CI_MUTATION_MODE = full ? 'full' : 'diff'", "env.CI_MUTATION_MODE = 'full'"),
-		"a diff unit with another limit":   replaceOnce(t, jf, "name: 'Mutation diff', minutes: 45,", "name: 'Mutation diff', minutes: 90,"),
-		"a diff run over every line":       replaceOnce(t, jf, `"BOARD_MUTATION_DIFF=${mutationBase} " + tune +`, `"" + tune +`),
-		"a diff run with no base":          replaceOnce(t, jf, "mutationBase = mutationDiffBase()", "mutationBase = 'HEAD'"),
-		"a main build diffing from itself": replaceOnce(t, jf, "git rev-parse HEAD~1", "git rev-parse HEAD"),
-		"a main build checked by branch":   replaceOnce(t, jf, "if (env.BRANCH_NAME == 'main') {\n    return", "if (env.BRANCH_NAME == 'dev') {\n    return"),
-		"a branch diffing from main only":  replaceOnce(t, jf, "env.CHANGE_TARGET ?: 'main'", "'main'"),
-		"a base that is the target's tip":  replaceOnce(t, jf, `git merge-base origin/${target} HEAD`, `git rev-parse origin/${target}`),
-		"a base never fetched":             replaceOnce(t, jf, "git fetch --no-tags --quiet origin +refs/heads/${target}:refs/remotes/origin/${target}", "true"),
-		"a red mutation gate that passes":  replaceOnce(t, jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n                    runUnit(u)", "catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n                    runUnit(u)"),
-		"reports that are not archived":    replaceOnce(t, jf, " ci-results/mutation/*.json,", ""),
+		"the timer not running mutation":    replaceOnce(t, jf, "boolean nightlyMutation = timer || (", "boolean nightlyMutation = ("),
+		"EXTENDED on a branch running it":   replaceOnce(t, jf, "(params.EXTENDED && env.BRANCH_NAME == 'main')", "params.EXTENDED"),
+		"MUTATION_FULL not forcing full":    replaceOnce(t, jf, "String mode = params.MUTATION_FULL ? 'full' : nightlyMutation", "String mode = nightlyMutation"),
+		"a nightly that is full by default": replaceOnce(t, jf, "choices: ['incremental', 'full'],", "choices: ['full', 'incremental'],"),
+		"incremental with no reference":     replaceOnce(t, jf, "if (!env.CI_MUTATION_REF) {", "if (false) {"),
+		"every mutation run full":           replaceOnce(t, jf, "env.CI_MUTATION_MODE = mode ?: 'diff'", "env.CI_MUTATION_MODE = 'full'"),
+		"mutation on every build":           replaceOnce(t, jf, "env.CI_MUTATION = mode ? 'true' : 'false'", "env.CI_MUTATION = 'true'"),
+		"a diff unit with another limit":    replaceOnce(t, jf, "name: 'Mutation diff', minutes: 45,", "name: 'Mutation diff', minutes: 90,"),
+		"a diff run over every line":        replaceOnce(t, jf, `"BOARD_MUTATION_DIFF=${mutationBase} " + tune +`, `"" + tune +`),
+		"a diff run with no base":           replaceOnce(t, jf, "mutationBase = mutationDiffBase()", "mutationBase = 'HEAD'"),
+		"a main build diffing from itself":  replaceOnce(t, jf, "git rev-parse HEAD~1", "git rev-parse HEAD"),
+		"a main build checked by branch":    replaceOnce(t, jf, "if (env.BRANCH_NAME == 'main') {\n    return", "if (env.BRANCH_NAME == 'dev') {\n    return"),
+		"a branch diffing from main only":   replaceOnce(t, jf, "env.CHANGE_TARGET ?: 'main'", "'main'"),
+		"a base that is the target's tip":   replaceOnce(t, jf, `git merge-base origin/${target} HEAD`, `git rev-parse origin/${target}`),
+		"a base never fetched":              replaceOnce(t, jf, "git fetch --no-tags --quiet origin +refs/heads/${target}:refs/remotes/origin/${target}", "true"),
+		"a red mutation gate that passes":   replaceOnce(t, jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n                    runUnit(u)", "catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n                    runUnit(u)"),
+		"reports that are not archived":     replaceOnce(t, jf, "ci-results/*.cdx.json, ci-results/mutation/*.json,", "ci-results/*.cdx.json,"),
 	})
 }
 
@@ -835,35 +845,56 @@ func fullLaneProblems(units [][]string, lanes map[string][]string) []string {
 	return problems
 }
 
-// fullMutationProblems: full mode (MUTATION_FULL or the timer) is the
+// groovyFunction returns the body of the Jenkinsfile's function whose
+// declaration line is decl, up to its closing brace at column 0.
+func groovyFunction(jf, decl string) (string, bool) {
+	_, rest, ok := strings.Cut(jf, "\n"+decl+" {\n")
+	if !ok {
+		return "", false
+	}
+	body, _, _ := strings.Cut(rest, "\n}\n")
+	return body, true
+}
+
+// fullMutationProblems: full mode (MUTATION_FULL, MUTATION_MODE=full, or a
+// nightly that cannot be incremental) is runFullMutation(null): the
 // FULL_MUTATION units side by side, each `ci/mutation.sh` over its lanes into
-// its own outdir, 90 minutes and a single attempt, nproc/3 gremlins workers at
-// GOMAXPROCS 2 (nice 10 is ci/mutation.sh's), then the Mutation gate unit
-// that merges and judges them with ci/mutation-merge.sh and fails the build
-// when red.
+// its own outdir, 110 minutes and a single attempt, nproc/3 gremlins workers
+// (nproc/2 when at most two units run) at GOMAXPROCS 2 (nice 10 is
+// ci/mutation.sh's), then the Mutation gate unit that merges and judges them
+// with ci/mutation-merge.sh and fails the build when red.
 func fullMutationProblems(jf string) []string {
 	var problems []string
 	body, ok := jenkinsStage(jf, "Mutation")
 	if !ok {
 		return []string{"there is no Mutation stage"}
 	}
+	fn, ok := groovyFunction(jf, "def runFullMutation(Map plan)")
+	if !ok {
+		return []string{"there is no runFullMutation(Map plan)"}
+	}
 	for _, want := range []string{
-		"String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 3 )) BOARD_MUTATION_TEST_CPU=2'",
-		"FULL_MUTATION.each { m ->",
-		"def u = [name: m.name, minutes: 90, maxAttempts: 1,",
-		"body: { sh(returnStatus: true, script: fullTune + \" ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json ${m.lanes}\") }]",
+		"String share = selected.size() > 2 ? '3' : '2'",
+		"String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2'",
+		"selected.each { m ->",
+		"String lanes = plan == null ? m.lanes : plan['group.' + m.dir]",
+		"def u = [name: m.name, minutes: 110, maxAttempts: 1,",
+		"body: { sh(returnStatus: true, script: fullTune + \" ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json '${lanes}'\") }]",
 		"parallel branches",
 		"def gate = [name: 'Mutation gate', minutes: 15,",
-		"unstash 'res-' + slug(m.name)",
-		"'ci/run.sh ci/mutation-merge.sh ci-results/mutation ci/quality.json ' + dirs",
-		"catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n                    runUnit(gate)",
+		"unstash 'res-' + slug(name)",
+		"sh(returnStatus: true, script: 'ci/run.sh ci/mutation-merge.sh ci-results/mutation ci/quality.json ' + dirs.join(' '))",
+		"catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n      runUnit(gate)",
 	} {
-		if !strings.Contains(body, want) {
-			problems = append(problems, "the Mutation stage lacks "+want)
+		if !strings.Contains(fn, want) {
+			problems = append(problems, "runFullMutation lacks "+want)
 		}
 	}
-	if p, g := strings.Index(body, "parallel branches"), strings.Index(body, "def gate ="); p < 0 || g < p {
+	if p, g := strings.Index(fn, "parallel branches"), strings.Index(fn, "def gate ="); p < 0 || g < p {
 		problems = append(problems, "the Mutation gate does not run after the full-mode units")
+	}
+	if !strings.Contains(body, "} else if (env.CI_MUTATION_MODE == 'full') {\n                runFullMutation(null)\n              } else {") {
+		problems = append(problems, "the Mutation stage never runs full mode")
 	}
 	if n := strings.Count(body, "ci/mutation.sh ci-results/mutation ci/quality.json"); n != 1 {
 		problems = append(problems, "the Mutation stage runs ci/mutation.sh into ci-results/mutation "+strconv.Itoa(n)+" times, want once (diff mode)")
@@ -878,15 +909,16 @@ func fullMutationProblems(jf string) []string {
 func TestFullMutationIsFourUnitsOverEveryPackage(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	expectProblems(t, jf, fullMutationProblems, map[string]string{
-		"a shorter limit":            replaceOnce(t, jf, "minutes: 90, maxAttempts: 1", "minutes: 30, maxAttempts: 1"),
-		"a longer limit":             replaceOnce(t, jf, "minutes: 90, maxAttempts: 1", "minutes: 360, maxAttempts: 1"),
-		"more attempts":              replaceOnce(t, jf, "minutes: 90, maxAttempts: 1", "minutes: 90, maxAttempts: 3"),
-		"a different worker split":   replaceOnce(t, jf, "BOARD_MUTATION_WORKERS=$(( $(nproc) / 3 ))", "BOARD_MUTATION_WORKERS=$(( $(nproc) ))"),
-		"a different per-worker CPU": replaceOnce(t, jf, "/ 3 )) BOARD_MUTATION_TEST_CPU=2'", "/ 3 )) BOARD_MUTATION_TEST_CPU=1'"),
-		"units in series":            replaceOnce(t, jf, "                parallel branches\n                // Runs", "                branches.each { k, v -> v.call() }\n                // Runs"),
+		"a shorter limit":            replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 30, maxAttempts: 1"),
+		"a longer limit":             replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 360, maxAttempts: 1"),
+		"more attempts":              replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 110, maxAttempts: 3"),
+		"a different worker split":   replaceOnce(t, jf, "selected.size() > 2 ? '3' : '2'", "'1'"),
+		"a different per-worker CPU": replaceOnce(t, jf, "+ share + ' )) BOARD_MUTATION_TEST_CPU=2'", "+ share + ' )) BOARD_MUTATION_TEST_CPU=1'"),
+		"units in series":            replaceOnce(t, jf, "    parallel branches\n", "    branches.each { k, v -> v.call() }\n"),
 		"no gate":                    replaceOnce(t, jf, "ci/run.sh ci/mutation-merge.sh ci-results/mutation", "ci/run.sh true ci-results/mutation"),
-		"a red gate that passes":     replaceOnce(t, jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n                    runUnit(gate)", "catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n                    runUnit(gate)"),
-		"one unit over lane all":     replaceOnce(t, jf, "ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json ${m.lanes}", "ci/mutation.sh ci-results/mutation ci/quality.json all"),
+		"a red gate that passes":     replaceOnce(t, jf, "catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n      runUnit(gate)", "catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n      runUnit(gate)"),
+		"one unit over lane all":     replaceOnce(t, jf, "ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json '${lanes}'", "ci/mutation.sh ci-results/mutation ci/quality.json all"),
+		"full mode never run":        replaceOnce(t, jf, "runFullMutation(null)\n              } else {", "echo 'skipped'\n              } else {"),
 	})
 	var cfg struct {
 		MutationGo struct {
@@ -1081,5 +1113,59 @@ func TestJenkinsfileStabilityRunsThePerfUnit(t *testing.T) {
 		"no stability result":          replaceOnce(t, jf, "env.STABILITY_RESULT = ", "env.STABILITY = "),
 		"Perf beside the stability":    replaceOnce(t, jf, "          unitBranch(perf).call()\n", "          parallel(['Perf': unitBranch(perf)])\n"),
 		"perf.json not archived":       replaceOnce(t, jf, " ci-results/perf.json,", ""),
+	})
+}
+
+// incrementalMutationProblems: incremental mode (the nightly's default) finds
+// its reference, the last successful build whose description says
+// mutation(full), plans with ci/mutation-plan.sh over the reports it copied
+// (full on Sundays when the timer started the build), runs only the units the
+// plan gives work, merges their reports with the reused ones, and falls back
+// to full mode, saying why, when there is no plan or the plan says full.
+func incrementalMutationProblems(jf string) []string {
+	var problems []string
+	body, _ := jenkinsStage(jf, "Mutation")
+	ref, _ := groovyFunction(jf, "String mutationReference()")
+	plan, _ := groovyFunction(jf, "Map mutationPlan()")
+	full, _ := groovyFunction(jf, "def runFullMutation(Map plan)")
+	for _, c := range []struct{ where, text, want string }{
+		{"mutationReference", ref, "def b = currentBuild.previousSuccessfulBuild"},
+		{"mutationReference", ref, "if ((b.description ?: '').contains('mutation(full)')) {"},
+		{"mutationReference", ref, "b = b.previousSuccessfulBuild"},
+		{"mutationPlan", plan, "copyArtifacts projectName: env.JOB_NAME, selector: specific(env.CI_MUTATION_REF), optional: true,"},
+		{"mutationPlan", plan, "ci-results/mutation/*.json, ci-results/mutation/unit-verdict.txt, ci-results/mutation/stryker/mutation.json, ci-results/commit.txt"},
+		{"mutationPlan", plan, "String weekly = timer ? 'BOARD_MUTATION_WEEKLY_FULL=yes ' : ''"},
+		{"mutationPlan", plan, "weekly + 'ci/run.sh ci/mutation-plan.sh mutation-ref-raw ci-results/mutation-ref ci/quality.json ci-results/mutation-plan.txt ' + groups"},
+		{"mutationPlan", plan, "return [mode: 'full', reason: 'the Mutation plan unit made no plan']"},
+		{"the Mutation stage", body, "if (plan.mode == 'incremental') {"},
+		{"the Mutation stage", body, `describeMutation("mutation(incremental: ${plan.run} run, ${plan.reused} reused from #${env.CI_MUTATION_REF})")`},
+		{"the Mutation stage", body, "runFullMutation(plan)"},
+		{"the Mutation stage", body, `describeMutation("mutation(full) [${plan.reason}]")`},
+		{"runFullMutation", full, "FULL_MUTATION.findAll { plan == null || plan['group.' + it.dir] }"},
+		{"runFullMutation", full, "(plan == null ? [] : ['Mutation plan'])"},
+		{"runFullMutation", full, "(plan == null ? [] : ['ci-results/mutation-ref'])"},
+		{"the build", jf, "writeFile file: 'ci-results/commit.txt', text: commitSha"},
+		{"the build", jf, " ci-results/mutation/stryker/mutation.json,"},
+	} {
+		if !strings.Contains(c.text, c.want) {
+			problems = append(problems, c.where+" lacks "+c.want)
+		}
+	}
+	return problems
+}
+
+// TestIncrementalMutationReusesTheLastFullRun: see incrementalMutationProblems.
+func TestIncrementalMutationReusesTheLastFullRun(t *testing.T) {
+	jf := readRepoFile(t, "Jenkinsfile")
+	expectProblems(t, jf, incrementalMutationProblems, map[string]string{
+		"any build as the reference":   replaceOnce(t, jf, ".contains('mutation(full)')", ".contains('mutation')"),
+		"an empty reference":           replaceOnce(t, jf, "selector: specific(env.CI_MUTATION_REF)", "selector: lastSuccessful()"),
+		"no weekly full run":           replaceOnce(t, jf, "timer ? 'BOARD_MUTATION_WEEKLY_FULL=yes ' : ''", "''"),
+		"a failed plan as no mutation": replaceOnce(t, jf, "return [mode: 'full', reason: 'the Mutation plan unit made no plan']", "return [mode: 'none']"),
+		"every unit run anyway":        replaceOnce(t, jf, "FULL_MUTATION.findAll { plan == null || plan['group.' + it.dir] }", "FULL_MUTATION.findAll { true }"),
+		"the reused reports unjudged":  replaceOnce(t, jf, "(plan == null ? [] : ['ci-results/mutation-ref'])", "[]"),
+		"a plain description":          replaceOnce(t, jf, "reused from #${env.CI_MUTATION_REF}", "reused"),
+		"no commit for the next build": replaceOnce(t, jf, "writeFile file: 'ci-results/commit.txt', text: commitSha", "echo commitSha"),
+		"Stryker's report not kept":    replaceOnce(t, jf, " ci-results/mutation/stryker/mutation.json,", ""),
 	})
 }

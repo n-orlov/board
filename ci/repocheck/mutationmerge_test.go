@@ -101,6 +101,15 @@ func TestMutationMergeJudgesTheUnion(t *testing.T) {
 			"mutation-go: passed\nstryker: failed\n"},
 		"Stryker in two units": {"0", []mergeUnit{{[]string{"a"}, "passed"}, {[]string{"c"}, "passed"}}, 1,
 			"mutation-go: passed\nstryker: failed\n"},
+		// Incremental mode: the last dir is ci/mutation-plan.sh's reused
+		// reports, with the reference's Stryker verdict when Stryker did not
+		// run again.
+		"incremental, Stryker reused": {"0", []mergeUnit{{[]string{"a"}, "not run"}, {[]string{"b", "c"}, "passed"}}, 0,
+			"mutation-go: passed\nstryker: passed\n"},
+		"incremental, Stryker run again": {"0", []mergeUnit{{[]string{"a"}, "passed"}, {[]string{"b", "c"}, ""}}, 0,
+			"mutation-go: passed\nstryker: passed\n"},
+		"incremental, a unit both run and reused": {"0", []mergeUnit{{[]string{"a"}, "not run"}, {[]string{"a", "b"}, "passed"}}, 1,
+			"mutation-go: failed\nstryker: passed\n"},
 	} {
 		status, verdict := runMerge(t, c.gate, c.units...)
 		if status != c.status || verdict != c.verdict {

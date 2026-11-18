@@ -35,6 +35,11 @@
 //	                                               # since the merge base with ref
 //	mutationgate -config ci/quality.json -diff <ref> -dir d -lane logic
 //	                                               # judge a diff-mode run (see below)
+//	mutationgate -config ci/quality.json -stale <ref>
+//	                                               # the units a full run at ref no longer
+//	                                               # stands for (incremental mode, stale.go)
+//	mutationgate -config ci/quality.json -list -lane cli,internal/tasks
+//	                                               # a lane list may name single units too
 //
 // Diff mode (-diff, the Jenkinsfile's branch builds; ci/mutation.sh passes the
 // same ref to gremlins --diff, which mutates only lines changed since the
@@ -47,7 +52,8 @@
 // them either way). gremlins marks the mutants outside the diff SKIPPED; they
 // sit outside every count.
 //
-// Exit codes: 0 pass, 1 gate failed, 2 usage or config error.
+// Exit codes: 0 pass, 1 gate failed, 2 usage or config error, 3 (-stale
+// only) a shared input changed, so every unit must run.
 package main
 
 import (
@@ -153,15 +159,28 @@ func (c config) laneUnion(lanes string) (map[string]bool, error) {
 			return nil, fmt.Errorf("lane %q is named twice in %q", name, lanes)
 		}
 		named[name] = true
-		members, ok := c.Lanes[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown lane %q (lanes: %s)", name, strings.Join(c.laneNames(), ", "))
+		members, err := c.laneMembers(name)
+		if err != nil {
+			return nil, err
 		}
 		for _, u := range members {
 			in[u] = true
 		}
 	}
 	return in, nil
+}
+
+// laneMembers returns the units of one lane, or the unit itself when name is
+// a unit ("internal/tasks", "internal/server#ops"): incremental mutation runs
+// a lane list narrowed to the units that changed by naming them.
+func (c config) laneMembers(name string) ([]string, error) {
+	if members, ok := c.Lanes[name]; ok {
+		return members, nil
+	}
+	if strings.Contains(name, "/") && slices.Contains(c.units(), name) {
+		return []string{name}, nil
+	}
+	return nil, fmt.Errorf("unknown lane %q (lanes: %s)", name, strings.Join(c.laneNames(), ", "))
 }
 
 // lanePackages returns the units of a lane in the configured order, or an
@@ -592,22 +611,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	excl := fs.String("excludes", "", "print, one per line, the gremlins --exclude-files regexps that keep `package` to its configured scope, and exit")
 	unmeas := fs.Bool("unmeasured", false, "print each application file changed since phase_base that no unit measures; exit 1 if there is one")
 	diffRef := fs.String("diff", "", "diff mode: only the units with a measured file changed since the merge base with `ref` (git diff --merge-base, as gremlins --diff)")
+	staleRef := fs.String("stale", "", "print the units whose report made at `ref` may differ from one made now (incremental mutation); exit 3 when a shared input changed and every unit must run")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg, pkgs, err := loadLane(*cfgPath, *lane)
+	cfg, pkgs, changed, err := loadSelection(*cfgPath, *lane, *diffRef)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
 		return 2
 	}
-	var changed map[string]bool
-	if *diffRef != "" {
-		if changed, err = changedFromCwd(cfg, *diffRef, pkgs); err != nil {
-			_, _ = fmt.Fprintln(stderr, "mutationgate:", err)
-			return 2
-		}
-	}
 	switch {
+	case *staleRef != "":
+		return printStale(cfg, *cfgPath, *staleRef, pkgs, stdout, stderr)
 	case *list:
 		printLines(stdout, onlyChanged(pkgs, changed))
 	case *unmeas:
@@ -656,6 +671,16 @@ func loadLane(cfgPath, lane string) (config, []string, error) {
 	}
 	pkgs, err := cfg.lanePackages(lane)
 	return cfg, pkgs, err
+}
+
+// loadSelection is loadLane, then in diff mode (diffRef set) the lane's
+// changed units; changed is nil outside diff mode.
+func loadSelection(cfgPath, lane, diffRef string) (cfg config, pkgs []string, changed map[string]bool, err error) {
+	cfg, pkgs, err = loadLane(cfgPath, lane)
+	if err == nil && diffRef != "" {
+		changed, err = changedFromCwd(cfg, diffRef, pkgs)
+	}
+	return cfg, pkgs, changed, err
 }
 
 // changedFromCwd is changedUnits with the working directory as the module root.
