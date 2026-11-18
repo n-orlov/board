@@ -229,7 +229,7 @@ func TestUpdateUsageErrors(t *testing.T) {
 
 func TestUpdateOptionsReadTheSameVariablesAsInstallSh(t *testing.T) {
 	o := updateOptions(func(string) string { return "" })
-	if o.Repo != "n-orlov/board" || o.APIBase != "https://api.github.com" || o.DownloadBase != "https://github.com" || !o.RequireImmutable {
+	if o.Repo != "n-orlov/village-hall" || o.APIBase != "https://api.github.com" || o.DownloadBase != "https://github.com" || !o.RequireImmutable {
 		t.Errorf("defaults = %+v", o)
 	}
 	set := map[string]string{"VH_REPO": "a/b", "VH_API_URL": "http://127.0.0.1:1", "VH_DOWNLOAD_URL": "http://127.0.0.1:2", "VH_REQUIRE_IMMUTABLE": "0"}

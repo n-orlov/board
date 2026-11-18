@@ -2289,15 +2289,15 @@ attention: asks 2 · done 3 · expired 1 · overdue 0 · conflicts 1
 **Script** (mirrors deck's `install.sh`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/n-orlov/village-hall/main/install.sh | sh
 ```
 
 - Detects OS (linux, darwin) and arch (amd64, arm64; `uname -m` `x86_64` and `aarch64` are mapped),
   downloads `vh_<os>_<arch>.tar.gz` and `checksums.txt` from the release over HTTPS only, verifies
   SHA-256, installs to `${VH_INSTALL_DIR:-$HOME/.local/bin}/vh` (copy to a temporary file in that
   directory, then rename, so a running binary is replaced safely and the inode changes).
-- **Where releases come from**: `VH_REPO` (default `n-orlov/board`; GitHub redirects the old
-  slug once the repository is renamed). The release API answer and the release assets are
+- **Where releases come from**: `VH_REPO` (default `n-orlov/village-hall`; the repository was
+  `n-orlov/board` until 18 Nov 2026 and GitHub redirects that old slug). The release API answer and the release assets are
   anonymous HTTPS downloads from the public repository: no token is read or sent, and `install.sh` and
   `vh update` have no token handling.
 - `VH_VERSION=vX.Y.Z` pins a release (default latest, resolved through the release API);

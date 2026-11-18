@@ -33,7 +33,7 @@ specification:
 The `vh` CLI installs from a release of this public repository with `install.sh`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/n-orlov/village-hall/main/install.sh | sh
 ```
 
 Or ask your agent: install Village Hall following [INSTALL-AGENT.md](INSTALL-AGENT.md), a nine-step guide

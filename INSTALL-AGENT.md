@@ -20,14 +20,14 @@ they share:
 
 The installer variables are optional: `VH_VERSION` pins a release (`vX.Y.Z`, default the latest),
 `VH_INSTALL_DIR` changes the directory, `VH_REPO` names the repository (`OWNER/NAME`, default
-`n-orlov/board`), `VH_API_URL` and `VH_DOWNLOAD_URL` replace the GitHub base URLs (for a test
+`n-orlov/village-hall`), `VH_API_URL` and `VH_DOWNLOAD_URL` replace the GitHub base URLs (for a test
 server on loopback only), and `VH_REQUIRE_IMMUTABLE=0` skips step 4, which you do only when the
 operator tells you to.
 
 Set these once, in the shell that runs the steps:
 
 ```sh
-repo="${VH_REPO:-n-orlov/board}"
+repo="${VH_REPO:-n-orlov/village-hall}"
 dir="${VH_INSTALL_DIR:-$HOME/.local/bin}"
 api="${VH_API_URL:-https://api.github.com}"
 dl="${VH_DOWNLOAD_URL:-https://github.com}"

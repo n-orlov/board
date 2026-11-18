@@ -1,11 +1,11 @@
 #!/bin/sh
 # Install vh (Village Hall's CLI) from a GitHub release of the public repository.
 #
-#   curl -fsSL https://raw.githubusercontent.com/n-orlov/board/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/n-orlov/village-hall/main/install.sh | sh
 #
 # Env:  VH_VERSION=vX.Y.Z        pin a release (default: latest)
 #       VH_INSTALL_DIR=DIR       where to put the binary (default: ~/.local/bin)
-#       VH_REPO=OWNER/NAME       the repository to read releases from (default: n-orlov/board)
+#       VH_REPO=OWNER/NAME       the repository to read releases from (default: n-orlov/village-hall)
 #       VH_REQUIRE_IMMUTABLE=0   install a release that is not confirmed immutable
 #                                (exactly 0; any other value keeps the check on)
 #       VH_API_URL, VH_DOWNLOAD_URL
@@ -21,7 +21,7 @@
 # (--proto =https; plain http only for a loopback test override).
 set -eu
 
-repo="${VH_REPO:-n-orlov/board}"
+repo="${VH_REPO:-n-orlov/village-hall}"
 version="${VH_VERSION:-latest}"
 dir="${VH_INSTALL_DIR:-$HOME/.local/bin}"
 api_base="${VH_API_URL:-https://api.github.com}"

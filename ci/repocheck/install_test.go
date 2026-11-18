@@ -365,7 +365,7 @@ func TestInstallShInstallsTheAssetOfEachSupportedPlatform(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.os+"_"+c.arch, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+			srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 			run := runInstall(t, installSpec{sysname: c.sysname, machine: c.machine, server: srv})
 			run.succeeded(t)
 			if got, want := run.installed(t), "#!/bin/sh\necho 'vh "+vhLabel("v1.4.0", c.os, c.arch)+"'\n"; got != want {
@@ -383,12 +383,12 @@ func TestInstallShInstallsTheAssetOfEachSupportedPlatform(t *testing.T) {
 				t.Fatalf("install directory holds %d entries after the install, want only vh", len(entries))
 			}
 			wantReq := []string{
-				"/repos/n-orlov/board/releases/latest",
-				"/n-orlov/board/releases/download/v1.4.0/" + assetName(c.os, c.arch),
-				"/n-orlov/board/releases/download/v1.4.0/checksums.txt",
+				"/repos/n-orlov/village-hall/releases/latest",
+				"/n-orlov/village-hall/releases/download/v1.4.0/" + assetName(c.os, c.arch),
+				"/n-orlov/village-hall/releases/download/v1.4.0/checksums.txt",
 			}
 			if got := srv.seen(); strings.Join(got, "\n") != strings.Join(wantReq, "\n") {
-				t.Fatalf("requests %v, want %v (the default repository is n-orlov/board)", got, wantReq)
+				t.Fatalf("requests %v, want %v (the default repository is n-orlov/village-hall)", got, wantReq)
 			}
 		})
 	}
@@ -402,7 +402,7 @@ func TestInstallShRefusesAnUnsupportedPlatformAndInstallsNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.sysname+"_"+c.machine, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+			srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 			run := runInstall(t, installSpec{sysname: c.sysname, machine: c.machine, server: srv})
 			run.refused(t, c.want)
 			run.nothingInstalled(t)
@@ -416,7 +416,7 @@ func TestInstallShRefusesAnUnsupportedPlatformAndInstallsNothing(t *testing.T) {
 func TestInstallShRefusesAChecksumMismatchAndInstallsNothing(t *testing.T) {
 	rel := goodRelease("v1.4.0")
 	rel.tamper = true
-	srv := newReleaseServer(t, "n-orlov/board", rel)
+	srv := newReleaseServer(t, "n-orlov/village-hall", rel)
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv})
 	run.refused(t, "checksum mismatch")
 	run.nothingInstalled(t)
@@ -425,7 +425,7 @@ func TestInstallShRefusesAChecksumMismatchAndInstallsNothing(t *testing.T) {
 func TestInstallShKeepsTheOldBinaryOnARefusal(t *testing.T) {
 	rel := goodRelease("v1.4.0")
 	rel.tamper = true
-	srv := newReleaseServer(t, "n-orlov/board", rel)
+	srv := newReleaseServer(t, "n-orlov/village-hall", rel)
 	dir := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -461,7 +461,7 @@ var notConfirmed = []struct {
 func TestInstallShRefusesAReleaseThatIsNotConfirmedImmutable(t *testing.T) {
 	for _, c := range notConfirmed {
 		t.Run(c.name, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", c.rel)
+			srv := newReleaseServer(t, "n-orlov/village-hall", c.rel)
 			run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv})
 			run.refused(t, c.want)
 			run.nothingInstalled(t)
@@ -477,7 +477,7 @@ func TestInstallShRefusesAReleaseThatIsNotConfirmedImmutable(t *testing.T) {
 func TestInstallShOptOutInstallsAReleaseThatIsNotConfirmedImmutable(t *testing.T) {
 	for _, c := range notConfirmed {
 		t.Run(c.name, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", c.rel)
+			srv := newReleaseServer(t, "n-orlov/village-hall", c.rel)
 			run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{"VH_REQUIRE_IMMUTABLE=0"}})
 			run.succeeded(t)
 			if !strings.Contains(run.installed(t), "v1.4.0 linux/amd64") {
@@ -493,10 +493,10 @@ func TestInstallShOptOutInstallsAReleaseThatIsNotConfirmedImmutable(t *testing.T
 func TestInstallShOptOutFallsBackToTheLatestDownloadWhenTheAPIIsDown(t *testing.T) {
 	// A server with no API answer for "latest" at all: the opt-out still installs
 	// from the latest-download path.
-	inner := newReleaseServer(t, "n-orlov/board", goodRelease("v2.0.0"))
+	inner := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v2.0.0"))
 	mux := http.NewServeMux()
-	mux.HandleFunc("/n-orlov/board/releases/latest/download/", func(w http.ResponseWriter, r *http.Request) {
-		file := strings.TrimPrefix(r.URL.Path, "/n-orlov/board/releases/latest/download/")
+	mux.HandleFunc("/n-orlov/village-hall/releases/latest/download/", func(w http.ResponseWriter, r *http.Request) {
+		file := strings.TrimPrefix(r.URL.Path, "/n-orlov/village-hall/releases/latest/download/")
 		inner.answerDownload(w, r, inner.releases["v2.0.0"], file)
 	})
 	srv := httptest.NewServer(mux)
@@ -513,7 +513,7 @@ func TestInstallShOptOutFallsBackToTheLatestDownloadWhenTheAPIIsDown(t *testing.
 func TestInstallShEnforcesImmutabilityForEveryValueButZero(t *testing.T) {
 	for _, value := range []string{"1", "no", "false", "00", "", " 0", "0 "} {
 		t.Run("value="+value, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", release{tag: "v1.4.0", immutable: "false"})
+			srv := newReleaseServer(t, "n-orlov/village-hall", release{tag: "v1.4.0", immutable: "false"})
 			run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{"VH_REQUIRE_IMMUTABLE=" + value}})
 			run.refused(t, "is not an immutable release")
 			run.nothingInstalled(t)
@@ -522,7 +522,7 @@ func TestInstallShEnforcesImmutabilityForEveryValueButZero(t *testing.T) {
 }
 
 func TestInstallShPinsTheVersionOfVHVersion(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v9.9.9"), goodRelease("v1.2.3"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v9.9.9"), goodRelease("v1.2.3"))
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "aarch64", server: srv, env: []string{"VH_VERSION=v1.2.3"}})
 	run.succeeded(t)
 	if !strings.Contains(run.installed(t), "v1.2.3 linux/arm64") {
@@ -533,7 +533,7 @@ func TestInstallShPinsTheVersionOfVHVersion(t *testing.T) {
 			t.Fatalf("a pinned install touched %s", p)
 		}
 	}
-	if got := srv.seen()[0]; got != "/repos/n-orlov/board/releases/tags/v1.2.3" {
+	if got := srv.seen()[0]; got != "/repos/n-orlov/village-hall/releases/tags/v1.2.3" {
 		t.Fatalf("first request %s, want the release API of the pinned tag", got)
 	}
 }
@@ -541,7 +541,7 @@ func TestInstallShPinsTheVersionOfVHVersion(t *testing.T) {
 func TestInstallShRefusesAPinnedVersionThatIsUnknownOrMalformed(t *testing.T) {
 	for _, version := range []string{"v8.8.8", "1.2.3", "v1.2", "v1.2.3/../../x", "latest2", "v1.2.3 v1.2.4"} {
 		t.Run(version, func(t *testing.T) {
-			srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.2.3"))
+			srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.2.3"))
 			run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{"VH_VERSION=" + version}})
 			if run.code == 0 {
 				t.Fatalf("VH_VERSION=%q installed:\n%s", version, run.stdout)
@@ -566,7 +566,7 @@ func TestInstallShReadsTheReleaseOfVHRepo(t *testing.T) {
 }
 
 func TestInstallShReplacesAnExistingBinaryThroughARename(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	dir := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -609,7 +609,7 @@ func TestInstallShReplacesAnExistingBinaryThroughARename(t *testing.T) {
 }
 
 func TestInstallShWarnsWhenTheDirectoryIsNotOnPath(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	off := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv})
 	off.succeeded(t)
 	if want := off.dir + " is not on your PATH"; !strings.Contains(off.stderr, want) {
@@ -623,7 +623,7 @@ func TestInstallShWarnsWhenTheDirectoryIsNotOnPath(t *testing.T) {
 }
 
 func TestInstallShDefaultsTheDirectoryToLocalBinInHome(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	home := t.TempDir()
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv, env: []string{"HOME=" + home, "VH_INSTALL_DIR="}})
 	run.succeeded(t)
@@ -633,7 +633,7 @@ func TestInstallShDefaultsTheDirectoryToLocalBinInHome(t *testing.T) {
 }
 
 func TestInstallShRefusesANonLoopbackHTTPOverride(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	for _, variable := range []string{"VH_API_URL", "VH_DOWNLOAD_URL"} {
 		for _, url := range []string{
 			"http://example.com", "http://example.com:8080/x", "http://127.0.0.1.example.com",
@@ -669,7 +669,7 @@ func TestInstallShRefusesANonLoopbackHTTPOverride(t *testing.T) {
 }
 
 func TestInstallShAcceptsLoopbackHTTPOverrides(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	port := srv.URL[strings.LastIndex(srv.URL, ":")+1:]
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", env: []string{
 		"VH_API_URL=http://localhost:" + port + "/", "VH_DOWNLOAD_URL=http://localhost:" + port,
@@ -756,7 +756,7 @@ func stubProbe(t *testing.T, args ...string) (delegated bool, blocked []string, 
 
 func TestTheCurlStubNeverDelegatesAnExternalURLToARealCurl(t *testing.T) {
 	external := []string{
-		"https://api.github.com/repos/n-orlov/board/releases/latest", "https://github.com", "https://example.com",
+		"https://api.github.com/repos/n-orlov/village-hall/releases/latest", "https://github.com", "https://example.com",
 		"http://example.com", "https://127.0.0.1.example.com/x", "http://127.0.0.1@example.com", "http://127.0.0.1:80@example.com",
 		"https://localhost@example.com", "http://localhost.example.com:80", "ftp://127.0.0.1/x", "https://[::2]",
 		"http://10.0.0.1", "http://127.0.0.1:x", "http://0.0.0.0", `http://127.0.0.1\@example.com`, "gopher://localhost",
@@ -834,7 +834,7 @@ func TestInstallerRunsWithoutAnyBaseOverrideNeverReachTheNetwork(t *testing.T) {
 }
 
 func TestInstallShSendsNoCredential(t *testing.T) {
-	srv := newReleaseServer(t, "n-orlov/board", goodRelease("v1.4.0"))
+	srv := newReleaseServer(t, "n-orlov/village-hall", goodRelease("v1.4.0"))
 	run := runInstall(t, installSpec{sysname: "Linux", machine: "x86_64", server: srv})
 	run.succeeded(t)
 	srv.mu.Lock()
@@ -950,7 +950,7 @@ func section8_5(t *testing.T) string {
 func TestSpecSection85DescribesTheInstallerForThePublicRepository(t *testing.T) {
 	section := section8_5(t)
 	for _, want := range []string{
-		"VH_VERSION", "VH_INSTALL_DIR", "VH_REQUIRE_IMMUTABLE", "VH_REPO", "n-orlov/board",
+		"VH_VERSION", "VH_INSTALL_DIR", "VH_REQUIRE_IMMUTABLE", "VH_REPO", "n-orlov/village-hall",
 		"vh_<os>_<arch>.tar.gz", "checksums.txt", "anonymous", "public repository", "VH_API_URL", "VH_DOWNLOAD_URL",
 		"--proto =https",
 	} {

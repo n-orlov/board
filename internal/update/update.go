@@ -27,7 +27,7 @@ import (
 // Default locations of the release API and of the release downloads, and the
 // default repository. They are the same as install.sh's.
 const (
-	DefaultRepo        = "n-orlov/board"
+	DefaultRepo        = "n-orlov/village-hall"
 	DefaultAPIBase     = "https://api.github.com"
 	DefaultDownloadURL = "https://github.com"
 )
