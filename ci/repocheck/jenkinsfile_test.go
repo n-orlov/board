@@ -879,8 +879,8 @@ func groovyFunction(jf, decl string) (string, bool) {
 // fullMutationProblems: full mode (MUTATION_FULL, MUTATION_MODE=full, or a
 // nightly that cannot be incremental) is runFullMutation(null): the
 // FULL_MUTATION units side by side, each `ci/mutation.sh` over its lanes into
-// its own outdir, 110 minutes and a single attempt, nproc/(2 x units)
-// gremlins workers at GOMAXPROCS 2 (nproc busy threads in all; nice 10 is
+// its own outdir, 110 minutes and a single attempt, nproc/3 gremlins workers
+// (nproc/2 when at most two units run) at GOMAXPROCS 2 (nice 10 is
 // ci/mutation.sh's) under the hard memory cap MUTATION_MEMORY, then the
 // Mutation gate unit that merges and judges them with ci/mutation-merge.sh and
 // fails the build when red.
@@ -897,9 +897,8 @@ func fullMutationProblems(jf string) []string {
 		return []string{"there is no runFullMutation(Map plan)"}
 	}
 	for _, want := range []string{
-		"int share = 2 * selected.size()",
-		"int strykerShare = Math.max(2, selected.size())",
-		"String fullTune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +\n                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / ' + strykerShare + ' ))'",
+		"String share = selected.size() > 2 ? '3' : '2'",
+		"String fullTune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +\n                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'",
 		"selected.each { m ->",
 		"String lanes = plan == null ? m.lanes : plan['group.' + m.dir]",
 		"def u = [name: m.name, minutes: 110, maxAttempts: 1,",
@@ -942,8 +941,8 @@ func TestFullMutationIsThreeUnitsOverEveryPackage(t *testing.T) {
 		"a shorter limit":            replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 30, maxAttempts: 1"),
 		"a longer limit":             replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 360, maxAttempts: 1"),
 		"more attempts":              replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 110, maxAttempts: 3"),
-		"a different worker split":   replaceOnce(t, jf, "int share = 2 * selected.size()", "int share = selected.size()"),
-		"Stryker on every thread":    replaceOnce(t, jf, "int strykerShare = Math.max(2, selected.size())", "int strykerShare = 1"),
+		"a different worker split":   replaceOnce(t, jf, "selected.size() > 2 ? '3' : '2'", "selected.size() > 2 ? '6' : '2'"),
+		"Stryker on every thread":    replaceOnce(t, jf, "STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'", "STRYKER_CONCURRENCY=$(( $(nproc) / 1 ))'"),
 		"no memory cap":              replaceOnce(t, jf, "String fullTune = MUTATION_MEMORY + ' BOARD", "String fullTune = ' BOARD"),
 		"an empty memory cap":        replaceOnce(t, jf, "MUTATION_MEMORY = 'BOARD_CI_MEMORY=", "MUTATION_MEMORY = 'BOARD_CI_NOTHING="),
 		"diff mode uncapped":         replaceOnce(t, jf, "String tune = MUTATION_MEMORY + ' BOARD", "String tune = ' BOARD"),

@@ -180,19 +180,20 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
     `ci/mutation-merge.sh`, which merges their reports into `ci-results/mutation`
     and judges every package once. The three units start together beside the
     Stability unit (1 + 3 of the 4 executors), each `internal/server` part in a
-    unit of its own. The running units share `nproc` busy threads: each runs
-    `nproc / (2 × units)` gremlins workers at GOMAXPROCS 2 per worker
-    (`BOARD_MUTATION_WORKERS`, `BOARD_MUTATION_TEST_CPU`), so 2 per unit and 6
-    workers in all on the 12 threads of `int21h-ws` when all three run, 3 or 6
-    per unit when an incremental plan runs two or one, at `nice 10`, under a
-    110-minute limit and a single attempt; Stryker, at the end of the unit
-    with lane `base`, runs its unit's share, `nproc / units` test processes (at
-    most `nproc / 2`), at `nice 10` (`BOARD_MUTATION_STRYKER_CONCURRENCY`, read
-    by `web/stryker.config.mjs` as `STRYKER_CONCURRENCY`; Stryker's own default
-    is one per CPU less one). #242 ran `nproc / 3` workers per unit (12
-    workers, 24 runnable threads on 12): load 20 to 30 (peak 44.6) with the CPU
-    81 to 99 % busy, so the work was CPU-bound and the extra workers bought
-    contention, not throughput.
+    unit of its own. Each runs `nproc / 3` gremlins workers at GOMAXPROCS 2 per
+    worker (`BOARD_MUTATION_WORKERS`, `BOARD_MUTATION_TEST_CPU`; `nproc / 2`
+    when at most two units run), 12 workers on `int21h-ws`, at `nice 10`, under
+    a 110-minute limit and a single attempt; Stryker, at the end of the unit
+    with lane `base`, runs `nproc / 2` test processes at `nice 10`
+    (`BOARD_MUTATION_STRYKER_CONCURRENCY`, read by `web/stryker.config.mjs` as
+    `STRYKER_CONCURRENCY`; Stryker's own default is one per CPU less one).
+    A worker is busy only about half the time (compiling its mutant, waiting
+    for its Postgres testcontainers), so 12 workers keep about `nproc` threads
+    busy: #242 ran the CPU 81 to 99 % busy (load 20 to 30, peak 44.6) and its
+    units took 72 to 85 minutes. #244 tried `nproc / (2 × units)`, 2 workers
+    per unit: the CPU fell to 30 to 45 % busy (load 5 to 8), each package of
+    the streams+cli unit took about 1.4 times as long, and that unit hit its
+    110-minute limit, so the split went back to `nproc / 3`.
     Every mutation unit (diff mode's too) runs under a hard memory cap of 12 GB
     (`MUTATION_MEMORY` in the Jenkinsfile: `ci/run.sh`'s `BOARD_CI_MEMORY`,
     `docker run --memory=12g --memory-swap=12g`). A mutant that allocates
@@ -204,7 +205,9 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
     the Jenkins agent). A normal unit stays far below it: a probe of `internal/cli` with 2 workers
     peaked near 5.5 GB, nearly all of it page cache of gremlins' work copies
     (anonymous memory under 0.5 GB), and its runaway mutant hit the cap within
-    15 s and was killed alone (`CONSTRAINT_MEMCG`) while gremlins went on. The
+    15 s and was killed alone (`CONSTRAINT_MEMCG`) while gremlins went on; in
+    #244 a runaway `cli.test` (12.3 GB anonymous) was killed the same way, with
+    no global OOM on the host. The
     Postgres testcontainers a unit starts through the docker socket are
     outside its cgroup. `GOMEMLIMIT` is not set: it is a soft limit that makes
     a runaway collect harder rather than stop.
@@ -492,7 +495,7 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
   `GOFLAGS=-count=1`: the covered run is a real run, and `--timeout-coefficient
   60` multiplies the suite's real duration (without it every `internal/server`
   and `internal/cli` mutant timed out unjudged). The efficacy floor, `--timeout-coefficient 60` and the worker count
-  (`nproc / (2 × units)` workers at GOMAXPROCS 2 in Jenkins) apply to every package alike; nothing is raised for the
+  (`nproc / 3` workers at GOMAXPROCS 2 per full-mode unit and `nproc / 2` in diff mode in Jenkins) apply to every package alike; nothing is raised for the
   scoped ones. `ci/qualitycheck` reports a scope narrowed against the base as a
   loosening, like a dropped package.
   Counts come from the per-mutation statuses, since gremlins' summary fields
