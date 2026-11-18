@@ -212,3 +212,26 @@ func TestRunShMountsTheDockerSocketForTheSiblingMatrix(t *testing.T) {
 		t.Errorf("the caller's command must come last: %q", tail)
 	}
 }
+
+// TestRunShMemoryCap: BOARD_CI_MEMORY puts a hard limit on the sibling's
+// cgroup with swap included (--memory-swap equal to --memory, so a runaway is
+// OOM-killed in its container instead of swapping), and without it the
+// sibling has no limit.
+func TestRunShMemoryCap(t *testing.T) {
+	argv := runShRun(t, []string{"RALPHD_HOST_WORKSPACE=/host/ws", noSocket, "BOARD_CI_MEMORY=12g"}, "true")
+	img := indexOf(argv, "board-ci:local")
+	if img < 0 {
+		t.Fatalf("image board-ci:local missing from argv %q", argv)
+	}
+	for _, want := range []string{"--memory=12g", "--memory-swap=12g"} {
+		if i := indexOf(argv, want); i < 0 || i > img {
+			t.Errorf("want %s before the image, got %q", want, argv)
+		}
+	}
+	argv = runShRun(t, []string{"RALPHD_HOST_WORKSPACE=/host/ws", noSocket}, "true")
+	for _, a := range argv {
+		if strings.HasPrefix(a, "--memory") {
+			t.Errorf("no BOARD_CI_MEMORY, yet argv caps memory: %q", argv)
+		}
+	}
+}

@@ -17,12 +17,20 @@
 #     caller set in front of ci/run.sh is forwarded explicitly (see below), and
 #     nothing else is: without that, selectors like BOARD_GODOG_PATHS were
 #     silently dropped and the whole feature suite ran instead of the named files
+#   - BOARD_CI_MEMORY=<size> (docker's units, e.g. 12g) puts a hard memory limit
+#     on the sibling's cgroup, swap included (--memory = --memory-swap): a
+#     process that runs away is killed by the cgroup's own OOM killer, alone,
+#     instead of the host's global one picking anything on the agent. The
+#     Jenkinsfile sets it on every full-mode mutation unit (SPEC 15.3), where
+#     a mutated cli.test once grew to 54 GB. Containers the sibling starts
+#     through the docker socket (Postgres testcontainers) are outside it.
 set -eu
 
 workspace=${RALPHD_HOST_WORKSPACE:-$PWD}
 image=${BOARD_CI_IMAGE:-board-ci:local}
 volume=${BOARD_CI_CACHE_VOLUME:-board-go-cache}
 npm_volume=${BOARD_CI_NPM_VOLUME:-board-npm-cache}
+memory=${BOARD_CI_MEMORY:-}
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     echo "error: image $image not found; build it with:" >&2
@@ -50,6 +58,7 @@ set -- "$@" docker run --rm \
     --mount "type=bind,src=$workspace,dst=/w" \
     --mount "type=volume,src=$volume,dst=/go-cache" \
     --mount "type=volume,src=$npm_volume,dst=/npm-cache" \
+    ${memory:+--memory=$memory --memory-swap=$memory} \
     ${RALPHD_RUN_ID:+--label ralphd.run=$RALPHD_RUN_ID} \
     ${RALPHD_RUN_ID:+--label ralphd.role=sibling}
 

@@ -45,18 +45,21 @@
 //          Mutation gate unit merges their reports and judges every package
 //          once (ci/mutation-merge.sh, lane all). The three units start
 //          together, beside the Stability unit: 1 + 3 units fit the 4
-//          executors. Each gremlins runs nproc/3 workers at GOMAXPROCS 2
-//          (nproc/2 when at most two units run), 12 workers in all on
-//          int21h-ws, plus the three stability runs for their first 11
-//          minutes; Stryker, at the end of its unit, runs nproc/2 test
-//          processes (a mutant spends much of its time waiting for Postgres
-//          testcontainers, and nice 10 leaves other jobs ahead). Each unit
-//          has one attempt under 110 minutes. ci/mutation.sh caps a mutant
-//          at about 5 minutes (its header), which a hanging internal/server
-//          mutant used to hold for an hour: the one full unit of #233 took
-//          3 h 56 min. #235 (four units, three of them waiting for the
-//          stability units, Stryker on 11 processes) ended mutation 80
-//          minutes after Core, at 128 minutes in all.
+//          executors. The running units share nproc busy threads: each
+//          gremlins runs nproc/(2 x units) workers at GOMAXPROCS 2, 2 per
+//          unit on int21h-ws when all three run (3 or 6 when an incremental
+//          plan runs two or one), beside the stability runs for their first
+//          21 minutes (nice 10 leaves them ahead); Stryker, at the end of its
+//          unit, runs its unit's share, nproc/units test processes (at most
+//          nproc/2). #242's nproc/3 workers per unit (24 runnable threads on
+//          12) kept the load at 20-30 (peak 44.6) with the CPU 81-99% busy:
+//          contention, not throughput. Each unit has one attempt under 110
+//          minutes and a hard memory cap (MUTATION_MEMORY). ci/mutation.sh
+//          caps a mutant at about 5 minutes (its header), which a hanging
+//          internal/server mutant used to hold for an hour: the one full
+//          unit of #233 took 3 h 56 min. #235 (four units, three of them
+//          waiting for the stability units, Stryker on 11 processes) ended
+//          mutation 80 minutes after Core, at 128 minutes in all.
 //        - incremental (the nightly's default, MUTATION_MODE=incremental):
 //          the reference is the last successful build of this job whose
 //          description says mutation(full). The Mutation plan unit copies
@@ -111,6 +114,18 @@ import groovy.transform.Field
 // runs its three parts side by side. All three start together beside the
 // one Stability unit (4 executors); dir is its outdir under
 // ci-results/mutation-units/.
+// Every mutation unit's hard memory cap (ci/run.sh's BOARD_CI_MEMORY, see the
+// header): its container's cgroup, swap included, so a mutant that runs away
+// is OOM-killed alone (go test exits 1: gremlins counts it KILLED) instead of
+// the host's global OOM killer picking anything on int21h-ws. A mutated
+// cli.test of #242 reached 54 GB (about 20 global OOMs since 10 Nov, every
+// full cli run). A normal unit with 2 workers peaks near 5.5 GB, nearly all
+// of it page cache of gremlins' work copies (anonymous memory under 0.5 GB);
+// 3 x 12 GB beside Stability and the Postgres testcontainers (outside the
+// cap) leave the 64 GB host headroom. A probe of internal/cli under 12g
+// reproduced the runaway: the cgroup OOM killer took that cli.test alone
+// within 15 s (CONSTRAINT_MEMCG) and gremlins went on, every mutant judged.
+@Field final String MUTATION_MEMORY = 'BOARD_CI_MEMORY=12g'
 @Field final List FULL_MUTATION = [
   [name: 'Mutation server-core+logic', dir: 'server-core', lanes: 'server-core,logic'],
   [name: 'Mutation streams+cli', dir: 'cli', lanes: 'server-streams,cli,cli-core'],
@@ -356,11 +371,16 @@ Map mutationPlan() {
 // lane list it names, and the gate also merges the reports it reused.
 def runFullMutation(Map plan) {
   def selected = FULL_MUTATION.findAll { plan == null || plan['group.' + it.dir] }
-  String share = selected.size() > 2 ? '3' : '2'
-  // Stryker (lane base's unit, after its gremlins) gets half the threads,
-  // beside the other units' gremlins.
-  String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +
-                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'
+  // Thread budget (see the header): the running units share nproc busy
+  // threads, a gremlins worker at GOMAXPROCS 2 being two of them, so each
+  // unit gets nproc / (2 x units) workers: 2 when all three run on the 12
+  // threads of int21h-ws, 3 or 6 when an incremental plan runs two or one.
+  // Stryker (lane base's unit, after its gremlins) gets its unit's share,
+  // nproc / units test processes, at most nproc / 2.
+  int share = 2 * selected.size()
+  int strykerShare = Math.max(2, selected.size())
+  String fullTune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +
+                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / ' + strykerShare + ' ))'
   def branches = [:]
   selected.each { m ->
     String lanes = plan == null ? m.lanes : plan['group.' + m.dir]
@@ -615,7 +635,7 @@ pipeline {
               // The worker and CPU split is read by ci/mutation.sh before it
               // scrubs BOARD_*, and ci/run.sh forwards only BOARD_* into its
               // container.
-              String tune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
+              String tune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
               if (env.CI_MUTATION_MODE == 'incremental') {
                 def plan = mutationPlan()
                 if (plan.mode == 'incremental') {

@@ -879,10 +879,13 @@ func groovyFunction(jf, decl string) (string, bool) {
 // fullMutationProblems: full mode (MUTATION_FULL, MUTATION_MODE=full, or a
 // nightly that cannot be incremental) is runFullMutation(null): the
 // FULL_MUTATION units side by side, each `ci/mutation.sh` over its lanes into
-// its own outdir, 110 minutes and a single attempt, nproc/3 gremlins workers
-// (nproc/2 when at most two units run) at GOMAXPROCS 2 (nice 10 is
-// ci/mutation.sh's), then the Mutation gate unit that merges and judges them
-// with ci/mutation-merge.sh and fails the build when red.
+// its own outdir, 110 minutes and a single attempt, nproc/(2 x units)
+// gremlins workers at GOMAXPROCS 2 (nproc busy threads in all; nice 10 is
+// ci/mutation.sh's) under the hard memory cap MUTATION_MEMORY, then the
+// Mutation gate unit that merges and judges them with ci/mutation-merge.sh and
+// fails the build when red.
+var mutationMemoryRE = regexp.MustCompile(`\n@Field final String MUTATION_MEMORY = 'BOARD_CI_MEMORY=[1-9][0-9]?g'\n`)
+
 func fullMutationProblems(jf string) []string {
 	var problems []string
 	body, ok := jenkinsStage(jf, "Mutation")
@@ -894,8 +897,9 @@ func fullMutationProblems(jf string) []string {
 		return []string{"there is no runFullMutation(Map plan)"}
 	}
 	for _, want := range []string{
-		"String share = selected.size() > 2 ? '3' : '2'",
-		"String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +\n                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / 2 ))'",
+		"int share = 2 * selected.size()",
+		"int strykerShare = Math.max(2, selected.size())",
+		"String fullTune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=$(( $(nproc) / ' + share + ' )) BOARD_MUTATION_TEST_CPU=2' +\n                    ' BOARD_MUTATION_STRYKER_CONCURRENCY=$(( $(nproc) / ' + strykerShare + ' ))'",
 		"selected.each { m ->",
 		"String lanes = plan == null ? m.lanes : plan['group.' + m.dir]",
 		"def u = [name: m.name, minutes: 110, maxAttempts: 1,",
@@ -912,6 +916,12 @@ func fullMutationProblems(jf string) []string {
 	}
 	if p, g := strings.Index(fn, "parallel branches"), strings.Index(fn, "def gate ="); p < 0 || g < p {
 		problems = append(problems, "the Mutation gate does not run after the full-mode units")
+	}
+	if !mutationMemoryRE.MatchString(jf) {
+		problems = append(problems, "MUTATION_MEMORY sets no BOARD_CI_MEMORY cap in gigabytes")
+	}
+	if !strings.Contains(body, "String tune = MUTATION_MEMORY + ' BOARD_MUTATION_WORKERS=") {
+		problems = append(problems, "diff mode's unit runs without the memory cap")
 	}
 	if !strings.Contains(body, "} else if (env.CI_MUTATION_MODE == 'full') {\n                runFullMutation(null)\n              } else {") {
 		problems = append(problems, "the Mutation stage never runs full mode")
@@ -932,7 +942,11 @@ func TestFullMutationIsThreeUnitsOverEveryPackage(t *testing.T) {
 		"a shorter limit":            replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 30, maxAttempts: 1"),
 		"a longer limit":             replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 360, maxAttempts: 1"),
 		"more attempts":              replaceOnce(t, jf, "minutes: 110, maxAttempts: 1", "minutes: 110, maxAttempts: 3"),
-		"a different worker split":   replaceOnce(t, jf, "selected.size() > 2 ? '3' : '2'", "'1'"),
+		"a different worker split":   replaceOnce(t, jf, "int share = 2 * selected.size()", "int share = selected.size()"),
+		"Stryker on every thread":    replaceOnce(t, jf, "int strykerShare = Math.max(2, selected.size())", "int strykerShare = 1"),
+		"no memory cap":              replaceOnce(t, jf, "String fullTune = MUTATION_MEMORY + ' BOARD", "String fullTune = ' BOARD"),
+		"an empty memory cap":        replaceOnce(t, jf, "MUTATION_MEMORY = 'BOARD_CI_MEMORY=", "MUTATION_MEMORY = 'BOARD_CI_NOTHING="),
+		"diff mode uncapped":         replaceOnce(t, jf, "String tune = MUTATION_MEMORY + ' BOARD", "String tune = ' BOARD"),
 		"a different per-worker CPU": replaceOnce(t, jf, "+ share + ' )) BOARD_MUTATION_TEST_CPU=2'", "+ share + ' )) BOARD_MUTATION_TEST_CPU=1'"),
 		"units in series":            replaceOnce(t, jf, "    parallel branches\n", "    branches.each { k, v -> v.call() }\n"),
 		"no gate":                    replaceOnce(t, jf, "ci/run.sh ci/mutation-merge.sh ci-results/mutation", "ci/run.sh true ci-results/mutation"),
