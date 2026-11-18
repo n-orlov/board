@@ -14,7 +14,7 @@
 //     free): another attempt, up to 3 infrastructure failures;
 //   - the unit's command fails: one rerun; a pass there marks the build
 //     UNSTABLE ("flaky"), a second failure fails it.
-// A unit may cap its attempts (maxAttempts: the full mutation run has one).
+// A unit may cap its attempts (maxAttempts: each full mutation unit has one).
 // Each attempt reports node, queue wait and run time; the build page gets a
 // per-unit timing table (ci-results/distributed/timing.md).
 //
@@ -25,44 +25,71 @@
 // and Image (the image tar). The report runs once at the end over every
 // unit's stash.
 //
-// Three phases, one after another; each phase's units run in parallel:
+// Phases; each phase's units run in parallel:
 //   1. Core (every build): Lint, Suite, Image, Allure smoke, then Quality
 //      (4 executors: Quality waits for Suite and Image without holding one).
-//   2. Stability (EXTENDED=true, or nightly on main): three stability runs,
-//      one unit each, then the Perf unit (the SPEC 14 harness, 30 minutes,
-//      alone on the agent); EXTENDED also adds -race and fresh vulnerability
-//      databases to Core.
-//   3. Mutation, one unit, in one of two modes:
-//      - full (nightly on main, or MUTATION_FULL=true): every package and
-//        Stryker (ci/mutation.sh lane all, one package after another), each
-//        gremlins with nproc/2 workers and GOMAXPROCS 2 per worker (a mutant
-//        is a go build plus a go test; 6 x 2 keeps the 12 threads busy
-//        without oversubscribing them, and nice 10 leaves other jobs ahead
-//        of it). One attempt under one 6-hour limit: a timeout is not worth
-//        another 6 hours. About 70 minutes.
-//      - diff (MUTATION=true on any other build): only the lines changed
-//        since a base, under 45 minutes (minutes when few packages changed;
-//        a changed internal/server still pays its covered suite run once).
-//        A branch or PR build diffs against the merge base with its target
-//        (origin/main, or CHANGE_TARGET), fetched into the workspace first
-//        because the multibranch checkout fetches the built branch only. A
-//        build of main itself would get HEAD as that merge base, so it diffs
-//        against HEAD~1 (the last commit; the nightly full run covers the
-//        rest). ci/mutation.sh and ci/mutationgate -diff: a package with no
-//        mutant passes, one with mutants keeps the 80 efficacy floor;
-//        Stryker runs only if web/src/lib changed.
+//   2. Stability and Mutation, side by side, once Core passed:
+//      - Stability (EXTENDED=true, or nightly on main): three stability
+//        runs, one unit each (about 11 minutes); EXTENDED also adds -race and
+//        fresh vulnerability databases to Core.
+//      - Mutation (MUTATION, MUTATION_FULL or nightly), in one of two modes:
+//        - full (nightly on main, or MUTATION_FULL=true): four units in
+//          parallel (FULL_MUTATION below), each ci/mutation.sh over its own
+//          lanes of ci/quality.json into its own outdir, every lane in
+//          exactly one unit and Stryker in the unit with lane base; then the
+//          Mutation gate unit merges their reports and judges every package
+//          once (ci/mutation-merge.sh, lane all). The first unit starts with
+//          the stability units; the other three wait for them, since 3 + 4
+//          units would not fit the 4 executors. Each gremlins runs nproc/3
+//          workers at GOMAXPROCS 2 (4 x 2 per unit: the four units ask for
+//          more than the 12 threads, which is fine, since a mutant spends
+//          much of its time waiting for Postgres testcontainers and nice 10
+//          leaves other jobs ahead). Each unit has one attempt under
+//          90 minutes. ci/mutation.sh caps a mutant at about 5 minutes (its
+//          header), which a hanging internal/server mutant used to hold for
+//          an hour: the one full unit of #233 took 3 h 56 min. Mutation ends
+//          about 50 minutes after Core.
+//        - diff (MUTATION=true on any other build): one unit, only the lines
+//          changed since a base, under 45 minutes (minutes when few packages
+//          changed; a changed internal/server still pays its covered suite
+//          run once). A branch or PR build diffs against the merge base with
+//          its target (origin/main, or CHANGE_TARGET), fetched into the
+//          workspace first because the multibranch checkout fetches the
+//          built branch only. A build of main itself would get HEAD as that
+//          merge base, so it diffs against HEAD~1 (the last commit; the
+//          nightly full run covers the rest). ci/mutation.sh and
+//          ci/mutationgate -diff: a package with no mutant passes, one with
+//          mutants keeps the 80 efficacy floor; Stryker runs only if
+//          web/src/lib changed.
+//   3. Perf (with Stability): the SPEC 14 harness, 30 minutes, after phase 2,
+//      alone on the agent, when the three stability units passed (a red
+//      mutation gate does not cost the build its perf numbers).
 // A phase runs only if every earlier one passed (UNSTABLE counts as passed).
+// Nightly with full mutation: about 80 minutes (Core about 33).
 @Library('homelab') _
 import groovy.transform.Field
 
 // Units' results and attempts, shared by the parallel branches.
 @Field def results = [:]        // unit -> 'pass' | 'flaky' | 'fail'
 @Field def attemptLog = [:]     // unit -> [attempt maps]
-@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
+@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail); 'Stability' once its units ended
 @Field String commitSha = ''
 @Field String imageVersion = ''
 @Field String mutationBase = ''  // diff mode: the commit the mutation diff starts from
 @Field final String AMD = 'board-test && amd64 && docker'
+// Full mutation's units (see the header): every lane of ci/quality.json's
+// mutation_go.lanes in exactly one unit (ci/repocheck checks the union), and
+// lane base carries Stryker. Balanced on #233's times at 6 workers (minutes,
+// with the 5-minute mutant cap): server-core about 22 + cli-core 12;
+// server-ops 18 + server-streams 13; cli 14 + logic 16; base 2 + Stryker 19.
+// The first one starts beside the stability units; dir is its outdir under
+// ci-results/mutation-units/.
+@Field final List FULL_MUTATION = [
+  [name: 'Mutation server-core+cli-core', dir: 'server-core', lanes: 'server-core,cli-core'],
+  [name: 'Mutation server-ops+streams', dir: 'server-ops', lanes: 'server-ops,server-streams'],
+  [name: 'Mutation cli+logic', dir: 'cli', lanes: 'cli,logic'],
+  [name: 'Mutation base+Stryker', dir: 'base', lanes: 'base'],
+]
 
 long nowMs() { System.currentTimeMillis() }
 
@@ -279,8 +306,10 @@ pipeline {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
-    // Core and Stability (about 1 h) plus the full mutation run's 6 hours.
-    timeout(time: 480, unit: 'MINUTES')
+    // A backstop only: every unit has its own bound. Core (Suite's 120
+    // minutes at worst, then Quality), a 90-minute mutation unit after a
+    // stability wait, the gate, and Perf; a nightly takes about 80 minutes.
+    timeout(time: 300, unit: 'MINUTES')
     copyArtifactPermission('/board/release,/board/ci/*')
   }
 
@@ -288,9 +317,9 @@ pipeline {
     booleanParam(name: 'EXTENDED', defaultValue: false,
                  description: 'Extended CI: -race, fresh vulnerability databases, then the stability runs')
     booleanParam(name: 'MUTATION', defaultValue: false,
-                 description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (and Stability if extended)')
+                 description: 'Mutation testing in diff mode: only the lines changed since the merge base with main (on main: since HEAD~1), after Core (beside Stability if extended)')
     booleanParam(name: 'MUTATION_FULL', defaultValue: false,
-                 description: 'Full mutation testing: every package and Stryker in one unit (about 70 minutes, 6-hour limit), as the nightly build of main does')
+                 description: 'Full mutation testing: every package and Stryker in four parallel units and one gate (about 50 minutes after Core, 90-minute limit per unit), as the nightly build of main does')
   }
 
   triggers {
@@ -376,69 +405,125 @@ pipeline {
       }
     }
 
-    stage('Stability') {
-      when {
-        beforeAgent true
-        expression { env.CI_NIGHTLY == 'true' && currentBuild.currentResult != 'FAILURE' }
-      }
-      steps {
-        script {
-          def branches = [:]
-          // A list, not 1..3: an IntRange is not serializable in CPS.
-          [1, 2, 3].each { i ->
-            // stability.sh prints only at the end (11 min on int21h-ws alone).
-            def u = [name: "Stability ${i}", minutes: 40,
-                     body: {
-                       sh(returnStatus: true, script: '''
-                         set -e
-                         mkdir -p "$BOARD_CI_OUT/stability"
-                         TMPDIR="$PWD/$BOARD_CI_OUT/stability" ci/stability.sh 1
-                       ''')
-                     }]
-            branches[u.name] = unitBranch(u)
+    stage('Stability and Mutation') {
+      parallel {
+        stage('Stability') {
+          when {
+            beforeAgent true
+            expression { env.CI_NIGHTLY == 'true' && currentBuild.currentResult != 'FAILURE' }
           }
-          parallel branches
-          // Perf (SPEC 14, R14): the harness against the real binary, 30
-          // minutes (about 4 on int21h-ws). It runs after the three stability
-          // units, alone on the agent: its p99 and RSS gates measure the
-          // product, not three suites running beside it. Its failure fails
-          // the build like any unit's; perf.json is archived with the rest.
-          def perf = [name: 'Perf', minutes: 30,
-                      body: { sh(returnStatus: true, script: 'ci/run.sh ci/perf.sh "$BOARD_CI_OUT"') }]
-          unitBranch(perf).call()
+          steps {
+            script {
+              try {
+                def branches = [:]
+                // A list, not 1..3: an IntRange is not serializable in CPS.
+                [1, 2, 3].each { i ->
+                  // stability.sh prints only at the end (11 min on int21h-ws alone).
+                  def u = [name: "Stability ${i}", minutes: 40,
+                           body: {
+                             sh(returnStatus: true, script: '''
+                               set -e
+                               mkdir -p "$BOARD_CI_OUT/stability"
+                               TMPDIR="$PWD/$BOARD_CI_OUT/stability" ci/stability.sh 1
+                             ''')
+                           }]
+                  branches[u.name] = unitBranch(u)
+                }
+                parallel branches
+                env.STABILITY_RESULT = ['Stability 1', 'Stability 2', 'Stability 3'].findAll { results[it] != 'pass' && results[it] != 'flaky' }.isEmpty() ? 'passing' : 'failing'
+              } finally {
+                signals['Stability'] = true
+              }
+            }
+          }
+        }
+
+        stage('Mutation') {
+          when {
+            beforeAgent true
+            expression { env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE' }
+          }
+          steps {
+            script {
+              // The worker and CPU split is read by ci/mutation.sh before it
+              // scrubs BOARD_*, and ci/run.sh forwards only BOARD_* into its
+              // container.
+              String tune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
+              if (env.CI_MUTATION_MODE == 'full') {
+                // Four units side by side, then one gate over their union (see
+                // the header).
+                String fullTune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 3 )) BOARD_MUTATION_TEST_CPU=2'
+                def branches = [:]
+                FULL_MUTATION.each { m ->
+                  boolean waits = m.name != FULL_MUTATION[0].name
+                  def u = [name: m.name, minutes: 90, maxAttempts: 1,
+                           body: { sh(returnStatus: true, script: fullTune + " ci/run.sh ci/mutation.sh ci-results/mutation-units/${m.dir} ci/quality.json ${m.lanes}") }]
+                  def unitRun = unitBranch(u)
+                  branches[u.name] = {
+                    // 4 executors: the stability units hold three of them.
+                    if (waits && env.CI_NIGHTLY == 'true') {
+                      waitUntil(initialRecurrencePeriod: 15000) { signals['Stability'] == true }
+                    }
+                    unitRun.call()
+                  }
+                }
+                parallel branches
+                // Runs whatever the units' results: a unit that left no
+                // reports fails here as a missing report of every package it
+                // owned, and the CI summary still gets one verdict.
+                def gate = [name: 'Mutation gate', minutes: 15,
+                            body: {
+                              FULL_MUTATION.each { m ->
+                                try {
+                                  unstash 'res-' + slug(m.name)
+                                } catch (Throwable e) {
+                                  echo "no results stashed for ${m.name}"
+                                }
+                              }
+                              String dirs = FULL_MUTATION.collect { 'ci-results/mutation-units/' + it.dir }.join(' ')
+                              sh(returnStatus: true, script: 'ci/run.sh ci/mutation-merge.sh ci-results/mutation ci/quality.json ' + dirs)
+                            }]
+                stage(gate.name) {
+                  catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    runUnit(gate)
+                  }
+                }
+              } else {
+                def u = [name: 'Mutation diff', minutes: 45,
+                         body: {
+                           mutationBase = mutationDiffBase()
+                           currentBuild.description = currentBuild.description.replaceAll('mutation\\(diff[^)]*\\)', "mutation(diff ${mutationBase.take(7)})")
+                           sh(returnStatus: true, script: "BOARD_MUTATION_DIFF=${mutationBase} " + tune +
+                                                          ' ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json all')
+                         }]
+                stage(u.name) {
+                  catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    runUnit(u)
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
 
-    stage('Mutation') {
+    stage('Perf') {
       when {
         beforeAgent true
-        expression { env.CI_MUTATION == 'true' && currentBuild.currentResult != 'FAILURE' }
+        expression { env.CI_NIGHTLY == 'true' && env.STABILITY_RESULT == 'passing' }
       }
       steps {
         script {
-          // One unit in either mode (see the header). The worker and CPU
-          // split is read by ci/mutation.sh before it scrubs BOARD_*, and
-          // ci/run.sh forwards only BOARD_* into its container.
-          String tune = 'BOARD_MUTATION_WORKERS=$(( $(nproc) / 2 )) BOARD_MUTATION_TEST_CPU=2'
-          def u
-          if (env.CI_MUTATION_MODE == 'full') {
-            u = [name: 'Mutation full', minutes: 360, maxAttempts: 1,
-                 body: { sh(returnStatus: true, script: tune + ' ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json all') }]
-          } else {
-            u = [name: 'Mutation diff', minutes: 45,
-                 body: {
-                   mutationBase = mutationDiffBase()
-                   currentBuild.description = currentBuild.description.replaceAll('mutation\\(diff[^)]*\\)', "mutation(diff ${mutationBase.take(7)})")
-                   sh(returnStatus: true, script: "BOARD_MUTATION_DIFF=${mutationBase} " + tune +
-                                                  ' ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json all')
-                 }]
-          }
-          stage(u.name) {
-            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-              runUnit(u)
-            }
-          }
+          // Perf (SPEC 14, R14): the harness against the real binary, 30
+          // minutes (about 4 on int21h-ws). It runs after the stability and
+          // mutation units, alone on the agent: its p99 and RSS gates measure
+          // the product, not suites or mutants running beside it. Its failure
+          // fails the build like any unit's; perf.json is archived with the
+          // rest.
+          def perf = [name: 'Perf', minutes: 30,
+                      body: { sh(returnStatus: true, script: 'ci/run.sh ci/perf.sh "$BOARD_CI_OUT"') }]
+          unitBranch(perf).call()
         }
       }
     }

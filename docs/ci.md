@@ -97,7 +97,7 @@ The clone is of the committed HEAD, so commit before running it.
 
 `Jenkinsfile` is the multibranch job `board/ci`
 (`https://jenkins.wisent-owl.ts.net/job/board/job/ci/`; `@Library('homelab')`,
-`agent none`, `disableConcurrentBuilds`, a 480-minute pipeline timeout). The
+`agent none`, `disableConcurrentBuilds`, a 300-minute pipeline timeout as a backstop). The
 header comment of the file is the authoritative description. Every test stage is
 a **unit**: its own parallel branch, with its own retry policy, that checks the
 build's commit out into its own workspace on the one agent every unit uses
@@ -107,7 +107,7 @@ label), builds `board-ci:local` (`ci/jenkins-image.sh`, cached by the Docker
 daemon; cache volumes `board-go-cache-jenkins` and `board-npm-cache-jenkins`,
 each chowned to the agent's uid once), runs, and removes the sibling and
 Testcontainers containers its attempt labelled (`ralphd.run=<attempt id>`, by
-exact ID). The Mutation unit is no exception: `ci/mutation.sh` scrubs every `BOARD_*`
+exact ID). The Mutation units are no exception (each parallel unit has its own attempt id, so none reaps another's containers): `ci/mutation.sh` scrubs every `BOARD_*`
 variable but hands `BOARD_CI_RUN_ID` (the attempt id `ci/run.sh` forwards from
 `RALPHD_RUN_ID`) to gremlins, so the Postgres testcontainers of every mutant's
 test run carry the attempt label and the cleanup reaps the ones a killed mutant
@@ -116,15 +116,17 @@ gets another attempt, up to three; a failing command is rerun once, and a pass
 there marks the build UNSTABLE ("flaky"). The build page carries a per-unit
 timing table (`ci-results/distributed/timing.md`).
 
-The pipeline has three phases, one after another; the units of a phase run in
-parallel, and a phase runs only if every earlier one passed (UNSTABLE counts as
-passed):
+The pipeline runs Core, then Stability and Mutation side by side, then Perf; the
+units of a phase run in parallel, and a phase runs only if every earlier one
+passed (UNSTABLE counts as passed; Perf needs only the stability units to pass).
+A nightly build takes about 80 minutes, Core about 33 of them:
 
 | phase | units | runs |
 |---|---|---|
 | Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
-| Stability | three units, each `ci/stability.sh 1`, then the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes) | `EXTENDED=true` or the nightly timer |
-| Mutation | one unit, in one of two modes (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
+| Stability | three units, each `ci/stability.sh 1`, beside Mutation | `EXTENDED=true` or the nightly timer |
+| Mutation | one unit (diff) or four units and a gate (full), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly timer |
+| Perf | the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes), alone, when the stability units passed | `EXTENDED=true` or the nightly timer |
 
 Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
 `MUTATION_FULL`. The nightly timer (`17 3 * * *`, on `main` only; every other
@@ -135,7 +137,7 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
   limit goes from 45 to 120 minutes) and fresh vulnerability databases to Core.
 - **Stability** is the extended lane: `EXTENDED=true` or the nightly timer.
   - The **Perf** unit runs the SPEC 14 harness (`ci/perf.sh`, build tag `perf`) after
-    the three stability units, alone on the agent so their load is not part of what it
+    the stability and mutation units, alone on the agent so their load is not part of what it
     measures, under a 30-minute bound (about 4 minutes on `int21h-ws`). It seeds 1 M
     events, 50 k notes and 200 live leases, starts the real `vh` binary and checks the
     eight targets (idle RSS, cold start, `/now` and `/attention` p99, lease renew p99,
@@ -144,8 +146,8 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     figure and its gate) is archived with the build. The targets are verified on the
     agent; no baseline is committed. A gate the agent misses is cured in the code or
     petitioned with the `perf.json` numbers, never loosened.
-- **Mutation** is one unit, gated on `MUTATION` or `MUTATION_FULL` or the
-  timer and on nothing else: `EXTENDED=true` on its own runs no mutation.
+- **Mutation** is gated on `MUTATION` or `MUTATION_FULL` or the timer and on
+  nothing else: `EXTENDED=true` on its own runs no mutation.
   - *diff* (`MUTATION=true`): only the lines changed since a base, in one
     45-minute unit (`BOARD_MUTATION_DIFF=<base>`). The base is the merge base
     with `origin/<CHANGE_TARGET, or main>` (fetched into the workspace first,
@@ -154,11 +156,18 @@ branch has no timer) counts as `EXTENDED` and `MUTATION_FULL` together.
     mutant passes; one with mutants keeps the 80 efficacy floor; Stryker runs
     only if `web/src/lib` changed.
   - *full* (`MUTATION_FULL=true` or the nightly timer on `main`): every package
-    plus Stryker in one unit, `ci/run.sh ci/mutation.sh ci-results/mutation
-    ci/quality.json all`, with `nproc / 2` gremlins workers at GOMAXPROCS 2 per
-    worker (`BOARD_MUTATION_WORKERS`, `BOARD_MUTATION_TEST_CPU`), at `nice 10`,
-    under one 6-hour limit and a single attempt (a timeout is not worth another
-    6 hours). It takes about 70 minutes.
+    plus Stryker in four parallel units (`FULL_MUTATION` in the Jenkinsfile), each
+    `ci/run.sh ci/mutation.sh ci-results/mutation-units/<dir> ci/quality.json
+    <lane>,<lane>` over its own lanes of `mutation_go.lanes` (every lane in exactly
+    one unit, Stryker with lane `base`), then the Mutation gate unit,
+    `ci/mutation-merge.sh`, which merges their reports into `ci-results/mutation`
+    and judges every package once. The first unit starts beside the stability
+    units, the other three when those end (4 executors). Each runs `nproc / 3`
+    gremlins workers at GOMAXPROCS 2 per worker (`BOARD_MUTATION_WORKERS`,
+    `BOARD_MUTATION_TEST_CPU`), at `nice 10`, under a 90-minute limit and a
+    single attempt. `ci/mutation.sh` caps one mutant at about 5 minutes (its
+    header): #233's single full unit spent two of its four hours on seven hanging
+    `internal/server` mutants. It takes about 50 minutes after Core.
 
 A red Lint, Suite, Image, Allure smoke, Quality, Stability, Perf or Mutation unit
 fails the build. Within a phase the other units still finish, and a later phase
@@ -259,14 +268,15 @@ last, in `post { cleanup }`.
   `lastCompletedBuild/CI_20summary/` (the CI summary report), all under
   `https://jenkins.wisent-owl.ts.net/job/board/job/ci/job/main/`.
 
-`ci/repocheck/jenkinsfile_test.go` pins all of it: the three phases Core,
-Stability and Mutation in order, with the Core units and Quality's wait for
-Suite and Image; the Perf unit (30 minutes, after the stability units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
-booleanParams, `disableConcurrentBuilds`, the 480-minute timeout, the
+`ci/repocheck/jenkinsfile_test.go` pins all of it: Core, then Stability and
+Mutation side by side, then Perf, with the Core units and Quality's wait for
+Suite and Image; the Perf unit (30 minutes, after the stability and mutation units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
+booleanParams, `disableConcurrentBuilds`, the 300-minute timeout, the
 per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
 on `main` only); the Quality unit; the two Mutation modes (diff: one 45-minute
-unit over the lines changed since the merge base, `HEAD~1` on `main`; full: one
-unit over lane `all`, 360 minutes, one attempt, the worker split) and that
+unit over the lines changed since the merge base, `HEAD~1` on `main`; full: four
+90-minute single-attempt units whose lanes cover every lane exactly once, Stryker
+included, and the gate over all of them) and that
 Mutation runs only for `MUTATION`, `MUTATION_FULL` or the timer; that the job
 never releases; the reports, the badges and `notifyTelegram`. Each property has
 a case that feeds the check a copy of the Jenkinsfile with it removed or

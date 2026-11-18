@@ -20,6 +20,8 @@
 //	                                               # one lane's packages
 //	mutationgate -config ci/quality.json -dir d -lane logic
 //	                                               # judge one lane's reports
+//	mutationgate -config ci/quality.json -list -lane server-core,logic
+//	                                               # several lanes at once
 //	mutationgate -config ci/quality.json -unmeasured
 //	                                               # application files changed since phase_base
 //	                                               # that no unit measures (exit 1 if any)
@@ -141,19 +143,43 @@ func (c config) units() []string {
 	return out
 }
 
+// laneUnion returns the set of units in a comma-separated list of lanes, or
+// an error for a lane named twice or not defined.
+func (c config) laneUnion(lanes string) (map[string]bool, error) {
+	in := map[string]bool{}
+	named := map[string]bool{}
+	for _, name := range strings.Split(lanes, ",") {
+		if named[name] {
+			return nil, fmt.Errorf("lane %q is named twice in %q", name, lanes)
+		}
+		named[name] = true
+		members, ok := c.Lanes[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown lane %q (lanes: %s)", name, strings.Join(c.laneNames(), ", "))
+		}
+		for _, u := range members {
+			in[u] = true
+		}
+	}
+	return in, nil
+}
+
 // lanePackages returns the units of a lane in the configured order, or an
-// error for a lane the config does not define.
+// error for a lane the config does not define. A comma-separated list of
+// lanes ("server-core,logic", one Jenkins unit running several lanes) selects
+// the union of those lanes, still in the configured order; a lane named twice
+// is an error, so a typo never hides behind a duplicate.
 func (c config) lanePackages(lane string) ([]string, error) {
 	if lane == "" || lane == allLane {
 		return c.units(), nil
 	}
-	in, ok := c.Lanes[lane]
-	if !ok {
-		return nil, fmt.Errorf("unknown lane %q (lanes: %s)", lane, strings.Join(c.laneNames(), ", "))
+	in, err := c.laneUnion(lane)
+	if err != nil {
+		return nil, err
 	}
 	var out []string
 	for _, u := range c.units() {
-		if slices.Contains(in, u) {
+		if in[u] {
 			out = append(out, u)
 		}
 	}
@@ -562,7 +588,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cfgPath := fs.String("config", "", "path to ci/quality.json (required)")
 	dir := fs.String("dir", "ci-results/mutation", "directory holding one gremlins JSON report per package")
 	list := fs.Bool("list", false, "print the configured packages and exit")
-	lane := fs.String("lane", allLane, "judge or list only this lane of mutation_go.lanes")
+	lane := fs.String("lane", allLane, "judge or list only this lane of mutation_go.lanes (or a comma-separated list of lanes)")
 	excl := fs.String("excludes", "", "print, one per line, the gremlins --exclude-files regexps that keep `package` to its configured scope, and exit")
 	unmeas := fs.Bool("unmeasured", false, "print each application file changed since phase_base that no unit measures; exit 1 if there is one")
 	diffRef := fs.String("diff", "", "diff mode: only the units with a measured file changed since the merge base with `ref` (git diff --merge-base, as gremlins --diff)")

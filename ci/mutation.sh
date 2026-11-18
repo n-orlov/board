@@ -16,11 +16,16 @@
 #   ci/run.sh ci/mutation.sh /tmp/m [config]  # a test's own outdir and config
 #   ci/run.sh ci/mutation.sh ci-results/mutation ci/quality.json logic
 #                                             # one lane of mutation_go.lanes
+#   ci/run.sh ci/mutation.sh ci-results/m1 ci/quality.json server-core,logic
+#                                             # several lanes in one run
 #
-# A lane is a group of packages that can be run by hand on their own. The
-# Jenkinsfile's Mutation unit runs the lane "all" (full mode, or diff mode
-# restricted to the changed lines). The lane "all" (the default) is every
-# package plus Stryker. Stryker runs in the lane "base" and in "all", and only there.
+# A lane is a group of packages that can be run on their own. In full mode the
+# Jenkinsfile runs four units in parallel, each one ci/mutation.sh over a
+# comma-separated list of lanes in its own outdir, and ci/mutation-merge.sh
+# judges the union of their reports; in diff mode one unit runs the lane "all"
+# restricted to the changed lines. The lane "all" (the default) is every
+# package plus Stryker. Stryker runs when the lane list holds "base" or "all",
+# and only then.
 # A package split into parts (mutation_go.parts) is run once per part, a part
 # written "internal/server#ops", with its own report and its own judgement.
 # Each lane judges and replaces only its own packages' reports, so the lanes
@@ -66,12 +71,56 @@ for board_var in $(env | sed -n -e 's/^\(BOARD_[A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'
     unset "$board_var"
 done
 
-# gremlins bounds each mutant's test run by a multiple of the covered run's
-# time. With a warm build cache that time is a fraction of a second, less than
-# the rebuild a mutant needs, so at gremlins' default every mutant of a
-# package like internal/store timed out and none was judged. 60 is the
-# multiple that judges every mutant; a mutant that really loops still ends.
-timeout_coefficient=60
+# gremlins bounds each mutant's test run by a multiple (--timeout-coefficient,
+# an integer) of its covered run's time, and a mutant over the bound is TIMED
+# OUT: judged, but neither killed nor lived. With a warm build cache a small
+# package's covered run takes a fraction of a second, less than the rebuild a
+# mutant needs, so at gremlins' default of 3 every mutant of a package like
+# internal/store timed out and none was judged. 60 is the multiple that judges
+# every mutant of a small package; a mutant that really loops still ends.
+#
+# The same 60 made a hanging mutant of internal/server (covered run about
+# 65 s) wait 65 minutes: #233's server#core part spent over two hours of its
+# 4 h 41 min on seven idempotency.go mutants that never return, every one
+# TIMED OUT in the end. So the multiple is capped by a bound on the mutant's
+# time, mutant_bound_s (300 s): before a package directory's first gremlins run
+# the script times that directory's covered suite once, `go test -cover`
+# under the same GOMAXPROCS and nice as gremlins, and passes
+# max(min_coefficient, min(60, mutant_bound_s / that time)). The rule is the
+# same for every package: a covered run under 5 s keeps 60, internal/feed
+# (22 s) gets 13, internal/cli (55 s) and internal/server (65 s) get 5, the
+# floor. A mutant that lives runs its package's suite once, about 1.5 times
+# the covered run in #233 (the build of the mutant on top), so the floor of 5
+# keeps every such mutant LIVED instead of TIMED OUT even with the four
+# Jenkins units sharing the host; a hanging one is still TIMED OUT, about
+# 5 minutes after it started instead of an hour. No verdict changes kind.
+timeout_coefficient_max=60
+min_coefficient=5
+mutant_bound_s=300
+
+# coefficient_for <dir>: the --timeout-coefficient for a package directory,
+# timed once per directory and run (a package split into parts shares it).
+coefficient_cache=$(mktemp)
+coefficient_for() {
+    cached=$(sed -n "s|^$1 ||p" "$coefficient_cache")
+    if [ -n "$cached" ]; then
+        echo "$cached"
+        return
+    fi
+    start=$(date +%s)
+    # Its verdict is gremlins' to give: a failing suite fails gremlins' own
+    # covered run, so only the time counts here.
+    env ${ci_run_id:+BOARD_CI_RUN_ID=$ci_run_id} ${test_cpu:+GOMAXPROCS=$test_cpu} \
+        nice -n 10 go test -cover "./$1/..." >/dev/null 2>&1 || true
+    took=$(( $(date +%s) - start ))
+    [ "$took" -ge 1 ] || took=1
+    coef=$(( mutant_bound_s / took ))
+    [ "$coef" -le "$timeout_coefficient_max" ] || coef=$timeout_coefficient_max
+    [ "$coef" -ge "$min_coefficient" ] || coef=$min_coefficient
+    echo "$1 $coef" >>"$coefficient_cache"
+    echo "ci/mutation.sh: covered run of ./$1 took ${took}s: --timeout-coefficient $coef" >&2
+    echo "$coef"
+}
 
 # gremlins takes that covered run's time from `go test -cover`, and go's test
 # cache can answer that run in a few milliseconds whatever the suite really
@@ -82,6 +131,8 @@ timeout_coefficient=60
 # run of internal/server on an arm64 phone (about 5 min on amd64, over 10 there).
 GOFLAGS="${GOFLAGS:+$GOFLAGS }-count=1 -timeout=30m"
 export GOFLAGS
+
+trap 'rm -f "$coefficient_cache"' EXIT
 
 mkdir -p "$outdir"
 rm -f "$outdir/unit-verdict.txt" "$outdir/mutationgate.txt"
@@ -102,7 +153,7 @@ if [ -n "$diff_ref" ]; then
     # other git command passes through untouched.
     real_git=$(command -v git)
     shim=$(mktemp -d)
-    trap 'rm -rf "$shim"' EXIT
+    trap 'rm -rf "$shim" "$coefficient_cache"' EXIT
     cat >"$shim/git" <<EOF
 #!/bin/sh
 if [ "\$1" = diff ] && [ -n "\${MUTATION_DIFF_RELATIVE:-}" ]; then
@@ -126,7 +177,8 @@ for pkg in $packages; do
     for pattern in $(go run ./ci/mutationgate -config "$config" -excludes "$pkg"); do
         set -- "$@" -E "$pattern"
     done
-    echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags)"
+    timeout_coefficient=$(coefficient_for "$dir")
+    echo "ci/mutation.sh: gremlins unleash ./$pkg ($# exclude flags, --timeout-coefficient $timeout_coefficient)"
     # nice: a full run takes every core for hours; other jobs on the host win.
     # The GOMAXPROCS cap applies only here, never to the gate's own go run.
     env ${ci_run_id:+BOARD_CI_RUN_ID=$ci_run_id} ${test_cpu:+GOMAXPROCS=$test_cpu} ${diff_ref:+PATH="$shim:$PATH" MUTATION_DIFF_RELATIVE="$dir"} \
@@ -153,7 +205,11 @@ cat "$outdir/mutationgate.txt"
 # ci/quality.sh's stryker row reads it.
 stryker=no
 stryker_verdict="not run"
-if [ -f web/stryker.config.mjs ] && { [ "$lane" = all ] || [ "$lane" = base ]; }; then
+case ",$lane," in
+*,all,*|*,base,*) stryker_lane=yes ;;
+*) stryker_lane=no ;;
+esac
+if [ -f web/stryker.config.mjs ] && [ "$stryker_lane" = yes ]; then
     stryker=yes
     if [ -n "$diff_ref" ] && git diff --quiet --merge-base "$diff_ref" -- web/src/lib; then
         echo "ci/mutation.sh: web/src/lib unchanged since the merge base with $diff_ref: no stryker run"

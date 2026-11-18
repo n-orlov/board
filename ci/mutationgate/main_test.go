@@ -344,6 +344,31 @@ func TestALaneListsAndJudgesOnlyItsOwnPackages(t *testing.T) {
 	}
 }
 
+// TestALaneListJudgesTheUnionOfItsLanes: one Jenkins unit runs several lanes
+// in one ci/mutation.sh call, "-lane server,base"; the union is listed in the
+// configured order, judged as one set, and a typo or a repeat is refused.
+func TestALaneListJudgesTheUnionOfItsLanes(t *testing.T) {
+	code, out := laneRun(t, lanedConfig, []string{"-list", "-lane", "server,base"}, nil)
+	if code != 0 || out != "internal/domain\ninternal/store\ninternal/server\n" {
+		t.Fatalf("server,base list: exit %d %q", code, out)
+	}
+	reports := map[string]string{
+		"internal-server.json": gremlinsReport(9, 1, 0, 0),
+		"internal-asks.json":   gremlinsReport(9, 1, 0, 0),
+	}
+	if code, out = laneRun(t, lanedConfig, []string{"-lane", "server,logic"}, reports); code != 0 {
+		t.Fatalf("server,logic with both reports: exit %d\n%s", code, out)
+	}
+	if code, out = laneRun(t, lanedConfig, []string{"-lane", "server,base"}, reports); code != 1 || !strings.Contains(out, "internal/domain: FAILED, report") {
+		t.Fatalf("server,base without the base reports: exit %d\n%s", code, out)
+	}
+	for list, want := range map[string]string{"server,nope": "unknown lane \"nope\"", "base,base": "named twice", "base,": "unknown lane \"\""} {
+		if code, out = laneRun(t, lanedConfig, []string{"-list", "-lane", list}, nil); code != 2 || !strings.Contains(out, want) {
+			t.Errorf("-lane %s: exit %d, want 2 naming %q:\n%s", list, code, want, out)
+		}
+	}
+}
+
 func TestLanesMustPartitionThePackages(t *testing.T) {
 	for name, tc := range map[string]struct{ config, want string }{
 		"unknown lane": {lanedConfig, "unknown lane"},
