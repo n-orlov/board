@@ -274,15 +274,25 @@ func TestAWaitAppendsItsEventToItsOwnAskOnly(t *testing.T) {
 
 func TestAWaitEndsWhenTheClientLeavesAndMarksThePoll(t *testing.T) {
 	t.Parallel()
-	for _, query := range []string{"?wait=60", "?wait=60&until=" + url.QueryEscape(time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano))} {
-		t.Run(query, func(t *testing.T) {
+	// until is a wall-clock instant a minute after the request, taken when the
+	// request is made: taken when the test started, it passed before a subtest
+	// queued behind the package's other parallel tests got to run (#240), and
+	// the hold ended at until, before the client left.
+	queries := map[string]func() string{
+		"wait": func() string { return "?wait=60" },
+		"wait+until": func() string {
+			return "?wait=60&until=" + url.QueryEscape(time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano))
+		},
+	}
+	for name, query := range queries {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			testAWaitEndsWhenTheClientLeaves(t, query)
 		})
 	}
 }
 
-func testAWaitEndsWhenTheClientLeaves(t *testing.T, query string) {
+func testAWaitEndsWhenTheClientLeaves(t *testing.T, query func() string) {
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
 		st := openStore(t, dbs.New(t))
 		if err := st.Migrate(context.Background()); err != nil {
@@ -292,7 +302,7 @@ func testAWaitEndsWhenTheClientLeaves(t *testing.T, query string) {
 		r, as := askRig(t, st, newToken(t, st), clock, time.Hour)
 		ref := r.raiseAsk()
 		ctx, cancel := context.WithCancel(context.Background())
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, r.base+"/api/v1/asks/"+ref+query, nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, r.base+"/api/v1/asks/"+ref+query(), nil)
 		req.Header.Set("Authorization", "Bearer "+r.token)
 		req.Header.Set(ActorHeader, "tester@host")
 		done := make(chan struct{})
