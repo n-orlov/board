@@ -1274,7 +1274,7 @@ export interface components {
             acked_at?: string;
             acked_by?: string;
         };
-        /** @description A task. `active`, `blocked` and `overdue` are derived. */
+        /** @description A task. `active`, `blocked` and `overdue` are derived. `tags` are the task's own tags. */
         Task: {
             /** @description The task's ULID. */
             id: string;
@@ -1314,6 +1314,8 @@ export interface components {
              */
             next_check_at?: string;
             external_refs: components["schemas"]["ExternalRef"][];
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
             /** @description The handle of the actor that created it. */
             created_by: string;
             /** Format: date-time */
@@ -1419,6 +1421,8 @@ export interface components {
             external_refs?: components["schemas"]["ExternalRef"][];
             /** @description Refs or ULIDs of the tasks the new task starts out blocked by. */
             blocked_by?: string[];
+            /** @description At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule). */
+            tags?: string[];
         };
         InitiativeClose: {
             /**
@@ -1552,6 +1556,8 @@ export interface components {
             initiative: string;
             /** @description 1 to 200 characters. */
             title: string;
+            /** @description At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule). */
+            tags?: string[];
         };
         /** @description The lease to start, on an existing task (`task`) or on a task it creates (`new_task`). */
         StartRequest: {

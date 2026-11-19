@@ -74,7 +74,7 @@ func (o startOps) Start(ctx context.Context, req StartRequestObject) (StartRespo
 func startRequest(b *StartRequest) checkin.StartRequest {
 	in := checkin.StartRequest{Task: text(b.Task), Intent: b.Intent, TTL: b.TtlSeconds, Resources: resourcesOf(b.Resources)}
 	if n := b.NewTask; n != nil {
-		in.NewTask = &checkin.NewTask{Initiative: n.Initiative, Title: n.Title}
+		in.NewTask = &checkin.NewTask{Initiative: n.Initiative, Title: n.Title, Tags: orEmpty(n.Tags)}
 	}
 	return in
 }

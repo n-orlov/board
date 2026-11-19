@@ -2059,6 +2059,9 @@ type StartNewTask struct {
 	// Initiative The slug or ULID of an open initiative.
 	Initiative string `json:"initiative"`
 
+	// Tags At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule).
+	Tags *[]string `json:"tags,omitempty"`
+
 	// Title 1 to 200 characters.
 	Title string `json:"title"`
 }
@@ -2101,7 +2104,7 @@ type StartResult struct {
 	TaskCreated bool `json:"task_created"`
 }
 
-// Task A task. `active`, `blocked` and `overdue` are derived.
+// Task A task. `active`, `blocked` and `overdue` are derived. `tags` are the task's own tags.
 type Task struct {
 	// Active It has a live lease.
 	Active bool `json:"active"`
@@ -2148,10 +2151,13 @@ type Task struct {
 	Resolution *TaskResolution `json:"resolution,omitempty"`
 
 	// Seq The number within the initiative, from 1.
-	Seq       int        `json:"seq"`
-	Status    TaskStatus `json:"status"`
-	Title     string     `json:"title"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	Seq    int        `json:"seq"`
+	Status TaskStatus `json:"status"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags      []string  `json:"tags"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TaskKind defines model for Task.Kind.
@@ -2229,6 +2235,9 @@ type TaskCreate struct {
 	PlannedEnd   *time.Time `json:"planned_end,omitempty"`
 	PlannedStart *time.Time `json:"planned_start,omitempty"`
 
+	// Tags At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule).
+	Tags *[]string `json:"tags,omitempty"`
+
 	// Title 1 to 200 characters.
 	Title string `json:"title"`
 }
@@ -2303,8 +2312,11 @@ type TaskDetail struct {
 
 	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
 	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
-	Title         string             `json:"title"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags      []string  `json:"tags"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TaskDetailKind defines model for TaskDetail.Kind.
@@ -2406,8 +2418,11 @@ type TaskListItem struct {
 
 	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
 	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
-	Title         string             `json:"title"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags      []string  `json:"tags"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TaskListItemKind defines model for TaskListItem.Kind.

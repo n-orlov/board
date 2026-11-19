@@ -79,6 +79,9 @@ func (s Store) List(ctx context.Context, q Query) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+	if err := s.loadTags(ctx, s.Store.ReaderFor(ctx), items); err != nil {
+		return Page{}, err
+	}
 	p := Page{Items: items}
 	if len(items) > size {
 		p.Items = items[:size]

@@ -101,13 +101,15 @@ type Task struct {
 	CadenceSeconds *int64
 	NextCheckAt    *time.Time
 	ExternalRefs   []domain.ExternalRef
-	CreatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DoneAt         *time.Time
-	DoneBy         string
-	ClosedAt       *time.Time
-	ClosedBy       string
+	// Tags are the task's own tags, sorted; empty, never nil, when it has none.
+	Tags      []string
+	CreatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DoneAt    *time.Time
+	DoneBy    string
+	ClosedAt  *time.Time
+	ClosedBy  string
 	// Blocked is derived: true while some task it is blocked by is not closed or
 	// it has an open blocking ask.
 	Blocked bool

@@ -172,6 +172,7 @@ func TestMigrateCreatesThePhase0Tables(t *testing.T) {
 			"planned_start", "planned_end", "cadence_seconds", "next_check_at", "external_refs",
 			"created_by", "created_at", "updated_at", "done_at", "done_by", "closed_at", "closed_by"},
 		"task_deps": {"task_id", "blocked_by_task_id"},
+		"task_tags": {"task_id", "tag"},
 		"notes": {"n", "id", "actor_id", "summary", "body", "task_id", "initiative_id", "resource", "mentions",
 			"created_at"},
 		"cursors": {"actor_id", "stream", "position"},
@@ -365,6 +366,57 @@ func TestMigration00013BackfillsAndRollsBack(t *testing.T) {
 	}
 }
 
+// TestMigration00014TaskTags: at version 13 there is no task_tags table; migrating
+// creates it with the primary key (task_id, tag) and an index on tag, and rolling
+// back drops it.
+func TestMigration00014TaskTags(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.MigrateTo(ctx, 13); err != nil {
+		t.Fatal(err)
+	}
+	if len(columns(t, s, "task_tags")) != 0 {
+		t.Fatal("task_tags exists at version 13")
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) error {
+		_, err := s.Writer().Exec(q, args...)
+		return err
+	}
+	if err := exec(`INSERT INTO actors (id, handle, kind, first_seen_at, last_seen_at) VALUES ('A', 'a', 'agent', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(`INSERT INTO initiatives (id, slug, title, description, status, created_by, created_at) VALUES ('I', 'ini', 't', '', 'open', 'A', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(`INSERT INTO tasks (id, initiative_id, seq, title, description, kind, status, external_refs, created_by, created_at, updated_at)
+		VALUES ('T', 'I', 1, 't', '', 'work', 'open', '[]', 'A', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(`INSERT INTO task_tags (task_id, tag) VALUES ('T', 'home')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(`INSERT INTO task_tags (task_id, tag) VALUES ('T', 'home')`); err == nil || !s.Dialect().IsUniqueViolation(err) {
+		t.Fatalf("the same tag twice on one task = %v, want a unique violation", err)
+	}
+	var idx int
+	if err := s.Reader().QueryRow(`SELECT COUNT(*) FROM pragma_index_list('task_tags') WHERE name = 'task_tags_tag'`).Scan(&idx); err != nil || idx != 1 {
+		t.Fatalf("index task_tags_tag count = %d, err %v, want 1", idx, err)
+	}
+	p, err := s.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 13); err != nil {
+		t.Fatalf("rolling back to 13: %v", err)
+	}
+	if len(columns(t, s, "task_tags")) != 0 {
+		t.Error("task_tags still exists after the roll back")
+	}
+}
+
 func setVersion(t *testing.T, s *Store, v int) {
 	t.Helper()
 	if _, err := s.Writer().Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v); err != nil {
@@ -417,7 +469,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 13 || files[12] != "00013_key_owner_and_origin.sql" || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
+		if len(files) != 14 || files[13] != "00014_task_tags.sql" || files[12] != "00013_key_owner_and_origin.sql" || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {

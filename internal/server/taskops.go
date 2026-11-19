@@ -145,8 +145,8 @@ func apiTaskDetail(t tasks.Task, links tasks.Links, live []leases.Lease, open []
 		Id: t.ID, Ref: t.Ref, Initiative: t.Initiative, Seq: t.Seq, Title: t.Title, Description: t.Description,
 		Kind: TaskDetailKind(t.Kind), Status: TaskDetailStatus(t.Status), Resolution: resolution(t.Resolution),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CadenceSeconds: t.CadenceSeconds, NextCheckAt: t.NextCheckAt,
-		ExternalRefs: apiExternalRefs(t.ExternalRefs),
-		CreatedBy:    t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
+		ExternalRefs: apiExternalRefs(t.ExternalRefs), Tags: nonNil(t.Tags),
+		CreatedBy: t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		DoneAt: t.DoneAt, DoneBy: optionalText(t.DoneBy), ClosedAt: t.ClosedAt, ClosedBy: optionalText(t.ClosedBy),
 		Active: len(live) > 0, Blocked: t.Blocked, Overdue: t.Overdue,
 		Deps: apiLinks(links.Deps), Blocking: apiLinks(links.Blocking), LiveLeases: make([]Lease, len(live)), OpenAsks: open,
@@ -214,7 +214,16 @@ func newTask(b *TaskCreate) tasks.New {
 	if b.ExternalRefs != nil {
 		in.ExternalRefs = domainRefs(*b.ExternalRefs)
 	}
+	in.Tags = orEmpty(b.Tags)
 	return in
+}
+
+// nonNil is list, or an empty list for nil, so a JSON array is never null.
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 func domainRefs(refs []ExternalRef) []domain.ExternalRef {

@@ -3022,8 +3022,8 @@ components:
           type: string
     Task:
       type: object
-      description: A task. `active`, `blocked` and `overdue` are derived.
-      required: [id, ref, initiative, seq, title, description, kind, status, external_refs, created_by, created_at,
+      description: A task. `active`, `blocked` and `overdue` are derived. `tags` are the task's own tags.
+      required: [id, ref, initiative, seq, title, description, kind, status, external_refs, tags, created_by, created_at,
                  updated_at, active, blocked, overdue]
       properties:
         id:
@@ -3072,6 +3072,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ExternalRef"
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
         created_by:
           type: string
           description: The handle of the actor that created it.
@@ -3247,6 +3252,13 @@ components:
         blocked_by:
           type: array
           description: Refs or ULIDs of the tasks the new task starts out blocked by.
+          items:
+            type: string
+        tags:
+          type: array
+          description: >-
+            At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or
+            digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule).
           items:
             type: string
     InitiativeClose:
@@ -3436,6 +3448,13 @@ components:
         title:
           type: string
           description: 1 to 200 characters.
+        tags:
+          type: array
+          description: >-
+            At most 20 tags, each lowercase letters, digits, `.`, `_`, `:` or `-`, starting with a letter or
+            digit, at most 40 characters. Trimmed, lowercased and deduplicated (the initiative tag rule).
+          items:
+            type: string
     StartRequest:
       type: object
       description: The lease to start, on an existing task (`task`) or on a task it creates (`new_task`).

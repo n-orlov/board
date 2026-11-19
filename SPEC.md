@@ -374,6 +374,11 @@ left as it was. Its Down restores the index after turning every `operator` row b
 | cadence_seconds | int, nullable | watch tasks only: 60 to 31536000, required on a watch task |
 | next_check_at | ts, nullable | watch tasks only |
 | external_refs | json text | list of `{label, url}` (tickets, PRs, builds): at most 20, `label` 1-80 characters, `url` http or https; `[]` when none |
+
+`task_tags(task_id, tag)`, PK both columns, index on `tag` (migration 00014, one common form with a Down that drops the table;
+additive, so a task of a Phase 4 database simply has no row). A task's own tags follow the rule of an initiative's tags
+(§4.2: `domain.NormalizeTags`): each trimmed and lowercased, matching `[a-z0-9][a-z0-9._:-]{0,39}`, repeats kept once, at most 20.
+They are written with the task, in the creating transaction, and read back sorted.
 | created_by, created_at, updated_at, done_at, done_by, closed_at, closed_by | | |
 
 Transitions (`internal/tasks`: `Done`, `Reopen`, `Close`), each in one transaction with its event:
@@ -693,7 +698,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10); Phase 5 drops the one-operator index (`00012_many_operators`, §4.1) and adds key owner and origin (`00013_key_owner_and_origin`, above). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10); Phase 5 drops the one-operator index (`00012_many_operators`, §4.1) and adds key owner and origin (`00013_key_owner_and_origin`, above) and a task's own tags (`00014_task_tags`, §4.3). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -1165,18 +1170,19 @@ unknown task is **404**.
 principal may use them. The server answers 503 problem documents when it runs without a store.
 
 - **`POST /api/v1/tasks`**, body `{initiative, title, description?, kind?, planned_start?, planned_end?,
-  cadence_seconds?, next_check_at?, external_refs?, blocked_by?}`. `initiative` is a slug or ULID, in either letter case.
+  cadence_seconds?, next_check_at?, external_refs?, blocked_by?, tags?}`. `initiative` is a slug or ULID, in either letter case.
   `title` is 1 to 200 characters after trimming, `description` Markdown of at most 20000. `kind` is `work` (the default)
   or `watch`. A watch task needs `cadence_seconds` (60 to 31536000), and its `next_check_at` defaults to now plus the
   cadence; either watch field on a work task is **400**. `planned_start` and `planned_end` are RFC 3339 times, the end
   not before the start. `external_refs` is at most 20 items `{label, url}`, `label` 1 to 80 characters and `url` `http`
-  or `https`. `blocked_by` lists tasks (ref or ULID, either letter case, repeats counted once) the new task starts out
+  or `https`. `tags` is the task's own tags (§4.3): at most 20, each normalised as an initiative tag (trimmed, lowercased,
+  repeats once); a tag that breaks the rule, or a 21st distinct one, is **400** with a `next`. `blocked_by` lists tasks (ref or ULID, either letter case, repeats counted once) the new task starts out
   blocked by. Answers **201** with the task (below). A bad field is **400**, an unknown initiative or an unknown
   blocker is **404**, and a closed initiative is **409**. A refusal changes nothing: no row, event, actor, and the
   task number is not used up. In one transaction the server upserts the actor, numbers the task `<slug>-<seq>` from the
   initiative's counter, inserts the row and appends `task_created` (`data` is `{ref, initiative, title, kind}`) and then
   one `dep_added` per blocker (§4.3). A new task cannot close a dependency cycle.
-- **`GET /api/v1/tasks`** lists tasks in id order (creation order), a page at a time, each item the task document
+- **`GET /api/v1/tasks`** lists tasks in id order (creation order), a page at a time, each item the task document (so with its `tags`)
   without `deps` and `blocking` (`TaskListItem`: the fields below plus `live_leases`, `attention` and `stranded_lease`). Filters combine, and none is
   needed: `initiative` (slug or ULID, either letter case) and `tag` (an initiative tag) may repeat, a task being kept
   when it belongs to any initiative given and its initiative carries every tag given (`domain.NormalizeTags` rules);
@@ -1257,10 +1263,10 @@ principal may use them. The server answers 503 problem documents when it runs wi
   edited, marked done, reopened and closed reads `task_created`, `task_updated`, `task_done`, `task_reopened`,
   `task_closed`. Events of other tasks and of the initiative itself are not in it. See §6.2 for the item and the paging.
 - **The task document** (all of the above answer it, `TaskDetail`): `{id, ref, initiative, seq, title, description, kind,
-  status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, created_by,
+  status, resolution?, planned_start?, planned_end?, cadence_seconds?, next_check_at?, external_refs, tags, created_by,
   created_at, updated_at, done_at?, done_by?, closed_at?, closed_by?, active, blocked, overdue, deps, blocking,
   live_leases, open_asks, attention, stranded_lease?}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
-  fields are omitted, and a task with none of its own has `external_refs`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`, and a task that needs nothing has `attention` as `[]`.
+  fields are omitted, and a task with none of its own has `external_refs`, `tags`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`, and a task that needs nothing has `attention` as `[]`.
   `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
   status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
   is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
@@ -1318,7 +1324,7 @@ first, so none shows a lease live past its expiry, with the sweeper off too.
   `/end` or by running out.
 
 - **`POST /api/v1/start`** (§8.4) starts the caller's lease and checks in, in one transaction. The body is `{task | new_task,
-  intent, ttl_seconds?, resources?}`: `task` is the ref or ULID of an existing task, `new_task` is `{initiative, title}` and
+  intent, ttl_seconds?, resources?}`: `task` is the ref or ULID of an existing task, `new_task` is `{initiative, title, tags?}` (`tags` as for `POST /api/v1/tasks`, a bad one **400**) and
   creates the task first; exactly one of the two, else **400** with a `next`. `intent`, `ttl_seconds` and `resources` are those
   of `POST /api/v1/leases` and fail the same way. It answers `{lease, conflicts, task_created, now, protocol, protocol_seen}`:
   `lease` and `conflicts` are the `LeaseResult` of `POST /api/v1/leases`, `task_created` is true when `new_task` created the

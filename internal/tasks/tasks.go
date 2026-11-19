@@ -30,6 +30,8 @@ type New struct {
 	// BlockedBy names (by ref or ULID) the tasks the new task starts out blocked
 	// by. Repeats count once.
 	BlockedBy []string
+	// Tags are the task's own tags, under the initiative tag rule.
+	Tags []string
 }
 
 // Normalize checks every field and returns the request with the kind defaulted,
@@ -46,6 +48,11 @@ func (n New) Normalize(now time.Time) (New, error) {
 	if err := f.validate(n.Kind); err != nil {
 		return New{}, err
 	}
+	tags, err := normalizeTags(n.Tags)
+	if err != nil {
+		return New{}, err
+	}
+	n.Tags = tags
 	n.Title = strings.TrimSpace(n.Title)
 	n.PlannedStart, n.PlannedEnd, n.NextCheckAt = f.PlannedStart, f.PlannedEnd, f.NextChk
 	if n.Kind == domain.KindWatch && n.NextCheckAt == nil {
@@ -194,6 +201,7 @@ func scan(r rowScanner) (Task, error) {
 // queryer is the part of *sql.DB and *sql.Tx that reads one row.
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 // find reads the task a ref names through q: by id for a ULID, else by the
@@ -227,7 +235,11 @@ func (s Store) read(ctx context.Context, q queryer, ref, lock string) (Task, err
 		return Task{}, fmt.Errorf("read task: %w", err)
 	}
 	t.Overdue = domain.Overdue(t.Kind, t.Status, t.NextCheckAt, s.now())
-	return t, nil
+	one := []Task{t}
+	if err := s.loadTags(ctx, q, one); err != nil {
+		return Task{}, err
+	}
+	return one[0], nil
 }
 
 // Get returns the task whose ref (`<slug>-<seq>`) or ULID is ref, in either
@@ -353,6 +365,9 @@ func (s Store) insert(ctx context.Context, tx *sql.Tx, actor audit.Actor, princi
 		Data:    map[string]any{"ref": ref, "initiative": ini.Slug, "title": in.Title, "kind": in.Kind},
 	})
 	if err != nil {
+		return err
+	}
+	if err := s.insertTags(ctx, tx, id, in.Tags); err != nil {
 		return err
 	}
 	return s.insertBlockers(ctx, tx, actorID, principal, Task{ID: id, Ref: ref, InitiativeID: ini.ID}, in.BlockedBy)

@@ -16,6 +16,8 @@ import (
 type NewTask struct {
 	Initiative string
 	Title      string
+	// Tags are the new task's own tags, under the initiative tag rule.
+	Tags []string
 }
 
 // StartRequest is a composite start (SPEC 8.4): the lease of leases.Start on
@@ -74,7 +76,7 @@ func (s Store) Start(ctx context.Context, actor audit.Actor, principal string, i
 func (s Store) write(ctx context.Context, tx *sql.Tx, actor audit.Actor, principal string, in StartRequest) (leases.Result, bool, error) {
 	created := in.NewTask != nil
 	if created {
-		t, err := s.Tasks.CreateIn(ctx, tx, actor, principal, tasks.New{Initiative: in.NewTask.Initiative, Title: in.NewTask.Title})
+		t, err := s.Tasks.CreateIn(ctx, tx, actor, principal, tasks.New{Initiative: in.NewTask.Initiative, Title: in.NewTask.Title, Tags: in.NewTask.Tags})
 		if err != nil {
 			return leases.Result{}, false, err
 		}

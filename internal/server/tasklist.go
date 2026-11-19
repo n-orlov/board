@@ -40,8 +40,8 @@ func apiTaskListItem(t tasks.Task, live []leases.Lease) TaskListItem {
 		Id: t.ID, Ref: t.Ref, Initiative: t.Initiative, Seq: t.Seq, Title: t.Title, Description: t.Description,
 		Kind: TaskListItemKind(t.Kind), Status: TaskListItemStatus(t.Status),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CadenceSeconds: t.CadenceSeconds, NextCheckAt: t.NextCheckAt,
-		ExternalRefs: apiExternalRefs(t.ExternalRefs),
-		CreatedBy:    t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
+		ExternalRefs: apiExternalRefs(t.ExternalRefs), Tags: nonNil(t.Tags),
+		CreatedBy: t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		DoneAt: t.DoneAt, DoneBy: optionalText(t.DoneBy), ClosedAt: t.ClosedAt, ClosedBy: optionalText(t.ClosedBy),
 		Active: len(live) > 0, Blocked: t.Blocked, Overdue: t.Overdue, LiveLeases: make([]Lease, len(live)),
 	}
