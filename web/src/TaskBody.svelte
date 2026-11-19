@@ -25,6 +25,8 @@
   import type { Snippet } from 'svelte';
   import AskList from './AskList.svelte';
   import NoteList from './NoteList.svelte';
+  import TagChips from './TagChips.svelte';
+  import type { TagEditor } from './lib/taskTags';
   import { taskConflictText, taskConflicts } from './lib/conflicts';
   import { nextCheckText } from './lib/durations';
   import { blockedReasons, orderAsks } from './lib/asks';
@@ -47,6 +49,7 @@
     actionError,
     wide = false,
     nav,
+    tags,
     onexpand,
   }: {
     view: TaskPageState;
@@ -56,6 +59,8 @@
     actionError?: string;
     wide?: boolean;
     nav?: Snippet;
+    /** What makes the task's tag chips editable; none for the read-only preview. */
+    tags?: TagEditor;
     onexpand: (noteRef: string) => void;
   } = $props();
 
@@ -117,6 +122,9 @@
             <span class="{badge} {toneClasses(flag.tone)}" data-testid="flag-{flag.key}">{flag.label}</span>
           {/each}
         </div>
+        {#if task.tag_marks.length > 0 || tags !== undefined}
+          <div class="mt-2" data-testid="task-tags-block"><TagChips marks={task.tag_marks} ref={task.ref} editor={tags} /></div>
+        {/if}
         {#each reasons as reason (reason)}
           <p class="mt-1 text-sm text-warning wrap-anywhere" data-testid="blocked-reason">{reason}</p>
         {/each}

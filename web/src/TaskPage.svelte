@@ -16,6 +16,7 @@
   import { toTaskEditForm, type TaskEditForm as EditForm } from './lib/taskEdit';
   import { ACK_BODY, affectsTaskPage, forceDoneBody, leaseHolders, TaskPageStore, type TaskPageState } from './lib/taskPage';
   import { TasksApi, type Resolution } from './lib/tasks';
+  import { tagEditor } from './lib/taskTags';
   import { live } from './lib/live';
 
   let { csrf, param }: { csrf: string; param: string } = $props();
@@ -25,7 +26,18 @@
   let editInitial: EditForm | undefined = $state(undefined);
   let toast = $state('');
 
-  const store = new TaskPageStore(new TasksApi(currentBrowser(), () => csrf), (s) => (view = s));
+  const api = new TasksApi(currentBrowser(), () => csrf);
+  const store = new TaskPageStore(api, (s) => (view = s));
+  // The tags typing a new one suggests; a failed read leaves no suggestion.
+  let inUse: string[] = $state([]);
+  $effect(() => {
+    void api.tagsInUse().then(
+      (tags) => (inUse = tags),
+      () => undefined,
+    );
+  });
+  // A closed task takes no tag change (the server refuses it), so its chips have no controls.
+  const tags = $derived(view.task === undefined || view.task.status === 'closed' ? undefined : tagEditor(api, view.task.ref, view.task.tag_marks, inUse, () => store.refresh(param)));
 
   $effect(() => {
     void store.load(param);
@@ -124,6 +136,7 @@
   wide
   {on}
   {nav}
+  {tags}
   actionError={dialog === undefined ? view.actionError : undefined}
   onexpand={(noteRef) => void store.loadBody(noteRef)}
 />

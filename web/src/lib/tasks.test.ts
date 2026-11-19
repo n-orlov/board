@@ -428,3 +428,41 @@ describe('TasksApi dependency, note and lease calls', () => {
     await expect(a.liveLeases()).rejects.toMatchObject({ message: 'Reading the live leases failed (HTTP 500).' });
   });
 });
+
+describe('TasksApi tag calls', () => {
+  it('puts one tag on a task with the CSRF token and no body, the tag and the ref encoded', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.addTag('aa-1', 'a:b');
+    const [url, init] = fetchFn.mock.calls[0]!;
+    expect(url).toBe('/api/v1/tasks/aa-1/tags/a%3Ab');
+    expect(init).toMatchObject({ method: 'PUT', credentials: 'same-origin' });
+    expect(init!.headers).toMatchObject({ 'X-CSRF-Token': 'csrf-1' });
+    expect(init!.body).toBeUndefined();
+  });
+
+  it('takes one tag off a task with DELETE', async () => {
+    const { api: a, fetchFn } = api(async () => json({ ref: 'aa-1' }));
+    await a.removeTag('aa-1', 'urgent');
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks/aa-1/tags/urgent');
+    expect(fetchFn.mock.calls[0]![1]).toMatchObject({ method: 'DELETE' });
+  });
+
+  it('turns a refused tag change into its problem text', async () => {
+    const { api: a } = api(async () => problem(409, { detail: 'task aa-1 is closed' }));
+    await expect(a.addTag('aa-1', 'x')).rejects.toThrow(/task aa-1 is closed/);
+  });
+
+  it('reads the marks of some refs, whatever their status', async () => {
+    const { api: a, fetchFn } = api(async () => json({ items: [{ ref: 'aa-1', tag_marks: [{ tag: 'x', source: 'task' }] }] }));
+    expect(await a.marks(['aa-1'])).toEqual({ 'aa-1': [{ tag: 'x', source: 'task' }] });
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=all&limit=100&ref=aa-1');
+  });
+
+  it('lists the tags in use from one page of up to 1000 tasks', async () => {
+    const { api: a, fetchFn } = api(async () =>
+      json({ items: [{ ref: 'aa-1', tag_marks: [{ tag: 'b', source: 'task' }, { tag: 'a', source: 'initiative' }] }, { ref: 'aa-2', tag_marks: [{ tag: 'b', source: 'actor' }] }] }),
+    );
+    expect(await a.tagsInUse()).toEqual(['a', 'b']);
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=all&limit=1000');
+  });
+});

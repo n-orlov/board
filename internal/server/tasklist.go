@@ -22,7 +22,7 @@ func orEmpty[T any](list *[]T) []T {
 // taskQuery is the store's query for the parameters of GET /api/v1/tasks.
 func taskQuery(p ListTasksParams, needing []string) tasks.Query {
 	q := tasks.Query{
-		Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag), Active: p.Active, Blocked: p.Blocked, Overdue: p.Overdue,
+		Refs: orEmpty(p.Ref), Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag), Active: p.Active, Blocked: p.Blocked, Overdue: p.Overdue,
 		Attention: p.Attention, AttentionRefs: needing,
 		ClosedWithin: text(p.ClosedWithin), Q: text(p.Q), After: text(p.After), Limit: pageLimit(p.Limit),
 	}

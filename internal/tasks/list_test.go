@@ -193,3 +193,30 @@ func TestListKeepsTheTasksWhoseRefIsInTheAttentionRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestListKeepsOnlyTheTasksWhoseRefIsNamed(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	initiative(t, s, "bb")
+	mk(t, s, "aa", "one")
+	mk(t, s, "bb", "two")
+	mk(t, s, "aa", "three")
+	cases := []struct {
+		name string
+		q    Query
+		want string
+	}{
+		{"no refs keeps every task", Query{}, "aa-1,bb-1,aa-2"},
+		{"one ref", Query{Refs: []string{"bb-1"}}, "bb-1"},
+		{"two refs in any letter case", Query{Refs: []string{"AA-2", "bb-1"}}, "bb-1,aa-2"},
+		{"a ref that names no task keeps nothing", Query{Refs: []string{"aa-9"}}, ""},
+		{"a ref is matched whole", Query{Refs: []string{"aa-10", "a-1"}}, ""},
+		{"with another filter", Query{Refs: []string{"aa-1", "bb-1"}, Initiatives: []string{"bb"}}, "bb-1"},
+	}
+	for _, c := range cases {
+		got, err := s.List(ctx, c.q)
+		if err != nil || refs(got) != c.want {
+			t.Errorf("%s: %q, %v, want %q", c.name, refs(got), err, c.want)
+		}
+	}
+}

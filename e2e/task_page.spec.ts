@@ -192,7 +192,7 @@ for (const vp of viewports) {
       await expect(page.getByTestId('task-planned')).toHaveText('2026-03-01 to 2026-03-09');
       await expect(eventTypes(page)).resolves.toEqual(['task_updated', 'task_created']);
       await expect(events(page).first().getByTestId('event-summary')).toHaveText(`task ${ref} updated: title, description, planned_end`);
-      await expect(page.getByRole('button', { name: 'Edit' })).toBeFocused();
+      await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeFocused();
       await api.dispose();
     });
 

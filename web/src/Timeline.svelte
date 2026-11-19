@@ -685,6 +685,38 @@
     min-width: 1rem;
     text-align: center;
   }
+  /* A task row with tags is two lines inside its fixed height: the title with its ellipsis over the chips, cut at the edge. */
+  .timeline-frame :global(.vis-label.tl-tagged .vis-inner) {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.25rem;
+  }
+  .timeline-frame :global(.vis-label.tl-tagged .vis-inner > .tl-label) {
+    justify-content: center;
+  }
+  .timeline-frame :global(.tl-label-title) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .timeline-frame :global(.tl-label) {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .timeline-frame :global(.tl-label-tags) {
+    display: flex;
+    gap: 0.25rem;
+    overflow: hidden;
+  }
+  .timeline-frame :global(.tl-tag) {
+    flex: none;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
   .timeline-frame :global(.tl-attention) {
     color: var(--danger);
   }

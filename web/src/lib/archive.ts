@@ -4,7 +4,7 @@
 // answer and the refusal of the last reopen.
 import type { components } from './api/schema';
 import { errorText, Fetches } from './fetches';
-import { chipsToParams, NO_CHIPS, type ChipState } from './chipFilter';
+import { chipsToParams, NO_CHIPS, type ChipState, type TagMark } from './chipFilter';
 import { absoluteTime, relativeTime } from './format';
 import { taskHref } from './taskPage';
 import { ThreadApi } from './threads';
@@ -75,6 +75,8 @@ export interface ArchiveRow {
   closed: string;
   closedTitle: string;
   closedBy: string;
+  /** The tags of a task and where each comes from; an initiative row has none. */
+  marks: TagMark[];
 }
 
 function ms(row: { closed_at?: string }): number {
@@ -93,6 +95,7 @@ function taskRow(task: Task, now: Date): ArchiveRow {
     closed: task.closed_at === undefined ? '' : relativeTime(task.closed_at, now),
     closedTitle: task.closed_at === undefined ? '' : absoluteTime(task.closed_at),
     closedBy: task.closed_by ?? '',
+    marks: task.tag_marks,
   };
 }
 
@@ -108,6 +111,7 @@ function initiativeRow(initiative: Initiative, now: Date): ArchiveRow {
     closed: initiative.closed_at === undefined ? '' : relativeTime(initiative.closed_at, now),
     closedTitle: initiative.closed_at === undefined ? '' : absoluteTime(initiative.closed_at),
     closedBy: initiative.closed_by ?? '',
+    marks: [],
   };
 }
 

@@ -54,6 +54,16 @@ Feature: Tag filters match a task's own, initiative and derived tags
     When I list the tasks with "tag=claude" as actor "operator@laptop"
     Then the response path "items" has 0 items
 
+  Scenario: the ref filter keeps only the tasks named and each carries its tag marks
+    When I list the tasks with "ref=aa-1&ref=BB-1" as actor "operator@laptop"
+    Then the response path "items" lists the refs "aa-1,bb-1"
+    And the response path "items.0.tag_marks.0.tag" is "urgent"
+    And the response path "items.0.tag_marks.0.source" is "task"
+    When I list the tasks with "ref=cc-1&tag=work" as actor "operator@laptop"
+    Then the response path "items" has 0 items
+    When I list the tasks with "ref=aa-9" as actor "operator@laptop"
+    Then the response path "items" has 0 items
+
   Scenario: the Archive list filters closed tasks by two tags
     Given I close the task "aa-1" with body "{'resolution':'dropped'}" as actor "claude@laptop"
     And I close the task "aa-2" with body "{'resolution':'dropped'}" as actor "claude@laptop"

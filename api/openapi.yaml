@@ -556,6 +556,7 @@ paths:
       summary: List the tasks
       description: >-
         A page of tasks ordered by id (creation order), each with its live leases. Filters combine.
+        `ref` (a task ref) may repeat: a task is kept when its ref is any of those given, which is how a view reads the tags of the tasks it shows.
         `initiative` (slug or ULID) and `tag` may repeat: a task is kept when it is in any of the
         initiatives given (OR) and matches every tag given (AND); a task matches a tag when the tag is one of its own tags, one of its initiative's tags or a derived actor-kind tag (a kind among ralph, claude, pi, codex, deck of any holder of a lease on it, live or ended). A single value means what it always did. `status=closed` is the Archive list. `status` is `open`, `done`, `closed`,
         `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has
@@ -572,6 +573,16 @@ paths:
         - bearerAuth: []
         - cookieAuth: []
       parameters:
+        - name: ref
+          in: query
+          required: false
+          description: Keep only the tasks with this ref, such as `aa-1`, in either letter case. Repeatable; a task is kept when its ref is any of those given, and a ref that names no task keeps nothing. Left out, it keeps every task.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
         - name: initiative
           in: query
           required: false

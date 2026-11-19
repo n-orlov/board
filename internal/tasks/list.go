@@ -26,7 +26,8 @@ var ErrBadCursor = errors.New("unknown cursor")
 
 // Query selects a page of tasks ordered by id.
 //
-// Initiatives are slugs or ULIDs: a task is kept when it belongs to any of them.
+// Refs are task refs: when there are any, a task is kept only when its ref is one of them, in either letter case (a ref
+// that names no task keeps nothing). Initiatives are slugs or ULIDs: a task is kept when it belongs to any of them.
 // Tags are tags a task must match every one of: its own, its initiative's or a derived actor-kind tag. Status
 // is open, done, closed, not_closed (the default when empty) or all, and Kind
 // work or watch, empty for either. Active, Blocked and Overdue keep the tasks
@@ -36,6 +37,7 @@ var ErrBadCursor = errors.New("unknown cursor")
 // title or the description contains, in either letter case. After is the ULID or
 // ref of the last task of the previous page. Limit 0 is the default page size.
 type Query struct {
+	Refs          []string
 	Initiatives   []string
 	Tags          []string
 	Status        string
@@ -172,8 +174,9 @@ func (s Store) conditions(ctx context.Context, f *filter, q Query) error {
 	return s.afterFilter(ctx, f, q.After)
 }
 
-// scope adds the initiative and tag conditions.
+// scope adds the ref, initiative and tag conditions.
 func (s Store) scope(ctx context.Context, f *filter, q Query) error {
+	f.onlyRefs(q.Refs)
 	if len(q.Initiatives) > 0 {
 		ids := make([]string, 0, len(q.Initiatives))
 		for _, ref := range q.Initiatives {
@@ -304,4 +307,16 @@ func (f *filter) refs(want *bool, refs []string) {
 		cond = `NOT ` + cond
 	}
 	f.add(cond, anys(refs)...)
+}
+
+// onlyRefs keeps the tasks whose ref is one of refs, in either letter case; no refs keeps every task.
+func (f *filter) onlyRefs(refs []string) {
+	if len(refs) == 0 {
+		return
+	}
+	lowered := make([]string, len(refs))
+	for i, ref := range refs {
+		lowered[i] = strings.ToLower(ref)
+	}
+	f.add(`(i.slug || '-' || CAST(t.seq AS TEXT)) IN (`+marks(len(lowered))+`)`, anys(lowered)...)
 }

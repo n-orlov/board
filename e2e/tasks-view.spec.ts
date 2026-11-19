@@ -49,7 +49,7 @@ const tableRefs = (page: Page) => page.getByTestId('task-ref').allTextContents()
 const needsRefs = (page: Page) => page.getByTestId('needs-ref').allTextContents();
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const goTo = async (page: Page, label: string) => {
-  await nav(page).getByRole('link', { name: label }).click();
+  await nav(page).getByRole('link', { name: label, exact: true }).click();
 };
 const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 
@@ -59,6 +59,8 @@ function taskReads(page: Page) {
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.pathname !== '/api/v1/tasks') return;
+    // The Now nav badge counts the live tasks with one read of its own (limit 1000, active): not the table's.
+    if (url.searchParams.get('active') === 'true' && url.searchParams.get('limit') === '1000') return;
     if (url.searchParams.get('attention') === 'true') reads.needs++;
     else reads.table++;
   });

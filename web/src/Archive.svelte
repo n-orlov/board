@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { replaceHash } from './lib/historyEntry';
   import ChipFilter from './ChipFilter.svelte';
+  import TagChips from './TagChips.svelte';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
@@ -158,6 +159,9 @@
               <a class={link} href={row.href} data-testid="archive-link">{row.title}</a>
               <br />
               <code class="font-mono text-sm text-text-muted" data-testid="archive-ref">{row.ref}</code>
+              {#if row.marks.length > 0}
+                <div class="mt-1"><TagChips marks={row.marks} ref={row.ref} /></div>
+              {/if}
             </td>
             <td class="text-sm {cell}" data-testid="archive-kind">{row.kind}</td>
             <td class="text-sm {cell}" data-testid="archive-resolution">{row.resolution}</td>

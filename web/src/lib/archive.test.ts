@@ -107,6 +107,13 @@ describe('archiveRows', () => {
     expect(row!.closedTitle).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
   });
 
+  it('carries a task’s tag marks to its row and gives an initiative row none', () => {
+    const marks = [{ tag: 'urgent', source: 'task' as const }, { tag: 'web', source: 'initiative' as const }];
+    const [t, i] = archiveRows([task('E1-3', '2026-03-09T12:00:00Z', { tag_marks: marks })], [initiative('a', '2026-03-01T00:00:00Z')], NOW);
+    expect(t!.marks).toEqual(marks);
+    expect(i!.marks).toEqual([]);
+  });
+
   it('draws an initiative with no resolution of its own', () => {
     const [row] = archiveRows([], [initiative('big thing', '2026-03-10T11:00:00Z')], NOW);
     expect(row).toMatchObject({ kind: 'initiative', ref: 'big thing', href: '#/i/big%20thing', resolution: 'initiative closed', closedBy: 'bob', closed: '1 hour ago' });

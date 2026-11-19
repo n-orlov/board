@@ -10,6 +10,7 @@ import {
   CHART_SCREEN_SHARE,
   chartHeight,
   chartOptions,
+  groupTemplate,
   DEFAULT_CHART_HEIGHT,
   dropUnknown,
   forgetTimeline,
@@ -96,6 +97,9 @@ describe('initialWindow', () => {
   });
 });
 
+/** The calls a stubbed fetch got that read `GET /timeline`, apart from the one that reads the tag marks. */
+const timelineReads = (fetchFn: { mock: { calls: unknown[][] } }) => fetchFn.mock.calls.filter(([url]) => String(url).includes('/api/v1/timeline'));
+
 describe('TimelineApi', () => {
   it('lists the actor handles from GET /actors, same origin', async () => {
     const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json({ items: [{ handle: 'ada' }, { handle: 'bob' }] }));
@@ -122,7 +126,7 @@ describe('TimelineApi', () => {
     const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
     const got = await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada', closedWithin: 30 }, initialWindow(NOW));
     expect(got.tasks.map((t) => t.ref)).toEqual(['T1']);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(timelineReads(fetchFn)).toHaveLength(1);
     const [url, init] = fetchFn.mock.calls[0]!;
     expect(url).toBe('/board/api/v1/timeline?from=2026-02-24T12%3A00%3A00.000Z&to=2026-03-17T12%3A00%3A00.000Z&rows=all&actor=ada&closed_within=30d');
     expect(init?.credentials).toBe('same-origin');
@@ -133,7 +137,7 @@ describe('TimelineApi', () => {
     const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json(answer()));
     const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
     await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, activeOnly: true }, initialWindow(NOW), '3d');
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(timelineReads(fetchFn)).toHaveLength(1);
     expect(fetchFn.mock.calls[0]![0]).toMatch(/&active=true&window=3d$/);
   });
 
@@ -145,11 +149,36 @@ describe('TimelineApi', () => {
     );
     const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
     const got = await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, order: 'active' }, initialWindow(NOW), '8h');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(timelineReads(fetchFn)).toHaveLength(2);
     expect(fetchFn.mock.calls.filter(([url]) => url.includes('active=true&window=8h'))).toHaveLength(1);
     expect(got.activeFirst).toEqual(['T3']);
     const rows = buildTimeline(got, NOW).groups.filter((g) => g.nestedGroups === undefined);
     expect(rows.map((g) => g.ref)).toEqual(['T3', 'T1', 'T2']);
+  });
+
+  it('reads the tag marks of the tasks it holds in one GET /tasks by ref and hands them to the rows', async () => {
+    const base = answer().tasks[0]!;
+    const tasks = ['T1', 'T2'].map((ref) => ({ ...base, ref }));
+    const fetchFn = vi.fn(async (input: string, _init?: RequestInit) =>
+      json(input.includes('/api/v1/tasks?') ? { items: [{ ref: 'T1', tag_marks: [{ tag: 'urgent', source: 'task' }] }, { ref: 'T2', tag_marks: [] }] } : answer({ tasks })),
+    );
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
+    const got = await new TimelineApi(browser, () => 't').read(DEFAULT_TIMELINE_FILTER, initialWindow(NOW));
+    const marksRead = fetchFn.mock.calls.filter(([url]) => url.includes('/api/v1/tasks?'));
+    expect(marksRead).toHaveLength(1);
+    expect(marksRead[0]![0]).toBe('/board/api/v1/tasks?status=all&limit=100&ref=T1&ref=T2');
+    expect(got.marks).toEqual({ T1: [{ tag: 'urgent', source: 'task' }], T2: [] });
+    const labels = buildTimeline(got, NOW).groups.filter((g) => g.ref === 'T1' || g.ref === 'T2');
+    expect(labels[0]!.tags).toEqual([{ tag: 'urgent', sources: ['task'] }]);
+    expect(labels[1]!.tags).toEqual([]);
+  });
+
+  it('draws the rows without chips when the tag read fails, and still answers', async () => {
+    const fetchFn = vi.fn(async (input: string, _init?: RequestInit) => (input.includes('/api/v1/tasks?') ? new Response('', { status: 500 }) : json(answer())));
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
+    const got = await new TimelineApi(browser, () => 't').read(DEFAULT_TIMELINE_FILTER, initialWindow(NOW));
+    expect(got.tasks.map((t) => t.ref)).toEqual(['T1']);
+    expect(got.marks).toEqual({});
   });
 
   it('turns a refusal into its problem text', async () => {
@@ -284,6 +313,7 @@ describe('chartOptions', () => {
       maxHeight: DEFAULT_CHART_HEIGHT,
       zoomKey: 'shiftKey',
       dataAttributes: ['task', 'id'],
+      groupTemplate,
     });
     expect(chartOptions(w, 640).maxHeight).toBe(640);
     expect(ZOOM_MIN_MS).toBe(HOUR_MS);

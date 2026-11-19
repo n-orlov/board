@@ -272,6 +272,43 @@ describe('the attention label on the task row', () => {
   });
 });
 
+describe('the tag chips on the task row', () => {
+  const marks = { T1: [{ tag: 'urgent', source: 'task' as const }, { tag: 'work', source: 'initiative' as const }, { tag: 'work', source: 'task' as const }] };
+
+  it('gives the row each tag once with every source it has, in the order the marks name them, and marks the row', () => {
+    const row = buildTimeline({ ...answer(), marks }, NOW).groups[1]!;
+    expect(row.tags).toEqual([
+      { tag: 'urgent', sources: ['task'] },
+      { tag: 'work', sources: ['initiative', 'task'] },
+    ]);
+    expect(row.className).toBe('tl-task tl-tagged');
+    expect(row.text).toBe('T1 First');
+    expect(row.title).toBe('T1 First tags: urgent, work');
+  });
+
+  it('keeps the attention badge in the label and the tooltip', () => {
+    const t = answer({ tasks: [{ ...answer().tasks[0]!, attention: [{ reason: 'done' }] }] });
+    const row = buildTimeline({ ...t, marks }, NOW).groups[1]!;
+    expect(row.className).toBe('tl-task tl-needs-attention tl-tagged');
+    expect(row.attentionLabel).toBe('done, not closed');
+    expect(row.title).toBe('T1 First (needs attention: done, not closed) tags: urgent, work');
+  });
+
+  it('leaves the row as it was for a task with no marks, or an answer with none', () => {
+    for (const held of [{ ...answer(), marks: { T1: [] } }, answer()]) {
+      const row = buildTimeline(held, NOW).groups[1]!;
+      expect(row.content).toBe('T1 First');
+      expect(row.tags).toEqual([]);
+      expect(row.className).toBe('tl-task');
+      expect(row.title).toBe('T1 First');
+    }
+  });
+
+  it('gives an initiative row no tags', () => {
+    expect(buildTimeline({ ...answer(), marks }, NOW).groups[0]!.tags).toEqual([]);
+  });
+});
+
 describe('opening a task', () => {
   it('names the task of a task row and none for an initiative row', () => {
     expect(taskOfGroup('t:T12')).toBe('T12');

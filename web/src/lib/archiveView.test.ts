@@ -28,6 +28,7 @@ function row(over: Partial<ArchiveRow>): ArchiveRow {
     closed: '',
     closedTitle: '',
     closedBy: '',
+    marks: [],
     ...over,
   };
 }

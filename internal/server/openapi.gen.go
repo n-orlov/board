@@ -3086,6 +3086,9 @@ type GetStreamParamsTopics string
 
 // ListTasksParams defines parameters for ListTasks.
 type ListTasksParams struct {
+	// Ref Keep only the tasks with this ref, such as `aa-1`, in either letter case. Repeatable; a task is kept when its ref is any of those given, and a ref that names no task keeps nothing. Left out, it keeps every task.
+	Ref *[]string `form:"ref,omitempty" json:"ref,omitempty"`
+
 	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
 	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
 
@@ -5068,6 +5071,10 @@ func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Requ
 	var params ListTasksParams
 
 	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "ref" -------------
+
+	bind.check("ref", runtime.BindQueryParameterWithOptions("form", true, false, "ref", r.URL.Query(), &params.Ref, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
 
 	// ------------- Optional query parameter "initiative" -------------
 

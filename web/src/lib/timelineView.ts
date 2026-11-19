@@ -5,6 +5,9 @@
 import { errorText, Fetches } from './fetches';
 import { RESTORE_WAIT_MS } from './historyEntry';
 import { ThreadApi } from './threads';
+import type { TagMark } from './chipFilter';
+import { labelNode, type LabelElement, type LabelGroup } from './timelineLabel';
+import { readMarks, type MarksPage } from './taskTags';
 import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineAnswer, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
 import { activeFirst, needsActiveSet, refsOf } from './timelineActive';
@@ -63,6 +66,23 @@ export class TimelineApi extends ThreadApi {
    * the active set the same way and puts those tasks first, so the server alone decides what active means.
    */
   async read(filter: TimelineFilter, window: TimeWindow, active: NowWindow = DEFAULT_WINDOW): Promise<TimelineAnswer> {
+    const answer = await this.readRows(filter, window, active);
+    return { ...answer, marks: await this.marksOf(answer.tasks.map((t) => t.ref)) };
+  }
+
+  /** The tag marks of the tasks the answer holds, by ref (the timeline carries none); a failed read leaves the rows without chips. */
+  private async marksOf(refs: readonly string[]): Promise<Record<string, TagMark[]>> {
+    try {
+      return await readMarks(async (query) => {
+        const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Reading the tags', { headers: { Accept: 'application/json' } });
+        return (await response.json()) as MarksPage;
+      }, refs);
+    } catch {
+      return {};
+    }
+  }
+
+  private async readRows(filter: TimelineFilter, window: TimeWindow, active: NowWindow): Promise<TimelineAnswer> {
     const only = filter.activeOnly ? active : undefined;
     const answer = this.fetchTimeline(apiQuery(filter, window.from, window.to, only));
     if (!needsActiveSet(filter.activeOnly, filter.order)) return answer;
@@ -264,7 +284,12 @@ export interface ChartOptions {
    * (and so its row) for a tap that lands beside it.
    */
   dataAttributes: string[];
+  /** Builds a row's label: its text, or for a row with tags the title over the chips as elements (vis-timeline strips styled HTML). */
+  groupTemplate: (group: LabelGroup | null) => LabelElement | string;
 }
+
+/** The label of a row in the page's document (`labelNode`); only a chart on a page calls it. */
+export const groupTemplate = (group: LabelGroup | null): LabelElement | string => labelNode(group, document as unknown as Parameters<typeof labelNode>[1]);
 
 /** The chart's height when the view does not give one. */
 export const DEFAULT_CHART_HEIGHT = 480;
@@ -291,6 +316,7 @@ export function chartOptions(window: TimeWindow, maxHeight: number = DEFAULT_CHA
     maxHeight,
     zoomKey: 'shiftKey',
     dataAttributes: ['task', 'id'],
+    groupTemplate,
   };
 }
 

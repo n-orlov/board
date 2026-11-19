@@ -70,7 +70,10 @@
   import { absoluteTime } from './lib/format';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
-  import type { Resolution } from './lib/tasks';
+  import { TasksApi, type Resolution } from './lib/tasks';
+  import TagChips from './TagChips.svelte';
+  import type { TagMark } from './lib/chipFilter';
+  import { marksOf, nowTaskRefs, taskOfHref } from './lib/nowTags';
   import type { SortState } from './lib/tableSort';
   import { currentViewEnv, FilterTurns } from './lib/viewState';
 
@@ -246,6 +249,28 @@
     const timer = setInterval(() => (now = new Date()), 30_000);
     return () => clearInterval(timer);
   });
+  // The tags of every task shown: Now's read carries none, so one read of the tasks by ref gives them, again after every answer.
+  const tasksApi = new TasksApi(browser, () => csrf);
+  let marks: Record<string, TagMark[]> = $state({});
+  $effect(() => {
+    const refs = nowTaskRefs(
+      view.attention,
+      (view.flight ?? []).map((f) => f.task.task),
+      (view.recent ?? []).map((r) => r.task.task),
+      untrack(() => now),
+    );
+    if (refs.length === 0) return;
+    let current = true;
+    void tasksApi.marks(refs).then(
+      (read) => {
+        if (current) marks = read;
+      },
+      () => undefined, // the rows show without chips
+    );
+    return () => {
+      current = false;
+    };
+  });
   const flightList = $derived(sortByOrder(flightRows(view.flight ?? [], now), order, (r) => r));
   const recentList = $derived(sortByOrder(recentRows(view.recent ?? [], now), order, (r) => r));
   function widgetCount(key: WidgetKey, data: Attention): number {
@@ -274,6 +299,9 @@
               <span data-testid="item-title">{row.title}</span>
             {/if}
           </p>
+          {#if marksOf(marks, taskOfHref(row.href)).length > 0}
+            <TagChips marks={marksOf(marks, taskOfHref(row.href))} ref={taskOfHref(row.href) ?? ''} />
+          {/if}
           {#if row.details.length > 0}
             <p class="text-sm text-text-muted" data-testid="item-details">{row.details.join(' · ')}</p>
           {/if}
@@ -322,6 +350,9 @@
           <p class="font-medium">
             <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="flight-task">{row.task} {row.title}</a>
           </p>
+          {#if marksOf(marks, row.task).length > 0}
+            <TagChips marks={marksOf(marks, row.task)} ref={row.task} />
+          {/if}
           <ul class="flex flex-col gap-2">
             {#each row.leases as lease (lease.lease)}
               <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm" data-testid="flight-lease" data-lease={lease.lease}>
@@ -348,6 +379,9 @@
           <p class="font-medium">
             <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="recent-task">{row.task} {row.title}</a>
           </p>
+          {#if marksOf(marks, row.task).length > 0}
+            <TagChips marks={marksOf(marks, row.task)} ref={row.task} />
+          {/if}
           <p class="text-sm text-text-muted" title={absoluteTime(row.at)} data-testid="recent-last">{row.last}</p>
           <p class="text-sm" data-testid="recent-summary">{row.summary}</p>
         </li>

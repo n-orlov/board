@@ -9,17 +9,22 @@
 // Text that vis-timeline renders as HTML (`content`, `title`) is escaped here.
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
-import { mergeChoices, type TagChoice } from './chipFilter';
+import { mergeChoices, type TagChoice, type TagMark } from './chipFilter';
 import { ACTIVE_COLUMNS, type TimelineOrder } from './timelineActive';
 import { sortFragment, sortFromFragment } from './sortControl';
 import type { NowWindow } from './nowFlight';
+import { tagChips } from './taskTags';
 
 export type Timeline = components['schemas']['Timeline'];
 /**
  * An answer as the view draws it. With `activeFirst` (the refs of its active tasks, Active first on the whole board)
  * the rows are drawn active first: every active task above every idle one (R8, `buildTimeline`).
  */
-export type TimelineAnswer = Timeline & { activeFirst?: readonly string[] };
+export type TimelineAnswer = Timeline & {
+  activeFirst?: readonly string[];
+  /** The tag marks of the answer's tasks by ref, which the timeline read does not carry: a row label draws them as chips. */
+  marks?: Readonly<Record<string, readonly TagMark[]>>;
+};
 type TimelineTask = components['schemas']['TimelineTask'];
 type TimelineLease = components['schemas']['TimelineLease'];
 type TimelineMarker = components['schemas']['TimelineMarker'];
@@ -38,6 +43,13 @@ export interface TimelineGroup {
   className: string;
   /** The tooltip of the row label. */
   title: string;
+  /**
+   * The row's tags as chips, in the order the marks name them (empty for an initiative row or a task with none). vis-timeline
+   * strips `class`, `style` and `data-` attributes from an HTML label, so `groupTemplate` (lib/timelineLabel.ts) builds the label's elements from this.
+   */
+  tags: TagChoice[];
+  /** A task row's `ref title` as plain text, which the label with tags is built from. */
+  text?: string;
   /** An initiative lists its task groups here; it can be collapsed. */
   nestedGroups?: string[];
   showNested?: boolean;
@@ -255,17 +267,21 @@ function actualEnd(task: TimelineTask, nowIso: string): string {
   return task.closed_at ?? laterOf(task.created_at, nowIso);
 }
 
-function taskGroup(task: TimelineTask, order: number, parent: string): TimelineGroup {
+function taskGroup(task: TimelineTask, order: number, parent: string, marks: readonly TagMark[]): TimelineGroup {
   const label = attentionBadges(task.attention)
     .map((b) => b.label)
     .join(', ');
   const text = `${task.ref} ${task.title}`;
+  const tags = tagChips(marks);
+  const named = [text, ...(label === '' ? [] : [`(needs attention: ${label})`]), ...(tags.length === 0 ? [] : [`tags: ${tags.map((c) => c.tag).join(', ')}`])];
   return {
     id: taskGroupId(task.ref),
     content: escapeHtml(text) + (label === '' ? '' : ` <span class="tl-attention">${escapeHtml(label)}</span>`),
     order,
-    className: label === '' ? 'tl-task' : 'tl-task tl-needs-attention',
-    title: escapeHtml(label === '' ? text : `${text} (needs attention: ${label})`),
+    className: ['tl-task', ...(label === '' ? [] : ['tl-needs-attention']), ...(tags.length === 0 ? [] : ['tl-tagged'])].join(' '),
+    title: escapeHtml(named.join(' ')),
+    text,
+    tags,
     ref: task.ref,
     attentionLabel: label,
     nestedInGroup: parent,
@@ -397,6 +413,7 @@ function initiativeGroup(section: Section, info: Timeline['initiatives'][number]
     showNested: true,
     ref: slug,
     attentionLabel: '',
+    tags: [],
   };
 }
 
@@ -446,7 +463,7 @@ export function buildTimeline(timeline: TimelineAnswer, now: Date): TimelineMode
   for (const section of sections(timeline)) {
     groups.push(initiativeGroup(section, timeline.initiatives.find((i) => i.slug === section.slug), groups.length));
     for (const task of section.own) {
-      groups.push(taskGroup(task, groups.length, section.id));
+      groups.push(taskGroup(task, groups.length, section.id, timeline.marks?.[task.ref] ?? []));
       items.push(...spanItems(task, nowIso));
     }
   }

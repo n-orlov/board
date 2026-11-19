@@ -2,9 +2,11 @@
 // dialog use; `TasksStore` holds the list under a filter; `NewTaskStore` holds what the dialog needs (the open
 // initiatives and open tasks to pick from) and the refusal of the last create.
 import { mountPrefix } from './apibase';
+import type { TagMark } from './chipFilter';
 import type { components } from './api/schema';
 import { errorText, Fetches } from './fetches';
 import { problemText } from './keys';
+import { readMarks, tagsInUse } from './taskTags';
 import { InitiativesApi, InitiativesError, type InitiativeListItem, type TaskListItem } from './initiatives';
 import { toTaskCreate, type NewTaskForm, type TaskCreate } from './newTask';
 import { apiQuery, DEFAULT_TASKS_FILTER, type TasksFilter } from './taskFilters';
@@ -138,6 +140,30 @@ export class TasksApi {
 
   removeDep(ref: string, blockedBy: string): Promise<TaskDetail> {
     return this.write('DELETE', this.depPath(ref, blockedBy), 'Removing the dependency');
+  }
+
+  /** Gives the task one more of its own tags (`PUT /tasks/{ref}/tags/{tag}`); a tag it has is a no-op the server answers 200. */
+  addTag(ref: string, tag: string): Promise<TaskDetail> {
+    return this.write('PUT', `/api/v1/tasks/${encodeURIComponent(ref)}/tags/${encodeURIComponent(tag)}`, 'Adding the tag');
+  }
+
+  /** Takes one of the task's own tags off it (`DELETE /tasks/{ref}/tags/{tag}`). */
+  removeTag(ref: string, tag: string): Promise<TaskDetail> {
+    return this.write('DELETE', `/api/v1/tasks/${encodeURIComponent(ref)}/tags/${encodeURIComponent(tag)}`, 'Removing the tag');
+  }
+
+  /** The tags in use on the board, for the suggestions typing a tag offers: those of the first 1000 tasks of any status, sorted. */
+  async tagsInUse(): Promise<string[]> {
+    const response = await this.call('/api/v1/tasks?status=all&limit=1000', 'Reading the tags in use', { headers: { Accept: 'application/json' } });
+    return tagsInUse(...((await response.json()) as TaskList).items.map((task) => task.tag_marks));
+  }
+
+  /** The tag marks of the tasks `refs` name, by ref, whatever their status: what a list that carries no marks shows as chips. */
+  marks(refs: readonly string[]): Promise<Record<string, TagMark[]>> {
+    return readMarks(async (query) => {
+      const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Reading the tags', { headers: { Accept: 'application/json' } });
+      return (await response.json()) as TaskList;
+    }, refs);
   }
 
   milestone(ref: string, summary: string): Promise<TaskDetail> {

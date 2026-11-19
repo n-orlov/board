@@ -27,6 +27,9 @@
   import { live } from './lib/live';
   import { onDestroy, untrack } from 'svelte';
   import ChipFilter from './ChipFilter.svelte';
+  import TagChips from './TagChips.svelte';
+  import { tagEditor } from './lib/taskTags';
+  import type { TaskRow } from './lib/initiativePage';
   import SortControl from './SortControl.svelte';
   import { mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
@@ -163,6 +166,11 @@
     void reloadNeeds();
   }
 
+  // The tags on offer when typing a new one: every tag the list shows or has shown, and the operator's edits read the list again.
+  const inUse = $derived(tagChoices.map((c) => c.tag));
+  const reread = () => Promise.all([store.refresh(), reloadNeeds()]);
+  // A closed task takes no tag change (the server refuses it), so its chips have no controls.
+  const editorOf = (row: TaskRow) => (row.status === 'closed' ? undefined : tagEditor(api, row.ref, row.marks, inUse, reread));
   const setChips = (chips: ChipState) => apply({ ...view.filter, ...chips });
   const setFlag = (name: FlagName, value: string) => apply({ ...view.filter, [name]: value });
   const needs = $derived(needsView.needs);
@@ -242,7 +250,7 @@
   {/if}
 
   {#if !view.loading}
-    <NeedsAttention rows={needsRows} more={needs.more} moreHref={attentionHref(view.filter)} showInitiative />
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={attentionHref(view.filter)} showInitiative editor={editorOf} />
   {/if}
 
   {#if view.loading}
@@ -281,7 +289,12 @@
             class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
           >
             <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
-            <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">{row.title}</td>
+            <td class="order-last w-full min-w-0 font-medium md:order-none {cell}">
+              <span data-testid="task-title">{row.title}</span>
+              {#if row.marks.length > 0 || editorOf(row) !== undefined}
+                <div class="mt-1"><TagChips marks={row.marks} ref={row.ref} editor={editorOf(row)} /></div>
+              {/if}
+            </td>
             <td class="text-sm {cell}"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href="#/i/{row.initiative}" data-testid="task-initiative">{row.initiative}</a></td>
             <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
             <td class={cell} data-testid="task-status"><span class="{badge} border-border text-text-muted">{row.status}</span></td>

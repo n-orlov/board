@@ -29,6 +29,7 @@
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
   import ChipFilter from './ChipFilter.svelte';
+  import TagChips from './TagChips.svelte';
   import SortControl from './SortControl.svelte';
   import { tagStyle, type ChipState } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
@@ -303,11 +304,11 @@
               class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
             >
               <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
-              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">
-                {row.title}
-                {#each row.marks.filter((m) => m.source === 'task') as mark (mark.tag)}
-                  <span class="vh-tag ml-1" style={tagStyle(mark.tag)} data-testid="task-tag">{mark.tag}</span>
-                {/each}
+              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}">
+                <span data-testid="task-title">{row.title}</span>
+                {#if row.marks.length > 0}
+                  <div class="mt-1"><TagChips marks={row.marks} ref={row.ref} /></div>
+                {/if}
               </td>
               <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
               <td class={cell} data-testid="task-status">

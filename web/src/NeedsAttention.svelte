@@ -3,10 +3,12 @@
   import type { TaskRow } from './lib/initiativePage';
   import { moreText } from './lib/needsAttention';
   import { toneClasses } from './lib/presentation';
+  import TagChips from './TagChips.svelte';
+  import type { TagEditor } from './lib/taskTags';
 
   // The Needs attention section (PRD R2): one card per task that needs a person, its attention badges and its flags, in the
   // order the caller gives; nothing at all when there are none. `showInitiative` adds the task's initiative (the Tasks view).
-  let { rows, more, moreHref, showInitiative }: { rows: TaskRow[]; more: number; moreHref: string; showInitiative: boolean } = $props();
+  let { rows, more, moreHref, showInitiative, editor }: { rows: TaskRow[]; more: number; moreHref: string; showInitiative: boolean; editor?: (row: TaskRow) => TagEditor | undefined } = $props();
 
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
 </script>
@@ -26,6 +28,9 @@
             <a class="inline-flex min-h-11 max-w-full min-w-11 items-center text-sm wrap-anywhere text-accent hover:underline" href="#/i/{row.initiative}" data-testid="needs-initiative">{row.initiative}</a>
           {/if}
           <span class="order-last w-full min-w-0 font-medium wrap-anywhere md:order-none md:w-auto md:flex-1" data-testid="needs-title">{row.title}</span>
+          {#if row.marks.length > 0 || editor?.(row) !== undefined}
+            <div class="order-last w-full min-w-0"><TagChips marks={row.marks} ref={row.ref} editor={editor?.(row)} /></div>
+          {/if}
           <span class="flex max-w-full min-w-0 flex-wrap gap-1" data-testid="needs-badges">
             {#each row.attention as reason (reason.reason)}
               <span class="{badge} {toneClasses(reason.tone)}" data-testid="attention-{reason.reason}">
