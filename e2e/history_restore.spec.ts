@@ -378,7 +378,8 @@ for (const vp of viewports) {
           await expect(p.getByTestId('archive-window')).toHaveValue('90', FIVE_SECONDS);
           expect(queryOf(p).get('window')).toBe('90');
         },
-        links: (p) => p.getByTestId('archive-link'),
+        // Only the task links: the shared store's Archive also lists closed initiatives (this file closes one), whose link lands on #/i/.
+        links: (p) => p.locator('[data-testid="archive-link"][href^="#/t/"]'),
         landing: /#\/t\//,
         sortColumn: 'item',
       };

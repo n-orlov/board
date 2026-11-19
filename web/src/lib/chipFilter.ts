@@ -107,7 +107,8 @@ export function chipSummary(state: ChipState): string {
 }
 
 /**
- * The one colour rule for a tag: a hue (0-359) from the FNV-1a hash of its text. The same text always has the same hue, and
+ * The one colour rule for a tag: a hue (0-359) from the FNV-1a hash of its text. The same text always has the same hue (two
+ * different texts usually differ, but with 360 hues some share one), and
  * the hue is the same in the light and the dark theme: the stylesheet's `.vh-tag` takes it as `--h` and picks the pastel
  * lightness for the theme.
  */

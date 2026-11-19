@@ -159,6 +159,11 @@ describe('the tag colour', () => {
     expect(tagHue('a')).not.toBe(tagHue('b'));
   });
 
+  it('has only 360 hues, so two texts can share one (the text, not the colour, tells them apart)', () => {
+    expect(tagHue('tag28')).toBe(177);
+    expect(tagHue('tag64')).toBe(177);
+  });
+
   it('is the FNV-1a hash of the text modulo 360', () => {
     // FNV-1a 32-bit of "a" is 0xe40c292c = 3826002220, mod 360 = 340. The empty text is the offset basis 0x811c9dc5 = 2166136261, mod 360 = 61.
     expect(tagHue('a')).toBe(340);
