@@ -99,7 +99,7 @@ describe('recentRows', () => {
   it('shows the last event with its type, actor and age, in the server order', () => {
     const rows = recentRows(items, NOW);
     expect(rows).toEqual([
-      { task: 'aa-4', title: 'Title aa-4', initiative: 'aa', href: '#/t/aa-4', last: 'lease_ended by bob 12 minutes ago', summary: 'L3 ended: done', at: '2026-01-01T11:48:00Z' },
+      { task: 'aa-4', title: 'Title aa-4', initiative: 'aa', href: '#/t/aa-4', last: 'lease_ended by bob 12 minutes ago', summary: 'L3 ended: done', at: '2026-01-01T11:48:00Z', by: 'bob' },
     ]);
   });
 });

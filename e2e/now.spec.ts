@@ -464,3 +464,79 @@ for (const vp of [
     });
   });
 }
+
+// The one sort of Now (PRD R3, SPEC 11): the shared sort control orders the rows inside every band, newest first by default,
+// and the choice is remembered per browser under `vh.now.sort.v1`.
+const SORT_KEY = 'vh.now.sort.v1';
+
+// Three open asks of one initiative, raised a second apart by actors whose handles sort the other way round: the newest ask is
+// by `a`, the oldest by `m`. Newest first is therefore a, z, m; oldest first m, z, a; by actor a, m, z.
+async function seedSortedAsks(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string) {
+  const slug = `e2e-nowsort-${name}`;
+  const owner = await actorApi(playwright, baseURL, `nowsort-owner-${name}`);
+  await created(owner, '/api/v1/initiatives', { slug, title: `Sort ${name}` });
+  const task = (await created(owner, '/api/v1/tasks', { initiative: slug, title: 'Needs answers' })).ref;
+  const refs: Record<string, string> = {};
+  for (const who of ['m', 'z', 'a']) {
+    const api = await actorApi(playwright, baseURL, `nowsort-${who}-${name}`);
+    refs[who] = (await created(api, '/api/v1/asks', { question: `Question from ${who} in ${name}?`, task, mode: 'poll' })).ref;
+    await api.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  }
+  await owner.dispose();
+  return { slug, refs };
+}
+
+const askOrder = async (page: Page, refs: Record<string, string>): Promise<string[]> => {
+  const titles = await band(page, 'asks').getByTestId('attention-item').locator('p.font-medium').allInnerTexts();
+  return titles.map((t) => Object.keys(refs).find((who) => t.startsWith(`${refs[who]}:`))!);
+};
+
+for (const vp of [
+  { name: 'phone', size: PHONE },
+  { name: 'desktop', size: DESKTOP },
+]) {
+  test.describe(`the band sort on Now, ${vp.name}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('the shared control reorders a seeded band, and the choice survives a reload', async ({ page, playwright, baseURL }) => {
+      const s = await seedSortedAsks(playwright, baseURL, `reorder-${vp.name}`);
+      await showAllBands(page);
+      await page.goto(`/#/now?initiative=${s.slug}`);
+      const select = page.getByTestId('now-sort').getByTestId('sort-select');
+      await expect(band(page, 'asks').getByTestId('attention-item')).toHaveCount(3, FIVE_SECONDS);
+      await expect(select).toHaveValue('');
+      await expect(select.locator('option')).toHaveText(['Newest first', 'Oldest first', 'By actor']);
+      expect(await askOrder(page, s.refs)).toEqual(['a', 'z', 'm']);
+
+      await select.selectOption({ label: 'Oldest first' });
+      await expect.poll(() => askOrder(page, s.refs)).toEqual(['m', 'z', 'a']);
+      expect(await page.evaluate((key) => localStorage.getItem(key), SORT_KEY)).toBe('oldest');
+
+      await select.selectOption({ label: 'By actor' });
+      await expect.poll(() => askOrder(page, s.refs)).toEqual(['a', 'm', 'z']);
+
+      await page.reload();
+      await expect(band(page, 'asks').getByTestId('attention-item')).toHaveCount(3, FIVE_SECONDS);
+      await expect(page.getByTestId('now-sort').getByTestId('sort-select')).toHaveValue('actor:asc');
+      expect(await askOrder(page, s.refs)).toEqual(['a', 'm', 'z']);
+
+      await page.getByTestId('now-sort').getByTestId('sort-select').selectOption({ label: 'Newest first' });
+      await expect.poll(() => askOrder(page, s.refs)).toEqual(['a', 'z', 'm']);
+      await page.reload();
+      await expect(page.getByTestId('now-sort').getByTestId('sort-select')).toHaveValue('', FIVE_SECONDS);
+    });
+
+    test('a bad stored value falls back to newest first, and the sort leaves the URL alone', async ({ page, playwright, baseURL }) => {
+      const s = await seedSortedAsks(playwright, baseURL, `bad-${vp.name}`);
+      await page.addInitScript((key) => localStorage.setItem(key, 'sideways'), SORT_KEY);
+      await showAllBands(page);
+      await page.goto(`/#/now?initiative=${s.slug}`);
+      await expect(band(page, 'asks').getByTestId('attention-item')).toHaveCount(3, FIVE_SECONDS);
+      await expect(page.getByTestId('now-sort').getByTestId('sort-select')).toHaveValue('');
+      expect(await askOrder(page, s.refs)).toEqual(['a', 'z', 'm']);
+      await page.getByTestId('now-sort').getByTestId('sort-select').selectOption({ label: 'Oldest first' });
+      await expect(page).toHaveURL(new RegExp(`#/now\\?initiative=${s.slug}$`));
+    });
+  });
+}

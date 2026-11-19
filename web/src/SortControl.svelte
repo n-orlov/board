@@ -1,6 +1,6 @@
 <script lang="ts">
   import { optionValue, pickOption, sortOptions, type SortColumn } from './lib/sortControl';
-  import type { SortState } from './lib/tableSort';
+  import type { SortChoice, SortState } from './lib/tableSort';
 
   // The shared sort control (lib/sortControl.ts): one select at every width, with the default order and each column
   // ascending and descending. 44 px high and 16 px text on a phone. A page passes its columns and its sort.
@@ -9,9 +9,11 @@
     sort,
     onsort,
     testid = 'sort-select',
-  }: { columns: readonly SortColumn[]; sort: SortState; onsort: (next: SortState) => void; testid?: string } = $props();
+    choices,
+  }: { columns: readonly SortColumn[]; sort: SortState; onsort: (next: SortState) => void; testid?: string; choices?: readonly SortChoice[] } = $props();
 
-  const options = $derived(sortOptions(columns));
+  // A page with its own words for the options (Now: Newest first, Oldest first, By actor) gives them as `choices`.
+  const options = $derived(choices ?? sortOptions(columns));
 </script>
 
 <label class="flex max-w-full items-center gap-2 text-sm text-text-muted">

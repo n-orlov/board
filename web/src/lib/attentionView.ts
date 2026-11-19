@@ -45,6 +45,8 @@ export interface ItemRow {
   initiative: string | undefined;
   details: string[];
   actors: ItemActor[];
+  /** The instant the item is ordered by (an ask's creation, a lease's expiry, a watch's due time, when a task was done); none for a conflict. */
+  at: string | undefined;
 }
 
 function actor(role: string, who: Actor): ItemActor {
@@ -65,6 +67,7 @@ function askRows(items: NonNullable<Attention['open_asks']>): ItemRow[] {
       initiative: a.initiative ?? initiativeOfHref(href),
       details: [`asked ${ageText(a.age_seconds)}`, a.mode === 'stop' ? 'asker stopped' : askerWaitingLabel(a.asker_waiting), ...(a.blocking ? ['blocking'] : [])],
       actors: [actor('asked by', a.asker)],
+      at: a.created_at,
     };
   });
 }
@@ -80,6 +83,7 @@ function doneRows(items: NonNullable<Attention['done_not_closed']>, now: Date): 
       initiative: initiativeOfHref(taskHref(t.task)),
       details: [`done ${relativeTime(t.done_at, now)}`, ...outcome],
       actors: [actor('done by', t.done_by), ...(lease === undefined ? [] : [actor('last lease', lease.holder)])],
+      at: t.done_at,
     };
   });
 }
@@ -92,6 +96,7 @@ function leaseRows(items: NonNullable<Attention['expired_leases']>, now: Date): 
     initiative: initiativeOfHref(taskHref(l.task)),
     details: [l.intent, `expired ${relativeTime(l.expired_at, now)}`],
     actors: [actor('held by', l.holder)],
+    at: l.expired_at,
   }));
 }
 
@@ -103,6 +108,7 @@ function watchRows(items: NonNullable<Attention['overdue_watches']>, now: Date):
     initiative: initiativeOfHref(taskHref(w.task)),
     details: [`check was due ${relativeTime(w.next_check_at, now)}`, ...(w.last_check === undefined ? [] : [`last check: ${w.last_check.summary}`])],
     actors: [actor('owner', w.owner), ...(w.last_check === undefined ? [] : [actor('last check by', w.last_check.by)])],
+    at: w.next_check_at,
   }));
 }
 
@@ -114,6 +120,7 @@ function conflictRows(items: NonNullable<Attention['conflicts']>): ItemRow[] {
     initiative: initiativeOfHref(c.tasks.length === 1 ? taskHref(c.tasks[0]!) : undefined),
     details: c.holders.map((h) => `${h.lease} on ${h.task}: ${h.intent}`),
     actors: c.holders.map((h) => actor(h.lease, h.actor)),
+    at: undefined,
   }));
 }
 

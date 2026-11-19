@@ -74,6 +74,7 @@ describe('rowsFor', () => {
       initiative: 'aa',
       details: ['asked 1 hour ago', 'asker waiting', 'blocking'],
       actors: [{ role: 'asked by', handle: 'bob', wayBack: 'ralphctl status bob' }],
+      at: '2026-01-01T11:00:00Z',
     });
     expect(a2).toEqual({
       id: 'A2',
@@ -82,6 +83,7 @@ describe('rowsFor', () => {
       initiative: undefined,
       details: ['asked just now', 'asker stopped'],
       actors: [{ role: 'asked by', handle: 'sue', wayBack: undefined }],
+      at: '2026-01-01T11:59:50Z',
     });
   });
 
@@ -120,6 +122,7 @@ describe('rowsFor', () => {
         { role: 'done by', handle: 'bob', wayBack: 'ralphctl status bob' },
         { role: 'last lease', handle: 'sue', wayBack: undefined },
       ],
+      at: '2026-01-01T10:00:00Z',
     });
     expect(noOutcome!.details).toEqual(['done just now']);
     expect(noOutcome!.actors.map((a) => a.role)).toEqual(['done by', 'last lease']);
@@ -136,6 +139,7 @@ describe('rowsFor', () => {
         initiative: 'aa',
         details: ['ride', 'expired 3 hours ago'],
         actors: [{ role: 'held by', handle: 'bob', wayBack: 'ralphctl status bob' }],
+        at: '2026-01-01T09:00:00Z',
       },
     ]);
   });
@@ -163,6 +167,7 @@ describe('rowsFor', () => {
         { role: 'L1', handle: 'bob', wayBack: 'ralphctl status bob' },
         { role: 'L2', handle: 'sue', wayBack: undefined },
       ],
+      at: undefined,
     });
     expect(one!.href).toBe('#/t/aa-1');
   });

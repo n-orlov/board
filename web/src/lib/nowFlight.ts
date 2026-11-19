@@ -64,11 +64,25 @@ export interface FlightRow {
   initiative: string;
   href: string;
   leases: LeaseRow[];
+  /** When the newest of its live leases started: what the sort by time reads. */
+  at: string;
+  /** The handle that sorts first among the lease holders: what the sort by actor reads. */
+  by: string;
+}
+
+function newest(times: readonly string[]): string {
+  return times.reduce((a, b) => (a === '' || Date.parse(b) > Date.parse(a) ? b : a), '');
+}
+
+function firstHandle(handles: readonly string[]): string {
+  return handles.reduce((a, b) => (a === '' || b.localeCompare(a, undefined, { sensitivity: 'base' }) < 0 ? b : a), '');
 }
 
 /** The In flight rows in the server's order (the task whose newest live lease started last first); `now` phrases the TTLs. */
 export function flightRows(items: readonly InFlight[], now: Date): FlightRow[] {
   return items.map((item) => ({
+    at: newest(item.leases.map((l) => l.started_at)),
+    by: firstHandle(item.leases.map((l) => l.holder.handle)),
     task: item.task.task,
     title: item.task.title,
     initiative: item.task.initiative,
@@ -88,6 +102,8 @@ export interface RecentRow {
   /** The event's own summary. */
   summary: string;
   at: string;
+  /** The handle of the actor who wrote the last event: what the sort by actor reads. */
+  by: string;
 }
 
 /** The Recently touched rows in the server's order (latest event first). */
@@ -100,5 +116,6 @@ export function recentRows(items: readonly Recent[], now: Date): RecentRow[] {
     last: `${item.last_event.type} by ${item.last_event.actor.handle} ${relativeTime(item.last_event.at, now)}`,
     summary: item.last_event.summary,
     at: item.last_event.at,
+    by: item.last_event.actor.handle,
   }));
 }

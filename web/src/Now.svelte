@@ -7,6 +7,7 @@
   import TaskCloseForm from './TaskCloseForm.svelte';
   import TaskNoteForm from './TaskNoteForm.svelte';
   import SegmentedRadio from './SegmentedRadio.svelte';
+  import SortControl from './SortControl.svelte';
   import Toast from './Toast.svelte';
   import {
     ActionsApi,
@@ -51,11 +52,13 @@
     type Layout,
   } from './lib/nowBands';
   import { live } from './lib/live';
+  import { NOW_CHOICES, NOW_COLUMNS, loadOrder, orderToSort, saveOrder, sortByOrder, sortToOrder, type NowOrder } from './lib/nowSort';
   import { WINDOWS, flightRows, loadWindow, recentRows, saveWindow, type NowWindow } from './lib/nowFlight';
   import { absoluteTime } from './lib/format';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
   import type { Resolution } from './lib/tasks';
+  import type { SortState } from './lib/tableSort';
   import { currentViewEnv, FilterTurns } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
@@ -181,6 +184,13 @@
     void store.setWindow(next);
   }
 
+  // The one sort of the page: it orders the rows inside every band and both right-hand lists, and is remembered per browser.
+  let order: NowOrder = $state(loadOrder(viewEnv.storage));
+  function chooseOrder(sort: SortState) {
+    order = sortToOrder(sort);
+    saveOrder(viewEnv.storage, order);
+  }
+
   function toggle(band: BandInfo, open: boolean) {
     prefs = withChoice(prefs, band.key, layout, open);
     saveBandPrefs(viewEnv.storage, prefs);
@@ -211,6 +221,10 @@
     <ChipFilter tags={tagChoices} initiatives={initiativeSlugs} value={view.filter} onchange={setChips} />
   </div>
 
+  <div class="mb-4" data-testid="now-sort">
+    <SortControl columns={NOW_COLUMNS} choices={NOW_CHOICES} sort={orderToSort(order)} onsort={chooseOrder} />
+  </div>
+
   {#if view.error !== undefined}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
   {/if}
@@ -226,14 +240,14 @@
     {/if}
   {:else}
     {@const data = view.attention}
-    {@const flight = flightRows(view.flight ?? [], now)}
-    {@const recent = recentRows(view.recent ?? [], now)}
+    {@const flight = sortByOrder(flightRows(view.flight ?? [], now), order, (r) => r)}
+    {@const recent = sortByOrder(recentRows(view.recent ?? [], now), order, (r) => r)}
     <div class="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
     <section aria-labelledby="needs-heading" class="min-w-0" data-testid="now-needs">
       <h3 id="needs-heading" class="mb-3 text-lg font-semibold">Needs me</h3>
       <div class="flex flex-col gap-3" data-testid="now-bands">
         {#each BANDS as band (band.key)}
-          {@const rows = bandRows(band, data, now)}
+          {@const rows = sortByOrder(bandRows(band, data, now), order, (r) => ({ at: r.row.at, by: r.row.actors[0]?.handle }))}
           {@const count = bandCount(data.counts, band)}
           {@const open = isOpen(prefs, band.key, layout, count)}
           <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid="band-{band.key}" data-open={open}>
