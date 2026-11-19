@@ -14,10 +14,14 @@ It is tool-agnostic: agents take part by following a skill and identify themselv
 from their own environment. The server has no integration with any particular
 agent tool or job runner.
 
-Status: **Phases 0 to 4 are shipped**: the server, the CLI and the web UI (attention-first views,
+Status: **Phases 0 to 4 are shipped, and Phase 5 is built**: the server, the CLI and the web UI (attention-first views,
 Timeline, Actors, Archive), leases, asks, notes, alerts to a notifier URL, the shortcut commands
 (`vh start`, `vh finish`, `vh ping`, `vh catchup`), the installer script, `vh update` and the release
-pipeline. Not yet served: `/metrics`, `?view=compact`, `VH_BASE_PATH`, `VH_LOG_LEVEL` and `vh backup`.
+pipeline. Phase 5 (Village Hall) adds the **Now** view (the Attention page's successor: "Needs me", "In flight" with
+nested leases, nav badges), one display system on every list page (density and theme switches, one chip filter, one
+sort control, one colour per tag), a Timeline that finds active work, per-task tags (agent, operator and derived
+actor-kind tags) and a multi-operator foundation (several operators, owned API keys, an origin operator on every agent
+and event). Deploying it is the operator's. Not yet served: `/metrics`, `?view=compact`, `VH_BASE_PATH`, `VH_LOG_LEVEL` and `vh backup`.
 [SPEC.md](SPEC.md) is the full
 specification:
 
