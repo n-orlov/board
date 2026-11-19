@@ -380,19 +380,23 @@
       ><input type="checkbox" class="size-4" checked={onlyActive} onchange={(e) => setOnlyActive(e.currentTarget.checked)} /> Only active
       <span class="text-text-muted">({activeCount})</span></label
     >
-    <span class="inline-flex items-center gap-1 text-xs text-text-muted" role="group" aria-label="Recently touched within"
-      >touched in
-      {#each WINDOWS as w (w)}
-        <button type="button" class="vh-tag" aria-pressed={recent === w} style="--h: 210" onclick={() => setRecent(w)}>{w}</button>
-      {/each}
-    </span>
+    {#if onlyActive || sortBy === 'active'}
+      <span class="inline-flex items-center gap-1 text-xs text-text-muted" role="group" aria-label="Recently touched within"
+        >touched in
+        {#each WINDOWS as w (w)}
+          <button type="button" class="vh-tag" aria-pressed={recent === w} style="--h: 210" onclick={() => setRecent(w)}>{w}</button>
+        {/each}
+      </span>
+    {/if}
     {#if isFiltered(view.filter) || clientTags.length > 0 || onlyActive}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
   </div>
   <div class="mb-4 rounded-lg border border-border bg-surface-raised px-3 py-2" data-testid="timeline-chips">
     <ChipFilter tags={chipTags} initiatives={slugs} value={chipValue} onchange={setChips} />
-    <p class="mt-1 text-xs text-text-muted">Active = a live lease, needs attention, or touched in the last {recent}. Active rows are marked in the chart; prototype filters run in this browser.</p>
+    {#if onlyActive || sortBy === 'active'}
+      <p class="mt-1 text-xs text-text-muted">Active = a live lease, needs attention, or touched in the last {recent}. Active rows are marked in the chart; prototype filters run in this browser.</p>
+    {/if}
   </div>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="timeline-error">{view.error}</p>
