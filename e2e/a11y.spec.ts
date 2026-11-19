@@ -614,9 +614,9 @@ async function seedPhase3(playwright: PlaywrightTestArgs['playwright'], baseURL:
 
 const needsRow = (page: Page, ref: string) => page.locator(`[data-testid=needs-row][data-ref="${ref}"]`);
 
-// The table is sorted as the URL says: at the phone the Sort select holds `<column>:<dir>`, from 768 px the column's th carries aria-sort.
-async function expectSorted(page: Page, column: string, dir: 'asc' | 'desc') {
-  if ((page.viewportSize()?.width ?? 0) < 768) {
+// The table is sorted as the URL says: on Tasks (the shared sort control, `shared`) and at the phone the Sort select holds `<column>:<dir>`, from 768 px the column's th carries aria-sort.
+async function expectSorted(page: Page, column: string, dir: 'asc' | 'desc', shared = false) {
+  if (shared || (page.viewportSize()?.width ?? 0) < 768) {
     await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:${dir}`);
   } else {
     await expect(page.getByTestId(`sort-${column}`).locator('xpath=..')).toHaveAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
@@ -768,7 +768,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page, seed) => {
       await page.goto(`/#/tasks?initiative=${P3_SLUG}&sort=holder&dir=desc`);
       await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
-      await expectSorted(page, 'holder', 'desc');
+      await expectSorted(page, 'holder', 'desc', true);
     },
   },
   {

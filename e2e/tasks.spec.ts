@@ -1,4 +1,5 @@
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives, pickInitiative } from './chips';
 
 // Signs in through the mock provider, so no API key rides along (see login.spec.ts).
 // The Tasks view `#/tasks` (filters held in the fragment's query) and the New task dialog, opened from the Tasks
@@ -131,7 +132,7 @@ for (const vp of viewports) {
       await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
       await expect(page.getByTestId('status-filter')).toHaveValue('not-closed');
 
-      await page.getByTestId('initiative-filter').selectOption(slug);
+      await pickInitiative(page, slug);
       await expect.poll(async () => (await shownRefs(page)).sort()).toEqual([plain.ref, leased.ref, blocked.ref, watch.ref, done.ref].sort());
       await expect(page).toHaveURL(new RegExp(`#/tasks\\?initiative=${slug}$`));
 
@@ -162,7 +163,7 @@ for (const vp of viewports) {
       // The same filters after a reload: in the address, in the controls and in the rows.
       await expect(page).toHaveURL(new RegExp(`#/tasks\\?kind=work&initiative=${slug}&blocked=false&q=NEEDLE$`));
       await page.reload();
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(slug);
+      await expectInitiatives(page, [slug]);
       await expect(page.getByTestId('kind-filter')).toHaveValue('work');
       await expect(page.getByTestId('blocked-filter')).toHaveValue('no');
       await expect(page.getByTestId('text-filter')).toHaveValue('NEEDLE');

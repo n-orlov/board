@@ -18,7 +18,6 @@
     STATUS_OPTIONS,
     attentionHref,
     flagOptions,
-    initiativeOptions,
     isFiltered,
     needsFilterQuery,
     type FlagName,
@@ -27,8 +26,9 @@
   import { TasksApi, TasksStore, affectsTasks, type TasksState } from './lib/tasks';
   import { live } from './lib/live';
   import { onDestroy, untrack } from 'svelte';
-  import SortHeader from './SortHeader.svelte';
-  import SortSelect from './SortSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import SortControl from './SortControl.svelte';
+  import { mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
   import {
     TASKS_VIEW,
@@ -52,10 +52,12 @@
   const opened = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(window.location.hash)));
   const initial = opened.filter;
   // A restored initiative may have been deleted since: the first fetch waits for the list of initiatives to drop it.
-  const restoredInitiative = bare && initial.initiative !== '';
+  const restoredInitiative = bare && initial.initiatives.length > 0;
   let sort: SortState = $state(opened.sort);
   let view: TasksState = $state({ tasks: [], filter: initial, loading: true, error: undefined });
   let initiatives: string[] = $state([]);
+  // The tag chips on offer: every tag seen on the tasks read so far (a filtered list only holds what it matches) plus the chosen ones.
+  let tagChoices: TagChoice[] = $state([]);
   // Whether the list answered: an empty answer still drops a restored initiative, only a failed lookup keeps it.
   let listAnswered = false;
   let formOpen = $state(false);
@@ -109,6 +111,12 @@
     return live().subscribe(affectsTasks, () => (turns.hasRead() ? Promise.all([store.refresh(), reloadNeeds()]) : undefined));
   });
 
+  $effect(() => {
+    const marks = [...view.tasks, ...needsView.needs.items].flatMap((task) => task.tag_marks);
+    const chosen = view.filter.tags;
+    tagChoices = untrack(() => mergeChoices(tagChoices, marks, chosen));
+  });
+
   // The filters and the sort live in the fragment and in the saved query: a change fetches (the sort only reorders).
   function apply(filter: TasksFilter) {
     turns.begin();
@@ -142,9 +150,9 @@
     let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
     const current = turns.begin();
     // A restored initiative waits for the board's list like the first one does; a link's own query does not.
-    if (restoring && next.filter.initiative !== '') await listed;
+    if (restoring && next.filter.initiatives.length > 0) await listed;
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    if (restoring && listAnswered && next.filter.initiative !== '') {
+    if (restoring && listAnswered && next.filter.initiatives.length > 0) {
       next = dropUnknownInitiative(next, initiatives);
       persist(next);
     }
@@ -155,6 +163,7 @@
     void reloadNeeds();
   }
 
+  const setChips = (chips: ChipState) => apply({ ...view.filter, ...chips });
   const setFlag = (name: FlagName, value: string) => apply({ ...view.filter, [name]: value });
   const needs = $derived(needsView.needs);
   const needsRows = $derived(taskRows(needs.items, 'all'));
@@ -200,7 +209,6 @@
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="task-filters">
     <FilterSelect label="Status" options={STATUS_OPTIONS} value={view.filter.status} onchange={(v) => apply({ ...view.filter, status: v })} testid="status-filter" />
     <FilterSelect label="Kind" options={KIND_OPTIONS} value={view.filter.kind} onchange={(v) => apply({ ...view.filter, kind: v })} testid="kind-filter" />
-    <FilterSelect label="Initiative" options={initiativeOptions(initiatives, view.filter.initiative)} value={view.filter.initiative} onchange={(v) => apply({ ...view.filter, initiative: v })} testid="initiative-filter" />
     <FilterSelect label="Active" options={flagOptions('active')} value={view.filter.active} onchange={(v) => setFlag('active', v)} testid="active-filter" />
     <FilterSelect label="Blocked" options={flagOptions('blocked')} value={view.filter.blocked} onchange={(v) => setFlag('blocked', v)} testid="blocked-filter" />
     <FilterSelect label="Overdue" options={flagOptions('overdue')} value={view.filter.overdue} onchange={(v) => setFlag('overdue', v)} testid="overdue-filter" />
@@ -215,10 +223,14 @@
         onchange={(e) => apply({ ...view.filter, text: e.currentTarget.value.trim() })}
       />
     </label>
-    <SortSelect columns={TASK_SORT_LABELS} {sort} onsort={setSort} />
+    <SortControl columns={TASK_SORT_LABELS} {sort} onsort={setSort} />
     {#if isFiltered(view.filter)}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
+  </div>
+
+  <div class="mb-4">
+    <ChipFilter tags={tagChoices} {initiatives} value={{ tags: view.filter.tags, initiatives: view.filter.initiatives }} onchange={setChips} />
   </div>
 
   {#if view.error !== undefined}
@@ -252,13 +264,13 @@
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <SortHeader column="ref" label="Ref" {sort} onsort={setSort} class="{head} md:w-32" />
-          <SortHeader column="title" label="Title" {sort} onsort={setSort} class={head} />
-          <SortHeader column="initiative" label="Initiative" {sort} onsort={setSort} class="{head} md:w-32" />
-          <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-20" />
-          <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{head} md:w-24" />
-          <SortHeader column="flags" label="Flags" {sort} onsort={setSort} class="{head} md:w-1/6" />
-          <SortHeader column="holder" label="Lease holder" {sort} onsort={setSort} class="{head} md:w-28" />
+          <th scope="col" class="{head} md:w-32">Ref</th>
+          <th scope="col" class={head}>Title</th>
+          <th scope="col" class="{head} md:w-32">Initiative</th>
+          <th scope="col" class="{head} md:w-20">Kind</th>
+          <th scope="col" class="{head} md:w-24">Status</th>
+          <th scope="col" class="{head} md:w-1/6">Flags</th>
+          <th scope="col" class="{head} md:w-28">Lease holder</th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">

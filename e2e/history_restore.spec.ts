@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives, pickInitiative } from './chips';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
@@ -90,6 +91,8 @@ interface Route {
   /** Where the link followed lands. */
   landing: RegExp;
   sortColumn?: string;
+  /** The page sorts through the shared sort control (a select at every width), not through its column headers. */
+  sharedSort?: boolean;
   /** Leaves the page, for a route whose rows hold no link (the API keys table): the page is left by the navigation. */
   leave?: (page: Page) => Promise<void>;
   /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table, the Attention view its chips). */
@@ -104,7 +107,7 @@ async function backAndForward(page: Page, route: Route, left: Left, phone: boole
     await expect.poll(() => route.rows(page), FIVE_SECONDS).toEqual(left.rows);
     await expect.poll(async () => Math.abs((await scrollY(page)) - left.scrollY), FIVE_SECONDS).toBeLessThanOrEqual(2);
     if (route.sortColumn !== undefined) {
-      expect(await shownSort(page, phone, route.sortColumn)).toBe(left.sort);
+      expect(await shownSort(page, phone || route.sharedSort === true, route.sortColumn)).toBe(left.sort);
       expect(queryOf(page).get('sort')).toBe(route.sortColumn);
       expect(queryOf(page).get('dir')).toBe('desc');
     }
@@ -121,7 +124,7 @@ async function backAndForward(page: Page, route: Route, left: Left, phone: boole
 async function leaveAndReturn(page: Page, route: Route, phone: boolean) {
   await scrollDown(page, (await route.scrollTo?.(page)) ?? SCROLL_TO);
   const rows = await route.rows(page);
-  const sort = route.sortColumn === undefined ? undefined : await shownSort(page, phone, route.sortColumn);
+  const sort = route.sortColumn === undefined ? undefined : await shownSort(page, phone || route.sharedSort === true, route.sortColumn);
   const left: Left = { scrollY: await scrollY(page), fragment: fragment(page), rows, sort };
   const before = route.leave === undefined ? await followVisibleLink(page, route.links(page)) : await leaveBy(page, route.leave);
   expect(Math.abs(before - left.scrollY)).toBeLessThanOrEqual(2);
@@ -252,12 +255,12 @@ for (const vp of viewports) {
       const own = (p: Page) => p.getByTestId('task-title').allTextContents();
 
       await page.goto('/#/tasks');
-      await page.getByTestId('initiative-filter').selectOption(slug);
+      await pickInitiative(page, slug);
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(18);
       const byDefault = await own(page);
       await page.getByTestId('status-filter').selectOption('all');
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(20);
-      await sortBy(page, phone, 'title', 'desc');
+      await sortBy(page, true, 'title', 'desc');
       await expect(page).toHaveURL((url) => new URLSearchParams(url.hash.split('?')[1] ?? '').get('sort') === 'title');
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual([...byDefault, ...titles.slice(2, 4).map((t) => `${t} ${slug}`)]);
@@ -266,7 +269,7 @@ for (const vp of viewports) {
       const route: Route = {
         rows: own,
         shown: async (p) => {
-          await expect(p.getByTestId('initiative-filter')).toHaveValue(slug, FIVE_SECONDS);
+          await expectInitiatives(p, [slug]);
           await expect(p.getByTestId('status-filter')).toHaveValue('all');
           expect(queryOf(p).get('status')).toBe('all');
           expect(queryOf(p).get('initiative')).toBe(slug);
@@ -274,6 +277,7 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('task-ref').locator('a'),
         landing: /#\/t\//,
         sortColumn: 'title',
+        sharedSort: true,
         // The first row sits 300 px below the top of the window, clear of the bars, wherever the Now panel above it ends.
         scrollTo: (p) => p.getByTestId('task-row').first().evaluate((row) => Math.round(row.getBoundingClientRect().top + window.scrollY) - 300),
       };

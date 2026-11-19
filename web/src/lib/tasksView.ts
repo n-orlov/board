@@ -23,7 +23,7 @@ export const TASK_COLUMNS: Columns<TaskRow> = {
 /** The column names, in the order of the table. */
 export const TASK_SORT_COLUMNS: readonly string[] = Object.keys(TASK_COLUMNS);
 
-/** The choices of the phone's Sort select: a label for each column. */
+/** The choices of the shared sort control: a label for each column. */
 export const TASK_SORT_LABELS: readonly { column: string; label: string }[] = [
   { column: 'ref', label: 'Ref' },
   { column: 'title', label: 'Title' },
@@ -63,11 +63,11 @@ export function viewFromHash(hash: string): TasksViewState {
 }
 
 /**
- * A restored state without the initiative the board no longer has (deleted since it was saved): that filter goes back to
- * "any initiative" so the table is not an empty list under a filter nobody can see. The other values were already
- * checked when the query was read.
+ * A restored state without the initiatives the board no longer has (deleted since it was saved): those chips go, so the table
+ * is not an empty list under a filter nobody can see. The other values were already checked when the query was read.
  */
 export function dropUnknownInitiative(state: TasksViewState, slugs: readonly string[]): TasksViewState {
-  if (state.filter.initiative === '' || slugs.includes(state.filter.initiative)) return state;
-  return { ...state, filter: { ...state.filter, initiative: '' } };
+  const kept = state.filter.initiatives.filter((slug) => slugs.includes(slug));
+  if (kept.length === state.filter.initiatives.length) return state;
+  return { ...state, filter: { ...state.filter, initiatives: kept } };
 }

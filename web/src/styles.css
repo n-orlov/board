@@ -181,6 +181,58 @@ summary:focus-visible,
 }
 
 /*
+ * Tag chips (lib/chipFilter.ts `tagHue`): `--h` is a hue from the FNV-1a hash of the tag text, the same in both themes.
+ * Light and dark each get a pastel background with a dark (or light) text of that hue, so every tag stays legible.
+ * The source is told by the border as well as by words: an actor kind is dashed, a task's own tag dotted.
+ */
+.vh-tag {
+  --h: 210;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid hsl(var(--h) 45% 78%);
+  border-radius: 999px;
+  background: hsl(var(--h) 75% 92%);
+  color: hsl(var(--h) 55% 24%);
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+.vh-tag[data-source='actor'] {
+  border-style: dashed;
+}
+.vh-tag[data-source='task'] {
+  border-style: dotted;
+  border-width: 2px;
+}
+button.vh-tag {
+  cursor: pointer;
+}
+button.vh-tag[aria-pressed='false'] {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+button.vh-tag[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px hsl(var(--h) 55% 45%);
+  font-weight: 600;
+}
+[data-theme='dark'] .vh-tag {
+  border-color: hsl(var(--h) 30% 38%);
+  background: hsl(var(--h) 32% 22%);
+  color: hsl(var(--h) 75% 85%);
+}
+[data-theme='dark'] button.vh-tag[aria-pressed='false'] {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+[data-theme='dark'] button.vh-tag[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px hsl(var(--h) 70% 65%);
+}
+
+/*
  * Density (SPEC 11). Compact is the default: from 768 px the list pages (marked `.vh-dense`) drop the 44 px touch
  * minimum to 28 px (still above WCAG 2.5.8's 24 px) and the roomy cell padding. Sparse keeps the layout as it was,
  * and below 768 px both densities keep 44 px targets. `data-density` on <html> is set by lib/density.ts. These rules

@@ -8,7 +8,6 @@ import {
   filterFromQuery,
   filterToQuery,
   flagOptions,
-  initiativeOptions,
   isFiltered,
   needsFilterQuery,
   tasksHash,
@@ -35,7 +34,10 @@ describe('the URL fragment round trip, one field at a time', () => {
     ['status open', { status: 'open' }, 'status=open'],
     ['status all', { status: 'all' }, 'status=all'],
     ['kind', { kind: 'watch' }, 'kind=watch'],
-    ['initiative', { initiative: 'aa' }, 'initiative=aa'],
+    ['initiative', { initiatives: ['aa'] }, 'initiative=aa'],
+    ['initiatives, any of', { initiatives: ['aa', 'bb'] }, 'initiative=aa&initiative=bb'],
+    ['tag', { tags: ['x'] }, 'tag=x'],
+    ['tags, all of', { tags: ['x', 'y:z'] }, 'tag=x&tag=y%3Az'],
     ['active yes', { active: 'yes' }, 'active=true'],
     ['active no', { active: 'no' }, 'active=false'],
     ['blocked yes', { blocked: 'yes' }, 'blocked=true'],
@@ -56,9 +58,9 @@ describe('the URL fragment round trip, one field at a time', () => {
 
 describe('the URL fragment round trip', () => {
   it('keeps every field together, in a fixed order', () => {
-    const filter: TasksFilter = { status: 'closed', kind: 'work', initiative: 'bb', active: 'no', blocked: 'yes', overdue: 'no', attention: 'yes', text: 'a&b=c #1' };
+    const filter: TasksFilter = { status: 'closed', kind: 'work', initiatives: ['bb', 'cc'], tags: ['t1', 't2'], active: 'no', blocked: 'yes', overdue: 'no', attention: 'yes', text: 'a&b=c #1' };
     const query = filterToQuery(filter);
-    expect(query).toBe('status=closed&kind=work&initiative=bb&active=false&blocked=true&overdue=false&attention=true&q=a%26b%3Dc+%231');
+    expect(query).toBe('status=closed&kind=work&initiative=bb&initiative=cc&tag=t1&tag=t2&active=false&blocked=true&overdue=false&attention=true&q=a%26b%3Dc+%231');
     expect(filterFromHash(`#/tasks?${query}`)).toEqual(filter);
   });
   it('keeps non-ASCII text', () => {
@@ -81,8 +83,8 @@ describe('the API query', () => {
     expect(apiQuery(DEFAULT_TASKS_FILTER).toString()).toBe('status=not_closed');
   });
   it('sends the fields that are set', () => {
-    const filter: TasksFilter = { status: 'all', kind: 'watch', initiative: 'aa', active: 'yes', blocked: 'no', overdue: 'yes', attention: 'no', text: 'x y' };
-    expect(apiQuery(filter).toString()).toBe('status=all&kind=watch&initiative=aa&active=true&blocked=false&overdue=true&attention=false&q=x+y');
+    const filter: TasksFilter = { status: 'all', kind: 'watch', initiatives: ['aa'], tags: ['t'], active: 'yes', blocked: 'no', overdue: 'yes', attention: 'no', text: 'x y' };
+    expect(apiQuery(filter).toString()).toBe('status=all&kind=watch&initiative=aa&tag=t&active=true&blocked=false&overdue=true&attention=false&q=x+y');
   });
   it('sends an explicit open status as it is', () => {
     expect(apiQuery(set({ status: 'open' })).get('status')).toBe('open');
@@ -96,22 +98,6 @@ describe('flagOptions', () => {
       { value: 'yes', label: 'Blocked' },
       { value: 'no', label: 'Not blocked' },
     ]);
-  });
-});
-
-describe('initiativeOptions', () => {
-  it('offers any initiative first, then the slugs sorted', () => {
-    expect(initiativeOptions(['bb', 'aa'], '')).toEqual([
-      { value: '', label: 'Any initiative' },
-      { value: 'aa', label: 'aa' },
-      { value: 'bb', label: 'bb' },
-    ]);
-  });
-
-  it('offers the initiative the URL names once, even when the list lacks it', () => {
-    expect(initiativeOptions(['aa'], 'zz').map((o) => o.value)).toEqual(['', 'aa', 'zz']);
-    expect(initiativeOptions(['aa'], 'aa').map((o) => o.value)).toEqual(['', 'aa']);
-    expect(initiativeOptions([], '').map((o) => o.value)).toEqual(['']);
   });
 });
 
@@ -134,7 +120,7 @@ describe('the attention filter', () => {
 
 describe('needsFilterQuery', () => {
   it('is the API query of the filter with attention=true', () => {
-    expect(needsFilterQuery(set({ initiative: 'aa', kind: 'work' }))!.toString()).toBe('status=not_closed&kind=work&initiative=aa&attention=true');
+    expect(needsFilterQuery(set({ initiatives: ['aa', 'bb'], tags: ['x'], kind: 'work' }))!.toString()).toBe('status=not_closed&kind=work&initiative=aa&initiative=bb&tag=x&attention=true');
     expect(needsFilterQuery(set({ attention: 'yes' }))!.toString()).toBe('status=not_closed&attention=true');
   });
   it('is null when the filter keeps only tasks that need nothing', () => {
@@ -145,6 +131,6 @@ describe('needsFilterQuery', () => {
 describe('attentionHref', () => {
   it('links to the Tasks view under the filter with attention=true', () => {
     expect(attentionHref(DEFAULT_TASKS_FILTER)).toBe('#/tasks?attention=true');
-    expect(attentionHref(set({ initiative: 'aa', status: 'all', attention: 'no' }))).toBe('#/tasks?status=all&initiative=aa&attention=true');
+    expect(attentionHref(set({ initiatives: ['aa'], status: 'all', attention: 'no' }))).toBe('#/tasks?status=all&initiative=aa&attention=true');
   });
 });

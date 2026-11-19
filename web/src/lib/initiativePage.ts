@@ -191,7 +191,7 @@ export function concerns(slug: string): (event: { initiative?: string }) => bool
 
 /** The Tasks view's filter that matches the initiative page's task filter on initiative `slug`. */
 function tasksFilterOf(slug: string, filter: TaskFilter) {
-  return { ...DEFAULT_TASKS_FILTER, initiative: slug, status: filter };
+  return { ...DEFAULT_TASKS_FILTER, initiatives: [slug], status: filter };
 }
 
 /** The query of the page's Needs attention section: its initiative's tasks under the page's task filter, with `attention=true`. */

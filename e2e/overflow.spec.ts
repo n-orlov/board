@@ -676,7 +676,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page, seed) => {
       await page.goto(`/#/tasks?initiative=${P3_SLUG}&sort=holder&dir=desc`);
       await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
-      await sortedHeader(page);
+      await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc'); // Tasks sorts through the shared sort control
     },
   },
   {

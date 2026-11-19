@@ -55,7 +55,7 @@ describe('sort <-> query encoding', () => {
   it('round-trips every sortable column in both directions', () => {
     for (const column of TASK_SORT_COLUMNS) {
       for (const dir of ['asc', 'desc'] as const) {
-        const state = { filter: { ...DEFAULT_TASKS_FILTER, initiative: 'board' }, sort: { column, dir } };
+        const state = { filter: { ...DEFAULT_TASKS_FILTER, initiatives: ['board'], tags: ['x'] }, sort: { column, dir } };
         expect(viewFromHash(viewHash(state))).toEqual(state);
       }
     }
@@ -169,19 +169,25 @@ describe('the columns', () => {
 
 describe('dropping a restored initiative the board no longer has', () => {
   const state = viewFromQuery('initiative=gone&kind=work&sort=ref&dir=desc');
+  const two = viewFromQuery('initiative=gone&initiative=board&tag=t');
 
   it('drops an unknown initiative and keeps the other filters and the sort', () => {
     const dropped = dropUnknownInitiative(state, ['board', 'other']);
-    expect(dropped.filter.initiative).toBe('');
+    expect(dropped.filter.initiatives).toEqual([]);
     expect(dropped.filter.kind).toBe('work');
     expect(dropped.sort).toEqual({ column: 'ref', dir: 'desc' });
     expect(viewToQuery(dropped)).toBe('kind=work&sort=ref&dir=desc');
+  });
+  it('drops only the unknown one of two and keeps the tags', () => {
+    const dropped = dropUnknownInitiative(two, ['board']);
+    expect(dropped.filter.initiatives).toEqual(['board']);
+    expect(dropped.filter.tags).toEqual(['t']);
   });
   it('keeps an initiative the board has', () => {
     expect(dropUnknownInitiative(state, ['gone'])).toBe(state);
   });
   it('drops the initiative when the board lists none (an empty answer is an answer)', () => {
-    expect(dropUnknownInitiative(state, []).filter.initiative).toBe('');
+    expect(dropUnknownInitiative(state, []).filter.initiatives).toEqual([]);
   });
   it('keeps a state with no initiative as it is', () => {
     const none = viewFromQuery('sort=ref');

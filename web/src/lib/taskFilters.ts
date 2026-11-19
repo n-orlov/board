@@ -1,6 +1,7 @@
-// The filters of the Tasks view (PRD R10): status, kind, initiative, active, blocked, overdue and a text search.
+// The filters of the Tasks view (PRD R10, R7): status, kind, the initiative and tag chips (lib/chipFilter.ts), active, blocked, overdue and a text search.
 // They live in the URL fragment's query (`#/tasks?status=done&kind=watch`) so a reload keeps them. This module
 // turns the filter into that query and back, and into the query of `GET /tasks`.
+import { chipsFromQuery, chipsToParams } from './chipFilter';
 import type { TaskFilter } from './initiativeFilters';
 
 export type TaskStatusFilter = TaskFilter | 'open';
@@ -12,8 +13,10 @@ export type FlagName = 'active' | 'blocked' | 'overdue' | 'attention';
 export interface TasksFilter {
   status: TaskStatusFilter;
   kind: TaskKindFilter;
-  /** An initiative slug; empty for every initiative. */
-  initiative: string;
+  /** The initiatives chosen (a task in any of them); empty for every initiative. */
+  initiatives: string[];
+  /** The tags chosen (a task must carry all of them); empty for no tag filter. */
+  tags: string[];
   active: FlagFilter;
   blocked: FlagFilter;
   overdue: FlagFilter;
@@ -26,7 +29,8 @@ export interface TasksFilter {
 export const DEFAULT_TASKS_FILTER: TasksFilter = {
   status: 'not-closed',
   kind: '',
-  initiative: '',
+  initiatives: [],
+  tags: [],
   active: '',
   blocked: '',
   overdue: '',
@@ -47,13 +51,6 @@ export const KIND_OPTIONS: readonly { value: TaskKindFilter; label: string }[] =
   { value: 'work', label: 'Work' },
   { value: 'watch', label: 'Watch' },
 ];
-
-/** The options of the initiative select: any, then each slug (the one the URL names too, when the list lacks it), sorted. */
-export function initiativeOptions(slugs: readonly string[], current: string): { value: string; label: string }[] {
-  const all = new Set(slugs);
-  if (current !== '') all.add(current);
-  return [{ value: '', label: 'Any initiative' }, ...[...all].sort().map((slug) => ({ value: slug, label: slug }))];
-}
 
 /** The options of a flag select: `noun` is the flag's own word ("active"). */
 export function flagOptions(noun: string): readonly { value: FlagFilter; label: string }[] {
@@ -92,7 +89,7 @@ export function filterFromQuery(query: string): TasksFilter {
   return {
     status: pick(STATUS_OPTIONS, params.get('status'), DEFAULT_TASKS_FILTER.status),
     kind: pick(KIND_OPTIONS, params.get('kind'), ''),
-    initiative: params.get('initiative') ?? '',
+    ...chipsFromQuery(query),
     active: flagFromParam(params.get('active')),
     blocked: flagFromParam(params.get('blocked')),
     overdue: flagFromParam(params.get('overdue')),
@@ -106,7 +103,7 @@ export function filterToQuery(filter: TasksFilter): string {
   const params = new URLSearchParams();
   if (filter.status !== DEFAULT_TASKS_FILTER.status) params.set('status', filter.status);
   if (filter.kind !== '') params.set('kind', filter.kind);
-  if (filter.initiative !== '') params.set('initiative', filter.initiative);
+  chipsToParams(params, filter);
   for (const flag of FLAGS) {
     if (filter[flag] !== '') params.set(flag, flagToParam(filter[flag]));
   }
@@ -130,7 +127,7 @@ export function filterFromHash(hash: string): TasksFilter {
 export function apiQuery(filter: TasksFilter): URLSearchParams {
   const params = new URLSearchParams({ status: filter.status === 'not-closed' ? 'not_closed' : filter.status });
   if (filter.kind !== '') params.set('kind', filter.kind);
-  if (filter.initiative !== '') params.set('initiative', filter.initiative);
+  chipsToParams(params, filter);
   for (const flag of FLAGS) {
     if (filter[flag] !== '') params.set(flag, flagToParam(filter[flag]));
   }
