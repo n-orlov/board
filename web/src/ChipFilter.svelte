@@ -1,6 +1,6 @@
 <script lang="ts">
   // The shared chip filter (lib/chipFilter.ts): tag chips (all of them must match), initiative chips (any of them) and
-  // the two kinds together. Every chip is a toggle button (`aria-pressed`) that names its source to a screen reader and
+  // the two kinds together. A view whose rows are not in an initiative (`withInitiatives={false}`) offers tags only. Every chip is a toggle button (`aria-pressed`) that names its source to a screen reader and
   // on hover. Phones fold the whole filter behind one line; wider screens show it open.
   import {
     chipName,
@@ -21,7 +21,8 @@
     initiatives,
     value,
     onchange,
-  }: { tags: readonly TagChoice[]; initiatives: readonly string[]; value: ChipState; onchange: (next: ChipState) => void } = $props();
+    withInitiatives = true,
+  }: { tags: readonly TagChoice[]; initiatives: readonly string[]; value: ChipState; onchange: (next: ChipState) => void; withInitiatives?: boolean } = $props();
 
   let open = $state(false);
   const wide = typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 768px)').matches;
@@ -40,7 +41,7 @@
     data-testid="chip-toggle"
     onclick={() => (shown = !shown)}
   >
-    <span class="font-medium">Filter</span><span class="text-text-muted">{chipSummary(value)}</span><span class="ml-auto text-text-muted" aria-hidden="true">{shown ? '▴' : '▾'}</span>
+    <span class="font-medium">Filter</span><span class="text-text-muted">{chipSummary(value, withInitiatives)}</span><span class="ml-auto text-text-muted" aria-hidden="true">{shown ? '▴' : '▾'}</span>
   </button>
   <div id="chip-filter-body" class="flex flex-col gap-2 {shown ? '' : 'hidden'} md:flex">
     {#if tags.length > 0}
@@ -63,7 +64,7 @@
         {/each}
       </div>
     {/if}
-    {#if slugs.length > 0}
+    {#if withInitiatives && slugs.length > 0}
       <div role="group" aria-label="Initiatives, a task in any of them" class="flex flex-wrap items-center gap-1.5" data-testid="chip-initiatives">
         <span class="w-20 shrink-0 text-xs text-text-muted" title="A task in any initiative chosen">Initiatives <span>any of</span></span>
         {#each slugsShown as slug (slug)}

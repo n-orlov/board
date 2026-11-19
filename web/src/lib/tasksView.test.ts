@@ -16,7 +16,7 @@ import {
 } from './tasksView';
 
 function row(over: Partial<TaskRow>): TaskRow {
-  return { id: over.ref ?? 'x', ref: 'a-1', initiative: 'a', title: 't', kind: 'work', status: 'open', badges: [], attention: [], holder: '', ...over };
+  return { id: over.ref ?? 'x', ref: 'a-1', initiative: 'a', title: 't', kind: 'work', status: 'open', badges: [], attention: [], holder: '', marks: [], ...over };
 }
 
 function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map<string, string> } {

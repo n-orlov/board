@@ -31,6 +31,7 @@ const task = (ref: string, extra: Partial<TaskListItem> = {}): TaskListItem =>
     overdue: false,
     live_leases: [],
     attention: [],
+    tag_marks: [],
     ...extra,
   }) as TaskListItem;
 
@@ -98,8 +99,8 @@ describe('taskRows', () => {
 
   it('keeps the tasks the filter shows, each with its badges and holder', () => {
     expect(taskRows(tasks, 'not-closed')).toEqual([
-      { id: 'id-aa-1', ref: 'aa-1', initiative: 'aa', title: 'Title aa-1', kind: 'work', status: 'open', badges: [{ key: 'active', label: 'active', tone: 'success' }], attention: [], holder: 'ann' },
-      { id: 'id-aa-2', ref: 'aa-2', initiative: 'aa', title: 'Title aa-2', kind: 'watch', status: 'done', badges: [{ key: 'overdue', label: 'overdue', tone: 'danger' }], attention: [], holder: '' },
+      { id: 'id-aa-1', ref: 'aa-1', initiative: 'aa', title: 'Title aa-1', kind: 'work', status: 'open', badges: [{ key: 'active', label: 'active', tone: 'success' }], attention: [], holder: 'ann', marks: [] },
+      { id: 'id-aa-2', ref: 'aa-2', initiative: 'aa', title: 'Title aa-2', kind: 'watch', status: 'done', badges: [{ key: 'overdue', label: 'overdue', tone: 'danger' }], attention: [], holder: '', marks: [] },
     ]);
     expect(taskRows(tasks, 'done').map((r) => r.ref)).toEqual(['aa-2']);
     expect(taskRows(tasks, 'closed').map((r) => r.ref)).toEqual(['aa-3']);
@@ -282,6 +283,17 @@ describe('the Needs attention section of the page', () => {
   it('reads the tasks of the initiative under the task filter with attention=true', () => {
     expect(pageNeedsQuery('aa', 'not-closed').toString()).toBe('status=not_closed&initiative=aa&attention=true');
     expect(pageNeedsQuery('aa', 'done').toString()).toBe('status=done&initiative=aa&attention=true');
+  });
+  it('rows carry the tag marks of their task, every source', () => {
+    const marks = [
+      { tag: 'ui', source: 'task' as const },
+      { tag: 'web', source: 'initiative' as const },
+    ];
+    expect(taskRows([task('aa-1', { tag_marks: marks })], 'all')[0]?.marks).toEqual(marks);
+  });
+  it('adds each tag chosen, so the section narrows with the table', () => {
+    expect(pageNeedsQuery('aa', 'not-closed', ['ui', 'api']).toString()).toBe('status=not_closed&initiative=aa&tag=ui&tag=api&attention=true');
+    expect(pageNeedsHref('aa', 'not-closed', ['ui'])).toBe('#/tasks?initiative=aa&tag=ui&attention=true');
   });
   it('links `+K more` to the Tasks view for that initiative and filter', () => {
     expect(pageNeedsHref('aa', 'not-closed')).toBe('#/tasks?initiative=aa&attention=true');

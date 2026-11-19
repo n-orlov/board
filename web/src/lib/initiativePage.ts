@@ -7,6 +7,7 @@ import { DEFAULT_TASK_FILTER, filterTasks, type TaskFilter } from './initiativeF
 import type { Initiative, InitiativeEdit, InitiativesApi, TaskListItem } from './initiatives';
 import { toPatch } from './initiatives';
 import { attentionBadges, type AttentionBadge } from './attention';
+import type { TagMark } from './chipFilter';
 import type { Tone } from './presentation';
 import { DEFAULT_TASKS_FILTER, attentionHref, needsFilterQuery } from './taskFilters';
 
@@ -76,6 +77,8 @@ export interface TaskRow {
   /** Why the task needs a person, one badge per reason; empty when it needs nothing. */
   attention: AttentionBadge[];
   holder: string;
+  /** Every tag of the task and where it comes from: its own, its initiative's, an actor kind's. */
+  marks: TagMark[];
 }
 
 /** The rows the page's tasks table shows under a filter, in the order the API gave them. */
@@ -90,6 +93,7 @@ export function taskRows(tasks: readonly TaskListItem[], filter: TaskFilter): Ta
     badges: taskBadges(task),
     attention: attentionBadges(task.attention),
     holder: leaseHolder(task),
+    marks: task.tag_marks,
   }));
 }
 
@@ -190,16 +194,16 @@ export function concerns(slug: string): (event: { initiative?: string }) => bool
 }
 
 /** The Tasks view's filter that matches the initiative page's task filter on initiative `slug`. */
-function tasksFilterOf(slug: string, filter: TaskFilter) {
-  return { ...DEFAULT_TASKS_FILTER, initiatives: [slug], status: filter };
+function tasksFilterOf(slug: string, filter: TaskFilter, tags: readonly string[]) {
+  return { ...DEFAULT_TASKS_FILTER, initiatives: [slug], status: filter, tags: [...tags] };
 }
 
 /** The query of the page's Needs attention section: its initiative's tasks under the page's task filter, with `attention=true`. */
-export function pageNeedsQuery(slug: string, filter: TaskFilter): URLSearchParams {
-  return needsFilterQuery(tasksFilterOf(slug, filter))!;
+export function pageNeedsQuery(slug: string, filter: TaskFilter, tags: readonly string[] = []): URLSearchParams {
+  return needsFilterQuery(tasksFilterOf(slug, filter, tags))!;
 }
 
 /** The fragment of the Tasks view that lists the initiative's tasks that need attention (what `+K more` links to). */
-export function pageNeedsHref(slug: string, filter: TaskFilter): string {
-  return attentionHref(tasksFilterOf(slug, filter));
+export function pageNeedsHref(slug: string, filter: TaskFilter, tags: readonly string[] = []): string {
+  return attentionHref(tasksFilterOf(slug, filter, tags));
 }

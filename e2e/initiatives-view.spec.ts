@@ -1,7 +1,7 @@
-import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Initiatives view's sort and saved view state (PRD R16, SPEC 11): the table sorts by Title (text), Status (status),
-// Tags (text), Tasks (number) and Created (time) through the shared header (desktop, with the keyboard) and the Sort select (phone); the sort rides in the
+// The Initiatives view's sort and saved view state (PRD R16, R7, SPEC 11): the table sorts by Title (text), Status (status),
+// Tags (text), Tasks (number) and Created (time) through the shared sort control (a select at every width, with the keyboard); the sort rides in the
 // fragment query next to the status filter; the whole query is saved under `vh.view.v1.initiatives` and restored on a
 // bare `#/initiatives` with one fetch; a fragment with its own query wins; Clear filters forgets it all. The board is shared
 // with every other spec, so each test seeds initiatives of its own and reads only those rows.
@@ -44,7 +44,6 @@ const goTo = async (page: Page, label: string) => {
   await nav(page).getByRole('link', { name: label }).click();
 };
 const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 
 // The list fetches a page sends: the first page of each (a long list on the shared board is read in further pages, which are the same fetch).
@@ -57,16 +56,9 @@ function listReads(page: Page) {
   return reads;
 }
 
-async function sortBy(page: Page, phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
-  if (phone) {
-    await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
-  } else {
-    // The header cycles none -> ascending -> descending -> none: click until the target is reached.
-    const cycle = ['none', 'ascending', 'descending'];
-    const now = cycle.indexOf((await th(page, column).getAttribute('aria-sort')) ?? 'none');
-    const target = cycle.indexOf(dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
-    for (let i = 0; i < (target - now + 3) % 3; i++) await page.getByTestId(`sort-${column}`).click();
-  }
+// The shared sort control is one select at every width; `phone` stays in the signature so the tests read as before.
+async function sortBy(page: Page, _phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
+  await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
 }
 
 for (const vp of viewports) {
@@ -93,33 +85,33 @@ for (const vp of viewports) {
 
       await page.goto('/#/initiatives?status=all');
       await expect.poll(() => ownRows(page, prefix)).toHaveLength(4);
-      for (const column of ['tags', 'tasks']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['tags', 'tasks']) await expect(page.getByTestId('sort-select')).not.toHaveValue(new RegExp(`^${column}:`));
 
       // Tags is text, case-insensitive; the untagged initiative sits last whichever the direction.
       await sortBy(page, phone, 'tags', 'asc');
-      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tags:asc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([mid, few, big, plain]);
       await expect(page).toHaveURL(endsWith('#/initiatives?status=all&sort=tags&dir=asc'));
       await sortBy(page, phone, 'tags', 'desc');
-      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tags:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([big, few, mid, plain]);
 
       // Tasks is a number: 9 sorts before 10, an initiative with no tasks first ascending and last descending.
       await sortBy(page, phone, 'tasks', 'asc');
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'tags')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tasks:asc');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^tags:/);
       await expect.poll(() => ownRows(page, prefix)).toEqual([plain, few, mid, big]);
       await sortBy(page, phone, 'tasks', 'desc');
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tasks:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([big, mid, few, plain]);
       expect((await saved(page)).query).toBe('status=all&sort=tasks&dir=desc');
 
       await page.reload();
       await expect.poll(() => ownRows(page, prefix)).toEqual([big, mid, few, plain]);
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tasks:desc');
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('tasks:desc');
       await sortBy(page, phone, 'tasks', null);
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^tasks:/);
       await api.dispose();
     });
 
@@ -153,10 +145,10 @@ for (const vp of viewports) {
 
       // Tasks: every initiative has one task, so either direction keeps the default order.
       await sortBy(page, phone, 'tasks', 'asc');
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tasks:asc');
       await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
       await sortBy(page, phone, 'tasks', 'desc');
-      await expect(th(page, 'tasks')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('tasks:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
 
       // A saved Tags sort and a saved Tasks sort each come back on a bare #/initiatives after a visit to Tasks.
@@ -169,13 +161,12 @@ for (const vp of viewports) {
         await goTo(page, 'Initiatives');
         await expect(page.getByTestId('initiative-row').first()).toBeVisible();
         await expect(page).toHaveURL(endsWith(`#/initiatives?${query}`));
-        await expect(th(page, column)).toHaveAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
-        if (phone) await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:${dir}`);
+        await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:${dir}`);
       }
       await api.dispose();
     });
 
-    test('sorting by one column of each type (text, status, time) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
+    test('sorting by one column of each type (text, status, time) orders the rows and shows it in the shared sort control, and the third step is the default', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { prefix, slugs } = await seed(api, `e2e-iv-sort-${vp.name}`);
       const [mango, apple, zebra, cherry] = slugs;
@@ -183,40 +174,39 @@ for (const vp of viewports) {
       await page.goto('/#/initiatives?status=all');
       await expect.poll(() => ownRows(page, prefix)).toHaveLength(4);
       const byDefault = await ownRows(page, prefix);
-      if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
-      else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toBeVisible();
+      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(page.getByTestId('sort-select')).not.toHaveValue(new RegExp(`^${column}:`));
 
       // text: title ascending ignores case, descending reverses it.
       await sortBy(page, phone, 'title', 'asc');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:asc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([apple, cherry, mango, zebra]);
       await expect(page).toHaveURL(endsWith('#/initiatives?status=all&sort=title&dir=asc'));
       await sortBy(page, phone, 'title', 'desc');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([zebra, mango, cherry, apple]);
 
       // status: open before closed ascending (ties keep the default order), closed first descending.
       await sortBy(page, phone, 'status', 'asc');
-      await expect(th(page, 'status')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('status:asc');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^title:/);
       await expect.poll(() => ownRows(page, prefix)).toEqual([...byDefault.filter((s) => s !== zebra), zebra]);
       await sortBy(page, phone, 'status', 'desc');
-      await expect(th(page, 'status')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('status:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([zebra, ...byDefault.filter((s) => s !== zebra)]);
 
       // time: the creation order ascending, the reverse descending.
       await sortBy(page, phone, 'created', 'asc');
-      await expect(th(page, 'created')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('created:asc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([mango, apple, zebra, cherry]);
       await sortBy(page, phone, 'created', 'desc');
-      await expect(th(page, 'created')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('created:desc');
       await expect.poll(() => ownRows(page, prefix)).toEqual([cherry, zebra, apple, mango]);
       await expect(page).toHaveURL(endsWith('#/initiatives?status=all&sort=created&dir=desc'));
 
       // Third step: back to the default order, and the sort is gone from the fragment and from the saved query.
       await sortBy(page, phone, 'created', null);
-      await expect(th(page, 'created')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^created:/);
       await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
       await expect(page).toHaveURL(endsWith('#/initiatives?status=all'));
       expect((await saved(page)).query).toBe('status=all');
@@ -248,7 +238,7 @@ for (const vp of viewports) {
       await expect.poll(() => ownRows(page, prefix)).toEqual(expected);
       await expect(page).toHaveURL(endsWith(`#/initiatives?${query}`));
       await expect(page.getByTestId('initiative-filter')).toHaveValue('all');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       expect(reads.count).toBe(1);
 
@@ -260,7 +250,7 @@ for (const vp of viewports) {
       await expect.poll(() => ownRows(second, prefix)).toEqual(expected);
       await expect(second).toHaveURL(endsWith(`#/initiatives?${query}`));
       await expect(second.getByTestId('initiative-filter')).toHaveValue('all');
-      await expect(th(second, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(second.getByTestId('sort-select')).toHaveValue('title:desc');
       expect(secondReads.count).toBe(1);
       await second.close();
       await api.dispose();
@@ -278,7 +268,7 @@ for (const vp of viewports) {
       const link = await page.context().newPage();
       await link.goto('/#/initiatives?status=closed&sort=created&dir=desc');
       await expect(link.getByTestId('initiative-filter')).toHaveValue('closed');
-      await expect(th(link, 'created')).toHaveAttribute('aria-sort', 'descending');
+      await expect(link.getByTestId('sort-select')).toHaveValue('created:desc');
       await expect.poll(() => ownRows(link, prefix)).toEqual([zebra]);
       expect((await saved(link)).query).toBe('status=closed&sort=created&dir=desc');
 
@@ -286,14 +276,14 @@ for (const vp of viewports) {
       await expect(link.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
       await goTo(link, 'Initiatives');
       await expect(link.getByTestId('initiative-filter')).toHaveValue('closed');
-      await expect(th(link, 'created')).toHaveAttribute('aria-sort', 'descending');
+      await expect(link.getByTestId('sort-select')).toHaveValue('created:desc');
       await expect.poll(() => ownRows(link, prefix)).toEqual([zebra]);
 
       // Clear filters: the defaults at once, nothing saved, and the defaults again after nav away and back.
       await link.getByTestId('clear-filters').click();
       await expect(link).toHaveURL(/#\/initiatives$/);
       await expect(link.getByTestId('initiative-filter')).toHaveValue('open');
-      await expect(th(link, 'created')).toHaveAttribute('aria-sort', 'none');
+      await expect(link.getByTestId('sort-select')).not.toHaveValue(/^created:/);
       await expect(link.getByTestId('clear-filters')).toHaveCount(0);
       expect(await link.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
       await expect.poll(() => ownRows(link, prefix)).toHaveLength(3);
@@ -303,7 +293,7 @@ for (const vp of viewports) {
       await expect(link.getByTestId('initiative-row').first()).toBeVisible();
       await expect(link).toHaveURL(/#\/initiatives$/);
       await expect(link.getByTestId('initiative-filter')).toHaveValue('open');
-      await expect(th(link, 'created')).toHaveAttribute('aria-sort', 'none');
+      await expect(link.getByTestId('sort-select')).not.toHaveValue(/^created:/);
       if (phone) await expect(link.getByTestId('sort-select')).toHaveValue('');
       expect(await link.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
       await link.close();
@@ -318,12 +308,12 @@ for (const vp of viewports) {
       await fresh.goto('/#/initiatives');
       await expect(fresh.getByTestId('initiative-row').first()).toBeVisible();
       await expect(fresh.getByTestId('initiative-filter')).toHaveValue('open');
-      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['title', 'status', 'tags', 'tasks', 'created']) await expect(fresh.getByTestId('sort-select')).not.toHaveValue(new RegExp(`^${column}:`));
       await fresh.close();
     });
 
-    if (!phone) {
-      test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
+    {
+      test('the shared sort control sorts from the keyboard: the arrow keys step through the options', async ({ page, playwright, baseURL }) => {
         const api = await apiContext(playwright, baseURL);
         const { prefix, slugs } = await seed(api, `e2e-iv-keys-${vp.name}`);
         const [mango, apple, zebra, cherry] = slugs;
@@ -331,18 +321,18 @@ for (const vp of viewports) {
         await expect.poll(() => ownRows(page, prefix)).toHaveLength(4);
         const byDefault = await ownRows(page, prefix);
 
-        const title = page.getByTestId('sort-title');
-        await title.focus();
-        await expect(title).toBeFocused();
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'ascending');
+        const select = page.getByTestId('sort-select');
+        await select.focus();
+        await expect(select).toBeFocused();
+        for (let i = 0; i < 1; i++) await page.keyboard.press('ArrowDown'); // Default order -> Title (ascending)
+        await expect(page.getByTestId('sort-select')).toHaveValue('title:asc');
         await expect.poll(() => ownRows(page, prefix)).toEqual([apple, cherry, mango, zebra]);
-        await expect(title).toBeFocused();
-        await page.keyboard.press('Space');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+        await expect(select).toBeFocused();
+        await page.keyboard.press('ArrowDown'); // -> Title (descending)
+        await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
         await expect.poll(() => ownRows(page, prefix)).toEqual([zebra, mango, cherry, apple]);
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'none');
+        await page.keyboard.press('Home'); // back to the default order
+        await expect(page.getByTestId('sort-select')).not.toHaveValue(/^title:/);
         await expect.poll(() => ownRows(page, prefix)).toEqual(byDefault);
         await api.dispose();
       });

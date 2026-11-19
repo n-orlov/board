@@ -7,7 +7,9 @@ import {
   INITIATIVE_COLUMNS,
   INITIATIVE_SORT_COLUMNS,
   INITIATIVE_SORT_LABELS,
+  filterByTags,
   isCustomised,
+  tagChoices,
   viewFromQuery,
   viewHash,
   viewToQuery,
@@ -33,34 +35,34 @@ function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map
 
 describe('sort <-> query encoding', () => {
   it('writes the status first and the sort after it', () => {
-    const state = { filter: 'closed' as const, sort: { column: 'title', dir: 'desc' as const } };
+    const state = { filter: 'closed' as const, tags: [], sort: { column: 'title', dir: 'desc' as const } };
     expect(viewToQuery(state)).toBe('status=closed&sort=title&dir=desc');
     expect(viewHash(state)).toBe('#/initiatives?status=closed&sort=title&dir=desc');
   });
 
   it('writes only the sort when the status is the default, and nothing for the defaults', () => {
-    expect(viewToQuery({ filter: 'open', sort: { column: 'created', dir: 'asc' } })).toBe('sort=created&dir=asc');
-    expect(viewToQuery({ filter: 'all', sort: null })).toBe('status=all');
-    expect(viewToQuery({ filter: 'open', sort: null })).toBe('');
-    expect(viewHash({ filter: 'open', sort: null })).toBe('#/initiatives');
+    expect(viewToQuery({ filter: 'open', tags: [], sort: { column: 'created', dir: 'asc' } })).toBe('sort=created&dir=asc');
+    expect(viewToQuery({ filter: 'all', tags: [], sort: null })).toBe('status=all');
+    expect(viewToQuery({ filter: 'open', tags: [], sort: null })).toBe('');
+    expect(viewHash({ filter: 'open', tags: [], sort: null })).toBe('#/initiatives');
   });
 
   it('reads the status and the sort back from a query', () => {
-    expect(viewFromQuery('status=all&sort=status&dir=desc')).toEqual({ filter: 'all', sort: { column: 'status', dir: 'desc' } });
-    expect(viewFromQuery('sort=created')).toEqual({ filter: 'open', sort: { column: 'created', dir: 'asc' } });
+    expect(viewFromQuery('status=all&sort=status&dir=desc')).toEqual({ filter: 'all', tags: [], sort: { column: 'status', dir: 'desc' } });
+    expect(viewFromQuery('sort=created')).toEqual({ filter: 'open', tags: [], sort: { column: 'created', dir: 'asc' } });
   });
 
   it('takes the defaults for an unknown status, an unknown column and a bad direction', () => {
-    expect(viewFromQuery('status=weird&sort=bogus&dir=asc')).toEqual({ filter: 'open', sort: null });
-    expect(viewFromQuery('sort=title&dir=sideways')).toEqual({ filter: 'open', sort: null });
-    expect(viewFromQuery('')).toEqual({ filter: 'open', sort: null });
+    expect(viewFromQuery('status=weird&sort=bogus&dir=asc')).toEqual({ filter: 'open', tags: [], sort: null });
+    expect(viewFromQuery('sort=title&dir=sideways')).toEqual({ filter: 'open', tags: [], sort: null });
+    expect(viewFromQuery('')).toEqual({ filter: 'open', tags: [], sort: null });
   });
 
   it('round-trips every sortable column in both directions under every status', () => {
     for (const filter of ['open', 'closed', 'all'] as const) {
       for (const column of INITIATIVE_SORT_COLUMNS) {
         for (const dir of ['asc', 'desc'] as const) {
-          const state = { filter, sort: { column, dir } };
+          const state = { filter, tags: [], sort: { column, dir } };
           expect(viewFromQuery(viewToQuery(state))).toEqual(state);
         }
       }
@@ -68,9 +70,9 @@ describe('sort <-> query encoding', () => {
   });
 
   it('says whether the state is not the default', () => {
-    expect(isCustomised({ filter: 'open', sort: null })).toBe(false);
-    expect(isCustomised({ filter: 'closed', sort: null })).toBe(true);
-    expect(isCustomised({ filter: 'open', sort: { column: 'title', dir: 'asc' } })).toBe(true);
+    expect(isCustomised({ filter: 'open', tags: [], sort: null })).toBe(false);
+    expect(isCustomised({ filter: 'closed', tags: [], sort: null })).toBe(true);
+    expect(isCustomised({ filter: 'open', tags: [], sort: { column: 'title', dir: 'asc' } })).toBe(true);
   });
 });
 
@@ -107,14 +109,14 @@ describe('saved state', () => {
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, INITIATIVES_VIEW, '#/initiatives', '');
     expect(replaced).toEqual(['#/initiatives?status=all&sort=title&dir=desc']);
-    expect(viewFromQuery(query)).toEqual({ filter: 'all', sort: { column: 'title', dir: 'desc' } });
+    expect(viewFromQuery(query)).toEqual({ filter: 'all', tags: [], sort: { column: 'title', dir: 'desc' } });
   });
 
   it('lets a fragment with a query win and saves it', () => {
     const storage = memory();
     saveViewQuery(storage, INITIATIVES_VIEW, 'sort=title&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, INITIATIVES_VIEW, '#/initiatives', 'status=closed');
-    expect(viewFromQuery(query)).toEqual({ filter: 'closed', sort: null });
+    expect(viewFromQuery(query)).toEqual({ filter: 'closed', tags: [], sort: null });
     expect(JSON.parse(storage.data.get('vh.view.v1.initiatives')!)).toEqual({ v: 1, query: 'status=closed' });
   });
 
@@ -166,12 +168,64 @@ describe('saved state', () => {
     for (const column of ['tags', 'tasks']) {
       expect(Object.keys(INITIATIVE_COLUMNS)).toContain(column);
       expect(INITIATIVE_SORT_LABELS.map((l) => l.column)).toContain(column);
-      expect(viewToQuery({ filter: 'open', sort: { column, dir: 'desc' } })).toBe(`sort=${column}&dir=desc`);
+      expect(viewToQuery({ filter: 'open', tags: [], sort: { column, dir: 'desc' } })).toBe(`sort=${column}&dir=desc`);
       const storage = memory();
       saveViewQuery(storage, INITIATIVES_VIEW, `sort=${column}&dir=asc`);
       const replaced: string[] = [];
       openView({ storage, replaceHash: (h) => replaced.push(h) }, INITIATIVES_VIEW, '#/initiatives', '');
       expect(replaced).toEqual([`#/initiatives?sort=${column}&dir=asc`]);
     }
+  });
+});
+
+describe('the tag chips (tags only, no initiative dimension)', () => {
+  const rows = [row({ slug: 'a', tags: ['web', 'ui'] }), row({ slug: 'b', tags: ['web'] }), row({ slug: 'c', tags: [] }), row({ slug: 'd', tags: ['api', 'web', 'ui'] })];
+  const slugs = (tags: string[]) => filterByTags(rows, tags).map((r) => r.slug);
+
+  it('keeps every initiative when no tag is chosen', () => {
+    expect(slugs([])).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps the initiatives that carry the tag, in the order given', () => {
+    expect(slugs(['web'])).toEqual(['a', 'b', 'd']);
+    expect(slugs(['api'])).toEqual(['d']);
+  });
+
+  it('combines tags with AND: an initiative must carry every tag chosen', () => {
+    expect(slugs(['web', 'ui'])).toEqual(['a', 'd']);
+    expect(slugs(['api', 'ui', 'web'])).toEqual(['d']);
+    expect(slugs(['nope'])).toEqual([]);
+  });
+
+  it('offers every tag of the initiatives as an initiative tag, sorted, plus a chosen tag no initiative has', () => {
+    expect(tagChoices(rows, [])).toEqual([
+      { tag: 'api', sources: ['initiative'] },
+      { tag: 'ui', sources: ['initiative'] },
+      { tag: 'web', sources: ['initiative'] },
+    ]);
+    expect(tagChoices(rows, ['gone']).map((c) => c.tag)).toEqual(['api', 'gone', 'ui', 'web']);
+    expect(tagChoices([], [])).toEqual([]);
+  });
+
+  it('keeps the tags in the fragment, repeated and after the status, and reads them back', () => {
+    const state = { filter: 'closed' as const, tags: ['web', 'ui'], sort: { column: 'title', dir: 'desc' as const } };
+    expect(viewToQuery(state)).toBe('status=closed&tag=web&tag=ui&sort=title&dir=desc');
+    expect(viewHash({ filter: 'open', tags: ['web'], sort: null })).toBe('#/initiatives?tag=web');
+    expect(viewFromQuery('status=closed&tag=web&tag=ui&sort=title&dir=desc')).toEqual(state);
+    expect(isCustomised({ filter: 'open', tags: ['web'], sort: null })).toBe(true);
+  });
+
+  it('has no initiative dimension: an initiative parameter is ignored, blank and repeated tags dropped', () => {
+    expect(viewFromQuery('initiative=x&tag=&tag=web&tag=web')).toEqual({ filter: 'open', tags: ['web'], sort: null });
+    expect(viewToQuery({ filter: 'open', tags: [], sort: null })).toBe('');
+  });
+
+  it('saves the tags with the view and restores them on a bare route', () => {
+    const storage = memory();
+    saveViewQuery(storage, INITIATIVES_VIEW, 'tag=web&tag=ui&sort=title&dir=asc');
+    const replaced: string[] = [];
+    const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, INITIATIVES_VIEW, '#/initiatives', '');
+    expect(replaced).toEqual(['#/initiatives?tag=web&tag=ui&sort=title&dir=asc']);
+    expect(viewFromQuery(query).tags).toEqual(['web', 'ui']);
   });
 });

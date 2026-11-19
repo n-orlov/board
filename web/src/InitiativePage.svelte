@@ -28,16 +28,19 @@
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
-  import SortHeader from './SortHeader.svelte';
-  import SortSelect from './SortSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import SortControl from './SortControl.svelte';
+  import { tagStyle, type ChipState } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
   import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
   import {
     INITIATIVE_VIEW,
     PAGE_TASK_COLUMNS,
     PAGE_TASK_SORT_LABELS,
+    filterRowsByTags,
     isCustomised,
     isPageHash,
+    pageTagChoices,
     pagePath,
     viewFromQuery,
     viewHash,
@@ -63,6 +66,7 @@
   const slug = untrack(() => param);
   const opened = viewFromQuery(openView(viewEnv, INITIATIVE_VIEW, pagePath(slug), queryOf(window.location.hash)));
   let sort: SortState = $state(opened.sort);
+  let tags: string[] = $state(opened.tags);
   store.setFilter(opened.filter);
 
   // Rewrites the fragment in place (no history entry per choice) and saves the query under the shared key.
@@ -72,19 +76,26 @@
   }
 
   function filterChanged(filter: TaskFilter) {
-    persist({ filter, sort });
+    persist({ filter, tags, sort });
     store.setFilter(filter);
   }
 
   // The sort only reorders the rows the page holds: no request.
   function setSort(next: SortState) {
     sort = next;
-    persist({ filter: view.filter, sort });
+    persist({ filter: view.filter, tags, sort });
+  }
+
+  // The tag chips narrow the rows the page holds (no request) and the Needs attention section (read again with the tags).
+  function setChips(next: ChipState) {
+    tags = next.tags;
+    persist({ filter: view.filter, tags, sort });
   }
 
   // Clear filters: the defaults, and nothing saved.
   function clear() {
     sort = null;
+    tags = [];
     clearViewQuery(viewEnv.storage, INITIATIVE_VIEW);
     replaceHash(pagePath(slug));
     store.setFilter(DEFAULT_TASK_FILTER);
@@ -96,12 +107,13 @@
     if (!isPageHash(slug, hash)) return;
     const next = viewFromQuery(openView(viewEnv, INITIATIVE_VIEW, pagePath(slug), queryOf(hash)));
     sort = next.sort;
+    tags = next.tags;
     if (next.filter !== view.filter) store.setFilter(next.filter);
   }
   let needsView: NeedsState = $state({ needs: NO_NEEDS, error: undefined });
   const needsStore = new NeedsStore((query) => api.needs(query), (s) => (needsView = s));
   // The section reads this initiative's tasks that need attention under the page's task filter, again whenever the filter changes.
-  const reloadNeeds = () => needsStore.load(pageNeedsQuery(param, view.filter));
+  const reloadNeeds = () => needsStore.load(pageNeedsQuery(param, view.filter, tags));
 
   const threads = new ThreadStore(new ThreadApi(currentBrowser(), () => csrf), (s) => (thread = s));
 
@@ -114,8 +126,9 @@
 
   // Only a change of the filter's value (not every update of the page state) reads the section again.
   const filterNow = $derived(view.filter);
+  const tagsKey = $derived(tags.join('\n'));
   $effect(() => {
-    void needsStore.load(pageNeedsQuery(param, filterNow));
+    void needsStore.load(pageNeedsQuery(param, filterNow, tagsKey === '' ? [] : tagsKey.split('\n')));
   });
 
   function open(which: 'edit' | 'close' | 'reopen' | 'task' | 'note' | { answer: Ask } | { withdraw: string }) {
@@ -169,7 +182,9 @@
   const needs = $derived(needsView.needs);
   const needsRows = $derived(taskRows(needs.items, 'all'));
   // The table sorts by the chosen column; the Needs attention section above it keeps its own order.
-  const rows = $derived(sortRows(taskRows(withoutNeeds(view.tasks, needs), view.filter), sort, PAGE_TASK_COLUMNS));
+  const rows = $derived(sortRows(filterRowsByTags(taskRows(withoutNeeds(view.tasks, needs), view.filter), tags), sort, PAGE_TASK_COLUMNS));
+  // The chips on offer come from every task the page holds under its status filter, so a chosen tag never hides the others.
+  const choices = $derived(pageTagChoices(taskRows(view.tasks, view.filter), tags));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const cell = 'md:table-cell md:px-3 md:py-3';
   const head = 'px-3 py-2 text-sm font-medium text-text-muted';
@@ -206,7 +221,7 @@
         <code class="wrap-anywhere font-mono text-sm text-text-muted" data-testid="initiative-slug">{initiative.slug}</code>
         <span class="{badge} {toneClasses(initiativeTone(initiative.status))}" data-testid="initiative-status">{initiative.status}</span>
         {#each tagLabels(initiative.tags) as tag (tag)}
-          <span class="wrap-anywhere rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted" data-testid="tag">{tag}</span>
+          <span class="vh-tag wrap-anywhere" style={tagStyle(tag)} data-testid="tag">{tag}</span>
         {/each}
       </div>
       <p class="mt-2 text-sm text-text-muted wrap-anywhere">
@@ -244,18 +259,24 @@
     {#if needsView.error !== undefined}
       <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="needs-error">{needsView.error}</p>
     {/if}
-    <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter)} showInitiative={false} />
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter, tags)} showInitiative={false} />
 
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-testid="tasks-heading">
       <h3 class="text-lg font-bold">Tasks</h3>
       <div class="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
         <FilterSelect label="Tasks" options={TASK_FILTERS} value={view.filter} onchange={filterChanged} testid="task-filter" />
-        <SortSelect columns={PAGE_TASK_SORT_LABELS} {sort} onsort={setSort} />
-        {#if isCustomised({ filter: view.filter, sort })}
+        <SortControl columns={PAGE_TASK_SORT_LABELS} {sort} onsort={setSort} />
+        {#if isCustomised({ filter: view.filter, tags, sort })}
           <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
         {/if}
       </div>
     </div>
+
+    {#if choices.length > 0}
+      <div class="mb-3">
+        <ChipFilter tags={choices} initiatives={[]} withInitiatives={false} value={{ tags, initiatives: [] }} onchange={setChips} />
+      </div>
+    {/if}
 
     {#if rows.length === 0 && needsRows.length === 0}
       <p class="rounded-md border border-dashed border-border px-4 py-8 text-center text-text-muted" data-testid="no-tasks">No tasks match this filter.</p>
@@ -266,12 +287,12 @@
       <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
         <thead class="sr-only max-md:[&_th]:block max-md:[&_tr]:block md:table-header-group md:not-sr-only">
           <tr class="md:border-b md:border-border">
-            <SortHeader column="ref" label="Ref" {sort} onsort={setSort} class="{head} md:w-32" />
-            <SortHeader column="title" label="Title" {sort} onsort={setSort} class={head} />
-            <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-20" />
-            <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{head} md:w-24" />
-            <SortHeader column="flags" label="Flags" {sort} onsort={setSort} class="{head} md:w-1/5" />
-            <SortHeader column="holder" label="Lease holder" {sort} onsort={setSort} class="{head} md:w-32" />
+            <th scope="col" class="{head} md:w-32">Ref</th>
+            <th scope="col" class={head}>Title</th>
+            <th scope="col" class="{head} md:w-20">Kind</th>
+            <th scope="col" class="{head} md:w-24">Status</th>
+            <th scope="col" class="{head} md:w-1/5">Flags</th>
+            <th scope="col" class="{head} md:w-32">Lease holder</th>
           </tr>
         </thead>
         <tbody class="flex flex-col gap-3 md:table-row-group">
@@ -282,7 +303,12 @@
               class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
             >
               <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
-              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">{row.title}</td>
+              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">
+                {row.title}
+                {#each row.marks.filter((m) => m.source === 'task') as mark (mark.tag)}
+                  <span class="vh-tag ml-1" style={tagStyle(mark.tag)} data-testid="task-tag">{mark.tag}</span>
+                {/each}
+              </td>
               <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
               <td class={cell} data-testid="task-status">
                 <span class="{badge} border-border text-text-muted">{row.status}</span>

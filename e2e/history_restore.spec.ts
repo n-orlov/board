@@ -186,7 +186,7 @@ for (const vp of viewports) {
       await page.getByTestId('initiative-filter').selectOption('all');
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(16);
       const byDefault = await own(page);
-      await sortBy(page, phone, 'title', 'desc');
+      await sortBy(page, true, 'title', 'desc');
       await expect(page).toHaveURL((url) => url.hash === '#/initiatives?status=all&sort=title&dir=desc');
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
@@ -200,6 +200,7 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('initiative-row').locator('a'),
         landing: /#\/i\//,
         sortColumn: 'title',
+        sharedSort: true,
       };
       await leaveAndReturn(page, route, phone);
     });
@@ -223,7 +224,7 @@ for (const vp of viewports) {
       const byDefault = await own(page);
       await page.getByTestId('task-filter').selectOption('all');
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(20);
-      await sortBy(page, phone, 'title', 'desc');
+      await sortBy(page, true, 'title', 'desc');
       await expect(page).toHaveURL((url) => url.hash === `#/i/${slug}?status=all&sort=title&dir=desc`);
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual([...byDefault, ...refs.slice(2, 4)]);
@@ -237,6 +238,7 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('task-ref').locator('a'),
         landing: /#\/t\//,
         sortColumn: 'title',
+        sharedSort: true,
       };
       await leaveAndReturn(page, route, phone);
     });

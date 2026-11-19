@@ -16,6 +16,9 @@ export const NO_CHIPS: ChipState = { tags: [], initiatives: [] };
 /** Where a task's tag comes from, as the API's `tag_marks` name it. */
 export type TagSource = components['schemas']['TagMark']['source'];
 
+/** A tag of a task with its source, as the API's `tag_marks` give it. */
+export type TagMark = components['schemas']['TagMark'];
+
 /** One tag chip on offer, with every source it was seen with (a tag can be a task's own and its initiative's). */
 export interface TagChoice {
   tag: string;
@@ -100,10 +103,10 @@ export function visibleInitiatives(all: readonly string[], chosen: readonly stri
   return all.filter((slug, n) => n < INITIATIVE_FOLD || chosen.includes(slug));
 }
 
-/** The summary of the folded phone filter: how many chips are chosen, or what could be. */
-export function chipSummary(state: ChipState): string {
+/** The summary of the folded phone filter: how many chips are chosen, or what could be (just tags on a view with no initiative chips). */
+export function chipSummary(state: ChipState, withInitiatives = true): string {
   const n = state.tags.length + state.initiatives.length;
-  return n === 0 ? 'tags, initiatives' : `${n} selected`;
+  return n === 0 ? (withInitiatives ? 'tags, initiatives' : 'tags') : `${n} selected`;
 }
 
 /**

@@ -142,6 +142,8 @@ describe('folding a long list of initiatives', () => {
 describe('the phone summary', () => {
   it('says what can be picked, or how many are', () => {
     expect(chipSummary(NO_CHIPS)).toBe('tags, initiatives');
+    expect(chipSummary(NO_CHIPS, false)).toBe('tags');
+    expect(chipSummary({ tags: ['a'], initiatives: [] }, false)).toBe('1 selected');
     expect(chipSummary({ tags: ['a', 'b'], initiatives: ['x'] })).toBe('3 selected');
   });
 });

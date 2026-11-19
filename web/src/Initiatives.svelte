@@ -12,10 +12,11 @@
   import { initiativeTone, tagLabels, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
-  import SortHeader from './SortHeader.svelte';
-  import SortSelect from './SortSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import SortControl from './SortControl.svelte';
+  import { tagStyle, type ChipState } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
-  import { INITIATIVES_VIEW, INITIATIVE_COLUMNS, INITIATIVE_SORT_LABELS, isCustomised, viewFromQuery, viewHash, viewToQuery, type InitiativesViewState } from './lib/initiativesView';
+  import { INITIATIVES_VIEW, INITIATIVE_COLUMNS, INITIATIVE_SORT_LABELS, filterByTags, isCustomised, tagChoices, viewFromQuery, viewHash, viewToQuery, type InitiativesViewState } from './lib/initiativesView';
   import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string } = $props();
@@ -25,6 +26,7 @@
   // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
   const opened = viewFromQuery(openView(viewEnv, INITIATIVES_VIEW, '#/initiatives', queryOf(window.location.hash)));
   let sort: SortState = $state(opened.sort);
+  let tags: string[] = $state(opened.tags);
   let view: InitiativesState = $state({ initiatives: [], filter: opened.filter, loading: true, error: undefined, formError: undefined });
   let formOpen = $state(false);
   let toast = $state('');
@@ -57,19 +59,26 @@
   }
 
   function filterChanged(filter: InitiativeFilter) {
-    persist({ filter, sort });
+    persist({ filter, tags, sort });
     void store.setFilter(filter);
   }
 
   // The sort only reorders the rows the view holds: no request.
   function setSort(next: SortState) {
     sort = next;
-    persist({ filter: view.filter, sort });
+    persist({ filter: view.filter, tags, sort });
+  }
+
+  // The tag chips only narrow the rows the view holds: no request.
+  function setChips(next: ChipState) {
+    tags = next.tags;
+    persist({ filter: view.filter, tags, sort });
   }
 
   // Clear filters: the defaults, and nothing saved.
   function clear() {
     sort = null;
+    tags = [];
     clearViewQuery(viewEnv.storage, INITIATIVES_VIEW);
     replaceHash('#/initiatives');
     void store.setFilter(DEFAULT_INITIATIVE_FILTER);
@@ -81,12 +90,15 @@
     if (hash !== '#/initiatives' && !hash.startsWith('#/initiatives?')) return;
     const next = viewFromQuery(openView(viewEnv, INITIATIVES_VIEW, '#/initiatives', queryOf(hash)));
     sort = next.sort;
+    tags = next.tags;
     if (next.filter !== view.filter) void store.setFilter(next.filter);
   }
 
   const now = new Date();
   // The default order puts the initiatives with tasks that need a person first; a chosen sort replaces it.
-  const ordered = $derived(sortRows(orderInitiatives(view.initiatives), sort, INITIATIVE_COLUMNS));
+  const ordered = $derived(sortRows(filterByTags(orderInitiatives(view.initiatives), tags), sort, INITIATIVE_COLUMNS));
+  // The chips on offer come from every initiative read under the status filter, so a chosen tag never hides the others.
+  const choices = $derived(tagChoices(view.initiatives, tags));
   const empty = $derived(!view.loading && view.error === undefined && view.initiatives.length === 0);
   const primary = 'min-h-11 rounded-md border border-accent bg-surface-raised px-4 text-sm font-medium text-accent';
   const skeletonBar = 'h-4 animate-pulse rounded-md bg-border';
@@ -103,11 +115,17 @@
   </div>
   <div class="mb-4 flex flex-wrap items-end gap-3">
     <FilterSelect label="Status" options={INITIATIVE_FILTERS} value={view.filter} onchange={filterChanged} testid="initiative-filter" />
-    <SortSelect columns={INITIATIVE_SORT_LABELS} {sort} onsort={setSort} />
-    {#if isCustomised({ filter: view.filter, sort })}
+    <SortControl columns={INITIATIVE_SORT_LABELS} {sort} onsort={setSort} />
+    {#if isCustomised({ filter: view.filter, tags, sort })}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
   </div>
+
+  {#if choices.length > 0}
+    <div class="mb-4">
+      <ChipFilter tags={choices} initiatives={[]} withInitiatives={false} value={{ tags, initiatives: [] }} onchange={setChips} />
+    </div>
+  {/if}
 
   {#if view.error !== undefined}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
@@ -129,16 +147,18 @@
       <p class="text-sm text-text-muted">An initiative groups the tasks of one piece of work.</p>
       <button type="button" class={primary} onclick={openForm}>New initiative</button>
     </div>
+  {:else if view.initiatives.length > 0 && ordered.length === 0}
+    <p class="rounded-md border border-dashed border-border px-4 py-8 text-center text-text-muted" data-testid="no-tag-match">No initiatives carry all of these tags.</p>
   {:else if view.initiatives.length > 0}
     <!-- One table: from 768 px a dense table, below it each row is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <SortHeader column="title" label="Title" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted" />
-          <SortHeader column="status" label="Status" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-28" />
-          <SortHeader column="tags" label="Tags" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/5" />
-          <SortHeader column="tasks" label="Tasks" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-44" />
-          <SortHeader column="created" label="Created" {sort} onsort={setSort} class="px-3 py-2 text-sm font-medium text-text-muted md:w-32" />
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted">Title</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-28">Status</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-1/5">Tags</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-44">Tasks</th>
+          <th scope="col" class="px-3 py-2 text-sm font-medium text-text-muted md:w-32">Created</th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">
@@ -168,7 +188,7 @@
             </td>
             <td class="flex min-w-0 flex-wrap gap-1 empty:hidden md:table-cell md:px-3 md:py-3" data-testid="initiative-tags">
               {#each tagLabels(initiative.tags) as tag (tag)}
-                <span class="mr-1 inline-block rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted" data-testid="tag">{tag}</span>
+                <span class="vh-tag mr-1" style={tagStyle(tag)} data-testid="tag">{tag}</span>
               {/each}
             </td>
             <td class="w-full text-sm md:table-cell md:w-auto md:px-3 md:py-3" data-testid="initiative-tasks">

@@ -1,8 +1,8 @@
-import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The initiative page's Tasks table sort and saved view state (PRD R16, SPEC 11): the table sorts by Ref (ref), Title (text),
-// Kind (kind), Status (status), Flags (text) and Lease holder (text) through the shared header (desktop, with the keyboard) and the Sort
-// select (phone); the sort rides in the fragment query next to the task filter; the whole query is saved under the ONE key
+// Kind (kind), Status (status), Flags (text) and Lease holder (text) through the shared sort control (a select at every width, with the keyboard);
+// the sort rides in the fragment query next to the task filter; the whole query is saved under the ONE key
 // every initiative shares, `vh.view.v1.initiative`, so a sort set on one initiative is restored on nav back and on a second
 // initiative; a fragment with its own query wins; Clear filters forgets it all. The table has no time column. Each test seeds
 // initiatives of its own and reads only their rows.
@@ -52,7 +52,6 @@ const goTo = async (page: Page, label: string) => {
   await nav(page).getByRole('link', { name: label }).click();
 };
 const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 
 // Opens an initiative's page through the Initiatives list, the way a person does: the link has no query.
@@ -73,16 +72,9 @@ function taskReads(page: Page, slug: string) {
   return reads;
 }
 
-async function sortBy(page: Page, phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
-  if (phone) {
-    await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
-  } else {
-    // The header cycles none -> ascending -> descending -> none: click until the target is reached.
-    const cycle = ['none', 'ascending', 'descending'];
-    const now = cycle.indexOf((await th(page, column).getAttribute('aria-sort')) ?? 'none');
-    const target = cycle.indexOf(dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
-    for (let i = 0; i < (target - now + 3) % 3; i++) await page.getByTestId(`sort-${column}`).click();
-  }
+// The shared sort control is one select at every width; `phone` stays in the signature so the tests read as before.
+async function sortBy(page: Page, _phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
+  await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
 }
 
 for (const vp of viewports) {
@@ -103,26 +95,26 @@ for (const vp of viewports) {
 
       await page.goto(`/#/i/${slug}`);
       await expect.poll(() => tableRefs(page)).toEqual([plain, leased, blocked]);
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^flags:/);
       await sortBy(page, phone, 'flags', 'asc');
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('flags:asc');
       await expect.poll(() => tableRefs(page)).toEqual([leased, blocked, plain]);
       await expect(page).toHaveURL(/sort=flags&dir=asc$/);
       await sortBy(page, phone, 'flags', 'desc');
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('flags:desc');
       await expect.poll(() => tableRefs(page)).toEqual([blocked, leased, plain]);
       await expect(page).toHaveURL(/sort=flags&dir=desc$/);
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('flags:desc');
       await page.reload();
       await expect.poll(() => tableRefs(page)).toEqual([blocked, leased, plain]);
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('flags:desc');
       await sortBy(page, phone, 'flags', null);
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^flags:/);
       await expect.poll(() => tableRefs(page)).toEqual([plain, leased, blocked]);
       await api.dispose();
     });
 
-    test('sorting by one column of each type (ref, text, kind, status) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
+    test('sorting by one column of each type (ref, text, kind, status) orders the rows and shows it in the shared sort control, and the third step is the default', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { slug, refs, needs } = await seed(api, `e2e-ip-sort-${vp.name}`);
       const [mango, apple, zebra, cherry] = refs as [string, string, string, string];
@@ -132,42 +124,41 @@ for (const vp of viewports) {
       const byDefault = await tableRefs(page);
       const needsByDefault = await needsRefs(page);
       expect([...needsByDefault].sort()).toEqual([...needs].sort());
-      if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
-      else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of ['ref', 'title', 'kind', 'status', 'flags', 'holder']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toBeVisible();
+      for (const column of ['ref', 'title', 'kind', 'status', 'flags', 'holder']) await expect(page.getByTestId('sort-select')).not.toHaveValue(new RegExp(`^${column}:`));
 
       // ref: numerically, so descending reverses the creation order.
       await sortBy(page, phone, 'ref', 'desc');
-      await expect(th(page, 'ref')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('ref:desc');
       await expect.poll(() => tableRefs(page)).toEqual([cherry, zebra, apple, mango]);
       await sortBy(page, phone, 'ref', 'asc');
-      await expect(th(page, 'ref')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('ref:asc');
       await expect.poll(() => tableRefs(page)).toEqual([mango, apple, zebra, cherry]);
       await expect(page).toHaveURL(endsWith(`#/i/${slug}?status=all&sort=ref&dir=asc`));
 
       // text: title ascending ignores case, descending reverses it.
       await sortBy(page, phone, 'title', 'asc');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'ref')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:asc');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^ref:/);
       await expect.poll(() => tableRefs(page)).toEqual([apple, cherry, mango, zebra]);
       await sortBy(page, phone, 'title', 'desc');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       await expect.poll(() => tableRefs(page)).toEqual([zebra, mango, cherry, apple]);
 
       // kind: work before watch ascending (ties keep the default order), watch first descending.
       await sortBy(page, phone, 'kind', 'asc');
-      await expect(th(page, 'kind')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('kind:asc');
       await expect.poll(() => tableRefs(page)).toEqual([mango, zebra, cherry, apple]);
       await sortBy(page, phone, 'kind', 'desc');
-      await expect(th(page, 'kind')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('kind:desc');
       await expect.poll(() => tableRefs(page)).toEqual([apple, mango, zebra, cherry]);
 
       // status: open before closed ascending, closed first descending.
       await sortBy(page, phone, 'status', 'asc');
-      await expect(th(page, 'status')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('status:asc');
       await expect.poll(() => tableRefs(page)).toEqual([mango, apple, cherry, zebra]);
       await sortBy(page, phone, 'status', 'desc');
-      await expect(th(page, 'status')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('status:desc');
       await expect.poll(() => tableRefs(page)).toEqual([zebra, mango, apple, cherry]);
       await expect(page).toHaveURL(endsWith(`#/i/${slug}?status=all&sort=status&dir=desc`));
 
@@ -176,7 +167,7 @@ for (const vp of viewports) {
 
       // Third step: back to the default order; the sort is gone from the fragment and from the saved query.
       await sortBy(page, phone, 'status', null);
-      await expect(th(page, 'status')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^status:/);
       await expect.poll(() => tableRefs(page)).toEqual(byDefault);
       await expect(page).toHaveURL(endsWith(`#/i/${slug}?status=all`));
       expect((await saved(page)).query).toBe('status=all');
@@ -211,7 +202,7 @@ for (const vp of viewports) {
       await expect.poll(() => tableRefs(page)).toEqual([zebraA, mangoA, cherryA, appleA]);
       await expect(page).toHaveURL(endsWith(`#/i/${a.slug}?${query}`));
       await expect(page.getByTestId('task-filter')).toHaveValue('all');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       expect(readsA.count).toBe(1);
 
@@ -224,7 +215,7 @@ for (const vp of viewports) {
       await expect.poll(() => tableRefs(page)).toEqual([zebraB, mangoB, cherryB, appleB]);
       await expect(page).toHaveURL(endsWith(`#/i/${b.slug}?${query}`));
       await expect(page.getByTestId('task-filter')).toHaveValue('all');
-      await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
       expect(readsB.count).toBe(1);
 
       // A change on the second initiative is what the first one then opens with.
@@ -232,7 +223,7 @@ for (const vp of viewports) {
       await expect.poll(() => tableRefs(page)).toEqual([appleB, mangoB, zebraB, cherryB]);
       await openFromList(page, a.slug);
       await expect.poll(() => tableRefs(page)).toEqual([appleA, mangoA, zebraA, cherryA]);
-      await expect(th(page, 'kind')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('kind:desc');
 
       // A new page of the same context opens the bare fragment and gets the same state.
       const second = await page.context().newPage();
@@ -240,7 +231,7 @@ for (const vp of viewports) {
       await expect(second.getByTestId('initiative-title')).toBeVisible();
       await expect.poll(() => tableRefs(second)).toEqual([appleB, mangoB, zebraB, cherryB]);
       await expect(second).toHaveURL(endsWith(`#/i/${b.slug}?status=all&sort=kind&dir=desc`));
-      await expect(th(second, 'kind')).toHaveAttribute('aria-sort', 'descending');
+      await expect(second.getByTestId('sort-select')).toHaveValue('kind:desc');
       await second.close();
       await api.dispose();
     });
@@ -257,7 +248,7 @@ for (const vp of viewports) {
       const link = await page.context().newPage();
       await link.goto(`/#/i/${s.slug}?status=closed&sort=ref&dir=desc`);
       await expect(link.getByTestId('task-filter')).toHaveValue('closed');
-      await expect(th(link, 'ref')).toHaveAttribute('aria-sort', 'descending');
+      await expect(link.getByTestId('sort-select')).toHaveValue('ref:desc');
       await expect.poll(() => tableRefs(link)).toEqual([zebra]);
       expect((await saved(link)).query).toBe('status=closed&sort=ref&dir=desc');
 
@@ -265,14 +256,14 @@ for (const vp of viewports) {
       await link.getByTestId('clear-filters').click();
       await expect(link).toHaveURL(new RegExp(`#/i/${s.slug}$`));
       await expect(link.getByTestId('task-filter')).toHaveValue('not-closed');
-      await expect(th(link, 'ref')).toHaveAttribute('aria-sort', 'none');
+      await expect(link.getByTestId('sort-select')).not.toHaveValue(/^ref:/);
       await expect(link.getByTestId('clear-filters')).toHaveCount(0);
       expect(await link.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
       await expect.poll(() => tableRefs(link)).toEqual([mango, apple, cherry]);
       await openFromList(link, s.slug);
       await expect(link).toHaveURL(new RegExp(`#/i/${s.slug}$`));
       await expect(link.getByTestId('task-filter')).toHaveValue('not-closed');
-      await expect(th(link, 'ref')).toHaveAttribute('aria-sort', 'none');
+      await expect(link.getByTestId('sort-select')).not.toHaveValue(/^ref:/);
       if (phone) await expect(link.getByTestId('sort-select')).toHaveValue('');
       expect(await link.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
       await link.close();
@@ -289,7 +280,7 @@ for (const vp of viewports) {
       await fresh.goto(`/#/i/${s.slug}`);
       await expect.poll(() => tableRefs(fresh)).toHaveLength(3);
       await expect(fresh.getByTestId('task-filter')).toHaveValue('not-closed');
-      for (const column of ['ref', 'title', 'kind', 'status', 'flags', 'holder']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['ref', 'title', 'kind', 'status', 'flags', 'holder']) await expect(fresh.getByTestId('sort-select')).not.toHaveValue(new RegExp(`^${column}:`));
       await fresh.close();
       await api.dispose();
     });
@@ -320,17 +311,17 @@ for (const vp of viewports) {
 
       // Lease holder: text, the two without a holder last in both directions, equal holders keep the default order.
       await sortBy(page, phone, 'holder', 'asc');
-      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('holder:asc');
       await expect.poll(() => tableRefs(page)).toEqual([three, one, four, two, five]);
       await sortBy(page, phone, 'holder', 'desc');
-      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
       await expect.poll(() => tableRefs(page)).toEqual([one, four, three, two, five]);
       await expect(page).toHaveURL(/sort=holder&dir=desc$/);
 
       // Flags: the two tasks without a flag and the three with the same flag keep the default order whichever way it runs.
       await sortBy(page, phone, 'flags', 'asc');
-      await expect(th(page, 'flags')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('flags:asc');
+      await expect(page.getByTestId('sort-select')).not.toHaveValue(/^holder:/);
       await expect.poll(() => tableRefs(page)).toEqual([one, three, four, two, five]);
       await sortBy(page, phone, 'flags', 'desc');
       await expect.poll(() => tableRefs(page)).toEqual([one, three, four, two, five]);
@@ -342,7 +333,7 @@ for (const vp of viewports) {
       expect(await saved(page)).toEqual({ v: 1, query });
       await openFromList(page, b.slug);
       await expect(page).toHaveURL(endsWith(`#/i/${b.slug}?${query}`));
-      await expect(th(page, 'holder')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
       await expect.poll(() => tableRefs(page)).toEqual([b.refs[0], b.refs[3], b.refs[2], b.refs[1], b.refs[4]]);
       if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('holder:desc');
       await amy.dispose();
@@ -350,8 +341,8 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
-    if (!phone) {
-      test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
+    {
+      test('the shared sort control sorts from the keyboard: the arrow keys step through the options', async ({ page, playwright, baseURL }) => {
         const api = await apiContext(playwright, baseURL);
         const s = await seed(api, `e2e-ip-keys-${vp.name}`);
         const [mango, apple, zebra, cherry] = s.refs as [string, string, string, string];
@@ -359,18 +350,18 @@ for (const vp of viewports) {
         await expect.poll(() => tableRefs(page)).toHaveLength(4);
         const byDefault = await tableRefs(page);
 
-        const title = page.getByTestId('sort-title');
-        await title.focus();
-        await expect(title).toBeFocused();
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'ascending');
+        const select = page.getByTestId('sort-select');
+        await select.focus();
+        await expect(select).toBeFocused();
+        for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown'); // Default order -> Ref (ascending) -> Ref (descending)
+        await expect(page.getByTestId('sort-select')).toHaveValue('title:asc');
         await expect.poll(() => tableRefs(page)).toEqual([apple, cherry, mango, zebra]);
-        await expect(title).toBeFocused();
-        await page.keyboard.press('Space');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'descending');
+        await expect(select).toBeFocused();
+        await page.keyboard.press('ArrowDown'); // -> Title (descending)
+        await expect(page.getByTestId('sort-select')).toHaveValue('title:desc');
         await expect.poll(() => tableRefs(page)).toEqual([zebra, mango, cherry, apple]);
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'title')).toHaveAttribute('aria-sort', 'none');
+        await page.keyboard.press('Home'); // back to the default order
+        await expect(page.getByTestId('sort-select')).not.toHaveValue(/^title:/);
         await expect.poll(() => tableRefs(page)).toEqual(byDefault);
         await api.dispose();
       });

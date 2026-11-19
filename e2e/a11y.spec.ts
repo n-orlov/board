@@ -761,7 +761,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page) => {
       await page.goto('/#/initiatives?sort=title&dir=desc');
       await expect(page.locator(`[data-testid=initiative-row][data-slug=${P3_SLUG}]`)).toBeVisible();
-      await expectSorted(page, 'title', 'desc');
+      await expectSorted(page, 'title', 'desc', true);
     },
   },
   {
@@ -777,7 +777,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page, seed) => {
       await page.goto(`/#/i/${P3_SLUG}?sort=holder&dir=desc`);
       await expect(page.locator(`[data-testid=task-row][data-ref=${seed.forced}]`)).toBeVisible();
-      await expectSorted(page, 'holder', 'desc');
+      await expectSorted(page, 'holder', 'desc', true);
     },
   },
   {
