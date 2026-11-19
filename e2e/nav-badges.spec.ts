@@ -31,6 +31,44 @@ async function scan(page: Page, theme: string) {
   ).toEqual([]);
 }
 
+
+// For the zero cases the counts must be the test's own, not the shared board's: the page gets a stand-in EventSource the
+// test feeds (`attention` for the red count, `board` events that name a task for the green one), and the tasks read the
+// green badge counts answers with as many tasks as the test says.
+async function standInStream(page: Page) {
+  await page.addInitScript(() => {
+    type Listener = (e: { data: string }) => void;
+    const w = window as unknown as { __streams: FakeStream[]; EventSource: unknown };
+    class FakeStream {
+      readyState = 1;
+      onopen: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() {
+        w.__streams = [...(w.__streams ?? []), this];
+        setTimeout(() => this.onopen?.({}), 0);
+      }
+      addEventListener(type: string, l: Listener) {
+        this.listeners.set(type, l);
+      }
+      close() {}
+    }
+    w.EventSource = FakeStream;
+  });
+}
+
+async function emit(page: Page, type: 'attention' | 'board', data: object) {
+  await page.evaluate(
+    ([t, d]) => {
+      const w = window as unknown as { __streams: { listeners: Map<string, (e: { data: string }) => void> }[] };
+      for (const stream of w.__streams) stream.listeners.get(t)?.({ data: d });
+    },
+    [type, JSON.stringify(data)] as const,
+  );
+}
+
+const needsMe = (n: number) => ({ open_asks: n, done_not_closed: 0, expired_leases: 0, overdue_watches: 0, conflicts: 0, total: n });
+
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
@@ -71,6 +109,52 @@ for (const vp of viewports) {
       await expect.poll(async () => (await count(red)) - redBefore, FIVE_SECONDS).toBeLessThanOrEqual(-1);
       expect(await page.evaluate(() => (window as unknown as { navMark?: boolean }).navMark)).toBe(true);
       await api.dispose();
+    });
+
+    test('each badge is hidden at zero, shown with an accessible label naming its meaning above zero, and follows the stream', async ({ page }) => {
+      let live = 0;
+      await standInStream(page);
+      await page.route('**/api/v1/tasks?*active=true*', (route) =>
+        route.fulfill({ json: { items: Array.from({ length: live }, (_, i) => ({ ref: `T-${i + 1}` })) } }),
+      );
+      await page.goto('/#/notes');
+      const nav = page.getByTestId(vp.nav);
+      await expect(nav).toBeVisible();
+      const link = nav.getByRole('link', { name: /^Now/ });
+      const red = nav.getByTestId('attention-badge');
+      const green = nav.getByTestId('live-badge');
+
+      // Both counts at zero: neither badge is in the page, and the link is named just "Now".
+      await emit(page, 'attention', needsMe(0));
+      await expect(red).toHaveCount(0);
+      await expect(green).toHaveCount(0);
+      await expect(link).toHaveAccessibleName('Now');
+
+      // Red only: the green one stays hidden at zero.
+      await emit(page, 'attention', needsMe(2));
+      await expect(red).toHaveText('2');
+      await expect(green).toHaveCount(0);
+      await expect(link).toHaveAccessibleName('Now 2 items need attention');
+
+      // A live event naming a task reads the count again: green appears beside red, each with its own words.
+      live = 3;
+      await emit(page, 'board', { type: 'lease_started', task: 'T-3' });
+      await expect(green).toHaveText('3');
+      await expect(link).toHaveAccessibleName('Now 2 items need attention 3 open tasks have a live lease');
+
+      // Green only: the red one is hidden again at zero.
+      await emit(page, 'attention', needsMe(0));
+      await expect(red).toHaveCount(0);
+      await expect(green).toHaveText('3');
+      await expect(link).toHaveAccessibleName('Now 3 open tasks have a live lease');
+
+      // Back to zero: green is hidden too, and no other nav entry ever carried either badge.
+      live = 0;
+      await emit(page, 'board', { type: 'lease_ended', task: 'T-3' });
+      await expect(green).toHaveCount(0);
+      await expect(link).toHaveAccessibleName('Now');
+      await expect(page.getByTestId('attention-badge')).toHaveCount(0);
+      await expect(page.getByTestId('live-badge')).toHaveCount(0);
     });
 
     for (const theme of ['light', 'dark'] as const) {

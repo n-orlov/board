@@ -298,7 +298,7 @@ describe('the live-lease badge on the navigation entries', () => {
     }
   });
 
-  it('hides each badge at zero on its own: red without green, green without red', () => {
+  it('each badge is hidden at zero on its own: red without green, green without red', () => {
     const red = navEntries(ROUTES[0], ROUTES, 4, 0)[0];
     expect([red.badge, red.liveBadge]).toEqual(['4', '']);
     const green = navEntries(ROUTES[0], ROUTES, 0, 5)[0];
