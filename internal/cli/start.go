@@ -11,11 +11,11 @@ import (
 const StartUsage = "usage: vh start <task> \"<intent>\" [--res r]... [--ttl D] [--json]"
 
 // NewUsage is the single stderr line for a malformed `vh new`.
-const NewUsage = "usage: vh new <initiative> \"<title>\" --start \"<intent>\" [--res r]... [--ttl D] [--json]"
+const NewUsage = "usage: vh new <initiative> \"<title>\" --start \"<intent>\" [--tag t]... [--res r]... [--ttl D] [--json]"
 
 var (
 	startFlags = []flagSpec{{"--res", true}, {"--ttl", true}, {"--json", false}}
-	newFlags   = []flagSpec{{"--start", true}, {"--res", true}, {"--ttl", true}, {"--json", false}}
+	newFlags   = []flagSpec{{"--start", true}, {"--tag", true}, {"--res", true}, {"--ttl", true}, {"--json", false}}
 )
 
 // startView is what POST /api/v1/start answers: the lease and its conflicts,
@@ -59,7 +59,11 @@ func newCmd(args []string, stdout, stderr io.Writer, env Env) int {
 	if err != nil {
 		return badFlagValue(stderr, err)
 	}
-	body["new_task"] = map[string]any{"initiative": p.pos[0], "title": p.pos[1]}
+	newTask := map[string]any{"initiative": p.pos[0], "title": p.pos[1]}
+	if tags := p.values["--tag"]; len(tags) > 0 {
+		newTask["tags"] = tags
+	}
+	body["new_task"] = newTask
 	body["intent"] = intent
 	return postStart(p, body, func(err error) error { return taskWriteFailure(err, p.pos[0], "POST") }, stdout, stderr, env)
 }

@@ -164,6 +164,7 @@
                 "taskattention.go",
                 "taskdeps.go",
                 "tasks.go",
+                "tasktags.go",
                 "tasktransitions.go",
                 "taskview.go",
                 "tree.go",
@@ -257,6 +258,7 @@
                     "ping.go",
                     "start.go",
                     "taskdeps.go",
+                    "tasktags.go",
                     "tree.go",
                     "update.go",
                     "whoami.go"

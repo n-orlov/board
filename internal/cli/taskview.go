@@ -35,6 +35,7 @@ type task struct {
 	DoneBy         string         `json:"done_by"`
 	ClosedAt       string         `json:"closed_at"`
 	ClosedBy       string         `json:"closed_by"`
+	Tags           []string       `json:"tags"`
 	Active         bool           `json:"active"`
 	Blocked        bool           `json:"blocked"`
 	Overdue        bool           `json:"overdue"`
@@ -88,6 +89,9 @@ func taskLine(t task) string {
 	}
 	if m := t.markers(); len(m) > 0 {
 		line += "  " + strings.Join(m, " ")
+	}
+	if len(t.Tags) > 0 {
+		line += "  #" + strings.Join(t.Tags, " #")
 	}
 	return line
 }

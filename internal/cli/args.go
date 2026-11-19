@@ -22,7 +22,7 @@ var (
 	initReopenFlags = []flagSpec{{"--json", false}}
 	taskAddFlags    = []flagSpec{
 		{"--description", true}, {"--kind", true}, {"--cadence", true}, {"--after", true},
-		{"--start", true}, {"--end", true}, {"--link", true}, {"--json", false},
+		{"--start", true}, {"--end", true}, {"--link", true}, {"--tag", true}, {"--json", false},
 	}
 	taskLsFlags = []flagSpec{
 		{"--status", true}, {"--kind", true}, {"--active", false}, {"--blocked", false}, {"--overdue", false},
@@ -34,6 +34,7 @@ var (
 		{"--link", true}, {"--no-links", false}, {"--json", false},
 	}
 	taskDepFlags    = []flagSpec{{"--json", false}}
+	taskTagFlags    = []flagSpec{{"--json", false}}
 	taskDoneFlags   = []flagSpec{{"--force", false}, {"--json", false}}
 	taskReopenFlags = []flagSpec{{"--json", false}}
 	taskCloseFlags  = []flagSpec{{"--resolution", true}, {"--for", true}, {"--json", false}}

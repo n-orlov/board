@@ -29,6 +29,8 @@ var commandTree = map[string][]flagSpec{
 	"task done":         taskDoneFlags,
 	"task reopen":       taskReopenFlags,
 	"task close":        taskCloseFlags,
+	"task tag":          taskTagFlags,
+	"task untag":        taskTagFlags,
 	"task dep add":      taskDepFlags,
 	"task dep rm":       taskDepFlags,
 	"task events":       taskEventsFlags,

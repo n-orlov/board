@@ -1992,15 +1992,19 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
 - `vh init reopen <slug> [--json]` prints `ok initiative <slug> reopened`; reopening an open initiative exits 6
   with `<detail> → vh init show <slug>`, an unknown slug exits 4 with `→ vh init ls`.
 - `vh task add <initiative> "<title>" [--description file|-] [--kind work|watch] [--cadence D] [--after <ref>]...
-  [--start T] [--end T] [--link label=url]... [--json]` creates the task and prints `ok task <ref> created`
+  [--start T] [--end T] [--link label=url]... [--tag t]... [--json]` creates the task and prints `ok task <ref> created`
   (`--json`: the created object). `--after` (repeatable) names the tasks it starts out blocked by, `--link` (repeatable)
-  an external link, `--description` is read as for `init edit`. A watch task needs `--cadence`; a work task refuses it
+  an external link, `--tag` (repeatable) one of the task's own tags, sent as `tags` in the `POST /api/v1/tasks` body
+  (§5.5; the server trims and lowercases them and refuses a bad one with 400, exit 1, creating nothing), `--description`
+  is read as for `init edit`. A watch task needs `--cadence`; a work task refuses it
   (exit 1 with the server's message, as for any value the server refuses). An unknown initiative exits 4 with
   `<detail> → vh init ls`, an unknown `--after` task exits 4 with `→ vh task ls <initiative>`, a closed initiative
   exits 6 with `→ vh init show <initiative>`.
 - `vh task ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked]
   [--overdue] [--attention] [--q text] [--limit N|--all] [--json]` prints one line per task, `<ref>  <status>  <title>`
-  followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. The tasks that
+  followed by `  (watch, blocked, active, overdue)` for the marks it has, and nothing when there are none. A task's own tags
+  (`tags`, §5.5) end its line as `#<tag>` words in the API's sorted order, set off by two spaces and after any `!`
+  markers, so `aa-3  open  Wire it  (blocked)  #home #work`; a task with no tag prints nothing extra. The tasks that
   need attention (§5.3, `attention` on the task, §6.4) come first: stranded, then asking with the blocking ones first,
   then done, each group by most recent change (`updated_at`) first, a task with several reasons in the group of its
   first one; the rest follow in creation order (id order). A task's line ends with one marker per reason, in the order
@@ -2021,7 +2025,15 @@ anything else is 1, except a 409 of `init close`, `init reopen`, `init edit`, `t
   …)` per live lease, an `attention: <markers>` line (the markers of `task ls`) after `initiative:` when the task
   needs attention, and for a stranded task a line `stranded: L<n> by <holder>: "<intent>" expired <age> ago → vh
   lease ack L<n>` after it (`<holder>` is the handle; `<age>` is `2m`, `3h` or `4d`), the description, then `events:`
-  and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → vh task ls`.
+  and its last 10 events as `  E<n>  <relative time>  <handle>  <summary>`. The one-line form carries the task's own
+  tags as in `task ls`. The ref is case-insensitive. An unknown task exits 4 with `<detail> → vh task ls`.
+- `vh task tag <ref> <tag>... [--json]` and `vh task untag <ref> <tag>... [--json]` call `PUT` and `DELETE
+  /api/v1/tasks/<ref>/tags/<tag>` (§5.5) once per tag, in the order given, and print `ok task <ref> tagged <tag>...` and
+  `ok task <ref> untagged <tag>...` with the tags in lower case (`--json`: the task after the last call). A tag the task
+  already has, or has not, is no change and no error. The first refusal stops the command with the tags before it
+  already changed: an unknown task exits 4 with `→ vh task ls`, a closed task or initiative exits 6 with `<detail> → vh
+  task show <ref>`, a tag the server refuses (or a 21st) exits 1. A missing tag, an unknown flag or a task alone is exit 2
+  with the usage line, and nothing is sent.
 - `vh task edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]...
   [--no-links] [--json]` sends only the fields given (`PATCH /api/v1/tasks/<ref>`) and prints `ok task <ref> updated`
   (`--json`: the object). `--link` (repeatable) replaces the links and `--no-links` empties them. No field to change and
@@ -2228,7 +2240,8 @@ vh attention [--tag t]... [--init slug] [--limit N|--all]   # the five §5.3 sec
 vh init add <slug> "<title>" [--tag t]... | ls [--tag t]... [--status open|closed|all] [--closed-within N] [--limit N|--all] | show <slug>
                 | edit <slug> [--title T] [--description file|-] [--tag t]... [--no-tags] [--start D] [--end D] [--clear-start] [--clear-end]
                 | close <slug> [--force] | reopen <slug>
-vh task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]...
+vh task add <initiative> "<title>" [--description file|-] [--kind watch --cadence 24h] [--after <ref>]... [--start T] [--end T] [--link label=url]... [--tag t]...
+vh task tag <ref> <tag>... | untag <ref> <tag>...
 vh task ls [<initiative>] [--status …] [--kind k] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] | show <ref>
                 | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links]
 vh task done <ref> ["outcome"] [--force] | reopen <ref> | close <ref> [--resolution dropped] [--for operator]
@@ -2299,15 +2312,16 @@ print, one line per effect, then the `now` summary of `vh now`:
 
 - `vh start <task> "<intent>" [--res r]… [--ttl D] [--json]` prints the `vh lease start` line `ok lease L<n> <task> exp <ttl>`
   with a `CONFLICT` line for each live lease of another that holds one of its resources, and then the `now` summary.
-- `vh new <initiative> "<title>" --start "<intent>" [--res r]… [--ttl D] [--json]` prints the `vh task add` line
+- `vh new <initiative> "<title>" --start "<intent>" [--tag t]… [--res r]… [--ttl D] [--json]` prints the `vh task add` line
   `ok task <ref> created`, then the same lease line and `CONFLICT` lines, then the `now` summary. `--start` is required.
+  `--tag` (repeatable) gives the new task its own tags, sent as `new_task.tags` (§5.5, as for `vh task add --tag`).
 - `--json` prints the response as it came. The exit codes are those of the commands they replace: **0**; **7** when the
   start succeeded and printed a `CONFLICT` line; **6** for a done or closed task (`→ vh task reopen <task> first` or
   `→ vh task show <task>`) and for a closed initiative (`→ vh init show <initiative>`); **4** for an unknown task
   (`→ vh task ls`) or initiative (`→ vh init ls`); **2** for a missing argument, an unreadable `--ttl`, a flag the
   command does not have, or `--start` missing from `vh new` (one `usage:` line on stderr, nothing sent).
 - Both commands are in `cli.Commands()` with their flag tables (`start`: `--json --res --ttl`; `new`: `--json --res --start
-  --ttl`), so `vh help agent` text that names them resolves.
+  --tag --ttl`), so `vh help agent` text that names them resolves.
 
 **Built: `vh finish`.** `vh finish [<task>] "<outcome>" [--done] [--json]` sends one `POST /api/v1/finish` (§6.5). One
 positional argument is the outcome; two are the task and the outcome. It prints one line per effect, the lines of the

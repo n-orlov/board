@@ -14,7 +14,7 @@ import (
 )
 
 // TaskUsage is the single stderr line for a malformed `vh task` command line.
-const TaskUsage = "usage: vh task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [\"outcome\"] [--force] [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
+const TaskUsage = "usage: vh task add <initiative> \"<title>\" [--description file|-] [--kind work|watch] [--cadence D] [--after ref]... [--start T] [--end T] [--link label=url]... [--tag t]... [--json] | ls [<initiative>] [--status open|done|closed|not_closed|all] [--kind work|watch] [--active] [--blocked] [--overdue] [--attention] [--q text] [--limit N|--all] [--json] | show <ref> [--json] | edit <ref> [--title T] [--description file|-] [--start T] [--end T] [--cadence D] [--link label=url]... [--no-links] [--json] | done <ref> [\"outcome\"] [--force] [--json] | reopen <ref> [--json] | close <ref> [--resolution completed|dropped|superseded|duplicate] [--for operator] [--json] | tag|untag <ref> <tag>... [--json] | dep add|rm <ref> <blocked-by-ref> [--json] | events <ref> [--limit N|--all] [--json]"
 
 // taskSubcommands are the words after `vh task` and what runs each.
 var taskSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
@@ -25,6 +25,8 @@ var taskSubcommands = map[string]func([]string, io.Writer, io.Writer, Env) int{
 	"done":   transition("done"),
 	"reopen": transition("reopen"),
 	"close":  transition("close"),
+	"tag":    transitionTags("add"),
+	"untag":  transitionTags("remove"),
 	"dep":    taskDep,
 	"events": taskEvents,
 }
@@ -81,6 +83,9 @@ func addBody(p parsedArgs, description *string) (map[string]any, error) {
 	}
 	if after := p.values["--after"]; len(after) > 0 {
 		body["blocked_by"] = after
+	}
+	if tags := p.values["--tag"]; len(tags) > 0 {
+		body["tags"] = tags
 	}
 	return body, commonFlags(p, body, false)
 }

@@ -213,3 +213,41 @@ Feature: Adding, listing, showing and editing tasks from the command line
     Then the exit code is 2
     When I run the client 'vh task frobnicate' as actor "claude@laptop"
     Then the exit code is 2
+
+  Scenario: task add --tag and vh new --tag give the task its own tags, which show and ls read back
+    When I run the client 'vh task add aa "Tagged by add" --tag Work --tag home' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok task aa-1 created"
+    When I run the client 'vh new aa "Tagged by new" --start "doing it" --tag urgent' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout line 1 matches '^ok task aa-2 created$'
+    When I run the client 'vh task show aa-1' as actor "claude@laptop"
+    Then stdout line 1 matches '^aa-1  open  Tagged by add  #home #work$'
+    When I run the client 'vh task show aa-2' as actor "claude@laptop"
+    Then stdout line 1 matches '^aa-2  open  Tagged by new  \(active\)  #urgent$'
+    When I run the client 'vh task ls' as actor "claude@laptop"
+    Then stdout is:
+      """
+      aa-1  open  Tagged by add  #home #work
+      aa-2  open  Tagged by new  (active)  #urgent
+      """
+    When I run the client 'vh task show aa-1 --json' as actor "claude@laptop"
+    Then stdout JSON path "tags" has 2 items
+
+  Scenario: task tag and untag change a task's own tags one request per tag
+    Given I run the client 'vh task add aa "Plain"' as actor "claude@laptop"
+    When I run the client 'vh task tag aa-1 Work home' as actor "claude@laptop"
+    Then the exit code is 0
+    And stdout is exactly "ok task aa-1 tagged work home"
+    When I run the client 'vh task ls' as actor "claude@laptop"
+    Then stdout is exactly "aa-1  open  Plain  #home #work"
+    When I run the client 'vh task untag aa-1 work' as actor "claude@laptop"
+    Then stdout is exactly "ok task aa-1 untagged work"
+    When I run the client 'vh task ls' as actor "claude@laptop"
+    Then stdout is exactly "aa-1  open  Plain  #home"
+    When I run the client 'vh task tag aa-1' as actor "claude@laptop"
+    Then the exit code is 2
+    And stderr is exactly one line containing "usage: vh task"
+    When I run the client 'vh task tag aa-9 x' as actor "claude@laptop"
+    Then the exit code is 4
+    And stderr is exactly one line containing "→ vh task ls"
