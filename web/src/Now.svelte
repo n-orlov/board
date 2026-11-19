@@ -3,6 +3,7 @@
   import AnswerForm from './AnswerForm.svelte';
   import ChipFilter from './ChipFilter.svelte';
   import Dialog from './Dialog.svelte';
+  import NowDock from './NowDock.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
   import TaskNoteForm from './TaskNoteForm.svelte';
@@ -33,6 +34,7 @@
     openAttention,
     saveAttention,
     startFilter,
+    type Attention,
     type AttentionState,
     type ItemActor,
   } from './lib/attentionView';
@@ -51,6 +53,17 @@
     type BandInfo,
     type Layout,
   } from './lib/nowBands';
+  import {
+    DOCK_QUERY,
+    isDefaultLayout,
+    loadLayout,
+    resetLayout,
+    saveLayout,
+    setOpen,
+    widgetOpen,
+    type NowLayout,
+    type WidgetKey,
+  } from './lib/nowLayout';
   import { live } from './lib/live';
   import { NOW_CHOICES, NOW_COLUMNS, loadOrder, orderToSort, saveOrder, sortByOrder, sortToOrder, type NowOrder } from './lib/nowSort';
   import { WINDOWS, flightRows, loadWindow, recentRows, saveWindow, type NowWindow } from './lib/nowFlight';
@@ -178,6 +191,30 @@
     return () => wideQuery.removeEventListener('change', follow);
   });
 
+  // From lg (1024 px) the widgets are docked in columns the person arranges (the layout, saved under its own key, with its own
+  // open states); below it they are stacked, the bands as an accordion that keeps the open state above. The stored layout is
+  // never touched on a narrow screen.
+  const dockQuery = typeof window.matchMedia === 'function' ? window.matchMedia(DOCK_QUERY) : undefined;
+  let docked = $state(dockQuery?.matches ?? true);
+  $effect(() => {
+    if (dockQuery === undefined) return;
+    const follow = () => (docked = dockQuery.matches);
+    dockQuery.addEventListener('change', follow);
+    return () => dockQuery.removeEventListener('change', follow);
+  });
+  let dock: NowLayout = $state(loadLayout(viewEnv.storage));
+  function arrange(next: NowLayout, final: boolean) {
+    dock = next;
+    if (final) saveLayout(viewEnv.storage, next);
+  }
+  function toggleWidget(key: WidgetKey, open: boolean) {
+    arrange(setOpen(dock, key, open), true);
+  }
+  function reset() {
+    arrange(resetLayout(), true);
+  }
+  const arranged = $derived(!isDefaultLayout(dock));
+
   // The window of Recently touched: remembered under its own key, and a change reads the board again.
   function chooseWindow(next: NowWindow) {
     saveWindow(viewEnv.storage, next);
@@ -209,10 +246,125 @@
     const timer = setInterval(() => (now = new Date()), 30_000);
     return () => clearInterval(timer);
   });
+  const flightList = $derived(sortByOrder(flightRows(view.flight ?? [], now), order, (r) => r));
+  const recentList = $derived(sortByOrder(recentRows(view.recent ?? [], now), order, (r) => r));
+  function widgetCount(key: WidgetKey, data: Attention): number {
+    if (key === 'flight') return flightList.length;
+    if (key === 'recent') return recentList.length;
+    return bandCount(data.counts, BANDS.find((band) => band.key === key)!);
+  }
   const action = 'min-h-11 min-w-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
 </script>
 
 <svelte:window onhashchange={hashChanged} />
+
+{#snippet bandItems(band: BandInfo, data: Attention)}
+  {@const rows = sortByOrder(bandRows(band, data, now), order, (r) => ({ at: r.row.at, by: r.row.actors[0]?.handle }))}
+  {#if rows.length === 0}
+    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="band-empty">{band.empty}</p>
+  {:else}
+    <ul class="flex flex-col gap-3">
+      {#each rows as { section, row } (`${section}:${row.id}`)}
+        {@const initiative = row.initiative}
+        <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item" data-section={section}>
+          <p class="font-medium">
+            {#if row.href !== undefined}
+              <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="item-link">{row.title}</a>
+            {:else}
+              <span data-testid="item-title">{row.title}</span>
+            {/if}
+          </p>
+          {#if row.details.length > 0}
+            <p class="text-sm text-text-muted" data-testid="item-details">{row.details.join(' · ')}</p>
+          {/if}
+          <ul class="flex flex-col gap-2">
+            {#each row.actors as actor, n (n)}
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="item-actor">
+                <span class="text-text-muted">{actor.role}</span>
+                <span class="font-medium" data-testid="actor-handle">{actor.handle}</span>
+                {#if actor.wayBack !== undefined}
+                  <code class="font-mono text-text-muted" data-testid="actor-way-back">{actor.wayBack}</code>
+                  <button type="button" class={action} aria-label={copyLabel(actor)} data-testid="copy-way-back" onclick={() => void copy(actor)}>Copy way back</button>
+                {:else}
+                  <span class="text-text-muted">no way back on record</span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+          {#if initiative !== undefined}
+            <p class="text-sm">
+              <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(initiative)} data-testid="initiative-link">Initiative {initiative}</a>
+            </p>
+          {/if}
+          {#if acting.itemError?.target === row.id}
+            <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="item-error">{acting.itemError.text}</p>
+          {/if}
+          {#if actionsFor(section).length > 0}
+            <div class="flex flex-wrap gap-2" data-testid="item-actions">
+              {#each actionsFor(section) as kind (kind)}
+                <button type="button" class={action} aria-label={actionName(kind, row.id)} data-testid="action-{kind}" onclick={() => void actions.open(kind, row.id)}>{actionLabel(kind)}</button>
+              {/each}
+            </div>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
+{#snippet flightBody()}
+  {#if flightList.length === 0}
+    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="flight-empty">Nothing is in flight. No task has a live lease.</p>
+  {:else}
+    <ul class="flex flex-col gap-3" data-testid="flight-list">
+      {#each flightList as row (row.task)}
+        <li class="flex flex-col gap-2 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="flight-row" data-task={row.task}>
+          <p class="font-medium">
+            <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="flight-task">{row.task} {row.title}</a>
+          </p>
+          <ul class="flex flex-col gap-2">
+            {#each row.leases as lease (lease.lease)}
+              <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm" data-testid="flight-lease" data-lease={lease.lease}>
+                <span class="font-medium" data-testid="lease-holder">{lease.holder}</span>
+                <span data-testid="lease-intent">{lease.intent}</span>
+                <span class="text-text-muted" data-testid="lease-ttl">{lease.ttl}</span>
+              </li>
+            {/each}
+          </ul>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
+{#snippet recentBody()}
+  <SegmentedRadio legend="Window" name="now-window" options={WINDOWS} value={view.window} onchoose={chooseWindow} testid="now-window" />
+  {#if recentList.length === 0}
+    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="recent-empty">Nothing was touched in this window.</p>
+  {:else}
+    <ul class="flex flex-col gap-3" aria-labelledby="recent-heading" data-testid="recent-list">
+      {#each recentList as row (row.task)}
+        <li class="flex flex-col gap-1 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="recent-row" data-task={row.task}>
+          <p class="font-medium">
+            <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="recent-task">{row.task} {row.title}</a>
+          </p>
+          <p class="text-sm text-text-muted" title={absoluteTime(row.at)} data-testid="recent-last">{row.last}</p>
+          <p class="text-sm" data-testid="recent-summary">{row.summary}</p>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
+{#snippet widgetBody(key: WidgetKey)}
+  {#if key === 'flight'}
+    {@render flightBody()}
+  {:else if key === 'recent'}
+    {@render recentBody()}
+  {:else if view.attention !== undefined}
+    {@render bandItems(BANDS.find((band) => band.key === key)!, view.attention)}
+  {/if}
+{/snippet}
 
 <section aria-labelledby="now-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
   <h2 id="now-heading" class="mb-4 text-xl font-bold">Now</h2>
@@ -221,8 +373,19 @@
     <ChipFilter tags={tagChoices} initiatives={initiativeSlugs} value={view.filter} onchange={setChips} />
   </div>
 
-  <div class="mb-4" data-testid="now-sort">
-    <SortControl columns={NOW_COLUMNS} choices={NOW_CHOICES} sort={orderToSort(order)} onsort={chooseOrder} />
+  <div class="mb-4 flex flex-wrap items-end gap-3">
+    <div data-testid="now-sort">
+      <SortControl columns={NOW_COLUMNS} choices={NOW_CHOICES} sort={orderToSort(order)} onsort={chooseOrder} />
+    </div>
+    {#if docked}
+      <button
+        type="button"
+        class="min-h-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={!arranged}
+        data-testid="reset-layout"
+        onclick={reset}>Reset layout</button
+      >
+    {/if}
   </div>
 
   {#if view.error !== undefined}
@@ -240,140 +403,48 @@
     {/if}
   {:else}
     {@const data = view.attention}
-    {@const flight = sortByOrder(flightRows(view.flight ?? [], now), order, (r) => r)}
-    {@const recent = sortByOrder(recentRows(view.recent ?? [], now), order, (r) => r)}
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
-    <section aria-labelledby="needs-heading" class="min-w-0" data-testid="now-needs">
-      <h3 id="needs-heading" class="mb-3 text-lg font-semibold">Needs me</h3>
-      <div class="flex flex-col gap-3" data-testid="now-bands">
-        {#each BANDS as band (band.key)}
-          {@const rows = sortByOrder(bandRows(band, data, now), order, (r) => ({ at: r.row.at, by: r.row.actors[0]?.handle }))}
-          {@const count = bandCount(data.counts, band)}
-          {@const open = isOpen(prefs, band.key, layout, count)}
-          <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid="band-{band.key}" data-open={open}>
-            <h4>
-              <button
-                type="button"
-                id="band-toggle-{band.key}"
-                class="flex min-h-11 w-full items-center gap-2 rounded-lg px-4 py-2 text-left text-base font-semibold"
-                aria-expanded={open}
-                aria-controls="band-panel-{band.key}"
-                data-testid="band-toggle"
-                onclick={() => toggle(band, !open)}
-              >
-                <svg viewBox="0 0 24 24" class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-                <span>{band.title}</span>
-                <span class="text-sm font-normal text-text-muted" data-testid="band-count">{count}</span>
-              </button>
-            </h4>
-            <div id="band-panel-{band.key}" role="region" aria-labelledby="band-toggle-{band.key}" hidden={!open} class="px-4 pb-4" data-testid="band-panel">
-              {#if rows.length === 0}
-                <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="band-empty">{band.empty}</p>
-              {:else}
-                <ul class="flex flex-col gap-3">
-                  {#each rows as { section, row } (`${section}:${row.id}`)}
-                    {@const initiative = row.initiative}
-                    <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item" data-section={section}>
-                      <p class="font-medium">
-                        {#if row.href !== undefined}
-                          <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="item-link">{row.title}</a>
-                        {:else}
-                          <span data-testid="item-title">{row.title}</span>
-                        {/if}
-                      </p>
-                      {#if row.details.length > 0}
-                        <p class="text-sm text-text-muted" data-testid="item-details">{row.details.join(' · ')}</p>
-                      {/if}
-                      <ul class="flex flex-col gap-2">
-                        {#each row.actors as actor, n (n)}
-                          <li class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="item-actor">
-                            <span class="text-text-muted">{actor.role}</span>
-                            <span class="font-medium" data-testid="actor-handle">{actor.handle}</span>
-                            {#if actor.wayBack !== undefined}
-                              <code class="font-mono text-text-muted" data-testid="actor-way-back">{actor.wayBack}</code>
-                              <button type="button" class={action} aria-label={copyLabel(actor)} data-testid="copy-way-back" onclick={() => void copy(actor)}
-                                >Copy way back</button
-                              >
-                            {:else}
-                              <span class="text-text-muted">no way back on record</span>
-                            {/if}
-                          </li>
-                        {/each}
-                      </ul>
-                      {#if initiative !== undefined}
-                        <p class="text-sm">
-                          <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(initiative)} data-testid="initiative-link">Initiative {initiative}</a>
-                        </p>
-                      {/if}
-                      {#if acting.itemError?.target === row.id}
-                        <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="item-error">{acting.itemError.text}</p>
-                      {/if}
-                      {#if actionsFor(section).length > 0}
-                        <div class="flex flex-wrap gap-2" data-testid="item-actions">
-                          {#each actionsFor(section) as kind (kind)}
-                            <button
-                              type="button"
-                              class={action}
-                              aria-label={actionName(kind, row.id)}
-                              data-testid="action-{kind}"
-                              onclick={() => void actions.open(kind, row.id)}>{actionLabel(kind)}</button
-                            >
-                          {/each}
-                        </div>
-                      {/if}
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            </div>
-          </section>
-        {/each}
-      </div>
-    </section>
-    <section aria-labelledby="flight-heading" class="min-w-0" data-testid="now-flight">
-      <h3 id="flight-heading" class="mb-3 text-lg font-semibold">In flight <span class="text-sm font-normal text-text-muted" data-testid="flight-count">{flight.length}</span></h3>
-      {#if flight.length === 0}
-        <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="flight-empty">Nothing is in flight. No task has a live lease.</p>
-      {:else}
-        <ul class="flex flex-col gap-3" data-testid="flight-list">
-          {#each flight as row (row.task)}
-            <li class="flex flex-col gap-2 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="flight-row" data-task={row.task}>
-              <p class="font-medium">
-                <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="flight-task">{row.task} {row.title}</a>
-              </p>
-              <ul class="flex flex-col gap-2">
-                {#each row.leases as lease (lease.lease)}
-                  <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm" data-testid="flight-lease" data-lease={lease.lease}>
-                    <span class="font-medium" data-testid="lease-holder">{lease.holder}</span>
-                    <span data-testid="lease-intent">{lease.intent}</span>
-                    <span class="text-text-muted" data-testid="lease-ttl">{lease.ttl}</span>
-                  </li>
-                {/each}
-              </ul>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+    {#if docked}
+      <NowDock layout={dock} count={(key) => widgetCount(key, data)} open={(key) => widgetOpen(dock, key)} onchange={arrange} ontoggle={toggleWidget} body={widgetBody} />
+    {:else}
+      <div class="grid gap-6">
+        <section aria-labelledby="needs-heading" class="min-w-0" data-testid="now-needs">
+          <h3 id="needs-heading" class="mb-3 text-lg font-semibold">Needs me</h3>
+          <div class="flex flex-col gap-3" data-testid="now-bands">
+            {#each BANDS as band (band.key)}
+              {@const count = bandCount(data.counts, band)}
+              {@const open = isOpen(prefs, band.key, layout, count)}
+              <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid="band-{band.key}" data-open={open}>
+                <h4>
+                  <button
+                    type="button"
+                    id="band-toggle-{band.key}"
+                    class="flex min-h-11 w-full items-center gap-2 rounded-lg px-4 py-2 text-left text-base font-semibold"
+                    aria-expanded={open}
+                    aria-controls="band-panel-{band.key}"
+                    data-testid="band-toggle"
+                    onclick={() => toggle(band, !open)}
+                  >
+                    <svg viewBox="0 0 24 24" class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                    <span>{band.title}</span>
+                    <span class="text-sm font-normal text-text-muted" data-testid="band-count">{count}</span>
+                  </button>
+                </h4>
+                <div id="band-panel-{band.key}" role="region" aria-labelledby="band-toggle-{band.key}" hidden={!open} class="px-4 pb-4" data-testid="band-panel">
+                  {@render bandItems(band, data)}
+                </div>
+              </section>
+            {/each}
+          </div>
+        </section>
+        <section aria-labelledby="flight-heading" class="min-w-0" data-testid="now-flight">
+          <h3 id="flight-heading" class="mb-3 text-lg font-semibold">In flight <span class="text-sm font-normal text-text-muted" data-testid="flight-count">{flightList.length}</span></h3>
+          {@render flightBody()}
 
-      <h3 id="recent-heading" class="mt-6 mb-3 text-lg font-semibold">Recently touched <span class="text-sm font-normal text-text-muted" data-testid="recent-count">{recent.length}</span></h3>
-      <SegmentedRadio legend="Window" name="now-window" options={WINDOWS} value={view.window} onchoose={chooseWindow} testid="now-window" />
-      {#if recent.length === 0}
-        <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="recent-empty">Nothing was touched in this window.</p>
-      {:else}
-        <ul class="flex flex-col gap-3" aria-labelledby="recent-heading" data-testid="recent-list">
-          {#each recent as row (row.task)}
-            <li class="flex flex-col gap-1 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="recent-row" data-task={row.task}>
-              <p class="font-medium">
-                <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="recent-task">{row.task} {row.title}</a>
-              </p>
-              <p class="text-sm text-text-muted" title={absoluteTime(row.at)} data-testid="recent-last">{row.last}</p>
-              <p class="text-sm" data-testid="recent-summary">{row.summary}</p>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-    </div>
+          <h3 id="recent-heading" class="mt-6 mb-3 text-lg font-semibold">Recently touched <span class="text-sm font-normal text-text-muted" data-testid="recent-count">{recentList.length}</span></h3>
+          {@render recentBody()}
+        </section>
+      </div>
+    {/if}
   {/if}
 </section>
 

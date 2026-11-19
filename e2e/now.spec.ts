@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { initiativeChip, openChips, pickInitiative, pickTag, tagChip } from './chips';
-import { BANDS_KEY, FLIGHT_KEY, actorApi, band, created, seedFlight, seedNeedsMe, showAllBands } from './now';
+import { BANDS_KEY, FLIGHT_KEY, LAYOUT_KEY, actorApi, band, created, seedFlight, seedNeedsMe, showAllBands } from './now';
 
 // The Now view's Needs me bands (PRD R1, SPEC 11): the four bands in order with their counts, every band open on the desktop
 // but Done, not closed, an accordion on the phone (Open asks and Expired leases and conflicts open when they hold something,
@@ -13,6 +13,7 @@ const DESKTOP = { width: 1440, height: 900 };
 const KEYS = ['asks', 'expired', 'watches', 'done'] as const;
 
 const expanded = async (page: Page) => Promise.all(KEYS.map((key) => band(page, key).getByTestId('band-toggle').getAttribute('aria-expanded')));
+const storedLayout = (page: Page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null') as unknown, LAYOUT_KEY);
 const stored = (page: Page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null') as unknown, BANDS_KEY);
 
 test.describe('desktop 1440x900', () => {
@@ -22,7 +23,7 @@ test.describe('desktop 1440x900', () => {
     const s = await seedNeedsMe(playwright, baseURL, 'order-desktop');
     await page.goto(`/#/now?initiative=${s.slug}`);
     await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 3, name: 'Needs me' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 3, name: 'Open asks' })).toBeVisible();
     await expect(page.getByTestId('band-toggle')).toHaveText([/^\s*Open asks\s*1\s*$/, /^\s*Expired leases and conflicts\s*1\s*$/, /^\s*Overdue watches\s*1\s*$/, /^\s*Done, not closed\s*1\s*$/], FIVE_SECONDS);
     expect(await expanded(page)).toEqual(['true', 'true', 'true', 'false']);
 
@@ -58,7 +59,8 @@ test.describe('desktop 1440x900', () => {
     expect(await expanded(page)).toEqual(['false', 'true', 'true', 'true']);
     await expect(band(page, 'asks').getByTestId('attention-item')).toBeHidden();
     await expect(band(page, 'done').getByTestId('attention-item')).toBeVisible();
-    expect(await stored(page)).toEqual({ wide: { asks: false, done: true }, narrow: {} });
+    expect(await storedLayout(page)).toMatchObject({ open: { asks: false, done: true } });
+    expect(await stored(page)).toBeNull(); // the dock keeps its own open states: the bands key is the stacked view's
 
     await page.reload();
     await expect(band(page, 'watches').getByTestId('attention-item')).toBeVisible(FIVE_SECONDS);
@@ -67,7 +69,7 @@ test.describe('desktop 1440x900', () => {
     await expect(band(page, 'done').getByTestId('attention-item')).toBeVisible();
   });
 
-  test('the open state is remembered apart for wide and narrow screens', async ({ page, playwright, baseURL }) => {
+  test('the open state is remembered apart for the docked desktop and the narrow accordion', async ({ page, playwright, baseURL }) => {
     const s = await seedNeedsMe(playwright, baseURL, 'apart-desktop');
     await page.goto(`/#/now?initiative=${s.slug}`);
     await expect(band(page, 'asks').getByTestId('attention-item')).toBeVisible(FIVE_SECONDS);
@@ -77,7 +79,8 @@ test.describe('desktop 1440x900', () => {
     await page.setViewportSize(PHONE); // narrow: its own defaults, the wide choice untouched
     await expect.poll(() => expanded(page)).toEqual(['true', 'true', 'false', 'false']);
     await band(page, 'watches').getByTestId('band-toggle').click(); // narrow: opened
-    expect(await stored(page)).toEqual({ wide: { asks: false }, narrow: { watches: true } });
+    expect(await stored(page)).toEqual({ wide: {}, narrow: { watches: true } });
+    expect(await storedLayout(page)).toMatchObject({ open: { asks: false } });
 
     await page.setViewportSize(DESKTOP);
     await expect.poll(() => expanded(page)).toEqual(['false', 'true', 'true', 'false']);
@@ -188,7 +191,7 @@ test.describe('the right column on the desktop', () => {
     const s = await seedFlight(playwright, baseURL, 'columns');
     await page.goto(`/#/now?initiative=${s.slug}`);
     await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
-    const needs = (await page.getByTestId('now-needs').boundingBox())!;
+    const needs = (await band(page, 'asks').boundingBox())!;
     const right = (await flight(page).boundingBox())!;
     expect(right.x).toBeGreaterThanOrEqual(needs.x + needs.width);
     expect(Math.abs(right.y - needs.y)).toBeLessThanOrEqual(2);
@@ -540,3 +543,288 @@ for (const vp of [
     });
   });
 }
+
+// The dock (PRD R4, SPEC 11): from lg the widgets sit in 1 to 4 columns the person arranges by dragging a handle, by the
+// splitters and height bars, or from the keyboard, and the arrangement is kept under `vh.now.layout.v1`. Drags use the mouse API.
+interface StoredLayout {
+  columns: { width: number; widgets: string[] }[];
+  heights: Record<string, number>;
+  open: Record<string, boolean>;
+}
+const layoutOf = async (page: Page) => (await storedLayout(page)) as StoredLayout | null;
+const columnsOf = async (page: Page) => (await layoutOf(page))!.columns.map((c) => c.widgets.join(','));
+const handle = (page: Page, key: string) => page.locator(`[data-handle="${key}"]`);
+const dockColumn = (page: Page, n: number) => page.locator(`[data-dock-col="${n}"]`);
+const resetLayout = (page: Page) => page.getByTestId('reset-layout');
+const DEFAULT_COLUMNS = ['asks,expired,watches,done', 'flight,recent'];
+
+async function centre(target: ReturnType<Page['locator']>) {
+  const box = (await target.boundingBox())!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2, box };
+}
+
+// A real pointer drag: press on the handle, move in steps, release.
+async function dragTo(page: Page, grip: ReturnType<Page['locator']>, x: number, y: number) {
+  const from = await centre(grip);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + x) / 2, (from.y + y) / 2, { steps: 6 });
+  await page.mouse.move(x, y, { steps: 6 });
+  await page.mouse.up();
+}
+
+async function openDock(page: Page, playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string) {
+  const s = await seedFlight(playwright, baseURL, `dock-${name}`);
+  await page.goto(`/#/now?initiative=${s.slug}`);
+  await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
+  await s.api.dispose();
+  return s;
+}
+
+test.describe('the dock on the desktop', () => {
+  test.use({ viewport: DESKTOP });
+
+  test('every widget has a handle, two columns start at half each with a splitter between, and Reset layout is disabled', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'default');
+    await expect(page.getByTestId('widget-handle')).toHaveCount(6);
+    await expect(page.getByTestId('dock-column')).toHaveCount(2);
+    await expect(page.getByTestId('column-splitter')).toHaveCount(1);
+    await expect(resetLayout(page)).toBeVisible();
+    await expect(resetLayout(page)).toBeDisabled();
+    const a = (await dockColumn(page, 0).boundingBox())!;
+    const b = (await dockColumn(page, 1).boundingBox())!;
+    expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(2);
+    expect(await layoutOf(page)).toBeNull(); // nothing is written until the person arranges something
+  });
+
+  test('a widget dragged by its handle into the other column docks there, and the layout holds after a reload', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'drag');
+    const target = await centre(page.getByTestId('now-flight'));
+    await dragTo(page, handle(page, 'asks'), target.x, target.box.y + 6);
+    await expect(dockColumn(page, 1).getByTestId('band-asks')).toBeVisible();
+    await expect(dockColumn(page, 0).getByTestId('band-asks')).toHaveCount(0);
+    expect(await columnsOf(page)).toEqual(['expired,watches,done', 'asks,flight,recent']);
+    await expect(resetLayout(page)).toBeEnabled();
+
+    await page.reload();
+    await expect(dockColumn(page, 1).getByTestId('band-asks')).toBeVisible(FIVE_SECONDS);
+    expect(await columnsOf(page)).toEqual(['expired,watches,done', 'asks,flight,recent']);
+    await expect(resetLayout(page)).toBeEnabled();
+    const asks = (await band(page, 'asks').boundingBox())!;
+    const flightBox = (await page.getByTestId('now-flight').boundingBox())!;
+    expect(asks.y).toBeLessThan(flightBox.y); // docked above In flight, where it was dropped
+  });
+
+  test('a widget dropped on the edge of the dock opens a third column, and the last widget out of a column closes it', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'edge');
+    const dock = (await page.getByTestId('now-dock').boundingBox())!;
+    await dragTo(page, handle(page, 'recent'), dock.x + dock.width - 12, dock.y + 60);
+    await expect(page.getByTestId('dock-column')).toHaveCount(3);
+    expect(await columnsOf(page)).toEqual(['asks,expired,watches,done', 'flight', 'recent']);
+    await expect(dockColumn(page, 2).getByTestId('now-recent')).toBeVisible();
+    const widths = (await layoutOf(page))!.columns.map((c) => c.width);
+    expect(widths.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 6);
+    expect(Math.min(...widths)).toBeGreaterThanOrEqual(0.18 - 1e-9);
+
+    const first = await centre(dockColumn(page, 0));
+    await dragTo(page, handle(page, 'flight'), first.x, first.box.y + 6);
+    await expect(page.getByTestId('dock-column')).toHaveCount(2);
+    expect(await columnsOf(page)).toEqual(['flight,asks,expired,watches,done', 'recent']);
+  });
+
+  test('a splitter resizes the columns, kept at least 18% and after a reload', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'split');
+    const before = (await dockColumn(page, 0).boundingBox())!;
+    const grip = await centre(page.getByTestId('column-splitter'));
+    await dragTo(page, page.getByTestId('column-splitter'), grip.x + 160, grip.y);
+    await expect.poll(async () => (await dockColumn(page, 0).boundingBox())!.width).toBeGreaterThan(before.width + 120);
+    const stored = (await layoutOf(page))!;
+    expect(stored.columns[0]!.width).toBeGreaterThan(0.55);
+    expect(stored.columns[0]!.width + stored.columns[1]!.width).toBeCloseTo(1, 6);
+    const after = (await dockColumn(page, 0).boundingBox())!;
+
+    await page.reload();
+    await expect(dockColumn(page, 0)).toBeVisible(FIVE_SECONDS);
+    expect(Math.abs((await dockColumn(page, 0).boundingBox())!.width - after.width)).toBeLessThanOrEqual(2);
+    await expect(resetLayout(page)).toBeEnabled();
+
+    // Far past the other column's minimum: it stops at 18%.
+    const again = await centre(page.getByTestId('column-splitter'));
+    await dragTo(page, page.getByTestId('column-splitter'), again.x + 1000, again.y);
+    await expect.poll(async () => (await layoutOf(page))!.columns[1]!.width).toBeCloseTo(0.18, 6);
+  });
+
+  test('the bar under a widget resizes its height, kept after a reload', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'height');
+    const panel = band(page, 'asks').getByTestId('band-panel');
+    const before = (await panel.boundingBox())!.height;
+    await dragTo(page, band(page, 'asks').getByTestId('height-handle'), (await centre(band(page, 'asks').getByTestId('height-handle'))).x, (await centre(band(page, 'asks').getByTestId('height-handle'))).y + 140);
+    await expect.poll(async () => (await panel.boundingBox())!.height).toBeCloseTo(before + 140, -1);
+    const stored = (await layoutOf(page))!.heights.asks!;
+    expect(stored).toBeGreaterThan(before + 100);
+
+    await page.reload();
+    await expect(band(page, 'asks')).toBeVisible(FIVE_SECONDS);
+    expect(Math.abs((await panel.boundingBox())!.height - stored)).toBeLessThanOrEqual(1);
+    await expect(resetLayout(page)).toBeEnabled();
+  });
+
+  test('Reset layout restores the default columns, widths, heights and open states, then disables itself', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'reset');
+    const defaultWidth = (await dockColumn(page, 0).boundingBox())!.width;
+    await dragTo(page, handle(page, 'done'), (await centre(dockColumn(page, 1))).x, (await dockColumn(page, 1).boundingBox())!.y + 6);
+    const grip = await centre(page.getByTestId('column-splitter'));
+    await dragTo(page, page.getByTestId('column-splitter'), grip.x - 150, grip.y);
+    const heightBar = band(page, 'asks').getByTestId('height-handle');
+    await dragTo(page, heightBar, (await centre(heightBar)).x, (await centre(heightBar)).y + 90);
+    await band(page, 'watches').getByTestId('band-toggle').click();
+    await expect(resetLayout(page)).toBeEnabled();
+    const arranged = (await layoutOf(page))!;
+    expect(arranged.columns.map((c) => c.widgets.join(','))).not.toEqual(DEFAULT_COLUMNS);
+    expect(Object.keys(arranged.heights)).toEqual(['asks']);
+    expect(arranged.open).toMatchObject({ watches: false });
+
+    await resetLayout(page).click();
+    await expect(resetLayout(page)).toBeDisabled();
+    expect(await columnsOf(page)).toEqual(DEFAULT_COLUMNS);
+    const reset = (await layoutOf(page))!;
+    expect(reset.columns.map((c) => c.width)).toEqual([0.5, 0.5]);
+    expect(reset.heights).toEqual({});
+    expect(reset.open).toEqual({});
+    await expect(band(page, 'watches').getByTestId('band-toggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(band(page, 'done').getByTestId('band-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(dockColumn(page, 0).getByTestId('band-done')).toBeVisible();
+    await expect.poll(async () => Math.abs((await dockColumn(page, 0).boundingBox())!.width - defaultWidth)).toBeLessThanOrEqual(2);
+    await page.reload();
+    await expect(resetLayout(page)).toBeDisabled();
+  });
+
+  test('a toggled band put back to its default open state counts as the default layout', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'toggle');
+    const toggle = band(page, 'asks').getByTestId('band-toggle');
+    await toggle.click();
+    await expect(resetLayout(page)).toBeEnabled();
+    await toggle.click();
+    await expect(resetLayout(page)).toBeDisabled();
+  });
+
+  test('a focused handle moves with the arrow keys, announces its place and keeps focus; a move across the edge docks a new column', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'keys');
+    const status = page.getByTestId('dock-status');
+    await handle(page, 'asks').focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(status).toHaveText('Open asks, column 1 of 2, position 2 of 4');
+    await expect(handle(page, 'asks')).toBeFocused();
+    expect(await columnsOf(page)).toEqual(['expired,asks,watches,done', 'flight,recent']);
+    await page.keyboard.press('ArrowUp');
+    await expect(status).toHaveText('Open asks, column 1 of 2, position 1 of 4');
+
+    await handle(page, 'done').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(status).toHaveText('Done, not closed, column 2 of 2, position 3 of 3');
+    await expect(handle(page, 'done')).toBeFocused();
+    await expect(dockColumn(page, 1).getByTestId('band-done')).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(status).toHaveText('Done, not closed, column 3 of 3, position 1 of 1');
+    await expect(page.getByTestId('dock-column')).toHaveCount(3);
+    await expect(dockColumn(page, 2).getByTestId('band-done')).toBeVisible();
+    expect(await columnsOf(page)).toEqual(['asks,expired,watches', 'flight,recent', 'done']);
+    await page.keyboard.press('ArrowRight');
+    await expect(status).toHaveText('Done, not closed, column 3 of 3, position 1 of 1, cannot move right');
+    await page.keyboard.press('ArrowLeft'); // back across: the lone widget's column closes
+    await expect(page.getByTestId('dock-column')).toHaveCount(2);
+    await expect(status).toHaveText('Done, not closed, column 2 of 2, position 1 of 3');
+    await expect(resetLayout(page)).toBeEnabled();
+
+    await page.reload();
+    await expect(dockColumn(page, 1).getByTestId('band-done')).toBeVisible(FIVE_SECONDS);
+    expect(await columnsOf(page)).toEqual(['asks,expired,watches', 'done,flight,recent']);
+  });
+
+  test('a splitter and a height bar take the arrow keys and say their value', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'keysize');
+    const splitter = page.getByTestId('column-splitter');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+    await splitter.focus();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '56');
+    await expect(page.getByTestId('dock-status')).toHaveText('Column 1 is 56% wide, column 2 is 44%');
+    expect((await layoutOf(page))!.columns[0]!.width).toBeCloseTo(0.56, 6);
+    await page.keyboard.press('ArrowLeft');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '54');
+
+    const bar = band(page, 'asks').getByTestId('height-handle');
+    const before = (await band(page, 'asks').getByTestId('band-panel').boundingBox())!.height;
+    await bar.focus();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(async () => (await layoutOf(page))!.heights.asks).toBeCloseTo(Math.round(before) + 48, -1);
+    await expect(page.getByTestId('dock-status')).toHaveText(/^Open asks is \d+ pixels high$/);
+    await page.keyboard.press('Home');
+    await expect(page.getByTestId('dock-status')).toHaveText('Open asks takes the height of its content');
+    expect((await layoutOf(page))!.heights).toEqual({});
+  });
+
+  test('a stored layout that breaks the model (a column under 18%) is the default', async ({ page, playwright, baseURL }) => {
+    const bad = JSON.stringify({ columns: [{ width: 0.05, widgets: ['asks', 'expired', 'watches', 'done'] }, { width: 0.95, widgets: ['flight', 'recent'] }], heights: {}, open: {} });
+    await page.addInitScript(([key, value]) => localStorage.setItem(key!, value!), [LAYOUT_KEY, bad]);
+    await openDock(page, playwright, baseURL, 'bad');
+    await expect(page.getByTestId('dock-column')).toHaveCount(2);
+    await expect(resetLayout(page)).toBeDisabled();
+    const a = (await dockColumn(page, 0).boundingBox())!;
+    const b = (await dockColumn(page, 1).boundingBox())!;
+    expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(2);
+  });
+
+  test('the dock is drawn from 1024 px and the widgets stack below it', async ({ page, playwright, baseURL }) => {
+    await openDock(page, playwright, baseURL, 'lg');
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await expect(page.getByTestId('now-dock')).toBeVisible();
+    await page.setViewportSize({ width: 1023, height: 800 });
+    await expect(page.getByTestId('now-dock')).toHaveCount(0);
+    await expect(resetLayout(page)).toHaveCount(0);
+    await expect(page.getByTestId('widget-handle')).toHaveCount(0);
+    await expect(page.getByTestId('now-needs')).toBeVisible();
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await expect(page.getByTestId('now-dock')).toBeVisible();
+  });
+});
+
+test.describe('the dock and the phone', () => {
+  const custom = JSON.stringify({
+    columns: [
+      { width: 0.3, widgets: ['asks', 'expired'] },
+      { width: 0.3, widgets: ['flight', 'done'] },
+      { width: 0.4, widgets: ['watches', 'recent'] },
+    ],
+    heights: { asks: 300 },
+    open: { done: true },
+  });
+
+  test('at 390x844 the accordion shows with no handles or Reset, and the stored desktop layout is kept untouched', async ({ page, playwright, baseURL }) => {
+    await page.setViewportSize(PHONE);
+    await page.addInitScript(([key, value]) => localStorage.getItem(key!) === null && localStorage.setItem(key!, value!), [LAYOUT_KEY, custom]);
+    const s = await seedNeedsMe(playwright, baseURL, 'phone-dock');
+    await page.goto(`/#/now?initiative=${s.slug}`);
+    await expect(page.getByTestId('band-count')).toHaveText(['1', '1', '1', '1'], FIVE_SECONDS);
+    expect(await expanded(page)).toEqual(['true', 'true', 'false', 'false']);
+    await expect(page.getByTestId('now-dock')).toHaveCount(0);
+    await expect(page.getByTestId('widget-handle')).toHaveCount(0);
+    await expect(resetLayout(page)).toHaveCount(0);
+    await band(page, 'watches').getByTestId('band-toggle').click();
+    await expect(band(page, 'watches').getByTestId('attention-item')).toBeVisible();
+    await page.reload();
+    await expect(band(page, 'watches').getByTestId('attention-item')).toBeVisible(FIVE_SECONDS);
+    expect(await page.evaluate((key) => localStorage.getItem(key), LAYOUT_KEY)).toBe(custom);
+
+    // The same browser on the desktop shows the arrangement it kept.
+    await page.setViewportSize(DESKTOP);
+    await expect(page.getByTestId('dock-column')).toHaveCount(3);
+    expect(await columnsOf(page)).toEqual(['asks,expired', 'flight,done', 'watches,recent']);
+    await expect(resetLayout(page)).toBeEnabled();
+    await expect(dockColumn(page, 1).getByTestId('band-done').getByTestId('band-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(Math.round((await band(page, 'asks').getByTestId('band-panel').boundingBox())!.height)).toBe(300);
+  });
+});

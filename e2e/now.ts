@@ -16,11 +16,23 @@ export const BAND_OF = {
   done_not_closed: 'done',
 } as const;
 
-function seedAllOpen(key: string): void {
+// The desktop dock keeps its open states in the layout, the stacked view in the bands key: seed both.
+export const LAYOUT_KEY = 'vh.now.layout.v1';
+
+function seedAllOpen(keys: { bands: string; layout: string }): void {
   try {
-    if (localStorage.getItem(key) === null) {
-      const open = { asks: true, expired: true, watches: true, done: true };
-      localStorage.setItem(key, JSON.stringify({ wide: open, narrow: open }));
+    const open = { asks: true, expired: true, watches: true, done: true };
+    if (localStorage.getItem(keys.bands) === null) localStorage.setItem(keys.bands, JSON.stringify({ wide: open, narrow: open }));
+    if (localStorage.getItem(keys.layout) === null) {
+      const layout = {
+        columns: [
+          { width: 0.5, widgets: ['asks', 'expired', 'watches', 'done'] },
+          { width: 0.5, widgets: ['flight', 'recent'] },
+        ],
+        heights: {},
+        open,
+      };
+      localStorage.setItem(keys.layout, JSON.stringify(layout));
     }
   } catch {
     // A page with no storage (about:blank) has nothing to seed.
@@ -30,8 +42,9 @@ function seedAllOpen(key: string): void {
 // Seeds every band open for the pages this one loads, and for the page already on screen: a goto that only changes the
 // fragment of the loaded page does not run an init script again.
 export async function showAllBands(page: Page): Promise<void> {
-  await page.addInitScript(seedAllOpen, BANDS_KEY);
-  await page.evaluate(seedAllOpen, BANDS_KEY);
+  const keys = { bands: BANDS_KEY, layout: LAYOUT_KEY };
+  await page.addInitScript(seedAllOpen, keys);
+  await page.evaluate(seedAllOpen, keys);
 }
 
 export const band = (page: Page, key: BandKey): Locator => page.getByTestId(`band-${key}`);

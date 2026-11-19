@@ -121,7 +121,8 @@ for (const vp of viewports) {
       await page.goto(`/#/now?initiative=${s.slug}`);
       await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
 
-      await expect(page.getByRole('heading', { level: 3, name: 'Needs me' })).toBeVisible();
+      // The stacked view heads its bands with Needs me; the desktop dock has no such column, each band is a widget.
+      await expect(page.getByRole('heading', { level: 3, name: vp.size.width >= 1024 ? /^Open asks/ : 'Needs me' })).toBeVisible();
       await expect(page.getByTestId('band-toggle')).toHaveText(BANDS.map((x) => new RegExp(`^\\s*${x.title}\\s*\\d+\\s*$`)), FIVE_SECONDS);
       await expect(page.getByTestId('band-count')).toHaveText(['1', '2', '1', '1'], FIVE_SECONDS);
       await expect(page.getByTestId('band-empty')).toHaveCount(0);

@@ -15,6 +15,8 @@ import {
   moveWidget,
   nudgeWidget,
   parseLayout,
+  pruneEmpty,
+  widgetOpen,
   positionLabel,
   removeColumn,
   resetLayout,
@@ -54,6 +56,15 @@ describe('the default layout', () => {
     expect(isDefaultLayout(setHeight(d, 'asks', 300))).toBe(false);
     expect(isDefaultLayout(setOpen(d, 'done', true))).toBe(false);
     expect(isDefaultLayout(addColumn(d))).toBe(false);
+  });
+
+  it('counts an open state put back to what it is by default as the default, and not one that differs', () => {
+    expect(widgetOpen(defaultLayout(), 'asks')).toBe(true);
+    expect(widgetOpen(defaultLayout(), 'done')).toBe(false);
+    expect(widgetOpen(setOpen(defaultLayout(), 'done', true), 'done')).toBe(true);
+    expect(isDefaultLayout(setOpen(setOpen(defaultLayout(), 'asks', false), 'asks', true))).toBe(true);
+    expect(isDefaultLayout(setOpen(defaultLayout(), 'done', false))).toBe(true);
+    expect(isDefaultLayout(setOpen(defaultLayout(), 'recent', false))).toBe(false);
   });
 
   it('counts a layout dragged back to the default widths as the default', () => {
@@ -455,5 +466,27 @@ describe('a stored layout', () => {
     expect(loadLayout(blocked)).toEqual(defaultLayout());
     expect(() => saveLayout(blocked, defaultLayout())).not.toThrow();
     expect(() => saveLayout(undefined, defaultLayout())).not.toThrow();
+  });
+});
+
+describe('pruneEmpty', () => {
+  it('drops a column a move emptied and gives its width to a neighbour', () => {
+    const emptied = { ...defaultLayout(), columns: [{ width: 0.2, widgets: [] }, { width: 0.3, widgets: ['asks', 'expired', 'watches', 'done'] as WidgetKey[] }, { width: 0.5, widgets: ['flight', 'recent'] as WidgetKey[] }] };
+    const out = pruneEmpty(emptied);
+    expect(names(out)).toEqual(['asks,expired,watches,done', 'flight,recent']);
+    expect(sum(out)).toBeCloseTo(1, 9);
+    expect(widths(out)[0]).toBeCloseTo(0.5, 9);
+  });
+
+  it('leaves a layout with no empty column as it was', () => {
+    const d = defaultLayout();
+    expect(pruneEmpty(d)).toBe(d);
+  });
+
+  it('turns a lone widget moved across into one fewer column', () => {
+    const three = moveWidget(defaultLayout(), 'done', { kind: 'new', side: 'right' });
+    expect(names(three)).toEqual(['asks,expired,watches', 'flight,recent', 'done']);
+    const back = pruneEmpty(moveWidget(three, 'done', { kind: 'col', col: 1, index: 0 }));
+    expect(names(back)).toEqual(['asks,expired,watches', 'done,flight,recent']);
   });
 });

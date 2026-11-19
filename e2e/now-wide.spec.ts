@@ -53,11 +53,11 @@ test.describe('wide 2560x1080 cards', () => {
 test.describe('ultrawide 3440x1440 cap', () => {
   test.use({ viewport: { width: 3440, height: 1440 } });
 
-  test('the view (bands and In flight column) is at most 2560 px wide and centred in the main column', async ({ page }) => {
+  test('the view (the docked columns) is at most 2560 px wide and centred in the main column', async ({ page }) => {
     await openNow(page);
     const block = (await page.getByTestId('now-view').boundingBox())!;
     expect(block.width).toBeLessThanOrEqual(2560);
-    const bands = (await page.getByTestId('now-bands').boundingBox())!;
+    const bands = (await page.getByTestId('band-asks').boundingBox())!;
     const flight = (await page.getByTestId('now-flight').boundingBox())!;
     expect(bands.x).toBeGreaterThanOrEqual(block.x);
     expect(flight.x + flight.width).toBeLessThanOrEqual(block.x + block.width + 1);

@@ -34,6 +34,9 @@ export interface NowLayout {
   open: Partial<Record<WidgetKey, boolean>>;
 }
 
+/** The screens the dock is drawn on: lg (1024 px) and wider. Below it the widgets are stacked. */
+export const DOCK_QUERY = '(min-width: 1024px)';
+
 export const MIN_COLUMNS = 1;
 export const MAX_COLUMNS = 4;
 /** No column is narrower than 18% of the row. */
@@ -66,9 +69,21 @@ export function resetLayout(): NowLayout {
   return defaultLayout();
 }
 
+/** Whether a widget is open when the person has not chosen: every one but Done, not closed. */
+export function defaultWidgetOpen(key: WidgetKey): boolean {
+  return key !== 'done';
+}
+
+/** Whether a widget is open under a layout: the person's choice, else the default. */
+export function widgetOpen(layout: NowLayout, key: WidgetKey): boolean {
+  return layout.open[key] ?? defaultWidgetOpen(key);
+}
+
+/** The default: the default columns and widths, no height given and every open state what it is by default. */
 export function isDefaultLayout(layout: NowLayout): boolean {
   const base = defaultLayout();
-  if (Object.keys(layout.heights).length > 0 || Object.keys(layout.open).length > 0) return false;
+  if (Object.keys(layout.heights).length > 0) return false;
+  if (Object.entries(layout.open).some(([key, open]) => open !== defaultWidgetOpen(key as WidgetKey))) return false;
   if (layout.columns.length !== base.columns.length) return false;
   return layout.columns.every(
     (col, i) =>
@@ -193,6 +208,13 @@ export function removeColumn(layout: NowLayout, col: number): NowLayout {
   heir.widgets.push(...gone!.widgets);
   heir.width += gone!.width;
   return { ...layout, columns: withWidths(columns, fitWidths(columns.map((c) => c.width))) };
+}
+
+/** Drops the columns left with no widget (a drag that emptied one); their width goes to a neighbour. */
+export function pruneEmpty(layout: NowLayout): NowLayout {
+  let out = layout;
+  for (let col = out.columns.length - 1; col >= 0; col--) if (out.columns[col]!.widgets.length === 0) out = removeColumn(out, col);
+  return out;
 }
 
 /** Moves the splitter after column `left` by `delta` (a fraction of the row); both columns keep MIN_WIDTH. */

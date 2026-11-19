@@ -83,7 +83,7 @@ for (const vp of viewports) {
       await expect(page).toHaveURL(new RegExp(`#/now\\?${query}$`));
       await expect(tagChip(page, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(initiativeChip(page, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(page.locator('[data-testid=now-bands], [data-testid=now-dock]')).toBeVisible(FIVE_SECONDS);
       expect(reads.count).toBe(1);
       expect(reads.queries).toEqual([`?${query}`]);
 
@@ -93,7 +93,7 @@ for (const vp of viewports) {
       await second.goto('/#/now');
       await expect(tagChip(second, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(initiativeChip(second, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(second.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(second.locator('[data-testid=now-bands], [data-testid=now-dock]')).toBeVisible(FIVE_SECONDS);
       await expect(second).toHaveURL(new RegExp(`#/now\\?${query}$`));
       expect(secondReads.count).toBe(1);
       expect(secondReads.queries).toEqual([`?${query}`]);
@@ -136,7 +136,7 @@ for (const vp of viewports) {
       await expect(link.getByTestId('initiative-row').first()).toBeVisible();
       const reads = attentionReads(link);
       await goTo(link, 'Now');
-      await expect(link.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(link.locator('[data-testid=now-bands], [data-testid=now-dock]')).toBeVisible(FIVE_SECONDS);
       await expect(link).toHaveURL(/#\/now$/);
       await expect(await revealInitiative(link, a)).toHaveAttribute('aria-pressed', 'false');
       await expect(link.getByTestId('chip-clear')).toHaveCount(0);
@@ -163,7 +163,7 @@ for (const vp of viewports) {
       await expect(fresh).toHaveURL(new RegExp(`#/now\\?${kept}$`));
       await expect(tagChip(fresh, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(initiativeChip(fresh, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(fresh.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.locator('[data-testid=now-bands], [data-testid=now-dock]')).toBeVisible(FIVE_SECONDS);
       await expect(tagChip(fresh, 'av-ghost-tag')).toHaveCount(0);
       await expect(initiativeChip(fresh, 'e2e-av-ghost')).toHaveCount(0);
       // The unknown values never reached the server, and the saved query was rewritten without them.
@@ -243,7 +243,7 @@ for (const vp of viewports) {
       );
       const reads = attentionReads(fresh);
       await fresh.goto('/#/now');
-      await expect(fresh.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.locator('[data-testid=now-bands], [data-testid=now-dock]')).toBeVisible(FIVE_SECONDS);
       await expect(fresh).toHaveURL(/#\/now$/);
       expect(lookups).toBeGreaterThan(0);
       // The unknown values never reached the server, and the saved query is gone (the empty filter is the default).
