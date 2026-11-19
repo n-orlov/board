@@ -244,3 +244,30 @@ func TestAFailureReadingLeasesOrAsksIsReturned(t *testing.T) {
 		})
 	}
 }
+
+func TestAnActorShowsTheOriginItsLatestKeyedWriteLeft(t *testing.T) {
+	e := newEnv(t)
+	op := audit.Actor{Handle: "alice-op", Operator: true}
+	if _, err := (initiatives.Store{Store: e.st}).Create(ctx, op, "oidc:a@example.com", initiatives.New{Slug: "bb", Title: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (initiatives.Store{Store: e.st}).Create(audit.WithOrigin(ctx, "alice-op"), audit.Actor{Handle: "claude@host"}, "key:k", initiatives.New{Slug: "cc", Title: "C"}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	list, err := e.r.List(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range list {
+		got[a.Handle] = a.Origin
+	}
+	want := map[string]string{"setup@host": "", "alice-op": "", "claude@host": "alice-op"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("origins = %v, want %v", got, want)
+	}
+	one, err := e.r.Get(ctx, "claude@host")
+	if err != nil || one.Origin != "alice-op" {
+		t.Errorf("Get = %+v, %v, want origin alice-op", one, err)
+	}
+}

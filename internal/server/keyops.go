@@ -32,7 +32,7 @@ func caller(ctx context.Context) (auth.Identity, problemResponse, bool) {
 func apiKey(k auth.Key, now time.Time) Key {
 	return Key{
 		Id: k.ID, Name: k.Name, DisplayPrefix: k.DisplayPrefix, Status: KeyStatus(k.Status(now)),
-		CreatedAt: k.CreatedAt, CreatedBy: k.CreatedBy, LastUsedAt: k.LastUsedAt, ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
+		CreatedAt: k.CreatedAt, CreatedBy: k.CreatedBy, Owner: optionalText(k.Owner), LastUsedAt: k.LastUsedAt, ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 	}
 }
 
@@ -88,7 +88,7 @@ func (o keyOps) CreateKey(ctx context.Context, req CreateKeyRequestObject) (Crea
 	k := apiKey(row, time.Now())
 	return CreateKey201JSONResponse(CreatedKey{
 		Id: k.Id, Name: k.Name, DisplayPrefix: k.DisplayPrefix, Status: CreatedKeyStatus(k.Status),
-		CreatedAt: k.CreatedAt, CreatedBy: k.CreatedBy, ExpiresAt: k.ExpiresAt, Key: plain,
+		CreatedAt: k.CreatedAt, CreatedBy: k.CreatedBy, Owner: k.Owner, ExpiresAt: k.ExpiresAt, Key: plain,
 	}), nil
 }
 

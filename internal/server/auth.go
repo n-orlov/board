@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/n-orlov/village-hall/internal/audit"
 	"github.com/n-orlov/village-hall/internal/auth"
 )
 
@@ -152,7 +153,9 @@ func serveKeyed(next http.Handler, verify KeyVerifier, key string, w http.Respon
 		Meta:       strings.TrimSpace(r.Header.Get(MetaHeader)),
 		OnBehalfOf: strings.TrimSpace(r.Header.Get(OnBehalfHeader)),
 	}
-	next.ServeHTTP(&usageWriter{ResponseWriter: w, usage: usage, ctx: r.Context()}, r.WithContext(withIdentity(r.Context(), who)))
+	// What the request writes carries the operator who owns the key as its origin.
+	ctx = audit.WithOrigin(r.Context(), usage.Owner())
+	next.ServeHTTP(&usageWriter{ResponseWriter: w, usage: usage, ctx: r.Context()}, r.WithContext(withIdentity(ctx, who)))
 }
 
 // usageWriter commits the writes authentication deferred (a key's
@@ -213,6 +216,8 @@ func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *htt
 		}
 		ctx := withSession(r.Context(), sessionIdentity{id: id, session: sess})
 		who := auth.Identity{Principal: "oidc:" + sess.Email, Actor: login.ActorFor(sess.Email), Operator: true}
+		// A session's writes carry its own operator as their origin.
+		ctx = audit.WithOrigin(ctx, who.Actor)
 		next.ServeHTTP(w, r.WithContext(withIdentity(ctx, who)))
 	}
 }

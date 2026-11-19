@@ -379,6 +379,7 @@ func registerOIDCSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE|BOARD_SWEEP_INTERVAL|BOARD_OIDC_OPERATORS) set to "([^"]*)"$`, h.serverWithOIDCSetting)
 	registerSessionSteps(sc, h)
 	registerManyOperatorSteps(sc, h)
+	registerKeyOriginSteps(sc, h)
 	sc.Step(`^the browser opens "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser requests GET "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser follows the redirects$`, h.followRedirects)

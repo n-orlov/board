@@ -1082,6 +1082,12 @@ export interface components {
             /** @description The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`. */
             created_by: string;
             /**
+             * @description The handle of the operator actor that owns the key: the session's operator for a key made through a
+             *     session, the creating key's owner for one made through a key, the `--owner` of `vh admin keys create`.
+             *     Absent when no operator was known when the key was made. Nothing checks it.
+             */
+            owner?: string;
+            /**
              * Format: date-time
              * @description When the key was last used, to within 30 seconds. Absent when it never was.
              */
@@ -1474,6 +1480,12 @@ export interface components {
             actor: string;
             /** @description The principal that authenticated. */
             principal: string;
+            /**
+             * @description The handle of the operator actor behind the write: a session's own operator, or the owner of the key
+             *     the write came through. Fixed when the event is written, whatever the actor's origin becomes later.
+             *     Absent when no operator was known.
+             */
+            origin?: string;
             /** @description The slug of the initiative the event names. Absent when it names none. */
             initiative?: string;
             /** @description The ref of the task the event names. Absent when it names none. */
@@ -2034,6 +2046,11 @@ export interface components {
             kind: "operator" | "agent";
             /** @description How to reach the actor again. Absent when the board has none. */
             way_back?: string;
+            /**
+             * @description The handle of the operator actor whose key made the agent's latest write (its owner). Absent for an
+             *     operator and for an agent that no keyed write has reached an owner for.
+             */
+            origin?: string;
             /** Format: date-time */
             last_seen: string;
             /** @description The actor's live leases, oldest first. */

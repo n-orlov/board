@@ -59,7 +59,7 @@ func eventResult[R any](err error) (R, error) {
 
 func apiEvent(e events.Event) Event {
 	return Event{
-		Id: e.ID, Ref: e.Ref, At: e.At, Type: e.Type, Actor: e.Actor, Principal: e.Principal,
+		Id: e.ID, Ref: e.Ref, At: e.At, Type: e.Type, Actor: e.Actor, Principal: e.Principal, Origin: optionalText(e.Origin),
 		Initiative: optionalText(e.Initiative), Task: optionalText(e.Task), RefId: optionalText(e.RefID),
 		Summary: e.Summary, Data: e.Data,
 	}

@@ -291,3 +291,24 @@ func TestOnBehalfOfAndAnEventWhoseTaskRowIsGone(t *testing.T) {
 		t.Errorf("event = %+v, want on_behalf_of ann@host and the task id as its task", e)
 	}
 }
+
+func TestAnEventShowsTheHandleOfItsOriginAndNoneWhenItHasNone(t *testing.T) {
+	f := newFixture(t)
+	op := audit.Actor{Handle: "alice-op", Operator: true}
+	_, err := f.in.Create(ctx, op, "oidc:a@example.com", initiatives.New{Slug: "by-op", Title: "I"})
+	f.must(t, err)
+	_, err = f.in.Create(audit.WithOrigin(ctx, "alice-op"), ann, "key:k", initiatives.New{Slug: "by-key", Title: "I"})
+	f.must(t, err)
+	_, err = f.in.Create(audit.WithOrigin(ctx, ""), bob, "key:j", initiatives.New{Slug: "by-orphan", Title: "I"})
+	f.must(t, err)
+	got := map[string]string{}
+	page, err := f.ev.List(ctx, Query{})
+	f.must(t, err)
+	for _, e := range page.Items {
+		got[e.Initiative] = e.Origin
+	}
+	want := map[string]string{"by-op": "alice-op", "by-key": "alice-op", "by-orphan": ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("origins = %v, want %v", got, want)
+	}
+}

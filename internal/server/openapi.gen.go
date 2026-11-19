@@ -943,6 +943,10 @@ type ActorView struct {
 	// Leases The actor's live leases, oldest first.
 	Leases []ActorLease `json:"leases"`
 
+	// Origin The handle of the operator actor whose key made the agent's latest write (its owner). Absent for an
+	// operator and for an agent that no keyed write has reached an owner for.
+	Origin *string `json:"origin,omitempty"`
+
 	// WayBack How to reach the actor again. Absent when the board has none.
 	WayBack *string `json:"way_back,omitempty"`
 }
@@ -1325,6 +1329,11 @@ type CreatedKey struct {
 	// Name The key's unique name, such as `workstation`.
 	Name string `json:"name"`
 
+	// Owner The handle of the operator actor that owns the key: the session's operator for a key made through a
+	// session, the creating key's owner for one made through a key, the `--owner` of `vh admin keys create`.
+	// Absent when no operator was known when the key was made. Nothing checks it.
+	Owner *string `json:"owner,omitempty"`
+
 	// RevokedAt When the key was revoked. Absent for a key that was not.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 
@@ -1365,6 +1374,11 @@ type Event struct {
 
 	// Initiative The slug of the initiative the event names. Absent when it names none.
 	Initiative *string `json:"initiative,omitempty"`
+
+	// Origin The handle of the operator actor behind the write: a session's own operator, or the owner of the key
+	// the write came through. Fixed when the event is written, whatever the actor's origin becomes later.
+	// Absent when no operator was known.
+	Origin *string `json:"origin,omitempty"`
 
 	// Principal The principal that authenticated.
 	Principal string `json:"principal"`
@@ -1644,6 +1658,11 @@ type Key struct {
 
 	// Name The key's unique name, such as `workstation`.
 	Name string `json:"name"`
+
+	// Owner The handle of the operator actor that owns the key: the session's operator for a key made through a
+	// session, the creating key's owner for one made through a key, the `--owner` of `vh admin keys create`.
+	// Absent when no operator was known when the key was made. Nothing checks it.
+	Owner *string `json:"owner,omitempty"`
 
 	// RevokedAt When the key was revoked. Absent for a key that was not.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`

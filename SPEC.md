@@ -116,6 +116,13 @@ Two separate things are recorded on every write:
 Events (§4.6) store both `principal` and `actor_id`. Revoking a key cuts off every actor that
 used it.
 
+A third thing is recorded beside them, the **origin**: the operator actor behind a write. A session's
+origin is its own operator actor. A key's origin is the key's **owner**, the operator actor that owns
+it (§3.3); a key without an owner (below) has no origin, so the write's origin is null. The origin is
+written on the event (`events.origin`, §4.6) and, for an agent, on the actor row (`actors.origin`,
+§4.1) as the owner of the key behind its latest write. It is a record of who is behind an agent, for
+the people reading the board: **no permission check uses it** (v1 has no ACL).
+
 ### 3.2 Humans: OIDC
 
 Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
@@ -214,8 +221,21 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   `created_at`, `created_by`, `last_used_at` (coalesced, §14), `expires_at` (optional),
   `revoked_at`.
 - Lookup is by hash (indexed, unique); comparison cost does not depend on the key.
-- **One key per environment** (e.g. `workstation`, `ralphd`, `laptop`), not per agent, so a
-  leaked environment is revoked alone. Names are unique.
+- **Name a key for the environment it serves** (e.g. `workstation`, `ralphd`, `laptop`), not for an
+  agent, so a leaked environment is revoked alone. Names are unique. An operator may own any number of
+  keys, and every key has at most one owner.
+- **Owner.** `api_keys.owner` is the operator actor that owns the key (§4.9), shown as a handle:
+  - a key made through a session is owned by that session's operator (§3.1);
+  - a key made through a key (`POST /api/v1/keys`) is owned by that key's owner, and by nobody when that
+    key has none;
+  - a key made by `vh admin keys create` is owned by the operator `--owner <handle>` names, or, with no
+    `--owner`, by the operator actor `VH_OPERATOR_HANDLE` names (default `operator`, §13). An `--owner`
+    that is not the handle of an existing operator actor row (unknown, or the handle of an agent) is
+    refused and nothing is written (§8.3). When no `--owner` is given and the default handle has no
+    operator row yet (a database bootstrapped before anyone signed in), the key is made with a null owner
+    rather than refused, so the bootstrap still works; its origin stays null.
+  - The migration (00013) gave every key that existed the operator row as its owner, and leaves the owner
+    null on a database with no operator row. Nothing reads the owner to allow or refuse a request.
 - A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail); a key
   that is not shaped like a key or that no row holds gets 401 (`key unknown`).
 - The server checks a presented key against `api_keys` on every request (no cache, so a revocation
@@ -226,7 +246,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   gets 400.
 - Management:
   - **UI** (after SSO): Settings → API keys: create (name, optional expiry), list, revoke.
-  - **Bootstrap, no HTTP**: `vh admin keys create <name> [--expires 90d]`, `vh admin keys
+  - **Bootstrap, no HTTP**: `vh admin keys create <name> [--expires 90d] [--owner <handle>]`, `vh admin keys
     list`, `vh admin keys revoke <name>`, run inside the container against `VH_DB_URL`
     directly. This is how the first key is made, and the recovery path if SSO is broken. The
     commands are described in §8.
@@ -238,14 +258,15 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
       never again. A bad name or expiry, or an unreadable body, is 400. A name already taken is 409.
     - `POST /api/v1/keys/{name}/revoke` sets `revoked_at` and answers 200 with the Key. An unknown name is 404. Revoking
       a revoked key changes nothing and answers 200 with the first `revoked_at`.
-    - A **Key** is `{id, name, display_prefix, status, created_at, created_by, last_used_at?, expires_at?, revoked_at?}`:
+    - A **Key** is `{id, name, display_prefix, status, created_at, created_by, owner?, last_used_at?, expires_at?, revoked_at?}`
+      (`owner` is the owner's handle, omitted when the key has none):
       `status` is `active`, `expired` or `revoked`, timestamps are RFC 3339, an absent date is omitted, `created_by`
       is the creating principal (`key:<name>`, `oidc:<email>`, or `admin-cli` for the command line). A Key never holds the
       key: not in `GET /api/v1/keys`, not in `vh admin keys list`, not in the `api_keys` row.
     - A creation and a revocation that happens each append an event in the same transaction as the row, `key_created` and
       `key_revoked` (§4.6), with `ref_id` the key's id, `principal` the caller's principal (`key:<name>` or
       `oidc:<email>`) and `actor_id` the actor it acted as (the `Board-Actor` handle, or the operator for a session), in
-      separate columns. Their `data` holds the key's `name` (and `expires_at` for a creation), never the key. The actor
+      separate columns, and `origin` the operator behind the request (§3.1). Their `data` holds the key's `name` (and `expires_at` for a creation), never the key. The actor
       is upserted on first use. `vh admin keys` has no actor and records no event.
 - **Swagger UI** declares a `bearerAuth` security scheme, so "Authorize" accepts a key; inside a
   logged-in browser session it also works with the session cookie and CSRF header.
@@ -302,6 +323,7 @@ exists.
 | host | text | optional, from the handle; never set in Phase 0 |
 | way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
 | meta | json text | free-form environment facts the agent chose to send; a JSON object set from `Board-Actor-Meta` (§6.1), `{}` until one is sent |
+| origin | fk, nullable | the operator actor whose key made this actor's latest write (§3.1, §3.3): set on every key write, so an agent that moves to another operator's key changes origin; null for an agent no keyed write by an owned key has reached, and left null on an operator row (an operator is its own origin). Migration 00013 backfilled it from each agent's latest key-principal event |
 | first_seen_at, last_seen_at | ts | the full product bumps `last_seen_at` on any API call with this handle (coalesced, §14); Phase 0 bumps it on every write that records the actor, uncoalesced, and a read does not |
 | protocol_seen | int, nullable | highest agent protocol version this actor has read (`vh help agent`, §8.6) |
 
@@ -534,6 +556,7 @@ The task timeline and the global change log. Append-only; never updated or delet
 | at | ts | |
 | actor_id | fk | who did it |
 | principal | text | who authenticated: `oidc:<email>` or `key:<name>` (§3.1) |
+| origin | fk, nullable | the operator actor behind the write, fixed when the event is written (§3.1): a session's own operator, or the owner of the key it came through; null when the key has no owner. An event keeps its origin even if the actor's `origin` (§4.1) changes later. A write made outside a request (a lease expiring on its own) takes the origin of the actor row it is written as. Migration 00013 backfilled it: session principals (`oidc:`) to the operator row, key principals (`key:<name>`) to that key's owner, other principals (`system`) left null |
 | on_behalf_of | fk, nullable | |
 | initiative_id | fk, nullable | denormalised for filtering |
 | task_id | fk, nullable | |
@@ -652,7 +675,12 @@ reads a handle's position (empty when none is set, which reads from the start). 
 ### 4.9 `api_keys`, `sessions`
 
 `api_keys(n, id, name unique, key_hash unique, display_prefix, created_at, created_by,
-last_used_at, expires_at, revoked_at)`. `key_hash` = SHA-256 of the full key. `created_by` is the creating principal, `key:<name>` or `oidc:<email>` for a key made over
+last_used_at, expires_at, revoked_at, owner)`. `owner` is a nullable fk to `actors`: the operator actor that owns the
+key (§3.3); null when no operator was known at creation. Migration `00013_key_owner_and_origin` adds it, `events.origin`
+(§4.6) and `actors.origin` (§4.1), all nullable, and backfills them in one common SQL form for both dialects: every
+key's owner is the earliest operator row (null with none), an `oidc:` event's origin is that operator, a `key:<name>`
+event's origin is that key's owner, and an agent's origin is the origin of its latest `key:` event. Its Down drops the three
+columns. `key_hash` = SHA-256 of the full key. `created_by` is the creating principal, `key:<name>` or `oidc:<email>` for a key made over
 HTTP and `admin-cli` for one made by `vh admin keys create`. `expires_at` is when the key stops working; the
 verifier answers 401 `key expired` from that instant on.
 
@@ -664,7 +692,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10); Phase 5 drops the one-operator index (`00012_many_operators`, §4.1) and adds key owner and origin (`00013_key_owner_and_origin`, above). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -1030,8 +1058,9 @@ event, the task, initiative, ask, lease and actor rows named above.
 
 **Events** (`GET /api/v1/events`, `GET /api/v1/tasks/{ref}/events`, in `api/openapi.yaml`): a page of
 `{items, next_after?}` ordered by the order the events were written (the `n` behind `E<n>`). Each item is `{id, ref,
-at, type, actor, principal, initiative?, task?, ref_id?, summary, data}`: `id` the ULID, `ref` the short ref `E<n>`,
-`actor` the handle of the actor it was written as, `principal` the authenticated principal, `initiative` a slug, `task`
+at, type, actor, principal, origin?, initiative?, task?, ref_id?, summary, data}`: `id` the ULID, `ref` the short ref `E<n>`,
+`actor` the handle of the actor it was written as, `principal` the authenticated principal, `origin` the handle of the
+operator behind the write (§3.1, §4.6; omitted when none), `initiative` a slug, `task`
 a ref (`<slug>-<seq>`), `ref_id` the id of the object it is about, `summary` the one line of §4.6; the optional keys are
 omitted when the event has none. Filters combine with AND: `initiative` (slug or ULID) and `task` (ref or ULID)
 keep the events that name them, `type` (repeatable, OR among the values) keeps those types, `actor` one handle, and
@@ -1591,8 +1620,9 @@ what each is doing now. Any authenticated principal may use them (v1 has no ACL)
 **503**. A read expires the leases that ran out first (§5.1), which writes their `lease_expired` events, so no lease is
 shown live past its expiry; it writes nothing else.
 
-- **An actor** is `{handle, kind, way_back?, last_seen, leases, asks}`: `kind` is `operator` or `agent`, `way_back` is
-  what the board has on record for the handle (§4.1) and is absent when it has none, and `last_seen` is its
+- **An actor** is `{handle, kind, way_back?, origin?, last_seen, leases, asks}`: `kind` is `operator` or `agent`, `way_back` is
+  what the board has on record for the handle (§4.1) and is absent when it has none, `origin` is the handle of the
+  operator whose key made the actor's latest write (§3.1, §4.1) and is absent when the actor has none, and `last_seen` is its
   `last_seen_at`.
   - **`leases`** are the actor's live leases, oldest first, each `{ref, task, intent, expires_at, resources}` with
     `task` the task ref and `resources` sorted. An ended or expired lease is not listed. The list is `[]` when the actor
@@ -1792,11 +1822,14 @@ and any other failure is one stderr line and exit 1. `vh admin` with no subcomma
 refuses a database that is not migrated (one stderr line ending `→ vh admin migrate`, exit 1). A key name is
 1 to 64 characters of `a-z A-Z 0-9 . _ -`, starting with a letter or digit.
 
-- `vh admin keys create <name> [--expires 90d]` makes a key and prints exactly one stdout line, with the
+- `vh admin keys create <name> [--expires 90d] [--owner <handle>]` makes a key and prints exactly one stdout line, with the
   key as its last field and nowhere else: `ok key <name> created brd_…`, or `ok key <name> created exp
   <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
   positive count of days (`90d`) or hours (`12h`), at most 36500 days in either unit (`36500d`, `876000h`), and the flag may come before or
-  after the name; without it the key never expires. `created_by` is `admin-cli`. A name that already exists
+  after the name; without it the key never expires. `created_by` is `admin-cli`. `--owner` names the operator that
+  owns the key (§3.3); without it the owner is the operator `VH_OPERATOR_HANDLE` names, and a database that has no such
+  operator row yet gets an ownerless key. An `--owner` that is no existing operator exits 2 with one `vh: …` stderr line
+  naming `--owner`, and stores nothing. A name that already exists
   exits 1 with the single stderr line `vh: key "<name>" already exists → vh admin keys list`, and
   stores nothing.
 - `vh admin keys list` prints one line per key, oldest first, and never the key:
@@ -1806,8 +1839,8 @@ refuses a database that is not migrated (one stderr line ending `→ vh admin mi
   revoked key prints `ok key <name> already revoked` (exit 0) and keeps the first `revoked_at`. An unknown
   name exits 4 with `vh: key "<name>" not found → vh admin keys list`.
 - A malformed command line (missing or extra arguments, an unknown flag) exits 2 with the single stderr line
-  `usage: vh admin keys create <name> [--expires 90d] | list | revoke <name>`. An invalid name or
-  `--expires` value exits 2 with one `vh: …` stderr line.
+  `usage: vh admin keys create <name> [--expires 90d] [--owner <handle>] | list | revoke <name>`. An invalid name,
+  `--expires` value or `--owner` handle exits 2 with one `vh: …` stderr line.
 
 ### 8.1 Output rules
 
@@ -2171,7 +2204,7 @@ vh notes [--since last|<time>|<N…>] [--task <ref>] [--init <slug>] [--broadcas
 vh note show <N…>
 vh milestone <task> "<summary>"
 vh check <task> "<summary>" [--next 24h]
-vh admin keys create <name> [--expires 90d] | list | revoke <name>   # direct DB, no HTTP
+vh admin keys create <name> [--expires 90d] [--owner <handle>] | list | revoke <name>   # direct DB, no HTTP
 vh admin migrate | backup <dest>   # backup: not yet served (no such command today); migrate is served
 ```
 

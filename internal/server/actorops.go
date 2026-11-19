@@ -22,7 +22,7 @@ func (o actorOps) ready() (problemResponse, bool) {
 
 func apiActorView(a roster.Actor) ActorView {
 	out := ActorView{
-		Handle: a.Handle, Kind: ActorViewKind(a.Kind), WayBack: optionalText(a.WayBack), LastSeen: a.LastSeen,
+		Handle: a.Handle, Kind: ActorViewKind(a.Kind), WayBack: optionalText(a.WayBack), Origin: optionalText(a.Origin), LastSeen: a.LastSeen,
 		Leases: make([]ActorLease, len(a.Leases)), Asks: make([]ActorAsk, len(a.Asks)),
 	}
 	for i, l := range a.Leases {

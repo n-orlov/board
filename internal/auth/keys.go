@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
+	"github.com/n-orlov/village-hall/internal/audit"
 	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/store"
 )
@@ -17,6 +19,8 @@ var (
 	ErrKeyExists   = errors.New("key name already exists")
 	ErrKeyNotFound = errors.New("key not found")
 	ErrInvalidName = errors.New("key name must be 1-64 characters of a-z, A-Z, 0-9, '.', '_' or '-', starting with a letter or digit")
+	// ErrOwnerNotOperator is a key owner that is no existing operator actor.
+	ErrOwnerNotOperator = errors.New("a key's owner must be the handle of an existing operator")
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -37,9 +41,12 @@ type Key struct {
 	DisplayPrefix string
 	CreatedAt     time.Time
 	CreatedBy     string
-	LastUsedAt    *time.Time
-	ExpiresAt     *time.Time
-	RevokedAt     *time.Time
+	// Owner is the handle of the operator actor that owns the key, or empty
+	// when no operator was known when the key was made (SPEC 3.3).
+	Owner      string
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time
+	RevokedAt  *time.Time
 }
 
 // Status is "revoked", "expired" or "active" at the instant now.
@@ -67,7 +74,7 @@ func (k Keys) now() time.Time {
 	return time.Now().UTC()
 }
 
-var keyColumns = []string{"id", "name", "key_hash", "display_prefix", "created_at", "created_by", "expires_at"}
+var keyColumns = []string{"id", "name", "key_hash", "display_prefix", "created_at", "created_by", "expires_at", "owner"}
 
 // execer is the part of *sql.DB and *sql.Tx that writes.
 type execer interface {
@@ -106,7 +113,32 @@ func (k Keys) Create(ctx context.Context, name, createdBy string, ttl time.Durat
 	if err != nil {
 		return "", Key{}, err
 	}
-	if err := k.insert(ctx, k.Store.WriterFor(ctx), row, HashKey(plain)); err != nil {
+	if err := k.insert(ctx, k.Store.WriterFor(ctx), row, HashKey(plain), nil); err != nil {
+		return "", Key{}, err
+	}
+	return plain, row, nil
+}
+
+// CreateOwned is Create for a key owned by the operator actor with the handle
+// owner. A handle that names no operator is ErrOwnerNotOperator, and nothing is
+// written.
+func (k Keys) CreateOwned(ctx context.Context, name, createdBy, owner string, ttl time.Duration) (string, Key, error) {
+	plain, row, err := k.newRow(name, createdBy, ttl)
+	if err != nil {
+		return "", Key{}, err
+	}
+	row.Owner = owner
+	err = k.inTx(ctx, func(tx *sql.Tx) error {
+		id, err := audit.OperatorID(ctx, tx, k.Store.Dialect(), owner)
+		if err != nil {
+			return fmt.Errorf("create key: %w", err)
+		}
+		if id == "" {
+			return fmt.Errorf("%w: %s", ErrOwnerNotOperator, owner)
+		}
+		return k.insert(ctx, tx, row, HashKey(plain), id)
+	})
+	if err != nil {
 		return "", Key{}, err
 	}
 	return plain, row, nil
@@ -114,7 +146,10 @@ func (k Keys) Create(ctx context.Context, name, createdBy string, ttl time.Durat
 
 // CreateAs is Create for a request: created_by is who's principal, and the
 // creation is appended to the events with that principal and who's actor, in
-// the same transaction as the row.
+// the same transaction as the row. The key is owned by the operator behind the
+// request: who's own actor for a session, the owner of the key the request came
+// through (audit.WithOrigin) for a key; when the request has none the owner is
+// null.
 func (k Keys) CreateAs(ctx context.Context, who Identity, name string, ttl time.Duration) (string, Key, error) {
 	plain, row, err := k.newRow(name, who.Principal, ttl)
 	if err != nil {
@@ -124,16 +159,60 @@ func (k Keys) CreateAs(ctx context.Context, who Identity, name string, ttl time.
 	if row.ExpiresAt != nil {
 		data["expires_at"] = row.ExpiresAt.Format(time.RFC3339)
 	}
-	err = k.inTx(ctx, func(tx *sql.Tx) error {
-		if err := k.insert(ctx, tx, row, HashKey(plain)); err != nil {
-			return err
-		}
-		return record(ctx, tx, k.Store.Dialect(), who, row.CreatedAt, EventKeyCreated, row.ID, "key "+row.Name+" created", data)
-	})
+	err = k.inTx(ctx, func(tx *sql.Tx) error { return k.createAs(ctx, tx, who, &row, plain, data) })
 	if err != nil {
 		return "", Key{}, err
 	}
 	return plain, row, nil
+}
+
+// createAs inserts row, owned by the operator behind the request, and appends
+// the event of its creation, in tx.
+func (k Keys) createAs(ctx context.Context, tx *sql.Tx, who Identity, row *Key, plain string, data map[string]any) error {
+	d := k.Store.Dialect()
+	actorID, err := audit.UpsertActor(ctx, tx, d, who.AuditActor(), row.CreatedAt)
+	if err != nil {
+		return err
+	}
+	owner, err := requestOwner(ctx, tx, d, who, actorID)
+	if err != nil {
+		return err
+	}
+	if owner != nil {
+		row.Owner = ownerHandle(ctx, who)
+	}
+	if err := k.insert(ctx, tx, *row, HashKey(plain), owner); err != nil {
+		return err
+	}
+	return audit.AppendAs(ctx, tx, d, actorID, row.CreatedAt, audit.Event{
+		Principal: who.Principal, Type: EventKeyCreated, RefID: row.ID, Summary: "key " + row.Name + " created", Data: data})
+}
+
+// ownerHandle is the handle of the operator behind the request.
+func ownerHandle(ctx context.Context, who Identity) string {
+	if who.Operator {
+		return strings.TrimSpace(who.Actor)
+	}
+	h, _ := audit.OriginFrom(ctx)
+	return h
+}
+
+// requestOwner is the actor id of the operator behind the request, or nil when
+// it has none: a session's own actor row, or the operator the request's origin
+// names.
+func requestOwner(ctx context.Context, tx *sql.Tx, d store.Dialect, who Identity, actorID string) (any, error) {
+	if who.Operator {
+		return actorID, nil
+	}
+	h, _ := audit.OriginFrom(ctx)
+	if h == "" {
+		return nil, nil
+	}
+	id, err := audit.OperatorID(ctx, tx, d, h)
+	if err != nil || id == "" {
+		return nil, err
+	}
+	return id, nil
 }
 
 // inTx runs f in a transaction on the writer and commits when f returns nil.
@@ -152,14 +231,14 @@ func (k Keys) inTx(ctx context.Context, f func(*sql.Tx) error) error {
 	return nil
 }
 
-func (k Keys) insert(ctx context.Context, ex execer, row Key, hash string) error {
+func (k Keys) insert(ctx context.Context, ex execer, row Key, hash string, owner any) error {
 	d := k.Store.Dialect()
 	var expires any
 	if row.ExpiresAt != nil {
 		expires = store.EncodeTime(*row.ExpiresAt)
 	}
 	_, err := ex.ExecContext(ctx, d.Rebind(d.Insert("api_keys", keyColumns)),
-		row.ID, row.Name, hash, row.DisplayPrefix, store.EncodeTime(row.CreatedAt), row.CreatedBy, expires)
+		row.ID, row.Name, hash, row.DisplayPrefix, store.EncodeTime(row.CreatedAt), row.CreatedBy, expires, owner)
 	switch {
 	case d.IsUniqueViolation(err):
 		return fmt.Errorf("%w: %s", ErrKeyExists, row.Name)
@@ -221,7 +300,7 @@ func (k Keys) revoke(ctx context.Context, tx *sql.Tx, name string) (id string, a
 
 // Get returns the key called name.
 func (k Keys) Get(ctx context.Context, name string) (Key, error) {
-	keys, err := k.query(ctx, ` WHERE name = ?`, name)
+	keys, err := k.query(ctx, ` WHERE k.name = ?`, name)
 	if err != nil {
 		return Key{}, err
 	}
@@ -239,7 +318,8 @@ func (k Keys) List(ctx context.Context) ([]Key, error) {
 func (k Keys) query(ctx context.Context, where string, args ...any) ([]Key, error) {
 	d := k.Store.Dialect()
 	rows, err := k.Store.ReaderFor(ctx).QueryContext(ctx, d.Rebind(
-		`SELECT id, name, display_prefix, created_at, created_by, last_used_at, expires_at, revoked_at FROM api_keys`+where+` ORDER BY n`), args...)
+		`SELECT k.id, k.name, k.display_prefix, k.created_at, k.created_by, k.last_used_at, k.expires_at, k.revoked_at, o.handle
+		FROM api_keys k LEFT JOIN actors o ON o.id = k.owner`+where+` ORDER BY k.n`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
@@ -262,7 +342,9 @@ func scanKey(rows *sql.Rows) (Key, error) {
 	var key Key
 	var created int64
 	var used, expires, revoked sql.NullInt64
-	err := rows.Scan(&key.ID, &key.Name, &key.DisplayPrefix, &created, &key.CreatedBy, &used, &expires, &revoked)
+	var owner sql.NullString
+	err := rows.Scan(&key.ID, &key.Name, &key.DisplayPrefix, &created, &key.CreatedBy, &used, &expires, &revoked, &owner)
+	key.Owner = owner.String
 	key.CreatedAt = store.DecodeTime(created)
 	key.LastUsedAt, key.ExpiresAt, key.RevokedAt = nullTime(used), nullTime(expires), nullTime(revoked)
 	return key, err

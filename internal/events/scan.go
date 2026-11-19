@@ -11,17 +11,19 @@ import (
 
 func scan(r interface{ Scan(dest ...any) error }) (Event, error) {
 	var (
-		e                                       Event
-		at                                      int64
-		onBehalf, ini, iniID, slug, taskID, ref sql.NullString
-		seq                                     sql.NullInt64
-		data                                    string
+		e                                  Event
+		at                                 int64
+		origin, onBehalf, ini, iniID, slug sql.NullString
+		taskID, ref                        sql.NullString
+		seq                                sql.NullInt64
+		data                               string
 	)
-	err := r.Scan(&e.N, &e.ID, &at, &e.Type, &e.Actor, &e.Principal, &onBehalf, &ini, &iniID, &slug, &seq, &taskID, &ref, &e.Summary, &data)
+	err := r.Scan(&e.N, &e.ID, &at, &e.Type, &e.Actor, &e.Principal, &origin, &onBehalf, &ini, &iniID, &slug, &seq, &taskID, &ref, &e.Summary, &data)
 	if err != nil {
 		return Event{}, err
 	}
 	e.Ref, e.At = domain.FormatEventRef(e.N), store.DecodeTime(at)
+	e.Origin = origin.String
 	e.OnBehalfOf, e.Initiative, e.InitiativeID, e.TaskID, e.RefID = onBehalf.String, ini.String, iniID.String, taskID.String, ref.String
 	e.Task = taskRef(slug, seq, taskID)
 	e.Data = map[string]any{}

@@ -52,9 +52,10 @@ func (v *Verifier) Verify(ctx context.Context, plain string) (string, error) {
 	d := v.Store.Dialect()
 	var key Key
 	var expires, revoked sql.NullInt64
+	var owner sql.NullString
 	err := v.Store.Reader().QueryRowContext(ctx,
-		d.Rebind(`SELECT id, name, expires_at, revoked_at FROM api_keys WHERE key_hash = ?`), HashKey(plain)).
-		Scan(&key.ID, &key.Name, &expires, &revoked)
+		d.Rebind(`SELECT k.id, k.name, k.expires_at, k.revoked_at, o.handle FROM api_keys k LEFT JOIN actors o ON o.id = k.owner WHERE k.key_hash = ?`), HashKey(plain)).
+		Scan(&key.ID, &key.Name, &expires, &revoked, &owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrKeyUnknown
 	}
@@ -69,6 +70,9 @@ func (v *Verifier) Verify(ctx context.Context, plain string) (string, error) {
 	case "expired":
 		return "", ErrKeyExpired
 	}
+	if u := usageFrom(ctx); u != nil {
+		u.owner = owner.String
+	}
 	later(ctx, func(ctx context.Context) { v.touch(ctx, key, now) })
 	return key.Name, nil
 }
@@ -79,10 +83,18 @@ type usageContextKey struct{}
 // last_used_at, a session's last_seen_at, the removal of a dead session), so
 // that they commit only if the request succeeds: a refused request changes no
 // row.
+//
+// It also holds the owner of the key a request presented, which Verify reads
+// from the same row: the operator a write through that key comes from.
 type Usage struct {
 	mu      sync.Mutex
 	pending []func(context.Context)
+	owner   string
 }
+
+// Owner is the handle of the operator that owns the key Verify last accepted
+// for this request, or empty when the key has no owner or none was verified.
+func (u *Usage) Owner() string { return u.owner }
 
 // WithDeferredUsage returns ctx in which authentication records its writes
 // instead of making them, and the Usage that makes the writes on Commit.

@@ -159,14 +159,14 @@ func TestMigrateCreatesThePhase0Tables(t *testing.T) {
 	}
 	want := map[string][]string{
 		"actors": {"n", "id", "handle", "kind", "display_name", "host", "way_back", "meta",
-			"first_seen_at", "last_seen_at", "protocol_seen"},
+			"first_seen_at", "last_seen_at", "protocol_seen", "origin"},
 		"initiatives": {"n", "id", "slug", "title", "description", "status", "target_start", "target_end",
 			"created_by", "created_at", "closed_at", "closed_by", "next_task_seq"},
 		"initiative_tags": {"initiative_id", "tag"},
 		"events": {"n", "id", "at", "actor_id", "principal", "on_behalf_of", "initiative_id", "task_id",
-			"type", "ref_id", "summary", "data"},
+			"type", "ref_id", "summary", "data", "origin"},
 		"api_keys": {"n", "id", "name", "key_hash", "display_prefix", "created_at", "created_by",
-			"last_used_at", "expires_at", "revoked_at"},
+			"last_used_at", "expires_at", "revoked_at", "owner"},
 		"sessions": {"id_hash", "email", "csrf_token", "created_at", "last_seen_at", "expires_at"},
 		"tasks": {"n", "id", "initiative_id", "seq", "title", "description", "kind", "status", "resolution",
 			"planned_start", "planned_end", "cadence_seconds", "next_check_at", "external_refs",
@@ -289,6 +289,82 @@ func TestTheOneOperatorIndexIsTheOnlyThingMigration00012Changes(t *testing.T) {
 	}
 }
 
+// TestMigration00013BacksUpAndRollsBack: at version 12 the three columns do not
+// exist; migrating gives every key the operator as owner, every event the
+// operator or its key's owner as origin, and an agent the origin of its latest
+// keyed write; rolling back drops the columns and leaves the rows.
+func TestMigration00013BackfillsAndRollsBack(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.MigrateTo(ctx, 12); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ table, col string }{{"api_keys", "owner"}, {"events", "origin"}, {"actors", "origin"}} {
+		if columns(t, s, c.table)[c.col] {
+			t.Fatalf("%s has %s at version 12", c.table, c.col)
+		}
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := s.Writer().Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO actors (id, handle, kind, first_seen_at, last_seen_at) VALUES ('OP', 'operator', 'operator', 1, 1), ('AG', 'agent-a', 'agent', 2, 2), ('AH', 'agent-b', 'agent', 3, 3)`)
+	exec(`INSERT INTO api_keys (id, name, key_hash, display_prefix, created_at, created_by) VALUES ('K1', 'laptop', 'h1', 'p1', 1, 'x')`)
+	ev := `INSERT INTO events (id, at, actor_id, principal, type, summary) VALUES (?, 1, ?, ?, 't', 's')`
+	exec(ev, "E1", "OP", "oidc:op@example.com")
+	exec(ev, "E2", "AG", "key:laptop")
+	exec(ev, "E3", "AG", "system")
+	exec(ev, "E4", "AH", "system")
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	read := func(q string) map[string]string {
+		t.Helper()
+		got := map[string]string{}
+		rows, err := s.Reader().QueryContext(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k string
+			var v sql.NullString
+			if err := rows.Scan(&k, &v); err != nil {
+				t.Fatal(err)
+			}
+			got[k] = v.String
+		}
+		return got
+	}
+	if got := read(`SELECT name, owner FROM api_keys`); got["laptop"] != "OP" {
+		t.Errorf("key owners = %v, want laptop owned by OP", got)
+	}
+	got := read(`SELECT id, origin FROM events`)
+	if got["E1"] != "OP" || got["E2"] != "OP" || got["E3"] != "" || got["E4"] != "" {
+		t.Errorf("event origins = %v, want E1 and E2 from OP and the system events none", got)
+	}
+	if got := read(`SELECT handle, origin FROM actors`); got["agent-a"] != "OP" || got["agent-b"] != "" || got["operator"] != "" {
+		t.Errorf("actor origins = %v, want agent-a from OP and the others none", got)
+	}
+	p, err := s.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 12); err != nil {
+		t.Fatalf("rolling back to 12: %v", err)
+	}
+	for _, c := range []struct{ table, col string }{{"api_keys", "owner"}, {"events", "origin"}, {"actors", "origin"}} {
+		if columns(t, s, c.table)[c.col] {
+			t.Errorf("%s still has %s after the roll back", c.table, c.col)
+		}
+	}
+	if got := read(`SELECT id, principal FROM events`); len(got) != 4 {
+		t.Errorf("events after the roll back = %v, want the 4 rows", got)
+	}
+}
+
 func setVersion(t *testing.T, s *Store, v int) {
 	t.Helper()
 	if _, err := s.Writer().Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v); err != nil {
@@ -341,7 +417,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 12 || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
+		if len(files) != 13 || files[12] != "00013_key_owner_and_origin.sql" || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {

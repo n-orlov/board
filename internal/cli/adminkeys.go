@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/envvar"
 	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // KeysUsage is the single line printed to stderr for a malformed
 // `vh admin keys` command line.
-const KeysUsage = "usage: vh admin keys create <name> [--expires 90d] | list | revoke <name>"
+const KeysUsage = "usage: vh admin keys create <name> [--expires 90d] [--owner <handle>] | list | revoke <name>"
 
 // ExitNotFound is the exit code for an unknown name (SPEC §8.1).
 const ExitNotFound = 4
@@ -36,37 +38,62 @@ func ParseExpiry(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// parseCreate reads `<name> [--expires D]` in either order.
-func parseCreate(args []string) (name string, ttl time.Duration, err error) {
-	for i := 0; i < len(args); i++ {
-		name, ttl, i, err = createArg(args, i, name, ttl)
-		if err != nil {
-			return "", 0, err
-		}
-	}
-	if name == "" {
-		return "", 0, errUsage
-	}
-	return name, ttl, nil
+// createOpts is what `vh admin keys create` was asked for: the key's name, its
+// lifetime and the handle of the operator that owns it (empty: the default).
+type createOpts struct {
+	name  string
+	ttl   time.Duration
+	owner string
+	// defaultOwner is VH_OPERATOR_HANDLE, the owner when --owner is not given.
+	defaultOwner string
 }
 
-// createArg reads args[i], which is the name or an --expires flag with its
-// value, and returns the state after it and the index of the last argument it
-// consumed.
-func createArg(args []string, i int, name string, ttl time.Duration) (string, time.Duration, int, error) {
+// parseCreate reads `<name> [--expires D] [--owner HANDLE]` in any order.
+func parseCreate(args []string) (createOpts, error) {
+	var o createOpts
+	for i := 0; i < len(args); i++ {
+		var err error
+		if o, i, err = createArg(args, i, o); err != nil {
+			return createOpts{}, err
+		}
+	}
+	if o.name == "" {
+		return createOpts{}, errUsage
+	}
+	return o, nil
+}
+
+// createArg reads args[i], which is the name or a flag with its value, and
+// returns the options after it and the index of the last argument it consumed.
+func createArg(args []string, i int, o createOpts) (createOpts, int, error) {
 	var err error
 	switch a := args[i]; {
-	case a == "--expires" && i+1 < len(args):
+	case (a == "--expires" || a == "--owner") && i+1 < len(args):
 		i++
-		ttl, err = ParseExpiry(args[i])
-	case strings.HasPrefix(a, "--expires="):
-		ttl, err = ParseExpiry(strings.TrimPrefix(a, "--expires="))
-	case strings.HasPrefix(a, "-") || name != "":
+		o, err = createFlag(o, a, args[i])
+	case strings.HasPrefix(a, "--expires="), strings.HasPrefix(a, "--owner="):
+		flag, value, _ := strings.Cut(a, "=")
+		o, err = createFlag(o, flag, value)
+	case strings.HasPrefix(a, "-") || o.name != "":
 		err = errUsage
 	default:
-		name = a
+		o.name = a
 	}
-	return name, ttl, i, err
+	return o, i, err
+}
+
+// createFlag sets the option the flag names to its value.
+func createFlag(o createOpts, flag, value string) (createOpts, error) {
+	if flag == "--owner" {
+		if err := domain.ValidateHandle(value); err != nil {
+			return o, fmt.Errorf("--owner %w", err)
+		}
+		o.owner = value
+		return o, nil
+	}
+	var err error
+	o.ttl, err = ParseExpiry(value)
+	return o, err
 }
 
 var errUsage = errors.New("usage")
@@ -76,17 +103,18 @@ var errUsage = errors.New("usage")
 type keysAction func(context.Context, auth.Keys) int
 
 // parseKeys reads the subcommand and its arguments.
-func parseKeys(args []string, stdout, stderr io.Writer) (keysAction, error) {
+func parseKeys(args []string, stdout, stderr io.Writer, env Env) (keysAction, error) {
 	if len(args) == 0 {
 		return nil, errUsage
 	}
 	switch rest := args[1:]; args[0] {
 	case "create":
-		name, ttl, err := parseCreate(rest)
+		opts, err := parseCreate(rest)
 		if err != nil {
 			return nil, err
 		}
-		return func(ctx context.Context, k auth.Keys) int { return createKey(ctx, k, stdout, stderr, name, ttl) }, nil
+		opts.defaultOwner = envvar.OperatorHandle.Get(env)
+		return func(ctx context.Context, k auth.Keys) int { return createKey(ctx, k, stdout, stderr, opts) }, nil
 	case "list":
 		if len(rest) == 0 {
 			return func(ctx context.Context, k auth.Keys) int { return listKeys(ctx, k, stdout, stderr) }, nil
@@ -101,7 +129,7 @@ func parseKeys(args []string, stdout, stderr io.Writer) (keysAction, error) {
 
 // adminKeys runs `vh admin keys ...` against the database directly.
 func adminKeys(args []string, stdout, stderr io.Writer, env Env) int {
-	run, err := parseKeys(args, stdout, stderr)
+	run, err := parseKeys(args, stdout, stderr, env)
 	if err != nil {
 		return keysArgError(stderr, err)
 	}
@@ -139,9 +167,32 @@ func withKeys(env Env, stderr io.Writer, f keysAction) int {
 	return f(ctx, auth.Keys{Store: st})
 }
 
-func createKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, name string, ttl time.Duration) int {
-	plain, row, err := k.Create(ctx, name, adminCreatedBy, ttl)
+// makeKey creates the key. An --owner that names no operator is refused and
+// changes nothing. Without --owner the owner is the operator VH_OPERATOR_HANDLE
+// names (default "operator"); when no such operator exists yet (a database
+// bootstrapped before anyone signed in) the key has no owner.
+func makeKey(ctx context.Context, k auth.Keys, o createOpts) (string, auth.Key, error) {
+	if o.owner != "" {
+		return k.CreateOwned(ctx, o.name, adminCreatedBy, o.owner, o.ttl)
+	}
+	owner := o.defaultOwner
+	if owner == "" {
+		owner = DefaultOperatorHandle
+	}
+	plain, row, err := k.CreateOwned(ctx, o.name, adminCreatedBy, owner, o.ttl)
+	if errors.Is(err, auth.ErrOwnerNotOperator) {
+		return k.Create(ctx, o.name, adminCreatedBy, o.ttl)
+	}
+	return plain, row, err
+}
+
+func createKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, o createOpts) int {
+	name := o.name
+	plain, row, err := makeKey(ctx, k, o)
 	switch {
+	case errors.Is(err, auth.ErrOwnerNotOperator):
+		_, _ = fmt.Fprintf(stderr, "vh: --owner %q is not an operator (an operator exists once its browser session has signed in)\n", o.owner)
+		return ExitUsage
 	case errors.Is(err, auth.ErrInvalidName):
 		return keysArgError(stderr, err)
 	case errors.Is(err, auth.ErrKeyExists):

@@ -136,7 +136,8 @@
                 "timelineops.go",
                 "actorops.go",
                 "login.go",
-                "loginops.go"
+                "loginops.go",
+                "keyops.go"
             ],
             "internal/cli": [
                 "adminkeys.go",
@@ -194,7 +195,8 @@
                 "write.go"
             ],
             "internal/auth": [
-                "keys.go"
+                "keys.go",
+                "verify.go"
             ],
             "internal/actors": [
                 "actors.go"
@@ -219,7 +221,8 @@
                     "startops.go",
                     "timelineops.go",
                     "actorops.go",
-                    "loginops.go"
+                    "loginops.go",
+                    "keyops.go"
                 ],
                 "streams": [
                     "askwait.go",

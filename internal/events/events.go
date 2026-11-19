@@ -31,13 +31,15 @@ func (e InvalidError) Is(target error) bool { return target == ErrInvalid }
 // people are actor handles, Initiative is a slug and Task a task ref; the
 // optional ones are empty when the event has none.
 type Event struct {
-	N            int64
-	ID           string
-	Ref          string
-	At           time.Time
-	Type         string
-	Actor        string
-	Principal    string
+	N         int64
+	ID        string
+	Ref       string
+	At        time.Time
+	Type      string
+	Actor     string
+	Principal string
+	// Origin is the handle of the operator behind the write, or empty.
+	Origin       string
 	OnBehalfOf   string
 	Initiative   string
 	InitiativeID string
@@ -79,9 +81,10 @@ type Store struct {
 	Now func() time.Time
 }
 
-const selectEvent = `SELECT e.n, e.id, e.at, e.type, a.handle, e.principal, ob.handle, i.slug, e.initiative_id,
+const selectEvent = `SELECT e.n, e.id, e.at, e.type, a.handle, e.principal, og.handle, ob.handle, i.slug, e.initiative_id,
 	ti.slug, t.seq, e.task_id, e.ref_id, e.summary, e.data
 	FROM events e JOIN actors a ON a.id = e.actor_id LEFT JOIN actors ob ON ob.id = e.on_behalf_of
+	LEFT JOIN actors og ON og.id = e.origin
 	LEFT JOIN initiatives i ON i.id = e.initiative_id LEFT JOIN tasks t ON t.id = e.task_id
 	LEFT JOIN initiatives ti ON ti.id = t.initiative_id`
 

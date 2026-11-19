@@ -22,9 +22,12 @@ const DefaultPage = 1000
 // order of raising. Both are empty, never nil.
 type Actor struct {
 	Handle, Kind, WayBack string
-	LastSeen              time.Time
-	Leases                []leases.Lease
-	Asks                  []asks.Ask
+	// Origin is the handle of the operator whose key made the actor's latest
+	// write, or empty.
+	Origin   string
+	LastSeen time.Time
+	Leases   []leases.Lease
+	Asks     []asks.Ask
 }
 
 // Alive reports whether the actor holds a live lease.
@@ -136,11 +139,11 @@ func pages[T any](fetch func(after string) ([]T, string, error)) ([]T, error) {
 
 // actors reads the actor rows, newest seen first, with empty lease and ask lists.
 func (s Store) actors(ctx context.Context, handle string) ([]Actor, error) {
-	query, args := `SELECT handle, kind, way_back, last_seen_at FROM actors`, []any(nil)
+	query, args := `SELECT a.handle, a.kind, a.way_back, a.last_seen_at, o.handle FROM actors a LEFT JOIN actors o ON o.id = a.origin`, []any(nil)
 	if handle != "" {
-		query, args = query+` WHERE handle = ?`, []any{handle}
+		query, args = query+` WHERE a.handle = ?`, []any{handle}
 	}
-	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY last_seen_at DESC, handle`), args...)
+	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(query+` ORDER BY a.last_seen_at DESC, a.handle`), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read actors: %w", err)
 	}
@@ -148,12 +151,12 @@ func (s Store) actors(ctx context.Context, handle string) ([]Actor, error) {
 	out := []Actor{}
 	for rows.Next() {
 		a := Actor{Leases: []leases.Lease{}, Asks: []asks.Ask{}}
-		var wayBack sql.NullString
+		var wayBack, origin sql.NullString
 		var seen int64
-		if err := rows.Scan(&a.Handle, &a.Kind, &wayBack, &seen); err != nil {
+		if err := rows.Scan(&a.Handle, &a.Kind, &wayBack, &seen, &origin); err != nil {
 			return nil, fmt.Errorf("read actors: %w", err)
 		}
-		a.WayBack, a.LastSeen = wayBack.String, store.DecodeTime(seen)
+		a.WayBack, a.Origin, a.LastSeen = wayBack.String, origin.String, store.DecodeTime(seen)
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {

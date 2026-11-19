@@ -2725,6 +2725,12 @@ components:
         created_by:
           type: string
           description: The principal that created the key, `key:<name>` or `oidc:<email>`, or `admin-cli`.
+        owner:
+          type: string
+          description: |-
+            The handle of the operator actor that owns the key: the session's operator for a key made through a
+            session, the creating key's owner for one made through a key, the `--owner` of `vh admin keys create`.
+            Absent when no operator was known when the key was made. Nothing checks it.
         last_used_at:
           type: string
           format: date-time
@@ -3322,6 +3328,12 @@ components:
         principal:
           type: string
           description: The principal that authenticated.
+        origin:
+          type: string
+          description: |-
+            The handle of the operator actor behind the write: a session's own operator, or the owner of the key
+            the write came through. Fixed when the event is written, whatever the actor's origin becomes later.
+            Absent when no operator was known.
         initiative:
           type: string
           description: The slug of the initiative the event names. Absent when it names none.
@@ -4257,6 +4269,11 @@ components:
         way_back:
           type: string
           description: How to reach the actor again. Absent when the board has none.
+        origin:
+          type: string
+          description: |-
+            The handle of the operator actor whose key made the agent's latest write (its owner). Absent for an
+            operator and for an agent that no keyed write has reached an owner for.
         last_seen:
           type: string
           format: date-time
