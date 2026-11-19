@@ -11,6 +11,16 @@
   import { currentViewEnv, FilterTurns } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
   import TaskPreview from './TaskPreview.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import DensitySwitch from './DensitySwitch.svelte';
+  import ProtoSort from './ProtoSort.svelte';
+  import { loadPref, manualTagsOf, prefs, savePref } from './lib/proto/prefs.svelte';
+  import { tagChoices as protoTagChoices, taskTags, type ChipState, type TaskTag } from './lib/proto/tags';
+  import { eventsSince, isWindow, lastTouches, WINDOW_MS, WINDOWS, type RecentWindow } from './lib/proto/activity';
+  import { isTimelineSort, shapeModel, TIMELINE_SORTS, type Activity, type TimelineSort } from './lib/proto/timelineActive';
+  import { TasksApi } from './lib/tasks';
+  import type { TaskListItem } from './lib/initiatives';
+  import type { components } from './lib/api/schema';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
   import {
@@ -94,6 +104,82 @@
     render: (paths) => domSurface(frame!)?.render(paths),
   };
 
+  // --- Prototype: chips, active-first sort, only-active filter ---
+  /** The initiatives lookup's answer, reactive, for the chips. */
+  let looks: { slug: string; tags: string[] }[] | undefined = $state();
+  type BoardEvent = components['schemas']['Event'];
+  const tasksApi = new TasksApi(browser, () => csrf);
+  let allTasks: TaskListItem[] = $state([]);
+  let events: BoardEvent[] = $state([]);
+  let clientTags: string[] = $state(loadPref('timeline.clientTags', [] as string[], (v): v is string[] => Array.isArray(v)));
+  let sortBy: TimelineSort = $state(loadPref('timeline.sort', 'default' as TimelineSort, isTimelineSort));
+  let onlyActive: boolean = $state(loadPref('timeline.onlyActive', false, (v): v is boolean => typeof v === 'boolean'));
+  let recent: RecentWindow = $state(loadPref('timeline.window', '24h' as RecentWindow, isWindow));
+  let nowMs = $state(Date.now());
+  async function loadActivity() {
+    try {
+      allTasks = await tasksApi.listQuery(new URLSearchParams({ status: 'all' }));
+    } catch {
+      /* the chips then offer initiative tags only */
+    }
+    try {
+      events = events.length === 0 ? await eventsSince(browser, new Date(Date.now() - WINDOW_MS['3d'])) : [...events, ...(await eventsSince(browser, events[events.length - 1]!.id))];
+    } catch {
+      /* recently touched then counts nothing */
+    }
+    nowMs = Date.now();
+  }
+  $effect(() => {
+    void untrack(loadActivity);
+    const off = live().subscribe(() => true, () => void loadActivity());
+    return off;
+  });
+  const initiativeTags = $derived(new Map((looks ?? []).map((i) => [i.slug, i.tags] as const)));
+  const tagsByRef = $derived.by(() => {
+    void prefs.manual;
+    return new Map(allTasks.map((t) => [t.ref, taskTags(t, initiativeTags, manualTagsOf(t.ref))] as const));
+  });
+  const touches = $derived(lastTouches(events, nowMs - WINDOW_MS[recent]));
+  const activityOf = $derived.by(() => {
+    const byRef = new Map(allTasks.map((t) => [t.ref, t] as const));
+    const attentionOf = new Map(view.model.groups.map((g) => [g.ref, g.attentionLabel] as const));
+    return (ref: string): Activity | undefined => {
+      const t = byRef.get(ref);
+      const live = t?.live_leases ?? [];
+      if (live.length > 0) return { rank: 0, at: Math.max(...live.map((l) => Date.parse(l.started_at))) };
+      if ((attentionOf.get(ref) ?? '') !== '' || (t?.attention?.length ?? 0) > 0) return { rank: 1, at: touches.get(ref)?.at ?? 0 };
+      const touch = touches.get(ref);
+      return touch === undefined ? undefined : { rank: 2, at: touch.at };
+    };
+  });
+  const keep = $derived((ref: string) => clientTags.every((tag) => (tagsByRef.get(ref) ?? []).some((x) => x.tag === tag)));
+  const displayed = $derived(shapeModel(view.model, { keep, activity: activityOf, onlyActive, sort: sortBy }));
+  const activeCount = $derived(view.model.groups.filter((g) => g.nestedGroups === undefined && activityOf(g.ref) !== undefined).length);
+  const chipValue: ChipState = $derived({ tags: [...view.filter.tags, ...clientTags], initiatives: view.filter.initiatives });
+  const chipTags = $derived.by((): ReturnType<typeof protoTagChoices> => {
+    const lists: TaskTag[][] = [...tagsByRef.values()];
+    return protoTagChoices(lists, initiativeTags.values(), chipValue.tags);
+  });
+  function setChips(next: ChipState) {
+    const serverTags = new Set([...initiativeTags.values()].flat());
+    const server = next.tags.filter((t) => serverTags.has(t));
+    clientTags = next.tags.filter((t) => !serverTags.has(t));
+    savePref('timeline.clientTags', clientTags);
+    apply({ ...view.filter, tags: server, initiatives: next.initiatives });
+  }
+  function setSort(v: string) {
+    sortBy = isTimelineSort(v) ? v : 'default';
+    savePref('timeline.sort', sortBy);
+  }
+  function setOnlyActive(v: boolean) {
+    onlyActive = v;
+    savePref('timeline.onlyActive', v);
+  }
+  function setRecent(w: RecentWindow) {
+    recent = w;
+    savePref('timeline.window', w);
+  }
+
   /** What the filter selects offer: the board's initiatives, their tags and its actors. */
   let slugs: string[] = $state([]);
   let tags: string[] = $state([]);
@@ -114,6 +200,7 @@
       .list('all')
       .then((list) => {
         looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
+        looks = looked;
         slugs = list.map((i) => i.slug);
         tags = tagChoices(list);
       })
@@ -164,6 +251,9 @@
     turns.begin();
     turns.reading();
     forgetTimeline(viewEnv.storage);
+    clientTags = [];
+    savePref('timeline.clientTags', []);
+    setOnlyActive(false);
     replaceHash('#/timeline');
     void store.setFilter(DEFAULT_TIMELINE_FILTER);
   }
@@ -192,7 +282,7 @@
   // does while it draws (the span, the arrows) must not run this again, or it would reset what the user collapsed.
   $effect(() => {
     const target = frame;
-    const model = view.model;
+    const model = displayed;
     if (target === undefined || !view.loaded) return;
     untrack(() => {
       const hooks = {
@@ -274,10 +364,11 @@
 <svelte:window onhashchange={hashChanged} onresize={resized} onpagehide={() => entry.leaving()} />
 
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
-  <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
+  <div class="mb-4 flex flex-wrap items-center gap-3">
+    <h2 id="timeline-heading" class="text-xl font-bold">Timeline</h2>
+    <span class="ml-auto"><DensitySwitch /></span>
+  </div>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
-    <FilterSelect label="Initiative" options={choiceOptions(slugs, view.filter.initiatives[0] ?? '', 'Any initiative')} value={view.filter.initiatives[0] ?? ''} onchange={(v) => apply(withInitiative(view.filter, v))} testid="initiative-filter" />
-    <FilterSelect label="Tag" options={choiceOptions(tags, view.filter.tags[0] ?? '', 'Any tag')} value={view.filter.tags[0] ?? ''} onchange={(v) => apply(withTag(view.filter, v))} testid="tag-filter" />
     <FilterSelect label="Actor" options={choiceOptions(actors, view.filter.actor, 'Any actor')} value={view.filter.actor} onchange={(v) => apply({ ...view.filter, actor: v })} testid="actor-filter" />
     <FilterSelect
       label="Closed within"
@@ -286,16 +377,31 @@
       onchange={(v) => apply(withClosedWithin(view.filter, v))}
       testid="closed-filter"
     />
-    {#if isFiltered(view.filter)}
+    <ProtoSort options={TIMELINE_SORTS} value={sortBy} onchange={setSort} />
+    <label class="inline-flex min-h-9 items-center gap-2 text-sm" data-testid="only-active"
+      ><input type="checkbox" class="size-4" checked={onlyActive} onchange={(e) => setOnlyActive(e.currentTarget.checked)} /> Only active
+      <span class="text-text-muted">({activeCount})</span></label
+    >
+    <span class="inline-flex items-center gap-1 text-xs text-text-muted" role="group" aria-label="Recently touched within"
+      >touched in
+      {#each WINDOWS as w (w)}
+        <button type="button" class="vh-tag" aria-pressed={recent === w} style="--h: 210" onclick={() => setRecent(w)}>{w}</button>
+      {/each}
+    </span>
+    {#if isFiltered(view.filter) || clientTags.length > 0 || onlyActive}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
+  </div>
+  <div class="mb-4 rounded-lg border border-border bg-surface-raised px-3 py-2" data-testid="timeline-chips">
+    <ChipFilter tags={chipTags} initiatives={slugs} value={chipValue} onchange={setChips} />
+    <p class="mt-1 text-xs text-text-muted">Active = a live lease, needs attention, or touched in the last {recent}. Active rows are marked in the chart; prototype filters run in this browser.</p>
   </div>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="timeline-error">{view.error}</p>
   {/if}
   {#if !view.loaded && view.error === ''}
     <p class="text-sm text-text-muted" data-testid="timeline-loading">Loading the timeline…</p>
-  {:else if view.loaded && view.model.groups.length === 0}
+  {:else if view.loaded && displayed.groups.length === 0}
     <p class="text-sm text-text-muted" data-testid="timeline-empty">No tasks in this window.</p>
   {/if}
   {#if view.loaded}
@@ -552,6 +658,19 @@
   }
   .timeline-frame :global(.tl-attention) {
     color: var(--danger);
+  }
+  /* Prototype: active rows get a coloured edge on their label (live lease, needs attention, recently touched). */
+  .timeline-frame :global(.vis-label.tl-active) {
+    box-shadow: inset 4px 0 0 var(--tl-active, var(--success));
+  }
+  .timeline-frame :global(.vis-label.tl-active-1) {
+    --tl-active: var(--warning);
+  }
+  .timeline-frame :global(.vis-label.tl-active-2) {
+    --tl-active: var(--accent);
+  }
+  .timeline-frame :global(.vis-label:not(.tl-active):not(.tl-initiative)) {
+    opacity: 0.7;
   }
   .timeline-frame :global(svg.tl-arrows) {
     position: absolute;
