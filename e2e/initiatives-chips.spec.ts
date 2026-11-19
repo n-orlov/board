@@ -114,7 +114,7 @@ for (const vp of viewports) {
       await expect(tagChip(page, s.tagB)).toHaveAttribute('aria-pressed', 'true');
 
       // A bare #/initiatives after a visit elsewhere restores the saved filter.
-      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tasks' }).click();
+      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tasks', exact: true }).click();
       await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
       await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Initiatives' }).click();
       await expect.poll(() => ownRows(page, s.prefix)).toEqual([both]);

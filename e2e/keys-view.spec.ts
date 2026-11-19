@@ -50,12 +50,12 @@ const order = (page: Page, prefix: string) =>
   page.locator(`[data-testid=key-row][data-name^="${prefix}"]`).evaluateAll((rows) => rows.map((row) => row.getAttribute('data-name')));
 
 async function goTo(page: Page, label: string) {
-  const link = nav(page).getByRole('link', { name: label });
+  const link = nav(page).getByRole('link', { name: new RegExp(`^${label}`) });
   if (await link.isVisible()) {
     await link.click();
   } else {
     await page.getByRole('button', { name: 'More' }).click();
-    await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: label }).click();
+    await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: new RegExp(`^${label}`) }).click();
   }
 }
 

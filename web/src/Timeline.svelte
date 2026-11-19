@@ -11,6 +11,11 @@
   import { currentViewEnv, FilterTurns } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
   import ChipFilter from './ChipFilter.svelte';
+  import SortControl from './SortControl.svelte';
+  import SegmentedRadio from './SegmentedRadio.svelte';
+  import { WINDOWS, loadWindow, saveWindow, type NowWindow } from './lib/nowFlight';
+  import { ACTIVE_CHOICES, ACTIVE_COLUMNS, WINDOW_HINT, windowVisible, type TimelineOrder } from './lib/timelineActive';
+  import type { SortState } from './lib/tableSort';
   import type { ChipState } from './lib/chipFilter';
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
@@ -62,7 +67,7 @@
   // A fragment with a query wins and is saved; a bare one restores the saved filter (in place, before the first fetch).
   const opened = openTimeline(viewEnv, window.location.hash);
   // A fragment that names a window (`from`/`to`: a link, or Back to this entry) opens on it; otherwise the default one.
-  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window);
+  const store = new TimelineViewStore(api, (s) => (view = s), opened.filter, undefined, undefined, opened.window, loadWindow(viewEnv.storage));
   /** Whether the fragment carries the window: once it named one or the user moved the chart, so a fresh visit keeps the default. */
   let windowInHash = opened.window !== undefined;
   /**
@@ -151,6 +156,16 @@
   function persist(filter: TimelineFilter) {
     replaceHash(timelineViewHash(filter, windowInHash ? view.window : undefined, preview));
     saveTimeline(viewEnv.storage, filter);
+  }
+
+  // Active first is the shared sort control's one option beside the current order; Only active is a checkbox. Both ride in
+  // the filter (fragment and saved query). The touched-in window is Now's choice, kept under Now's key.
+  const sort: SortState = $derived(view.filter.order === 'active' ? { column: 'active', dir: 'desc' } : null);
+  const chooseSort = (next: SortState) => apply({ ...view.filter, order: ((next === null ? 'default' : 'active') satisfies TimelineOrder) });
+  const showWindow = $derived(windowVisible(view.filter.activeOnly, view.filter.order));
+  function chooseActiveWindow(next: NowWindow) {
+    saveWindow(viewEnv.storage, next);
+    void store.setActiveWindow(next);
   }
 
   const setChips = (chips: ChipState) => apply({ ...view.filter, ...chips });
@@ -289,6 +304,27 @@
       onchange={(v) => apply(withClosedWithin(view.filter, v))}
       testid="closed-filter"
     />
+    <SortControl columns={ACTIVE_COLUMNS} choices={ACTIVE_CHOICES} {sort} onsort={chooseSort} testid="timeline-sort" />
+    <!-- The checkbox itself covers the whole 44 px pill (invisible, as in SegmentedRadio), so it is its own hit area. -->
+    <label
+      class="relative flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-border px-3 text-sm text-text has-[:checked]:border-accent has-[:checked]:bg-surface has-[:checked]:font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+    >
+      <input
+        type="checkbox"
+        class="absolute -inset-px h-[calc(100%+2px)] w-[calc(100%+2px)] cursor-pointer text-base opacity-0"
+        data-testid="only-active"
+        checked={view.filter.activeOnly}
+        onchange={(event) => apply({ ...view.filter, activeOnly: event.currentTarget.checked })}
+      />
+      <span aria-hidden="true" class="inline-flex h-5 w-5 items-center justify-center rounded border border-border text-xs {view.filter.activeOnly ? 'border-accent bg-accent text-surface-raised' : ''}">{view.filter.activeOnly ? '✓' : ''}</span>
+      Only active
+    </label>
+    {#if showWindow}
+      <div class="flex flex-wrap items-center gap-x-3" data-testid="timeline-window-control">
+        <SegmentedRadio legend="Touched within" name="timeline-window" options={WINDOWS} value={view.activeWindow} onchoose={chooseActiveWindow} testid="timeline-window" />
+        <p class="text-xs text-text-muted" data-testid="timeline-window-hint">{WINDOW_HINT}</p>
+      </div>
+    {/if}
     {#if isFiltered(view.filter)}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}

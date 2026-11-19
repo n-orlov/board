@@ -1278,11 +1278,31 @@ paths:
         `attention` list is the one of `GET /api/v1/tasks`. Leases that ran out
         are expired before the read, but only once the request is accepted: a refused request changes nothing. Everything is in stable order: initiatives in board order, tasks by initiative
         then number, leases by number, markers by time then event. An unreadable time, `to` not after `from`, a window
-        over 400 days, a bad `closed_within`, a `rows` that is neither `window` nor `all` (an empty `rows=` included) or a bad tag is 400; an initiative that names nothing is 404.
+        over 400 days, a bad `closed_within`, a `rows` that is neither `window` nor `all` (an empty `rows=` included), a `window`
+        that is not `8h`, `24h` or `3d`, an `active` that is not `true` or `false` or a bad tag is 400; an initiative that names nothing is 404.
+
+
+        `active` `true` keeps only the active tasks, and it adds to every other filter. A task is active when it has a live
+        lease, or has any attention reason (stranded, asking or done and not closed: a non-empty `attention` list), or
+        has an event in the last `window` (`8h`, `24h` by default, or `3d`, counted back from now: the Now view's window,
+        not the `from` and `to` of the chart). This is the one definition of active the Timeline's Only active filter and
+        Active first sort use. `active` `false` or left out keeps every task; `window` alone changes nothing.
       security:
         - bearerAuth: []
         - cookieAuth: []
       parameters:
+        - name: active
+          in: query
+          required: false
+          description: "`true` keeps only the active tasks: a live lease, any attention reason, or an event in the last `window`."
+          schema:
+            type: boolean
+        - name: window
+          in: query
+          required: false
+          description: "How far back an event makes a task active: `8h`, `24h` (the default) or `3d`. Used only with `active=true`."
+          schema:
+            $ref: "#/components/schemas/NowWindow"
         - name: from
           in: query
           required: false

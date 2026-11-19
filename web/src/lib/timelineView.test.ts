@@ -129,6 +129,27 @@ describe('TimelineApi', () => {
     expect(init?.headers).toEqual({ Accept: 'application/json' });
   });
 
+  it('sends active=true and the window under Only active, in one read', async () => {
+    const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json(answer()));
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
+    await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, activeOnly: true }, initialWindow(NOW), '3d');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0]![0]).toMatch(/&active=true&window=3d$/);
+  });
+
+  it('reads the active set a second time for Active first and puts those tasks first', async () => {
+    const base = answer().tasks[0]!;
+    const tasks = ['T1', 'T2', 'T3'].map((ref) => ({ ...base, ref }));
+    const fetchFn = vi.fn(async (input: string, _init?: RequestInit) =>
+      json(input.includes('active=true') ? answer({ tasks: [tasks[2]!] }) : answer({ tasks })),
+    );
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
+    const got = await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, order: 'active' }, initialWindow(NOW), '8h');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls.filter(([url]) => url.includes('active=true&window=8h'))).toHaveLength(1);
+    expect(got.tasks.map((t) => t.ref)).toEqual(['T3', 'T1', 'T2']);
+  });
+
   it('turns a refusal into its problem text', async () => {
     const problem = new Response(JSON.stringify({ detail: 'from must be before to' }), { status: 400, headers: { 'Content-Type': 'application/problem+json' } });
     const browser: Browser = { fetch: vi.fn(async () => problem), assign: vi.fn(), pathname: '/', setHash: vi.fn() };
@@ -150,7 +171,7 @@ describe('TimelineViewStore', () => {
     expect(store.state.model).toEqual({ groups: [], items: [], dependencies: [] });
     expect(store.state.window).toEqual(initialWindow(NOW));
     await store.load();
-    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, initialWindow(NOW));
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, initialWindow(NOW), '24h');
     expect(seen[0]!.loading).toBe(true);
     expect(store.state).toMatchObject({ loaded: true, loading: false, error: '' });
     expect(store.state.model.groups.map((g) => g.id)).toEqual(['i:alpha', 't:T1']);
@@ -163,7 +184,7 @@ describe('TimelineViewStore', () => {
     const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, undefined, w);
     expect(store.state.window).toBe(w);
     await store.load();
-    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, w);
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, w, '24h');
   });
 
   it('opens on the window around the real clock when no clock is handed in', () => {
@@ -191,12 +212,28 @@ describe('TimelineViewStore', () => {
     expect(store.state.error).toBe('');
   });
 
+  it('reads again under a new touched-in window, keeping the filter and the range', async () => {
+    const { store, api } = rig(async () => answer());
+    const filter = { ...DEFAULT_TIMELINE_FILTER, activeOnly: true };
+    await store.setFilter(filter);
+    await store.setActiveWindow('8h');
+    expect(store.state.activeWindow).toBe('8h');
+    expect(api.read).toHaveBeenLastCalledWith(filter, initialWindow(NOW), '8h');
+  });
+
+  it('opens on the touched-in window handed in', async () => {
+    const api = { read: vi.fn(async () => answer()) };
+    const store = new TimelineViewStore(api, () => undefined, DEFAULT_TIMELINE_FILTER, () => NOW, undefined, undefined, '3d');
+    await store.load();
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, initialWindow(NOW), '3d');
+  });
+
   it('reads again under a new filter', async () => {
     const { store, api } = rig(async () => answer());
     const filter = { ...DEFAULT_TIMELINE_FILTER, tags: ['work'] };
     await store.setFilter(filter);
     expect(store.state.filter).toEqual(filter);
-    expect(api.read).toHaveBeenLastCalledWith(filter, initialWindow(NOW));
+    expect(api.read).toHaveBeenLastCalledWith(filter, initialWindow(NOW), '24h');
   });
 
   it('drops a read that lands after a newer one and stays loading while one is out', async () => {
@@ -1762,7 +1799,7 @@ describe('TimelineViewStore panning', () => {
     expect(store.state.window).toEqual(initialWindow(NOW));
     tm.fire();
     await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
-    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(5));
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(5), '24h');
     expect(store.state.window).toEqual(moved(5));
   });
 
@@ -1777,7 +1814,7 @@ describe('TimelineViewStore panning', () => {
     expect(tm.pending.size).toBe(1);
     tm.fire();
     await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
-    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(6));
+    expect(api.read).toHaveBeenCalledWith(DEFAULT_TIMELINE_FILTER, moved(6), '24h');
   });
 
   it('debounces on the browser timers when none are handed in, and cancels with them', async () => {
@@ -1831,7 +1868,7 @@ describe('TimelineViewStore panning', () => {
     await vi.waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
     await store.setFilter({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' });
     await store.load();
-    expect(api.read).toHaveBeenLastCalledWith({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' }, moved(5));
+    expect(api.read).toHaveBeenLastCalledWith({ ...DEFAULT_TIMELINE_FILTER, actor: 'ada' }, moved(5), '24h');
   });
 });
 
@@ -1922,7 +1959,7 @@ describe('saved Timeline filters', () => {
 
   it('saves the filter as the fragment query and removes the key for the empty filter', () => {
     const storage = memory();
-    saveTimeline(storage, { initiatives: ['aa'], tags: ['work'], actor: 'bob', closedWithin: 7 });
+    saveTimeline(storage, { initiatives: ['aa'], tags: ['work'], actor: 'bob', closedWithin: 7, activeOnly: false, order: 'default' as const });
     expect(JSON.parse(storage.data.get(KEY)!)).toEqual({ v: 1, query: 'initiative=aa&tag=work&actor=bob&closed=7' });
     saveTimeline(storage, DEFAULT_TIMELINE_FILTER);
     expect(storage.data.has(KEY)).toBe(false);
@@ -1930,7 +1967,7 @@ describe('saved Timeline filters', () => {
 
   it('restores a bare route in place, before any fetch, and reports it as restored', () => {
     const e = viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work&actor=bob&closed=30' }) }));
-    expect(openTimeline(e, '#/timeline')).toEqual({ filter: { initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30 }, restored: true });
+    expect(openTimeline(e, '#/timeline')).toEqual({ filter: { initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30, activeOnly: false, order: 'default' as const }, restored: true });
     expect(e.hashes).toEqual(['#/timeline?tag=work&actor=bob&closed=30']);
   });
 
@@ -1981,9 +2018,9 @@ describe('saved Timeline filters', () => {
 
   it('restores through the module, drops the deleted initiative and the removed tag, and keeps the valid actor and closed_within', () => {
     const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: SAVED }) })), '#/timeline');
-    expect(opened.filter).toEqual({ initiatives: ['ghost'], tags: ['gone', 'work'], actor: 'bob', closedWithin: 30 });
+    expect(opened.filter).toEqual({ initiatives: ['ghost'], tags: ['gone', 'work'], actor: 'bob', closedWithin: 30, activeOnly: false, order: 'default' as const });
     const kept = startFilter(opened, known);
-    expect(kept).toEqual({ initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30 });
+    expect(kept).toEqual({ initiatives: [], tags: ['work'], actor: 'bob', closedWithin: 30, activeOnly: false, order: 'default' as const });
     const read = apiQuery(kept, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-08T00:00:00Z'));
     expect(read.getAll('initiative')).toEqual([]);
     expect(read.getAll('tag')).toEqual(['work']);
@@ -1993,7 +2030,7 @@ describe('saved Timeline filters', () => {
 
   it('drops every restored initiative and tag when the lookup answered with no initiatives at all', () => {
     const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: SAVED }) })), '#/timeline');
-    expect(startFilter(opened, [])).toEqual({ initiatives: [], tags: [], actor: 'bob', closedWithin: 30 });
+    expect(startFilter(opened, [])).toEqual({ initiatives: [], tags: [], actor: 'bob', closedWithin: 30, activeOnly: false, order: 'default' as const });
   });
 
   it('keeps a restored filter as it is when the lookup failed', () => {
@@ -2009,7 +2046,7 @@ describe('saved Timeline filters', () => {
   });
 
   it('keeps a filter whose values are all known, as the same object', () => {
-    const filter = { initiatives: ['bb'], tags: ['home', 'work'], actor: 'bob', closedWithin: 7 as const };
+    const filter = { initiatives: ['bb'], tags: ['home', 'work'], actor: 'bob', closedWithin: 7 as const, activeOnly: false, order: 'default' as const };
     expect(dropUnknown(filter, known)).toBe(filter);
     expect(dropUnknown(DEFAULT_TIMELINE_FILTER, known)).toBe(DEFAULT_TIMELINE_FILTER);
   });

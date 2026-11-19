@@ -32,6 +32,7 @@ func timelineQuery(p GetTimelineParams) timeline.Query {
 	return timeline.Query{
 		From: text(p.From), To: text(p.To), Initiatives: orEmpty(p.Initiative), Tags: orEmpty(p.Tag),
 		Actor: text(p.Actor), ClosedWithin: text(p.ClosedWithin), Rows: rowsText(p.Rows),
+		Active: p.Active != nil && *p.Active, Window: windowText(p.Window),
 	}
 }
 
@@ -61,30 +62,44 @@ func (o timelineOps) GetTimeline(ctx context.Context, req GetTimelineRequestObje
 	if _, err := o.leases.ExpireDue(ctx); err != nil {
 		return nil, err
 	}
-	got, err := o.timeline.Read(ctx, timelineQuery(req.Params))
+	reasons, err := o.derivation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := timelineQuery(req.Params)
+	q.Attention = attentionRefs(reasons)
+	got, err := o.timeline.Read(ctx, q)
 	if p, ok := timelineFailure(err); ok {
 		return p, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	doc, err := o.document(ctx, got)
-	if err != nil {
-		return nil, err
+	return GetTimeline200JSONResponse(document(got, reasons)), nil
+}
+
+// derivation is the attention derivation, empty when the operation has none.
+func (o timelineOps) derivation(ctx context.Context) (attention.Derivation, error) {
+	if o.derived == nil {
+		return attention.Derivation{}, nil
 	}
-	return GetTimeline200JSONResponse(doc), nil
+	return o.derived.Reasons(ctx, attention.Query{})
+}
+
+// attentionRefs are the refs of the tasks that carry any attention reason.
+func attentionRefs(d attention.Derivation) []string {
+	refs := make([]string, 0, len(d.Tasks))
+	for _, t := range d.Tasks {
+		if len(t.Reasons) > 0 {
+			refs = append(refs, t.Task)
+		}
+	}
+	return refs
 }
 
 // document is the answer for a read, with each task's attention list from the
 // attention derivation.
-func (o timelineOps) document(ctx context.Context, got timeline.Result) (Timeline, error) {
-	var reasons attention.Derivation
-	if o.derived != nil {
-		var err error
-		if reasons, err = o.derived.Reasons(ctx, attention.Query{}); err != nil {
-			return Timeline{}, err
-		}
-	}
+func document(got timeline.Result, reasons attention.Derivation) Timeline {
 	out := Timeline{
 		From: got.From, To: got.To, Initiatives: make([]TimelineInitiative, len(got.Initiatives)),
 		Tasks: make([]TimelineTask, len(got.Tasks)), Leases: make([]TimelineLease, len(got.Leases)), Markers: make([]TimelineMarker, len(got.Markers)),
@@ -103,7 +118,7 @@ func (o timelineOps) document(ctx context.Context, got timeline.Result) (Timelin
 	for i, m := range got.Markers {
 		out.Markers[i] = TimelineMarker{Task: m.Task, Type: TimelineMarkerType(m.Type), At: m.At, Label: m.Label}
 	}
-	return out, nil
+	return out
 }
 
 func apiTimelineTask(t timeline.Task) TimelineTask {
@@ -111,6 +126,14 @@ func apiTimelineTask(t timeline.Task) TimelineTask {
 		Ref: t.Ref, Initiative: t.Initiative, Title: t.Title, Status: TimelineTaskStatus(t.Status), Kind: TimelineTaskKind(t.Kind),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CreatedAt: t.CreatedAt, ClosedAt: t.ClosedAt, Deps: t.Deps,
 	}
+}
+
+// windowText is the text of the window parameter, empty when it is left out.
+func windowText(w *NowWindow) string {
+	if w == nil {
+		return ""
+	}
+	return string(*w)
 }
 
 // rowsText is the text of the rows parameter, empty when it is left out.

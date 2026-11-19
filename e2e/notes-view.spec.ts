@@ -20,7 +20,7 @@ const apiContext = (playwright: PlaywrightTestArgs['playwright'], baseURL: strin
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const goTo = async (page: Page, label: string) => {
-  await nav(page).getByRole('link', { name: label }).click();
+  await nav(page).getByRole('link', { name: new RegExp(`^${label}`) }).click();
 };
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 const stored = (page: Page) => page.evaluate((k) => localStorage.getItem(k), KEY);

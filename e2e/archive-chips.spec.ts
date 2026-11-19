@@ -94,7 +94,7 @@ for (const vp of viewports) {
       await expectTags(page, [s.tagA, s.tagB]);
 
       // A bare #/archive after a visit elsewhere restores the saved filter; taking a tag off widens the list; Clear forgets it.
-      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tasks' }).click();
+      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tasks', exact: true }).click();
       await expect(page.getByRole('heading', { level: 2, name: 'Tasks' })).toBeVisible();
       await page.goto('/#/archive');
       await expect.poll(() => rows(page, s.all)).toEqual([mango]);

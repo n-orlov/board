@@ -233,6 +233,8 @@ func TestGetTimelineRefusedWindowsAndFiltersChangeNothing(t *testing.T) {
 		"initiative=nope&rows=window":                                               404,
 		"initiative=nope&rows=some":                                                 400, // rows is judged first
 		"rows=some&initiative=nope&tag=Bad%20Tag&closed_within=soon&from=yesterday": 400,
+		"active=true&window=2h":                                                     400, // a window that is none of the three
+		"window=1d":                                                                 400, // judged whether or not active is asked for
 	} {
 		rec := s.send(http.MethodGet, "/api/v1/timeline?"+q, "", "claude@host")
 		if rec.Code != want || decode(t, rec)["next"] == nil {
@@ -276,4 +278,50 @@ func TestTimelineRowsAcceptOnlyTheDeclaredValues(t *testing.T) {
 	if got := rowsText(&all); got != "all" {
 		t.Errorf("rows all = %q", got)
 	}
+}
+
+// active=true keeps a task that carries an attention reason though nothing touched it
+// in the window: the derivation's refs reach the store's query.
+func TestGetTimelineActiveKeepsTheTasksWithAnAttentionReason(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"stranded one"}`)
+	s.task(`{"initiative":"aa","title":"quiet one"}`)
+	if rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"aa-1","intent":"work"}`, "codex@host"); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("start lease = %d %s", rec.Code, rec.Body)
+	}
+	if _, err := s.st.Writer().Exec(s.st.Dialect().Rebind(`UPDATE leases SET expires_at = ?`), store.EncodeTime(time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	// nothing was touched in the last 3 days
+	if _, err := s.st.Writer().Exec(s.st.Dialect().Rebind(`UPDATE events SET at = ?`), store.EncodeTime(time.Now().Add(-100*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	refs := func(query string) []string {
+		code, doc := timelineAt(s, mustValues(t, query))
+		if code != http.StatusOK {
+			t.Fatalf("%s = %d %v", query, code, doc)
+		}
+		var out []string
+		for _, task := range doc["tasks"].([]any) {
+			out = append(out, task.(map[string]any)["ref"].(string))
+		}
+		return out
+	}
+	if got := refs("active=true&window=3d"); len(got) != 1 || got[0] != "aa-1" {
+		t.Errorf("active tasks = %v, want only the stranded aa-1", got)
+	}
+	if got := refs("active=false"); len(got) != 2 {
+		t.Errorf("without active = %v, want both tasks", got)
+	}
+}
+
+func mustValues(t *testing.T, query string) url.Values {
+	t.Helper()
+	v, err := url.ParseQuery(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

@@ -3182,6 +3182,12 @@ type ReopenTaskParams struct {
 
 // GetTimelineParams defines parameters for GetTimeline.
 type GetTimelineParams struct {
+	// Active `true` keeps only the active tasks: a live lease, any attention reason, or an event in the last `window`.
+	Active *bool `form:"active,omitempty" json:"active,omitempty"`
+
+	// Window How far back an event makes a task active: `8h`, `24h` (the default) or `3d`. Used only with `active=true`.
+	Window *NowWindow `form:"window,omitempty" json:"window,omitempty"`
+
 	// From The start of the window, RFC 3339. Default 14 days before now.
 	From *string `form:"from,omitempty" json:"from,omitempty"`
 
@@ -5686,6 +5692,14 @@ func (siw *ServerInterfaceWrapper) GetTimeline(w http.ResponseWriter, r *http.Re
 	var params GetTimelineParams
 
 	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "active" -------------
+
+	bind.check("active", runtime.BindQueryParameterWithOptions("form", true, false, "active", r.URL.Query(), &params.Active, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""}))
+
+	// ------------- Optional query parameter "window" -------------
+
+	bind.check("window", runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
 
 	// ------------- Optional query parameter "from" -------------
 

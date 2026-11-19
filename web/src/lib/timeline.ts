@@ -10,6 +10,9 @@
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
 import { mergeChoices, type TagChoice } from './chipFilter';
+import { ACTIVE_COLUMNS, type TimelineOrder } from './timelineActive';
+import { sortFragment, sortFromFragment } from './sortControl';
+import type { NowWindow } from './nowFlight';
 
 export type Timeline = components['schemas']['Timeline'];
 type TimelineTask = components['schemas']['TimelineTask'];
@@ -431,9 +434,16 @@ export interface TimelineFilter {
   /** An actor handle; empty for any. */
   actor: string;
   closedWithin: ClosedWithin;
+  /** Only active: keep the tasks that are active (the server's definition, SPEC 6.10). */
+  activeOnly: boolean;
+  /** The order of the rows: the current one, or Active first. */
+  order: TimelineOrder;
 }
 
-export const DEFAULT_TIMELINE_FILTER: TimelineFilter = { initiatives: [], tags: [], actor: '', closedWithin: 0 };
+export const DEFAULT_TIMELINE_FILTER: TimelineFilter = { initiatives: [], tags: [], actor: '', closedWithin: 0, activeOnly: false, order: 'default' };
+
+/** The fragment's `active=1` is Only active; anything else is off. */
+const ACTIVE_ONLY_ON = '1';
 
 function closedFrom(raw: string | null): ClosedWithin {
   return CLOSED_WITHIN_OPTIONS.find((o) => String(o.value) === raw)?.value ?? 0;
@@ -447,6 +457,8 @@ export function filterFromQuery(query: string): TimelineFilter {
     tags: clean(params.getAll('tag')),
     actor: (params.get('actor') ?? '').trim(),
     closedWithin: closedFrom(params.get('closed')),
+    activeOnly: params.get('active') === ACTIVE_ONLY_ON,
+    order: sortFromFragment(query, ACTIVE_COLUMNS) === null ? 'default' : 'active',
   };
 }
 
@@ -457,7 +469,9 @@ export function filterToQuery(filter: TimelineFilter): string {
   for (const value of clean(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());
   if (filter.closedWithin !== 0) params.set('closed', String(filter.closedWithin));
-  return params.toString();
+  if (filter.activeOnly) params.set('active', ACTIVE_ONLY_ON);
+  const sort = filter.order === 'active' ? sortFragment({ column: 'active', dir: 'desc' }) : '';
+  return [params.toString(), sort].filter((part) => part !== '').join('&');
 }
 
 /** The fragment of the view under a filter: `#/timeline`, or `#/timeline?...` when a value is set. */
@@ -475,13 +489,18 @@ export function filterFromHash(hash: string): TimelineFilter {
 /**
  * The query of `GET /timeline` for a filter and the visible window. The rows are every task the filter keeps
  * (`rows=all`), so panning or zooming never adds, drops or reorders a row; the window picks the leases and markers.
+ * `active` (the touched-in window of the Only active filter, 8h, 24h or 3d) adds `active=true&window=`.
  */
-export function apiQuery(filter: TimelineFilter, from: Date, to: Date): URLSearchParams {
+export function apiQuery(filter: TimelineFilter, from: Date, to: Date, active?: NowWindow): URLSearchParams {
   const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), rows: 'all' });
   for (const value of clean(filter.initiatives)) params.append('initiative', value);
   for (const value of clean(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());
   if (filter.closedWithin !== 0) params.set('closed_within', `${filter.closedWithin}d`);
+  if (active !== undefined) {
+    params.set('active', 'true');
+    params.set('window', active);
+  }
   return params;
 }
 

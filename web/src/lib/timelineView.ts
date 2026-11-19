@@ -7,6 +7,8 @@ import { RESTORE_WAIT_MS } from './historyEntry';
 import { ThreadApi } from './threads';
 import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
+import { activeFirst, needsActiveSet, refsOf } from './timelineActive';
+import { DEFAULT_WINDOW, type NowWindow } from './nowFlight';
 import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
 export const HOUR_MS = 3_600_000;
@@ -47,19 +49,33 @@ export class TimelineApi extends ThreadApi {
     return ((await response.json()) as { items: { handle: string }[] }).items.map((a) => a.handle);
   }
 
-  /** The timeline under the filter in the window. */
-  async read(filter: TimelineFilter, window: TimeWindow): Promise<Timeline> {
-    const query = apiQuery(filter, window.from, window.to);
+  /** One `GET /timeline` under a query. */
+  private async fetchTimeline(query: URLSearchParams): Promise<Timeline> {
     const response = await this.call(`/api/v1/timeline?${query.toString()}`, 'Reading the timeline', {
       headers: { Accept: 'application/json' },
     });
     return (await response.json()) as Timeline;
+  }
+
+  /**
+   * The timeline under the filter in the window. `active` is the touched-in window of the active definition (what Only
+   * active and Active first use): Only active sends it with `active=true`, and Active first on the whole board reads
+   * the active set the same way and puts those tasks first, so the server alone decides what active means.
+   */
+  async read(filter: TimelineFilter, window: TimeWindow, active: NowWindow = DEFAULT_WINDOW): Promise<Timeline> {
+    const only = filter.activeOnly ? active : undefined;
+    const answer = this.fetchTimeline(apiQuery(filter, window.from, window.to, only));
+    if (!needsActiveSet(filter.activeOnly, filter.order)) return answer;
+    const [all, set] = await Promise.all([answer, this.fetchTimeline(apiQuery(filter, window.from, window.to, active))]);
+    return activeFirst(all, refsOf(set));
   }
 }
 
 export interface TimelineViewState {
   filter: TimelineFilter;
   window: TimeWindow;
+  /** The touched-in window of "active" (8h, 24h or 3d): Now's choice, shared. */
+  activeWindow: NowWindow;
   model: TimelineModel;
   /** Whether the first read has landed (until then the view shows that it is loading). */
   loaded: boolean;
@@ -94,12 +110,13 @@ export class TimelineViewStore {
     now: () => Date = () => new Date(),
     timers: Timers = BROWSER_TIMERS,
     window?: TimeWindow,
+    activeWindow: NowWindow = DEFAULT_WINDOW,
   ) {
     this.api = api;
     this.publish = publish;
     this.now = now;
     this.timers = timers;
-    this.state = { filter, window: window ?? initialWindow(now()), model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
+    this.state = { filter, window: window ?? initialWindow(now()), activeWindow, model: EMPTY_MODEL, loaded: false, loading: false, error: '' };
   }
 
   private set(patch: Partial<TimelineViewState>) {
@@ -111,9 +128,9 @@ export class TimelineViewStore {
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
     this.set({ loading: true });
-    const { filter, window } = this.state;
+    const { filter, window, activeWindow } = this.state;
     try {
-      const answer = await this.api.read(filter, window);
+      const answer = await this.api.read(filter, window, activeWindow);
       if (this.fetches.end(ticket)) this.set({ model: buildTimeline(answer, this.now()), loaded: true, error: '' });
     } catch (e) {
       if (this.fetches.end(ticket)) this.set({ error: errorText(e) });
@@ -139,6 +156,12 @@ export class TimelineViewStore {
   cancelPan(): void {
     if (this.panTimer !== undefined) this.timers.clear(this.panTimer);
     this.panTimer = undefined;
+  }
+
+  /** Applies a new touched-in window and reads again. */
+  setActiveWindow(activeWindow: NowWindow): Promise<void> {
+    this.set({ activeWindow });
+    return this.load();
   }
 
   /** Applies a new filter and reads again. */

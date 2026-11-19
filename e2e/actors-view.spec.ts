@@ -57,12 +57,12 @@ const order = (page: Page, prefix: string) =>
 
 async function goTo(page: Page, label: string) {
   const more = page.getByRole('button', { name: 'More' });
-  const link = nav(page).getByRole('link', { name: label });
+  const link = nav(page).getByRole('link', { name: new RegExp(`^${label}`) });
   if (await link.isVisible()) {
     await link.click();
   } else {
     await more.click();
-    await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: label }).click();
+    await page.getByRole('dialog', { name: 'More' }).getByRole('link', { name: new RegExp(`^${label}`) }).click();
   }
 }
 

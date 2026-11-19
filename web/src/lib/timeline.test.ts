@@ -279,7 +279,7 @@ describe('opening a task', () => {
 });
 
 describe('filter round trip', () => {
-  const full: TimelineFilter = { initiatives: ['alpha', 'beta'], tags: ['work', 'home'], actor: 'ada', closedWithin: 30 };
+  const full: TimelineFilter = { initiatives: ['alpha', 'beta'], tags: ['work', 'home'], actor: 'ada', closedWithin: 30, activeOnly: false, order: 'default' as const };
 
   it('encodes the default as an empty query and decodes it back', () => {
     expect(filterToQuery(DEFAULT_TIMELINE_FILTER)).toBe('');
@@ -298,6 +298,25 @@ describe('filter round trip', () => {
     expect(isFiltered(full)).toBe(true);
   });
 
+  it('keeps Only active as active=1 and Active first as the shared sort=active&dir=desc, both in the fragment', () => {
+    const both: TimelineFilter = { ...DEFAULT_TIMELINE_FILTER, activeOnly: true, order: 'active' };
+    expect(filterToQuery(both)).toBe('active=1&sort=active&dir=desc');
+    expect(filterFromQuery('active=1&sort=active&dir=desc')).toEqual(both);
+    expect(timelineHash(both)).toBe('#/timeline?active=1&sort=active&dir=desc');
+    expect(filterToQuery({ ...DEFAULT_TIMELINE_FILTER, order: 'active' })).toBe('sort=active&dir=desc');
+    expect(isFiltered({ ...DEFAULT_TIMELINE_FILTER, activeOnly: true })).toBe(true);
+    expect(filterFromQuery('active=yes&sort=ref&dir=desc')).toEqual(DEFAULT_TIMELINE_FILTER);
+    expect(filterFromQuery('sort=active').order).toBe('active');
+  });
+
+  it('sends active=true and the window to GET /timeline only when asked', () => {
+    const w = [new Date('2026-03-01T00:00:00Z'), new Date('2026-03-02T00:00:00Z')] as const;
+    expect(apiQuery(DEFAULT_TIMELINE_FILTER, ...w).has('active')).toBe(false);
+    expect(apiQuery(DEFAULT_TIMELINE_FILTER, ...w).has('window')).toBe(false);
+    const asked = apiQuery({ ...DEFAULT_TIMELINE_FILTER, activeOnly: true }, ...w, '8h');
+    expect([asked.get('active'), asked.get('window'), asked.get('rows')]).toEqual(['true', '8h', 'all']);
+  });
+
   it('round-trips each closed-within option, and reads an unknown one as off', () => {
     for (const { value } of CLOSED_WITHIN_OPTIONS) {
       expect(filterFromQuery(filterToQuery({ ...DEFAULT_TIMELINE_FILTER, closedWithin: value })).closedWithin).toBe(value);
@@ -309,13 +328,13 @@ describe('filter round trip', () => {
   });
 
   it('round-trips values that need escaping', () => {
-    const odd: TimelineFilter = { initiatives: ['a b'], tags: ['x&y=z'], actor: 'é ü', closedWithin: 7 };
+    const odd: TimelineFilter = { initiatives: ['a b'], tags: ['x&y=z'], actor: 'é ü', closedWithin: 7, activeOnly: false, order: 'default' as const };
     expect(filterFromQuery(filterToQuery(odd))).toEqual(odd);
   });
 
   it('drops blanks and repeats and trims the actor', () => {
-    expect(filterFromQuery('initiative=a&initiative=a&initiative=%20&tag=&actor=%20ada%20')).toEqual({ initiatives: ['a'], tags: [], actor: 'ada', closedWithin: 0 });
-    expect(filterToQuery({ initiatives: [' a ', 'a', ''], tags: [], actor: '  ', closedWithin: 0 })).toBe('initiative=a');
+    expect(filterFromQuery('initiative=a&initiative=a&initiative=%20&tag=&actor=%20ada%20')).toEqual({ initiatives: ['a'], tags: [], actor: 'ada', closedWithin: 0, activeOnly: false, order: 'default' as const });
+    expect(filterToQuery({ initiatives: [' a ', 'a', ''], tags: [], actor: '  ', closedWithin: 0, activeOnly: false, order: 'default' as const })).toBe('initiative=a');
     expect(filterToQuery({ ...DEFAULT_TIMELINE_FILTER, actor: ' ada ' })).toBe('actor=ada');
   });
 

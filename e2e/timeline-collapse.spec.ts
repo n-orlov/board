@@ -36,7 +36,7 @@ const main = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 
 /** A link of the nav: the phone tab bar keeps only some of them, the rest are under More. */
 async function goTo(page: Page, label: string) {
-  const link = main(page).getByRole('link', { name: label });
+  const link = main(page).getByRole('link', { name: new RegExp(`^${label}`) });
   if (await link.isVisible()) {
     await link.click();
     return;

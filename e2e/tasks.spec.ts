@@ -169,7 +169,7 @@ for (const vp of viewports) {
       await expect(page.getByTestId('text-filter')).toHaveValue('NEEDLE');
       await expect(page.getByTestId('status-filter')).toHaveValue('not-closed');
       await expect.poll(() => shownRefs(page)).toEqual([plain.ref]);
-      await expect(page.getByRole('link', { name: 'Tasks' })).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByRole('link', { name: 'Tasks', exact: true })).toHaveAttribute('aria-current', 'page');
 
       // Clear filters returns to the bare address.
       await page.getByTestId('clear-filters').click();

@@ -3,6 +3,7 @@ package timeline_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -515,11 +516,13 @@ func TestCheckRefusesWhatReadRefusesAndAcceptsWhatItReads(t *testing.T) {
 	e.initiative(t, "aa")
 	base := "2030-01-01T00:00:00Z"
 	for name, q := range map[string]timeline.Query{
-		"a bad rows":      {Rows: "some"},
-		"a bad from":      {From: "yesterday"},
-		"an empty window": {From: base, To: base},
-		"a bad closed":    {ClosedWithin: "soon"},
-		"a bad tag":       {Tags: []string{"No Good"}},
+		"a bad rows":                  {Rows: "some"},
+		"a bad from":                  {From: "yesterday"},
+		"an empty window":             {From: base, To: base},
+		"a bad closed":                {ClosedWithin: "soon"},
+		"a bad tag":                   {Tags: []string{"No Good"}},
+		"a bad window":                {Window: "2h"},
+		"a bad window with active on": {Window: "1d", Active: true},
 	} {
 		if err := e.tl.Check(ctx, q); !errors.Is(err, timeline.ErrInvalid) {
 			t.Errorf("%s: Check = %v, want ErrInvalid", name, err)
@@ -534,5 +537,54 @@ func TestCheckRefusesWhatReadRefusesAndAcceptsWhatItReads(t *testing.T) {
 		if err := e.tl.Check(ctx, q); err != nil {
 			t.Errorf("%s: Check = %v, want nil", name, err)
 		}
+	}
+}
+
+// activeEnv seeds six open tasks of "aa" whose own events are all old, so that
+// each is active (or not) for exactly one reason: aa-1 a live lease, aa-2 an
+// attention reason the caller names, aa-3 an event 5h old, aa-4 an event 30h
+// old, aa-5 nothing, aa-6 a lease that ran out.
+func activeEnv(t *testing.T) env {
+	t.Helper()
+	e := newEnv(t)
+	e.initiative(t, "aa")
+	ids := make([]string, 7)
+	for i := 1; i <= 6; i++ {
+		ids[i] = e.task(t, "aa", fmt.Sprintf("t%d", i), now.Add(-90*24*time.Hour), time.Time{})
+	}
+	e.lease(t, "aa-1", "claude@host", "live", "live", now.Add(-2*time.Hour), now.Add(time.Hour))
+	e.lease(t, "aa-6", "claude@host", "gone", "expired", now.Add(-48*time.Hour), now.Add(-47*time.Hour))
+	e.event(t, ids[3], "milestone", "recent", "{}", now.Add(-5*time.Hour))
+	e.event(t, ids[4], "milestone", "older", "{}", now.Add(-30*time.Hour))
+	// Move every lease event of the seeded leases out of the windows too.
+	e.sql(t, `UPDATE events SET at = ? WHERE type LIKE 'lease%'`, ms(now.Add(-100*24*time.Hour)))
+	return e
+}
+
+func TestActiveKeepsALiveLeaseAnAttentionReasonAndAnEventInTheWindow(t *testing.T) {
+	e := activeEnv(t)
+	for _, c := range []struct {
+		name string
+		q    timeline.Query
+		want []string
+	}{
+		{"off keeps every task", timeline.Query{}, []string{"aa-1", "aa-2", "aa-3", "aa-4", "aa-5", "aa-6"}},
+		{"a window alone changes nothing", timeline.Query{Window: "8h"}, []string{"aa-1", "aa-2", "aa-3", "aa-4", "aa-5", "aa-6"}},
+		{"24h by default", timeline.Query{Active: true, Attention: []string{"aa-2"}}, []string{"aa-1", "aa-2", "aa-3"}},
+		{"8h", timeline.Query{Active: true, Window: "8h", Attention: []string{"aa-2"}}, []string{"aa-1", "aa-2", "aa-3"}},
+		{"3d reaches the older event", timeline.Query{Active: true, Window: "3d", Attention: []string{"aa-2"}}, []string{"aa-1", "aa-2", "aa-3", "aa-4"}},
+		{"no attention refs", timeline.Query{Active: true}, []string{"aa-1", "aa-3"}},
+	} {
+		is(t, c.name, refs(e.read(t, c.q)), c.want)
+	}
+}
+
+func TestActiveNarrowsTheLeasesAndMarkersWithItsTasksAndAddsToTheOtherFilters(t *testing.T) {
+	e := activeEnv(t)
+	got := e.read(t, timeline.Query{Active: true, Window: "8h", From: now.Add(-24 * time.Hour).Format(time.RFC3339), To: now.Add(time.Hour).Format(time.RFC3339)})
+	is(t, "tasks", refs(got), []string{"aa-1", "aa-3"})
+	is(t, "leases", leaseRefs(got), []string{"L1"})
+	if g := e.read(t, timeline.Query{Active: true, Actor: "nobody@host"}); len(g.Tasks) != 0 {
+		t.Errorf("active with an actor nobody is: %v, want none", refs(g))
 	}
 }

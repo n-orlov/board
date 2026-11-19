@@ -29,3 +29,19 @@ export function backdateTask(id: string, days: number): void {
 export function backdateInitiative(id: string, days: number): void {
   backdate('initiatives', id, days);
 }
+
+/**
+ * Moves every event of a task (by its ULID) `hours` back, so the task counts as untouched in the Now windows (8h, 24h, 3d)
+ * without a spec waiting for them. Creating a task writes an event, so a task a spec wants idle is aged this way.
+ */
+export function ageTaskEvents(id: string, hours: number): void {
+  const work = process.env.E2E_WORK;
+  if (!work) throw new Error('E2E_WORK is not set (playwright.config.ts sets it)');
+  const db = new DatabaseSync(join(work, 'board.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.prepare('UPDATE events SET at = at - ? WHERE task_id = ?').run(hours * 60 * 60 * 1000, id);
+  } finally {
+    db.close();
+  }
+}

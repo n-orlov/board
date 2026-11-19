@@ -39,6 +39,12 @@ type Query struct {
 	Actor        string
 	ClosedWithin string
 	Rows         string
+	// Active keeps only the active tasks: a live lease, a ref in Attention, or an
+	// event not older than Window (8h, 24h when empty, or 3d). Attention is the
+	// refs of the tasks that carry any attention reason, which the caller derives.
+	Active    bool
+	Window    string
+	Attention []string
 }
 
 // The values of Query.Rows.
@@ -172,6 +178,11 @@ func (s Store) scope(ctx context.Context, q Query, now, from, to time.Time) (*fi
 	if err != nil {
 		return nil, err
 	}
+	span, err := activeSpan(q)
+	if err != nil {
+		return nil, err
+	}
+	f.activeFilter(q, now, span)
 	if !all {
 		f.span(from, to)
 	}
@@ -184,15 +195,20 @@ func (s Store) scope(ctx context.Context, q Query, now, from, to time.Time) (*fi
 	if err := f.tagFilter(q.Tags); err != nil {
 		return nil, err
 	}
+	f.actorFilter(q.Actor, all, from, to)
+	return f, nil
+}
+
+// actorFilter keeps the tasks on which the actor held a lease: in the window, or at any time when all rows are kept.
+func (f *filter) actorFilter(actor string, all bool, from, to time.Time) {
 	switch {
-	case q.Actor == "":
+	case actor == "":
 	case all:
-		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ?)`, q.Actor)
+		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ?)`, actor)
 	default:
 		f.add(`EXISTS (SELECT 1 FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id = t.id AND a.handle = ? AND `+leaseOverlap+`)`,
-			q.Actor, store.EncodeTime(to), store.EncodeTime(from))
+			actor, store.EncodeTime(to), store.EncodeTime(from))
 	}
-	return f, nil
 }
 
 const nextRows = "Send rows as window (the tasks in the window, the default) or all (the tasks wherever their spans fall), or leave it out."
