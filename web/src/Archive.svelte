@@ -5,6 +5,7 @@
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
+  import DensitySwitch from './DensitySwitch.svelte';
   import Toast from './Toast.svelte';
   import {
     ARCHIVE_WINDOWS,
@@ -96,8 +97,11 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="archive-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="archive-view">
-  <h2 id="archive-heading" class="mb-4 text-xl font-bold">Archive</h2>
+<section aria-labelledby="archive-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="archive-view">
+  <div class="mb-4 flex flex-wrap items-center gap-3">
+    <h2 id="archive-heading" class="text-xl font-bold">Archive</h2>
+    <span class="ml-auto"><DensitySwitch /></span>
+  </div>
   <div class="mb-4">
     <FilterSelect label="Closed within" options={ARCHIVE_WINDOWS} value={view.window} onchange={choose} testid="archive-window" />
   </div>

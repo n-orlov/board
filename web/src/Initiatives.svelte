@@ -14,6 +14,11 @@
   import { currentBrowser } from './lib/session';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import DensitySwitch from './DensitySwitch.svelte';
+  import TagChips from './TagChips.svelte';
+  import { isChipState, loadPref, savePref } from './lib/proto/prefs.svelte';
+  import { chipsActive, NO_CHIPS, passesChips, tagChoices as protoTagChoices, type ChipState } from './lib/proto/tags';
   import { sortRows, type SortState } from './lib/tableSort';
   import { INITIATIVES_VIEW, INITIATIVE_COLUMNS, INITIATIVE_SORT_LABELS, isCustomised, viewFromQuery, viewHash, viewToQuery, type InitiativesViewState } from './lib/initiativesView';
   import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
@@ -86,7 +91,15 @@
 
   const now = new Date();
   // The default order puts the initiatives with tasks that need a person first; a chosen sort replaces it.
-  const ordered = $derived(sortRows(orderInitiatives(view.initiatives), sort, INITIATIVE_COLUMNS));
+  // Prototype: the chip filter over initiative tags (all of them), in the browser.
+  let chips: ChipState = $state(loadPref('initiatives.chips', NO_CHIPS, isChipState));
+  function setChips(next: ChipState) {
+    chips = { tags: next.tags, initiatives: [] };
+    savePref('initiatives.chips', chips);
+  }
+  const chipTags = $derived(protoTagChoices([], view.initiatives.map((i) => i.tags), chips.tags));
+  const chipped = $derived(chipsActive(chips) ? view.initiatives.filter((i) => passesChips(i.tags, undefined, chips)) : view.initiatives);
+  const ordered = $derived(sortRows(orderInitiatives(chipped), sort, INITIATIVE_COLUMNS));
   const empty = $derived(!view.loading && view.error === undefined && view.initiatives.length === 0);
   const primary = 'min-h-11 rounded-md border border-accent bg-surface-raised px-4 text-sm font-medium text-accent';
   const skeletonBar = 'h-4 animate-pulse rounded-md bg-border';
@@ -94,9 +107,10 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="initiatives-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
+<section aria-labelledby="initiatives-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
     <h2 id="initiatives-heading" class="text-xl font-bold">Initiatives</h2>
+    <span class="ml-auto"><DensitySwitch /></span>
     {#if !empty}
       <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={openForm}>New initiative</button>
     {/if}
@@ -107,6 +121,10 @@
     {#if isCustomised({ filter: view.filter, sort })}
       <button type="button" class="min-h-11 rounded-md border border-border px-4 text-sm font-medium text-text" data-testid="clear-filters" onclick={clear}>Clear filters</button>
     {/if}
+  </div>
+
+  <div class="mb-4 rounded-lg border border-border bg-surface-raised px-3 py-2" data-testid="initiative-chips">
+    <ChipFilter tags={chipTags} initiatives={[]} value={chips} onchange={setChips} showInitiatives={false} />
   </div>
 
   {#if view.error !== undefined}
@@ -166,10 +184,8 @@
             <td class="md:table-cell md:px-3 md:py-3" data-testid="initiative-status">
               <span class="inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses(initiativeTone(initiative.status))}">{initiative.status}</span>
             </td>
-            <td class="flex min-w-0 flex-wrap gap-1 empty:hidden md:table-cell md:px-3 md:py-3" data-testid="initiative-tags">
-              {#each tagLabels(initiative.tags) as tag (tag)}
-                <span class="mr-1 inline-block rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted" data-testid="tag">{tag}</span>
-              {/each}
+            <td class="flex min-w-0 flex-wrap gap-1 max-md:empty:hidden md:table-cell md:px-3 md:py-3" data-testid="initiative-tags">
+              <TagChips tags={tagLabels(initiative.tags).map((tag) => ({ tag, source: 'initiative' as const }))} />
             </td>
             <td class="w-full text-sm md:table-cell md:w-auto md:px-3 md:py-3" data-testid="initiative-tasks">
               <span data-testid="initiative-counts">{countsText(initiative.counts)}</span>

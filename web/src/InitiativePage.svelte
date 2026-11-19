@@ -30,6 +30,10 @@
   import { currentBrowser } from './lib/session';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
+  import DensitySwitch from './DensitySwitch.svelte';
+  import TagChips from './TagChips.svelte';
+  import { manualTagsOf, prefs } from './lib/proto/prefs.svelte';
+  import { taskTags, type TaskTag } from './lib/proto/tags';
   import { sortRows, type SortState } from './lib/tableSort';
   import { clearViewQuery, currentViewEnv, openView, saveViewQuery } from './lib/viewState';
   import {
@@ -169,6 +173,16 @@
   const needs = $derived(needsView.needs);
   const needsRows = $derived(taskRows(needs.items, 'all'));
   // The table sorts by the chosen column; the Needs attention section above it keeps its own order.
+  // Prototype: each task's tags (the initiative's, live agent kinds, this browser's own).
+  const tagsFor = $derived.by(() => {
+    void prefs.manual;
+    const own = new Map([[view.initiative?.slug ?? '', view.initiative?.tags ?? []]]);
+    const byRef = new Map([...view.tasks, ...needs.items].map((t) => [t.ref, t] as const));
+    return (ref: string): TaskTag[] => {
+      const t = byRef.get(ref);
+      return t === undefined ? [] : taskTags(t, own, manualTagsOf(ref));
+    };
+  });
   const rows = $derived(sortRows(taskRows(withoutNeeds(view.tasks, needs), view.filter), sort, PAGE_TASK_COLUMNS));
   const badge = 'inline-block rounded-md border px-2 py-0.5 text-xs font-medium';
   const cell = 'md:table-cell md:px-3 md:py-3';
@@ -182,7 +196,7 @@
 <!-- From 1536 px (2xl) the page is a grid: the main column (header, Needs attention, Tasks) and a 420 px side column (Open asks, Notes). Below it the side column follows the main one, in flow. -->
 <section
   aria-labelledby="initiative-heading"
-  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
+  class="vh-dense mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
   data-testid="initiative-page"
 >
   <div class="min-w-0 2xl:col-start-1" data-testid="initiative-main">
@@ -201,13 +215,14 @@
   {:else if view.initiative !== undefined}
     {@const initiative = view.initiative}
     <header class="mb-4">
-      <h2 id="initiative-heading" class="wrap-anywhere text-xl font-bold" data-testid="initiative-title">{initiative.title}</h2>
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 id="initiative-heading" class="wrap-anywhere text-xl font-bold" data-testid="initiative-title">{initiative.title}</h2>
+        <span class="ml-auto"><DensitySwitch /></span>
+      </div>
       <div class="mt-1 flex flex-wrap items-center gap-2">
         <code class="wrap-anywhere font-mono text-sm text-text-muted" data-testid="initiative-slug">{initiative.slug}</code>
         <span class="{badge} {toneClasses(initiativeTone(initiative.status))}" data-testid="initiative-status">{initiative.status}</span>
-        {#each tagLabels(initiative.tags) as tag (tag)}
-          <span class="wrap-anywhere rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted" data-testid="tag">{tag}</span>
-        {/each}
+        <TagChips tags={tagLabels(initiative.tags).map((tag) => ({ tag, source: 'initiative' as const }))} />
       </div>
       <p class="mt-2 text-sm text-text-muted wrap-anywhere">
         {#if targetsText(initiative) !== ''}
@@ -244,7 +259,7 @@
     {#if needsView.error !== undefined}
       <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="needs-error">{needsView.error}</p>
     {/if}
-    <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter)} showInitiative={false} />
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={pageNeedsHref(param, view.filter)} showInitiative={false} tagsFor={(ref) => tagsFor(ref)} />
 
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-testid="tasks-heading">
       <h3 class="text-lg font-bold">Tasks</h3>
@@ -282,7 +297,9 @@
               class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
             >
               <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
-              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">{row.title}</td>
+              <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title"
+                >{row.title} <TagChips tags={tagsFor(row.ref)} taskRef={row.ref} editable /></td
+              >
               <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
               <td class={cell} data-testid="task-status">
                 <span class="{badge} border-border text-text-muted">{row.status}</span>
