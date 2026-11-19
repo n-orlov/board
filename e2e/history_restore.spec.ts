@@ -368,7 +368,7 @@ for (const vp of viewports) {
       await page.getByTestId('archive-window').selectOption('90');
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(titles.length);
       const byDefault = await own(page);
-      await sortBy(page, phone, 'item', 'desc');
+      await sortBy(page, true, 'item', 'desc'); // the shared sort control is a select at every width
       await expect(page).toHaveURL((url) => url.hash === '#/archive?window=90&sort=item&dir=desc');
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
@@ -384,6 +384,7 @@ for (const vp of viewports) {
         links: (p) => p.locator('[data-testid="archive-link"][href^="#/t/"]'),
         landing: /#\/t\//,
         sortColumn: 'item',
+        sharedSort: true,
       };
       await leaveAndReturn(page, route, phone);
     });

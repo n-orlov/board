@@ -6,11 +6,13 @@ import {
   ARCHIVE_SORT_COLUMNS,
   ARCHIVE_SORT_LABELS,
   ARCHIVE_VIEW,
+  archiveTagChoices,
   archiveViewHash,
   queryOfHash,
   viewFromQuery,
   viewToQuery,
 } from './archiveView';
+import { NO_CHIPS } from './chipFilter';
 import { sortRows } from './tableSort';
 import { openView, saveViewQuery, viewKey, type ViewStorage } from './viewState';
 
@@ -46,36 +48,36 @@ function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map
 
 describe('window and sort <-> query encoding', () => {
   it('writes the window first and the sort after it', () => {
-    const state = { window: '7' as const, sort: { column: 'closed', dir: 'desc' as const } };
+    const state = { window: '7' as const, chips: NO_CHIPS, sort: { column: 'closed', dir: 'desc' as const } };
     expect(viewToQuery(state)).toBe('window=7&sort=closed&dir=desc');
     expect(archiveViewHash(state)).toBe('#/archive?window=7&sort=closed&dir=desc');
   });
 
   it('writes only the sort when the window is the default, only the window when there is no sort, and nothing for the defaults', () => {
-    expect(viewToQuery({ window: '30', sort: { column: 'item', dir: 'asc' } })).toBe('sort=item&dir=asc');
-    expect(viewToQuery({ window: 'all', sort: null })).toBe('window=all');
-    expect(viewToQuery({ window: '30', sort: null })).toBe('');
-    expect(archiveViewHash({ window: '30', sort: null })).toBe('#/archive');
-    expect(archiveViewHash({ window: '90', sort: null })).toBe('#/archive?window=90');
+    expect(viewToQuery({ window: '30', chips: NO_CHIPS, sort: { column: 'item', dir: 'asc' } })).toBe('sort=item&dir=asc');
+    expect(viewToQuery({ window: 'all', chips: NO_CHIPS, sort: null })).toBe('window=all');
+    expect(viewToQuery({ window: '30', chips: NO_CHIPS, sort: null })).toBe('');
+    expect(archiveViewHash({ window: '30', chips: NO_CHIPS, sort: null })).toBe('#/archive');
+    expect(archiveViewHash({ window: '90', chips: NO_CHIPS, sort: null })).toBe('#/archive?window=90');
   });
 
   it('reads the window and the sort back from a query', () => {
-    expect(viewFromQuery('window=all&sort=resolution&dir=desc')).toEqual({ window: 'all', sort: { column: 'resolution', dir: 'desc' } });
-    expect(viewFromQuery('sort=kind')).toEqual({ window: '30', sort: { column: 'kind', dir: 'asc' } });
-    expect(viewFromQuery('?window=7')).toEqual({ window: '7', sort: null });
+    expect(viewFromQuery('window=all&sort=resolution&dir=desc')).toEqual({ window: 'all', chips: NO_CHIPS, sort: { column: 'resolution', dir: 'desc' } });
+    expect(viewFromQuery('sort=kind')).toEqual({ window: '30', chips: NO_CHIPS, sort: { column: 'kind', dir: 'asc' } });
+    expect(viewFromQuery('?window=7')).toEqual({ window: '7', chips: NO_CHIPS, sort: null });
   });
 
   it('takes the defaults for an unknown window, an unknown column and a bad direction', () => {
-    expect(viewFromQuery('window=14&sort=action&dir=asc')).toEqual({ window: '30', sort: null });
-    expect(viewFromQuery('window=7&sort=item&dir=sideways')).toEqual({ window: '7', sort: null });
-    expect(viewFromQuery('')).toEqual({ window: '30', sort: null });
+    expect(viewFromQuery('window=14&sort=action&dir=asc')).toEqual({ window: '30', chips: NO_CHIPS, sort: null });
+    expect(viewFromQuery('window=7&sort=item&dir=sideways')).toEqual({ window: '7', chips: NO_CHIPS, sort: null });
+    expect(viewFromQuery('')).toEqual({ window: '30', chips: NO_CHIPS, sort: null });
   });
 
   it('round-trips every window with every sortable column in both directions', () => {
     for (const { value: window } of ARCHIVE_WINDOWS) {
       for (const column of ARCHIVE_SORT_COLUMNS) {
         for (const dir of ['asc', 'desc'] as const) {
-          const state = { window, sort: { column, dir } };
+          const state = { window, chips: NO_CHIPS, sort: { column, dir } };
           expect(viewFromQuery(viewToQuery(state))).toEqual(state);
           expect(viewFromQuery(queryOfHash(archiveViewHash(state)))).toEqual(state);
         }
@@ -141,22 +143,57 @@ describe('saved state', () => {
     const replaced: string[] = [];
     const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, ARCHIVE_VIEW, '#/archive', '');
     expect(replaced).toEqual(['#/archive?window=all&sort=item&dir=desc']);
-    expect(viewFromQuery(query)).toEqual({ window: 'all', sort: { column: 'item', dir: 'desc' } });
+    expect(viewFromQuery(query)).toEqual({ window: 'all', chips: NO_CHIPS, sort: { column: 'item', dir: 'desc' } });
   });
 
   it('lets a fragment with a query win and saves it', () => {
     const storage = memory();
     saveViewQuery(storage, ARCHIVE_VIEW, 'sort=item&dir=asc');
     const query = openView({ storage, replaceHash: () => undefined }, ARCHIVE_VIEW, '#/archive', 'window=7');
-    expect(viewFromQuery(query)).toEqual({ window: '7', sort: null });
+    expect(viewFromQuery(query)).toEqual({ window: '7', chips: NO_CHIPS, sort: null });
     expect(JSON.parse(storage.data.get('vh.view.v1.archive')!)).toEqual({ v: 1, query: 'window=7' });
   });
 
   it('forgets the key when the state is back to the defaults', () => {
     const storage = memory();
-    saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '90', sort: null }));
+    saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '90', chips: NO_CHIPS, sort: null }));
     expect(storage.data.has('vh.view.v1.archive')).toBe(true);
-    saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '30', sort: null }));
+    saveViewQuery(storage, ARCHIVE_VIEW, viewToQuery({ window: '30', chips: NO_CHIPS, sort: null }));
     expect(storage.data.has('vh.view.v1.archive')).toBe(false);
+  });
+});
+
+describe('the chip filter in the view state', () => {
+  const chips = { tags: ['x', 'y'], initiatives: ['b', 'a'] };
+
+  it('writes the window, then the repeated initiative and tag, then the sort, in the order chosen', () => {
+    const state = { window: '7' as const, chips, sort: { column: 'closed', dir: 'desc' as const } };
+    expect(viewToQuery(state)).toBe('window=7&initiative=b&initiative=a&tag=x&tag=y&sort=closed&dir=desc');
+    expect(archiveViewHash({ window: '30', chips: { tags: ['x'], initiatives: [] }, sort: null })).toBe('#/archive?tag=x');
+    expect(archiveViewHash({ window: '30', chips: NO_CHIPS, sort: null })).toBe('#/archive');
+  });
+
+  it('reads the chips back from a query, keeping each once and dropping blanks', () => {
+    expect(viewFromQuery('tag=x&tag=y&initiative=b&initiative=a&tag=x&tag=')).toEqual({ window: '30', chips, sort: null });
+    for (const state of [{ window: '90' as const, chips, sort: { column: 'item', dir: 'asc' as const } }, { window: '30' as const, chips, sort: null }]) {
+      expect(viewFromQuery(queryOfHash(archiveViewHash(state)))).toEqual(state);
+    }
+  });
+
+  it('offers the tags the closed tasks and initiatives carry, with their sources, plus the chosen ones', () => {
+    const tasks = [{ tag_marks: [{ tag: 'b', source: 'task' as const }, { tag: 'a', source: 'initiative' as const }] }, { tag_marks: [{ tag: 'claude', source: 'actor' as const }] }];
+    const initiatives = [{ tags: ['a', 'z'] }];
+    expect(archiveTagChoices([], tasks, initiatives, ['gone'])).toEqual([
+      { tag: 'a', sources: ['initiative'] },
+      { tag: 'b', sources: ['task'] },
+      { tag: 'claude', sources: ['actor'] },
+      { tag: 'gone', sources: [] },
+      { tag: 'z', sources: ['initiative'] },
+    ]);
+  });
+
+  it('keeps the chips already on offer when a filtered read holds fewer tasks', () => {
+    const known = [{ tag: 'b', sources: ['task' as const] }];
+    expect(archiveTagChoices(known, [], [], []).map((c) => c.tag)).toEqual(['b']);
   });
 });

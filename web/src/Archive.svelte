@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { replaceHash } from './lib/historyEntry';
+  import ChipFilter from './ChipFilter.svelte';
   import Dialog from './Dialog.svelte';
   import FilterSelect from './FilterSelect.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
-  import SortHeader from './SortHeader.svelte';
-  import SortSelect from './SortSelect.svelte';
+  import SortControl from './SortControl.svelte';
   import Toast from './Toast.svelte';
   import {
     ARCHIVE_WINDOWS,
@@ -19,7 +20,9 @@
     type ArchiveState,
     type ArchiveWindow,
   } from './lib/archive';
-  import { ARCHIVE_COLUMNS, ARCHIVE_SORT_LABELS, ARCHIVE_VIEW, archiveViewHash, queryOfHash, viewFromQuery, viewToQuery, type ArchiveViewState } from './lib/archiveView';
+  import { ARCHIVE_COLUMNS, ARCHIVE_SORT_LABELS, ARCHIVE_VIEW, archiveTagChoices, archiveViewHash, queryOfHash, viewFromQuery, viewToQuery, type ArchiveViewState } from './lib/archiveView';
+  import { chipsActive, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
   import { hashPath } from './lib/routes';
   import { currentBrowser } from './lib/session';
@@ -27,26 +30,39 @@
   import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   // The Archive view (PRD R7, SPEC 11): the closed tasks and closed initiatives of a window, newest closed first, each
-  // with a Reopen button that confirms in the shared Dialog. The window and the table's sort (Item, Kind, Resolution,
-  // Closed: headers from 768 px, the Sort select on the phone) live in the fragment query and are saved under
+  // with a Reopen button that confirms in the shared Dialog. The window, the shared chip filter (tags AND, initiatives OR,
+  // sent to the server) and the shared sort control (Item, Kind, Resolution, Closed) live in the fragment query and are saved under
   // vh.view.v1.archive. The data layer is lib/archive.ts, the view state lib/archiveView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const viewEnv = currentViewEnv();
   // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
   const opened = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
-  const store = new ArchiveStore(new ArchiveApi(currentBrowser(), () => csrf), (s) => (view = s), opened.window);
+  const browser = currentBrowser();
+  const store = new ArchiveStore(new ArchiveApi(browser, () => csrf), (s) => (view = s), opened.window, opened.chips);
   let sort: SortState = $state(opened.sort);
   let view: ArchiveState = $state.raw(store.state);
   let reopening: ArchiveRow | undefined = $state(undefined);
   let toast = $state('');
+  // The initiative chips on offer: every initiative of the board (a closed task may sit in an open one); the tag chips: every tag seen so far plus the chosen ones.
+  let initiatives: string[] = $state([]);
+  let tagChoices: TagChoice[] = $state([]);
   // Ages are phrased at the moment of each draw; a refetch redraws them.
   // The default order (newest closed first) is the one a sort replaces.
   const rows = $derived(sortRows(archiveRows(view.tasks, view.initiatives, new Date()), sort, ARCHIVE_COLUMNS));
 
   $effect(() => {
+    void untrack(() => new InitiativesApi(browser, () => csrf).list('all'))
+      .then((list) => (initiatives = list.map((i) => i.slug)))
+      .catch(() => undefined); // the chips then offer only the initiatives the fragment names; the list shows its own error
     void store.load();
     return live().subscribe(affectsArchive, () => store.load());
+  });
+
+  $effect(() => {
+    const { tasks, initiatives: closed } = view;
+    const chosen = view.chips.tags;
+    tagChoices = untrack(() => archiveTagChoices(tagChoices, tasks, closed, chosen));
   });
 
   // A change rewrites the fragment in place (no history entry per choice) and saves the query.
@@ -57,14 +73,20 @@
 
   // A window reads the lists again.
   function choose(next: ArchiveWindow) {
-    remember({ window: next, sort });
+    remember({ window: next, chips: view.chips, sort });
     void store.setWindow(next);
+  }
+
+  // A chip change reads again, the server filtering.
+  function setChips(next: ChipState) {
+    remember({ window: view.window, chips: next, sort });
+    void store.setChips(next);
   }
 
   // A sort only reorders the rows the view holds: no request is made.
   function setSort(next: SortState) {
     sort = next;
-    remember({ window: view.window, sort: next });
+    remember({ window: view.window, chips: view.chips, sort: next });
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare '#/archive' restores the saved query.
@@ -72,7 +94,7 @@
     if (hashPath(window.location.hash) !== '#/archive') return;
     const next = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
     sort = next.sort;
-    void store.setWindow(next.window);
+    void store.setScope(next.window, next.chips);
   }
 
   function openReopen(row: ArchiveRow) {
@@ -98,8 +120,12 @@
 
 <section aria-labelledby="archive-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="archive-view">
   <h2 id="archive-heading" class="mb-4 text-xl font-bold">Archive</h2>
-  <div class="mb-4">
+  <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
     <FilterSelect label="Closed within" options={ARCHIVE_WINDOWS} value={view.window} onchange={choose} testid="archive-window" />
+    <SortControl columns={ARCHIVE_SORT_LABELS} {sort} onsort={setSort} />
+  </div>
+  <div class="mb-4">
+    <ChipFilter tags={tagChoices} {initiatives} value={view.chips} onchange={setChips} />
   </div>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="archive-error">{view.error}</p>
@@ -107,17 +133,16 @@
   {#if !view.loaded && view.error === ''}
     <p class="text-sm text-text-muted" data-testid="archive-loading">Loading the archive…</p>
   {:else if view.loaded && rows.length === 0}
-    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="archive-empty">Nothing was closed in this window.</p>
+    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="archive-empty">{chipsActive(view.chips) ? 'No closed item matches these chips in this window.' : 'Nothing was closed in this window.'}</p>
   {:else if rows.length > 0}
-    <div class="mb-3 flex"><SortSelect columns={ARCHIVE_SORT_LABELS} {sort} onsort={setSort} /></div>
     <!-- One table: from 768 px a dense table, below it each closed item is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <SortHeader column="item" label="Item" {sort} onsort={setSort} class="{head} md:w-2/5" />
-          <SortHeader column="kind" label="Kind" {sort} onsort={setSort} class="{head} md:w-32" />
-          <SortHeader column="resolution" label="Resolution" {sort} onsort={setSort} class="{head} md:w-36" />
-          <SortHeader column="closed" label="Closed" {sort} onsort={setSort} class="{head} md:w-40" />
+          <th scope="col" class="{head} md:w-2/5">Item</th>
+          <th scope="col" class="{head} md:w-32">Kind</th>
+          <th scope="col" class="{head} md:w-36">Resolution</th>
+          <th scope="col" class="{head} md:w-40">Closed</th>
           <th scope="col" class="{head} md:w-28"><span class="sr-only">Action</span></th>
         </tr>
       </thead>

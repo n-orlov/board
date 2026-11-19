@@ -3,7 +3,9 @@ import {
   affectsArchive,
   ARCHIVE_WINDOWS,
   ArchiveApi,
+  archiveInitiativesQuery,
   archiveQuery,
+  initiativesIn,
   archiveRows,
   ArchiveStore,
   DEFAULT_ARCHIVE_WINDOW,
@@ -17,6 +19,7 @@ import {
   type ArchiveWindow,
 } from './archive';
 import type { components } from './api/schema';
+import { NO_CHIPS } from './chipFilter';
 import type { Browser } from './session';
 
 type Task = components['schemas']['TaskListItem'];
@@ -66,6 +69,20 @@ describe('the window <-> URL encoding', () => {
     expect(archiveQuery('30').toString()).toBe('status=closed&closed_within=30d');
     expect(archiveQuery('90').toString()).toBe('status=closed&closed_within=90d');
     expect(archiveQuery('all').toString()).toBe('status=closed');
+  });
+
+  it('adds the chips to the task query as repeatable initiative (any) then tag (all), after the window', () => {
+    const chips = { tags: ['x', 'y'], initiatives: ['b', 'a'] };
+    expect(archiveQuery('7', chips).toString()).toBe('status=closed&closed_within=7d&initiative=b&initiative=a&tag=x&tag=y');
+    expect(archiveQuery('all', { tags: ['x'], initiatives: [] }).toString()).toBe('status=closed&tag=x');
+  });
+
+  it('sends only the tags to the initiatives query, and picks the chosen initiatives out of the answer', () => {
+    const chips = { tags: ['x'], initiatives: ['b', 'a'] };
+    expect(archiveInitiativesQuery('30', chips).toString()).toBe('status=closed&closed_within=30d&tag=x');
+    const list = [{ slug: 'a' }, { slug: 'c' }, { slug: 'b' }];
+    expect(initiativesIn(list, ['b', 'a'])).toEqual([{ slug: 'a' }, { slug: 'b' }]);
+    expect(initiativesIn(list, [])).toEqual(list);
   });
 });
 
@@ -160,6 +177,16 @@ describe('ArchiveApi', () => {
     expect(fetchFn.mock.calls[0]![1]?.credentials).toBe('same-origin');
   });
 
+  it('asks the server for the chips: tag and initiative repeated on /tasks with status=closed, only tags on /initiatives', async () => {
+    const { fetchFn, api } = setup((url) => json({ items: url.includes('/tasks') ? [] : [initiative('a', '2026-03-09T00:00:00Z'), initiative('b', '2026-03-09T00:00:00Z')] }));
+    const chips = { tags: ['x', 'y'], initiatives: ['b', 'q'] };
+    await api.tasks('7', chips);
+    const initiatives = await api.initiatives('7', chips);
+    expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/tasks?status=closed&closed_within=7d&initiative=b&initiative=q&tag=x&tag=y');
+    expect(fetchFn.mock.calls[1]![0]).toBe('/board/api/v1/initiatives?status=closed&closed_within=7d&tag=x&tag=y');
+    expect(initiatives.map((i) => i.slug)).toEqual(['b']);
+  });
+
   it('follows next_after through the pages', async () => {
     const { fetchFn, api } = setup((url) => (url.includes('after=E1-1') ? json({ items: [task('E1-2', undefined)] }) : json({ items: [task('E1-1', undefined)], next_after: 'E1-1' })));
     expect((await api.tasks('all')).map((t) => t.ref)).toEqual(['E1-1', 'E1-2']);
@@ -191,8 +218,8 @@ describe('ArchiveStore', () => {
   function setup(over: Partial<Record<'tasks' | 'initiatives' | 'reopenTask' | 'reopenInitiative', (arg: string) => Promise<unknown>>> = {}) {
     const states: ArchiveState[] = [];
     const api = {
-      tasks: vi.fn(async (_w: ArchiveWindow) => [task('E1-1', '2026-03-09T00:00:00Z')]),
-      initiatives: vi.fn(async (_w: ArchiveWindow) => [initiative('a', '2026-03-08T00:00:00Z')]),
+      tasks: vi.fn(async (_w: ArchiveWindow, _c?: unknown) => [task('E1-1', '2026-03-09T00:00:00Z')]),
+      initiatives: vi.fn(async (_w: ArchiveWindow, _c?: unknown) => [initiative('a', '2026-03-08T00:00:00Z')]),
       reopenTask: vi.fn(async (_ref: string) => undefined),
       reopenInitiative: vi.fn(async (_slug: string) => undefined),
       ...over,
@@ -202,7 +229,7 @@ describe('ArchiveStore', () => {
   }
 
   it('starts loading the default window, with nothing loaded', () => {
-    expect(setup().store.state).toEqual({ window: '30', tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' });
+    expect(setup().store.state).toEqual({ window: '30', chips: NO_CHIPS, tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' });
   });
 
   it('shows both lists once the read lands', async () => {
@@ -213,14 +240,31 @@ describe('ArchiveStore', () => {
     expect(store.state.initiatives.map((i) => i.slug)).toEqual(['a']);
   });
 
+  it('reads under the chips it holds, and a new chip set once, not the same one again', async () => {
+    const chips = { tags: ['x'], initiatives: ['a'] };
+    const { store, api } = setup();
+    await store.setChips(NO_CHIPS);
+    expect(api.tasks).not.toHaveBeenCalled();
+    await store.setChips(chips);
+    expect(store.state.chips).toEqual(chips);
+    expect(api.tasks).toHaveBeenCalledWith('30', chips);
+    expect(api.initiatives).toHaveBeenCalledWith('30', chips);
+    await store.setChips({ tags: ['x'], initiatives: ['a'] });
+    expect(api.tasks).toHaveBeenCalledTimes(1);
+    await store.setScope('7', chips);
+    expect(api.tasks).toHaveBeenLastCalledWith('7', chips);
+    await store.setScope('7', { tags: [], initiatives: ['a'] });
+    expect(api.tasks).toHaveBeenCalledTimes(3);
+  });
+
   it('reads the window it holds, and a new window once, not the same one again', async () => {
     const { store, api } = setup();
     await store.setWindow('30');
     expect(api.tasks).not.toHaveBeenCalled();
     await store.setWindow('7');
     expect(store.state.window).toBe('7');
-    expect(api.tasks).toHaveBeenCalledWith('7');
-    expect(api.initiatives).toHaveBeenCalledWith('7');
+    expect(api.tasks).toHaveBeenCalledWith('7', NO_CHIPS);
+    expect(api.initiatives).toHaveBeenCalledWith('7', NO_CHIPS);
   });
 
   it('keeps what it shows and says why when a refresh fails', async () => {

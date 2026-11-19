@@ -1,8 +1,8 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { backdateInitiative, backdateTask } from './store';
 
-// The Archive table sort and saved view state (PRD R16, SPEC 11): the table sorts by Item (text), Kind (kind), Resolution
-// (status) and Closed (time) through the shared header (desktop, with the keyboard) and the Sort select (phone). The window and
+// The Archive sort and saved view state (PRD R16, R7, SPEC 11): the rows sort by Item (text), Kind (kind), Resolution
+// (status) and Closed (time) through the shared sort control (one select at every width, with the keyboard). The window and
 // the sort ride in one fragment query and are saved under `vh.view.v1.archive`, so they survive nav away and back. The
 // table has no ref column of its own (the ref sits under the title). The server is shared with every other spec, so each test
 // reads only the four rows it seeded, by ref.
@@ -11,7 +11,6 @@ const viewports = [
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
 const KEY = 'vh.view.v1.archive';
-const COLUMNS = ['item', 'kind', 'resolution', 'closed'];
 
 async function post<T = Record<string, never>>(api: APIRequestContext, path: string, data: object, status = 201): Promise<T> {
   const response = await api.post(path, { data });
@@ -60,7 +59,7 @@ async function seed(playwright: PlaywrightTestArgs['playwright'], baseURL: strin
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
+const sortSelect = (page: Page): Locator => page.getByTestId('sort-select');
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 const stored = (page: Page) => page.evaluate((k) => localStorage.getItem(k), KEY);
 
@@ -78,76 +77,56 @@ async function goTo(page: Page, label: string) {
   }
 }
 
-async function sortBy(page: Page, phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
-  if (phone) {
-    await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
-  } else {
-    // The header cycles none -> ascending -> descending -> none: click until the target is reached.
-    const cycle = ['none', 'ascending', 'descending'];
-    const now = cycle.indexOf((await th(page, column).getAttribute('aria-sort')) ?? 'none');
-    const target = cycle.indexOf(dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
-    for (let i = 0; i < (target - now + 3) % 3; i++) await page.getByTestId(`sort-${column}`).click();
-  }
+async function sortBy(page: Page, column: string, dir: 'asc' | 'desc' | null) {
+  await sortSelect(page).selectOption(dir === null ? '' : `${column}:${dir}`);
 }
 
 for (const vp of viewports) {
-  const phone = vp.name === 'phone';
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    test('sorting by one column of each type (text, kind, status, time) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
+    test('sorting by one column of each type (text, kind, status, time) through the shared control orders the rows, and the first option is the default', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `sort-${vp.name}`);
       await page.goto('/#/archive');
       // The default order: newest closed first.
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
-      if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
-      else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of COLUMNS) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      await expect(sortSelect(page)).toBeVisible();
+      await expect(sortSelect(page)).toHaveValue('');
 
       // text: the title, ignoring case.
-      await sortBy(page, phone, 'item', 'asc');
-      await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'ascending');
+      await sortBy(page, 'item', 'asc');
       await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.bravo, s.charlie, s.delta]);
-      await sortBy(page, phone, 'item', 'desc');
-      await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'descending');
+      await sortBy(page, 'item', 'desc');
       await expect.poll(() => order(page, s.all)).toEqual([s.delta, s.charlie, s.bravo, s.alpha]);
       await expect(page).toHaveURL(endsWith('#/archive?sort=item&dir=desc'));
 
       // kind: the initiative before the tasks ascending, the tasks (in the default order) before it descending.
-      await sortBy(page, phone, 'kind', 'asc');
-      await expect(th(page, 'kind')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'none');
+      await sortBy(page, 'kind', 'asc');
       await expect.poll(() => order(page, s.all)).toEqual([s.delta, s.charlie, s.alpha, s.bravo]);
-      await sortBy(page, phone, 'kind', 'desc');
-      await expect(th(page, 'kind')).toHaveAttribute('aria-sort', 'descending');
+      await sortBy(page, 'kind', 'desc');
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.alpha, s.bravo, s.delta]);
 
       // status: the resolution.
-      await sortBy(page, phone, 'resolution', 'asc');
-      await expect(th(page, 'resolution')).toHaveAttribute('aria-sort', 'ascending');
+      await sortBy(page, 'resolution', 'asc');
       await expect.poll(() => order(page, s.all)).toEqual([s.bravo, s.charlie, s.delta, s.alpha]);
-      await sortBy(page, phone, 'resolution', 'desc');
-      await expect(th(page, 'resolution')).toHaveAttribute('aria-sort', 'descending');
+      await sortBy(page, 'resolution', 'desc');
       await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.delta, s.charlie, s.bravo]);
 
       // time: when it was closed, oldest first ascending, newest first descending.
-      await sortBy(page, phone, 'closed', 'asc');
-      await expect(th(page, 'closed')).toHaveAttribute('aria-sort', 'ascending');
+      await sortBy(page, 'closed', 'asc');
       await expect.poll(() => order(page, s.all)).toEqual([s.bravo, s.alpha, s.delta, s.charlie]);
-      await sortBy(page, phone, 'closed', 'desc');
-      await expect(th(page, 'closed')).toHaveAttribute('aria-sort', 'descending');
+      await sortBy(page, 'closed', 'desc');
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await expect(page).toHaveURL(endsWith('#/archive?sort=closed&dir=desc'));
       expect(await saved(page)).toEqual({ v: 1, query: 'sort=closed&dir=desc' });
 
-      // Third step: the default order, gone from the fragment and from the saved state.
-      await sortBy(page, phone, 'item', 'asc');
-      await sortBy(page, phone, 'item', null);
-      await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'none');
+      // The first option: the default order, gone from the fragment and from the saved state.
+      await sortBy(page, 'item', 'asc');
+      await sortBy(page, 'item', null);
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await expect(page).toHaveURL(endsWith('#/archive'));
       expect(await stored(page)).toBeNull();
-      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('');
+      await expect(sortSelect(page)).toHaveValue('');
     });
 
     test('the window and the sort survive nav away and back, a fresh page and a reload, and a fragment with its own query wins', async ({ page, playwright, baseURL }) => {
@@ -156,7 +135,7 @@ for (const vp of viewports) {
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await page.getByTestId('archive-window').selectOption('90');
       await expect(page).toHaveURL(endsWith('#/archive?window=90'));
-      await sortBy(page, phone, 'item', 'asc');
+      await sortBy(page, 'item', 'asc');
       await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.bravo, s.charlie, s.delta]);
       await expect(page).toHaveURL(endsWith('#/archive?window=90&sort=item&dir=asc'));
       expect(await saved(page)).toEqual({ v: 1, query: 'window=90&sort=item&dir=asc' });
@@ -170,11 +149,10 @@ for (const vp of viewports) {
       await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.bravo, s.charlie, s.delta]);
       await expect(page).toHaveURL(endsWith('#/archive?window=90&sort=item&dir=asc'));
       await expect(page.getByTestId('archive-window')).toHaveValue('90');
-      await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'ascending');
-      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('item:asc');
+      await expect(sortSelect(page)).toHaveValue('item:asc');
 
       // A sort change keeps the window, and the window change keeps the sort; a new page of the same context opens with both.
-      await sortBy(page, phone, 'closed', 'desc');
+      await sortBy(page, 'closed', 'desc');
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await page.getByTestId('archive-window').selectOption('all');
       await expect(page).toHaveURL(endsWith('#/archive?window=all&sort=closed&dir=desc'));
@@ -183,7 +161,7 @@ for (const vp of viewports) {
       await expect.poll(() => order(second, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await expect(second).toHaveURL(endsWith('#/archive?window=all&sort=closed&dir=desc'));
       await expect(second.getByTestId('archive-window')).toHaveValue('all');
-      await expect(th(second, 'closed')).toHaveAttribute('aria-sort', 'descending');
+      await expect(sortSelect(second)).toHaveValue('closed:desc');
 
       // A reload of the fragment keeps both, and a link with its own query wins and is saved.
       await second.reload();
@@ -191,7 +169,7 @@ for (const vp of viewports) {
       await second.goto('/#/archive?window=7&sort=resolution&dir=asc');
       await expect.poll(() => order(second, s.all)).toEqual([s.charlie, s.delta]);
       await expect(second.getByTestId('archive-window')).toHaveValue('7');
-      await expect(th(second, 'resolution')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(sortSelect(second)).toHaveValue('resolution:asc');
       expect(await saved(second)).toEqual({ v: 1, query: 'window=7&sort=resolution&dir=asc' });
       await second.close();
     });
@@ -205,29 +183,25 @@ for (const vp of viewports) {
       await fresh.goto('/#/archive');
       await expect.poll(() => order(fresh, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await expect(fresh.getByTestId('archive-window')).toHaveValue('30');
-      for (const column of COLUMNS) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      await expect(sortSelect(fresh)).toHaveValue('');
       await fresh.close();
     });
 
-    if (!phone) {
-      test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
-        const s = await seed(playwright, baseURL, `keys-${vp.name}`);
-        await page.goto('/#/archive');
-        await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
-        const item = page.getByTestId('sort-item');
-        await item.focus();
-        await expect(item).toBeFocused();
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'ascending');
-        await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.bravo, s.charlie, s.delta]);
-        await expect(item).toBeFocused();
-        await page.keyboard.press('Space');
-        await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'descending');
-        await expect.poll(() => order(page, s.all)).toEqual([s.delta, s.charlie, s.bravo, s.alpha]);
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'item')).toHaveAttribute('aria-sort', 'none');
-        await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
-      });
-    }
+    test('the sort control works from the keyboard: arrow keys pick an option, the first option is the default', async ({ page, playwright, baseURL }) => {
+      const s = await seed(playwright, baseURL, `keys-${vp.name}`);
+      await page.goto('/#/archive');
+      await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
+      const select = sortSelect(page);
+      await select.focus();
+      await expect(select).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(select).toHaveValue('item:asc');
+      await expect.poll(() => order(page, s.all)).toEqual([s.alpha, s.bravo, s.charlie, s.delta]);
+      await page.keyboard.press('ArrowDown');
+      await expect(select).toHaveValue('item:desc');
+      await expect.poll(() => order(page, s.all)).toEqual([s.delta, s.charlie, s.bravo, s.alpha]);
+      await select.selectOption('');
+      await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
+    });
   });
 }

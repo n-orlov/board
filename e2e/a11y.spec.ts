@@ -801,7 +801,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page, seed) => {
       await page.goto('/#/archive?window=7&sort=item&dir=desc');
       await expect(page.locator(`[data-testid=archive-row][data-ref="${seed.closed}"]`)).toBeVisible();
-      await expectSorted(page, 'item', 'desc');
+      await expectSorted(page, 'item', 'desc', true);
     },
   },
 ];

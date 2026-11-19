@@ -4,6 +4,7 @@
 // answer and the refusal of the last reopen.
 import type { components } from './api/schema';
 import { errorText, Fetches } from './fetches';
+import { chipsToParams, NO_CHIPS, type ChipState } from './chipFilter';
 import { absoluteTime, relativeTime } from './format';
 import { taskHref } from './taskPage';
 import { ThreadApi } from './threads';
@@ -39,11 +40,22 @@ export function windowToQuery(window: ArchiveWindow): string {
   return window === DEFAULT_ARCHIVE_WINDOW ? '' : new URLSearchParams({ window }).toString();
 }
 
-/** The `GET /tasks` and `GET /initiatives` query of a window: closed items, and `closed_within` unless it is all. */
-export function archiveQuery(window: ArchiveWindow): URLSearchParams {
+/** The `GET /tasks` query of a window and the chips: closed items, `closed_within` unless it is all, then the repeatable `initiative` (any) and `tag` (all). */
+export function archiveQuery(window: ArchiveWindow, chips: ChipState = NO_CHIPS): URLSearchParams {
   const params = new URLSearchParams({ status: 'closed' });
   if (window !== 'all') params.set('closed_within', `${window}d`);
+  chipsToParams(params, chips);
   return params;
+}
+
+/** The `GET /initiatives` query: the window as above and the tags (an initiative carries every one chosen); the initiative chips are not sent, `initiativesIn` applies them. */
+export function archiveInitiativesQuery(window: ArchiveWindow, chips: ChipState = NO_CHIPS): URLSearchParams {
+  return archiveQuery(window, { tags: chips.tags, initiatives: [] });
+}
+
+/** The closed initiatives an initiative chip leaves: with none chosen all of them, else the chosen ones themselves. */
+export function initiativesIn<T extends { slug: string }>(initiatives: readonly T[], chosen: readonly string[]): T[] {
+  return chosen.length === 0 ? [...initiatives] : initiatives.filter((i) => chosen.includes(i.slug));
 }
 
 /** One closed item as the view draws it. */
@@ -132,14 +144,15 @@ export function affectsArchive(event: Pick<BoardEvent, 'type'>): boolean {
 }
 
 export class ArchiveApi extends ThreadApi {
-  /** The closed tasks of a window. */
-  tasks(window: ArchiveWindow): Promise<Task[]> {
-    return this.pages<Task>('/api/v1/tasks', archiveQuery(window), 'Listing the closed tasks');
+  /** The closed tasks of a window that the chips keep: the server filters (`tag` AND, `initiative` OR). */
+  tasks(window: ArchiveWindow, chips: ChipState = NO_CHIPS): Promise<Task[]> {
+    return this.pages<Task>('/api/v1/tasks', archiveQuery(window, chips), 'Listing the closed tasks');
   }
 
-  /** The closed initiatives of a window. */
-  initiatives(window: ArchiveWindow): Promise<Initiative[]> {
-    return this.pages<Initiative>('/api/v1/initiatives', archiveQuery(window), 'Listing the closed initiatives');
+  /** The closed initiatives of a window that the chips keep: the server filters by tag, the initiative chips pick among the answer. */
+  async initiatives(window: ArchiveWindow, chips: ChipState = NO_CHIPS): Promise<Initiative[]> {
+    const all = await this.pages<Initiative>('/api/v1/initiatives', archiveInitiativesQuery(window, chips), 'Listing the closed initiatives');
+    return initiativesIn(all, chips.initiatives);
   }
 
   private async reopenPath(path: string, what: string): Promise<void> {
@@ -160,6 +173,7 @@ export class ArchiveApi extends ThreadApi {
 
 export interface ArchiveState {
   window: ArchiveWindow;
+  chips: ChipState;
   tasks: Task[];
   initiatives: Initiative[];
   /** Whether the first read has landed. */
@@ -171,6 +185,11 @@ export interface ArchiveState {
   dialogError: string;
 }
 
+/** The chips as one comparable string: the tags and the initiatives in the order chosen. */
+function chipsKey(chips: ChipState): string {
+  return JSON.stringify([chips.tags, chips.initiatives]);
+}
+
 type StoreApi = Pick<ArchiveApi, 'tasks' | 'initiatives' | 'reopenTask' | 'reopenInitiative'>;
 
 export class ArchiveStore {
@@ -179,10 +198,10 @@ export class ArchiveStore {
   private current: ArchiveState;
   private readonly fetches = new Fetches();
 
-  constructor(api: StoreApi, onChange: (state: ArchiveState) => void, window: ArchiveWindow = DEFAULT_ARCHIVE_WINDOW) {
+  constructor(api: StoreApi, onChange: (state: ArchiveState) => void, window: ArchiveWindow = DEFAULT_ARCHIVE_WINDOW, chips: ChipState = NO_CHIPS) {
     this.api = api;
     this.onChange = onChange;
-    this.current = { window, tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' };
+    this.current = { window, chips, tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' };
   }
 
   get state(): ArchiveState {
@@ -197,11 +216,11 @@ export class ArchiveStore {
   /** Reads the window. A refresh keeps what is shown until the answer lands; an answer older than one already shown is dropped. */
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
-    const { window } = this.current;
+    const { window, chips } = this.current;
     this.publish({ loading: true });
     let outcome: Partial<ArchiveState>;
     try {
-      const [tasks, initiatives] = await Promise.all([this.api.tasks(window), this.api.initiatives(window)]);
+      const [tasks, initiatives] = await Promise.all([this.api.tasks(window, chips), this.api.initiatives(window, chips)]);
       outcome = { tasks, initiatives, loaded: true, error: '' };
     } catch (e) {
       outcome = { error: errorText(e) };
@@ -210,11 +229,22 @@ export class ArchiveStore {
     this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy });
   }
 
-  /** Changes the window and reads it; the same window is not read again. */
-  async setWindow(window: ArchiveWindow): Promise<void> {
-    if (window === this.current.window) return;
-    this.publish({ window });
+  /** Changes the window and the chips and reads under them; the same window and chips are not read again. */
+  async setScope(window: ArchiveWindow, chips: ChipState): Promise<void> {
+    const { window: was, chips: had } = this.current;
+    if (window === was && chipsKey(chips) === chipsKey(had)) return;
+    this.publish({ window, chips });
     await this.load();
+  }
+
+  /** Changes the window and reads it; the same window is not read again. */
+  setWindow(window: ArchiveWindow): Promise<void> {
+    return this.setScope(window, this.current.chips);
+  }
+
+  /** Changes the chips and reads under them; the same chips are not read again. */
+  setChips(chips: ChipState): Promise<void> {
+    return this.setScope(this.current.window, chips);
   }
 
   /** Reopens the row's item and reads the archive again; false, with the refusal in `dialogError`, when the server refuses. */
