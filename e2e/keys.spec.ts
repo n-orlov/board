@@ -162,7 +162,7 @@ for (const vp of viewports) {
       } else {
         expect(await display(row)).toBe('table-row');
         await expect(head).toBeVisible();
-        await expect(head.getByRole('columnheader')).toHaveText(['Name', 'Prefix', 'Status', 'Created', 'Last used', 'Expires', 'Actions']);
+        await expect(head.getByRole('columnheader')).toHaveText(['Name', 'Owner', 'Prefix', 'Status', 'Created', 'Last used', 'Expires', 'Actions']);
       }
       // The status is a badge with a border of its tone (active -> success token).
       const badge = row.getByTestId('key-status').locator('span');

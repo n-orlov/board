@@ -4,6 +4,7 @@
 import { cadenceText, expiresIn } from './durations';
 import { errorText } from './fetches';
 import { absoluteTime, relativeTime } from './format';
+import { viaOrigin } from './origin';
 import { toTaskPatch, type TaskEditForm } from './taskEdit';
 import { targetsText } from './initiativePage';
 import { answerProblem, reasonProblem, type Ask } from './asks';
@@ -162,6 +163,8 @@ export interface EventRow {
   type: string;
   summary: string;
   actor: string;
+  /** "via alice" when the operator behind the write is not the actor; empty otherwise. */
+  via: string;
   at: string;
   when: string;
   title: string;
@@ -176,6 +179,7 @@ export function eventRows(events: readonly TaskEvent[], now: Date): EventRow[] {
       type: event.type,
       summary: event.summary,
       actor: event.actor,
+      via: viaOrigin(event.actor, event.origin),
       at: event.at,
       when: relativeTime(event.at, now),
       title: absoluteTime(event.at),

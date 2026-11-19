@@ -6,6 +6,7 @@ import type { components } from './api/schema';
 import { expiresIn } from './durations';
 import { errorText, Fetches } from './fetches';
 import { absoluteTime, relativeTime } from './format';
+import { actorOrigin } from './origin';
 import { taskHref } from './taskPage';
 import { ThreadApi } from './threads';
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
@@ -31,6 +32,8 @@ export interface ActorRow {
   kind: string;
   /** True when the actor holds a live lease: such rows come first. */
   alive: boolean;
+  /** The operator behind an agent (its latest keyed write's key owner); undefined for an operator or an agent with none. */
+  origin: string | undefined;
   /** The way back to copy; undefined when the board has none. */
   wayBack: string | undefined;
   /** "3 minutes ago", and the absolute time for its title. */
@@ -70,6 +73,7 @@ function actorRow(actor: ActorView, now: Date): ActorRow {
     handle: actor.handle,
     kind: actor.kind,
     alive: actor.leases.length > 0,
+    origin: actorOrigin(actor.kind, actor.origin),
     wayBack: actor.way_back === undefined || actor.way_back === '' ? undefined : actor.way_back,
     lastSeen: relativeTime(actor.last_seen, now),
     lastSeenTitle: absoluteTime(actor.last_seen),

@@ -349,7 +349,7 @@
               <p data-testid="event-summary">{event.summary}</p>
               <p class="text-text-muted">
                 <time datetime={event.at} title={event.title} data-testid="event-when">{event.when}</time> ·
-                <span data-testid="event-actor">{event.actor}</span> · <span class="font-mono">{event.type}</span>
+                <span data-testid="event-actor">{event.actor}</span>{#if event.via !== ''} <span data-testid="event-via">{event.via}</span>{/if} · <span class="font-mono">{event.type}</span>
               </p>
             </li>
           {/each}

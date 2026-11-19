@@ -8,6 +8,7 @@
   import { absoluteTime, relativeTime } from './lib/format';
   import { KeysApi, KeysStore, affectsKeys, type KeysState } from './lib/keys';
   import { KEYS_VIEW, KEY_COLUMNS, KEY_SORT_LABELS, isKeysHash, keysHash, queryOfHash, sortOfQuery } from './lib/keysView';
+  import { keyOwnerText } from './lib/origin';
   import { keyTone, toneClasses } from './lib/presentation';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
@@ -136,6 +137,7 @@
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
           <SortHeader column="name" label="Name" {sort} onsort={setSort} class={th} />
+          <th scope="col" class="{th} md:w-24">Owner</th>
           <SortHeader column="prefix" label="Prefix" {sort} onsort={setSort} class="{th} md:w-24" />
           <SortHeader column="status" label="Status" {sort} onsort={setSort} class="{th} md:w-24" />
           <SortHeader column="created" label="Created" {sort} onsort={setSort} class="{th} md:w-24" />
@@ -152,6 +154,9 @@
             class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
           >
             <td class="min-w-0 flex-1 font-medium md:table-cell md:px-3 md:py-3">{key.name}</td>
+            <td class="w-full text-sm text-text-muted md:table-cell md:w-auto md:px-3 md:py-3" data-testid="key-owner">
+              <span class={label}>Owner </span>{keyOwnerText(key.owner)}
+            </td>
             <td class="md:table-cell md:px-3 md:py-3"><code class="font-mono text-sm text-text-muted">{key.display_prefix}</code></td>
             <td class="md:table-cell md:px-3 md:py-3" data-testid="key-status"
               ><span class="inline-block rounded-md border px-2 py-0.5 text-xs font-medium {toneClasses(keyTone(key.status))}">{key.status}</span></td

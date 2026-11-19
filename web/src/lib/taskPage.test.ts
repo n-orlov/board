@@ -82,6 +82,11 @@ describe('eventRows', () => {
     expect(rows[0]!.title).toMatch(/^2026-01-10 \d\d:13$/);
   });
 
+  it('says "via <origin>" only when the origin is another operator than the actor', () => {
+    const rows = eventRows([event(1, { origin: 'ann' }), event(2, { origin: 'bob' }), event(3)], NOW);
+    expect(rows.map((r) => r.via)).toEqual(['', 'via bob', '']);
+  });
+
   it('does not reorder the events it was given', () => {
     const events = [event(1), event(2)];
     eventRows(events, NOW);

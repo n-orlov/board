@@ -90,6 +90,9 @@
             <td class="flex flex-wrap items-center gap-x-2 gap-y-1 {cell}">
               <span class="font-medium" data-testid="actor-handle">{row.handle}</span>
               <span class="text-sm text-text-muted" data-testid="actor-kind">{row.kind}</span>
+              {#if row.kind === 'agent'}
+                <span class="text-sm text-text-muted" data-testid="actor-origin">{row.origin !== undefined ? `origin ${row.origin}` : 'no origin'}</span>
+              {/if}
               {#if row.alive}
                 <span class="inline-block rounded-md border border-success px-2 py-0.5 text-xs font-medium text-success" data-testid="actor-alive">alive</span>
               {/if}
