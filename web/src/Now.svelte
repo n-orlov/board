@@ -634,7 +634,7 @@
     {:else}
       {@const { band, rows, total } = entry}
       {@const open = isOpen(band.key, rows.length)}
-      <details class="{tile} {band.muted ? 'opacity-70' : ''} {total > 0 && !band.muted ? 'border-l-4 border-l-warning' : ''}" {open} ontoggle={(e) => toggleBand(band.key, e)} data-testid="band-{band.key}">
+      <details class="{tile} {total > 0 && !band.muted ? 'border-l-4 border-l-warning' : ''}" {open} ontoggle={(e) => toggleBand(band.key, e)} data-testid="band-{band.key}">
         <summary class={summary}>
           {@render grip(key)}
           {@render chevron(open)}
