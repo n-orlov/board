@@ -292,9 +292,19 @@
 
   // Phones: every band is an accordion; asks and expired open by default when they have rows. Desktop: all open.
   const wide = typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 1024px)').matches;
-  let opens: Record<string, boolean | undefined> = $state({});
+  // Open/closed per band, remembered per browser (separately for desktop and phone, whose defaults differ).
+  // Only a state that differs from what the page would show anyway is stored, so the initial render's own
+  // toggle events never pin a default.
+  const OPENS_KEY = `now.open.${wide ? 'wide' : 'narrow'}`;
+  const isOpensMap = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((b) => typeof b === 'boolean');
+  let opens: Record<string, boolean | undefined> = $state(loadPref(OPENS_KEY, {}, isOpensMap));
   const isOpen = (key: string, count: number) => opens[key] ?? ((wide && key !== 'done') || ((key === 'asks' || key === 'stuck') && count > 0));
-  const toggleBand = (key: string, e: Event) => (opens = { ...opens, [key]: (e.currentTarget as HTMLDetailsElement).open });
+  const toggleBand = (key: string, e: Event, shown: boolean) => {
+    const open = (e.currentTarget as HTMLDetailsElement).open;
+    if (open === shown) return;
+    opens = { ...opens, [key]: open };
+    savePref(OPENS_KEY, opens);
+  };
 
   const timeLeft = (expires: string) => Date.parse(expires) - now.getTime();
   const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
@@ -315,7 +325,7 @@
     return () => lgQuery.removeEventListener('change', on);
   });
   let layout: NowLayout = $state(normalizeLayout(loadPref<unknown>('now.layout', null)));
-  const layoutIsDefault = $derived(isDefaultLayout(layout));
+  const layoutIsDefault = $derived(isDefaultLayout(layout) && Object.keys(opens).length === 0);
   const bandByKey = $derived(new Map(bands.map((b) => [b.band.key as WidgetKey, b] as const)));
   let dockEl: HTMLElement | undefined = $state(undefined);
 
@@ -325,6 +335,8 @@
   }
   function resetLayout() {
     commit(defaultLayout());
+    opens = {};
+    savePref(OPENS_KEY, {});
   }
 
   /** Follows one pointer gesture on the window until release, cancel or Escape. */
@@ -523,7 +535,7 @@
       {#if flightError === undefined}{@render skeleton(key)}{/if}
     {:else}
       {@const openF = opens['flight'] ?? (wide || flight.length > 0)}
-      <details class={tile} open={openF} ontoggle={(e) => toggleBand('flight', e)} data-testid="band-flight">
+      <details class={tile} open={openF} ontoggle={(e) => toggleBand('flight', e, openF)} data-testid="band-flight">
         <summary class={summary}>
           {@render grip(key)}
           {@render chevron(openF)}
@@ -584,7 +596,7 @@
       {#if flightError === undefined}{@render skeleton(key)}{/if}
     {:else}
       {@const openR = opens['recent'] ?? wide}
-      <details class="{tile} opacity-80" open={openR} ontoggle={(e) => toggleBand('recent', e)} data-testid="band-recent">
+      <details class="{tile} opacity-80" open={openR} ontoggle={(e) => toggleBand('recent', e, openR)} data-testid="band-recent">
         <summary class={summary}>
           {@render grip(key)}
           {@render chevron(openR)}
@@ -634,7 +646,7 @@
     {:else}
       {@const { band, rows, total } = entry}
       {@const open = isOpen(band.key, rows.length)}
-      <details class="{tile} {total > 0 && !band.muted ? 'border-l-4 border-l-warning' : ''}" {open} ontoggle={(e) => toggleBand(band.key, e)} data-testid="band-{band.key}">
+      <details class="{tile} {total > 0 && !band.muted ? 'border-l-4 border-l-warning' : ''}" {open} ontoggle={(e) => toggleBand(band.key, e, open)} data-testid="band-{band.key}">
         <summary class={summary}>
           {@render grip(key)}
           {@render chevron(open)}
@@ -718,7 +730,7 @@
           type="button"
           class="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border bg-surface-raised px-2.5 text-sm text-text-muted enabled:hover:border-accent enabled:hover:text-text disabled:cursor-default disabled:opacity-50"
           disabled={layoutIsDefault}
-          title={layoutIsDefault ? 'The layout is the default' : 'Back to two columns, default order, auto heights'}
+          title={layoutIsDefault ? 'The layout is the default' : 'Back to two columns, default order, auto heights, default open/closed bands'}
           data-testid="reset-layout"
           onclick={resetLayout}
         >
