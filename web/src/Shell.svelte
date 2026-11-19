@@ -1,14 +1,17 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import AccountMenu from './AccountMenu.svelte';
+  import DisplayControls from './DisplayControls.svelte';
   import Icon from './Icon.svelte';
   import LiveIndicator from './LiveIndicator.svelte';
   import Nav from './Nav.svelte';
   import type { NavEntry } from './lib/routes';
+  import { sidebar } from './densityController';
 
   // The responsive frame around every signed-in view. Below 768 px: a top bar (product name, view
   // title, account button) and a fixed bottom tab bar. 768-1023 px: a collapsed icon rail. 1024 px
-  // and up: a labelled sidebar whose foot shows the email, Sign out and an account button.
+  // and up: a labelled sidebar whose foot shows the density and theme switches, the email, Sign out and an account
+  // button; a button in its head collapses it to the same icon rail (kept in this browser), another expands it again.
   let {
     title,
     entries,
@@ -19,6 +22,13 @@
   }: { title: string; entries: NavEntry[]; email: string; actor: string; onsignout: () => void; children: Snippet } = $props();
 
   let menuOpen = $state(false);
+  let railed = $state(sidebar.collapsed());
+  function setRailed(next: boolean) {
+    railed = next;
+    sidebar.set(next);
+  }
+  const CHEVRON_LEFT = 'M15 18l-6-6 6-6';
+  const CHEVRON_RIGHT = 'M9 18l6-6-6-6';
 
   const USER = 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z';
   const button = 'flex size-11 shrink-0 items-center justify-center rounded-md text-text-muted hover:text-text';
@@ -56,9 +66,13 @@
   </header>
 
   <aside
-    class="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col items-center gap-4 border-r border-border bg-surface-raised py-4 md:flex lg:hidden"
+    class="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col items-center gap-4 border-r border-border bg-surface-raised py-4 md:flex {railed ? '' : 'lg:hidden'}"
+    data-testid="rail"
   >
     <span class="font-bold" aria-hidden="true">VH</span>
+    <button type="button" class="{button} hidden lg:flex" aria-label="Expand sidebar" title="Expand sidebar" data-testid="sidebar-expand" onclick={() => setRailed(false)}>
+      <Icon d={CHEVRON_RIGHT} />
+    </button>
     <div class="flex-1">
       <Nav {entries} variant="rail" testid="nav-rail" />
     </div>
@@ -69,13 +83,20 @@
   </aside>
 
   <aside
-    class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface-raised p-3 lg:flex"
+    class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-surface-raised p-3 {railed ? '' : 'lg:flex'}"
+    data-testid="sidebar"
   >
-    <span class="px-3 py-2 text-lg font-bold">Village Hall</span>
+    <div class="flex items-center">
+      <span class="flex-1 px-3 py-2 text-lg font-bold">Village Hall</span>
+      <button type="button" class={button} aria-label="Collapse sidebar" title="Collapse sidebar to icons" data-testid="sidebar-collapse" onclick={() => setRailed(true)}>
+        <Icon d={CHEVRON_LEFT} />
+      </button>
+    </div>
     <div class="flex-1">
       <Nav {entries} variant="sidebar" testid="nav-sidebar" />
     </div>
     <div class="flex flex-col gap-2 border-t border-border pt-3" data-testid="sidebar-foot">
+      <div class="px-1 [&_fieldset]:mb-2"><DisplayControls scope="sidebar" /></div>
       <div class="px-3"><LiveIndicator /></div>
       <div class="flex items-center gap-2">
         <span class="min-w-0 flex-1 truncate px-3 text-sm text-text-muted" data-testid="email">{email}</span>

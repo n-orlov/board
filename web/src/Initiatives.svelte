@@ -94,7 +94,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="initiatives-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
+<section aria-labelledby="initiatives-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
     <h2 id="initiatives-heading" class="text-xl font-bold">Initiatives</h2>
     {#if !empty}

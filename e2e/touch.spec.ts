@@ -738,7 +738,8 @@ test.describe('phone 390x844', () => {
     await page.getByRole('button', { name: 'Account menu' }).click();
     const dialog = page.getByRole('dialog', { name: 'Account' });
     await expect(dialog).toBeVisible();
-    expect(await dialog.locator('input[type=radio]').count()).toBe(3);
+    // Density (2) and theme (3) switches.
+    expect(await dialog.locator('input[type=radio]').count()).toBe(5);
     await expectTouchFriendly(page, 8);
   });
 

@@ -181,7 +181,7 @@
 <!-- From 1536 px: the heading and the rest in the main column, the Now panel in a 400 px side column that sticks at the top and scrolls on its own; the pair is at most 2560 px wide, centred. Below it the panel sits above the filters. -->
 <section
   aria-labelledby="tasks-heading"
-  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-x-6"
+  class="vh-dense mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-x-6"
   data-testid="tasks-view"
 >
   <div class="mb-4 flex items-center justify-between gap-3 2xl:col-start-1 2xl:row-start-1">

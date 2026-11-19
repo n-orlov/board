@@ -58,7 +58,7 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="actors-heading" class="mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="actors-view">
+<section aria-labelledby="actors-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="actors-view">
   <h2 id="actors-heading" class="mb-4 text-xl font-bold">Actors</h2>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="actors-error">{view.error}</p>

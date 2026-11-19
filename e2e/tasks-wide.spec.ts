@@ -45,7 +45,7 @@ test.describe('wide 2560x1080', () => {
 
   test('the Now panel is a side column right of the task table and stays in place when the page scrolls', async ({ page, playwright, baseURL }) => {
     const slug = 'e2e-tw-side';
-    await seedTasks(await apiContext(playwright, baseURL), slug, 30);
+    await seedTasks(await apiContext(playwright, baseURL), slug, 60); // Compact rows are short: 60 keep the page taller than the 1000 px scrolled below
     await openTasks(page, slug);
 
     const table = (await page.locator('[data-testid=tasks-view] table').boundingBox())!;

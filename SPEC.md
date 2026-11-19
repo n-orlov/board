@@ -3597,13 +3597,28 @@ Stranded panel, the archive's Reopen confirmation and the force-done confirm. At
 above, sits on the viewport's lower edge at the phone and clear of it at the desktop, and is the shared Dialog: one
 backdrop and one `role=dialog` panel under the same wrapper, and no second dialog on the page.
 
-**Theme.** The account menu has a Theme control with three settings: **System** (the default),
-**Light** and **Dark**. System follows the browser's `prefers-color-scheme`, Light and Dark ignore
+**Display: density, theme and the sidebar** (R6). Three browser-kept preferences shape every list page. **Density** is
+**Compact** (the default) or **Sparse**, in `localStorage` under `vh.density.v1` (`web/src/lib/density.ts`; a value it
+does not know, or unreadable storage, is Compact). The controller sets `data-density` on `<html>`, and the list pages
+(Tasks, Initiatives, the initiative page, Archive, Actors; each carries the `vh-dense` class) read it in
+`web/src/styles.css`: from 768 px Compact drops the 44 px touch minimum of their controls to 28 px (above WCAG 2.5.8's
+24 px) and trims the cell padding, so a Tasks row is shorter; Sparse is the roomy layout; **below 768 px both densities
+keep 44 px targets and 16 px inputs**. The **sidebar-collapsed** preference is `localStorage` `vh.sidebar.v1`
+(`web/src/lib/sidebar.ts`): the stored word `collapsed` collapses, anything else, or unreadable storage, is expanded. At
+1024 px and wider (lg) a **Collapse sidebar** button in the sidebar's head turns the labelled sidebar into the icon rail the
+768-1023 px layout already uses, and **Expand sidebar** on the rail turns it back; the choice survives a reload. Both
+keys are versioned `vh.` keys (never `vh.proto.`) and, like every `vh.*` key, are removed by signing out. The **density and
+theme switches sit together** (`DisplayControls`, two radio groups, **Compact / Sparse** and **Auto / Light / Dark**) in the
+sidebar foot and in the account menu, so they stay reachable on a phone and on the collapsed rail. Tests:
+`density.test.ts` and `sidebar.test.ts` (default, persist, bad stored value) and `e2e/density.spec.ts`.
+
+**Theme.** The sidebar foot and the account menu have a Theme control with three settings: **Auto** (the default, the stored
+value `system`), **Light** and **Dark**. Auto follows the browser's `prefers-color-scheme`, Light and Dark ignore
 it; the effective theme is `light` or `dark` and is the `data-theme` attribute of `<html>`, which
 selects the token set in `web/src/styles.css`. The setting is stored in `localStorage` under
 `vh.theme`; a stored value that is not one of the three (or storage that cannot be read) is
-System. Signing out removes the stored setting (PRD R3), so the next load after a sign out is System. The mapping of setting and system preference to the effective theme, the persistence and
-the controller that applies it are `web/src/lib/theme.ts`; while the setting is System the page
+Auto. Signing out removes the stored setting (PRD R3), so the next load after a sign out is Auto. The mapping of setting and system preference to the effective theme, the persistence and
+the controller that applies it are `web/src/lib/theme.ts`; while the setting is Auto the page
 follows a change of the system preference without a reload. **Pre-paint rule:** `web/index.html`
 holds a small inline script in `<head>`, before the app bundle, that applies the same rule and
 sets `data-theme` on `<html>` and the content of `<meta name="theme-color">` to the effective

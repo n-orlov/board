@@ -182,7 +182,7 @@
 <!-- From 1536 px (2xl) the page is a grid: the main column (header, Needs attention, Tasks) and a 420 px side column (Open asks, Notes). Below it the side column follows the main one, in flow. -->
 <section
   aria-labelledby="initiative-heading"
-  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
+  class="vh-dense mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_420px] 2xl:gap-x-6"
   data-testid="initiative-page"
 >
   <div class="min-w-0 2xl:col-start-1" data-testid="initiative-main">

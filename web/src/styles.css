@@ -179,3 +179,26 @@ summary:focus-visible,
   color: var(--accent);
   text-decoration: underline;
 }
+
+/*
+ * Density (SPEC 11). Compact is the default: from 768 px the list pages (marked `.vh-dense`) drop the 44 px touch
+ * minimum to 28 px (still above WCAG 2.5.8's 24 px) and the roomy cell padding. Sparse keeps the layout as it was,
+ * and below 768 px both densities keep 44 px targets. `data-density` on <html> is set by lib/density.ts. These rules
+ * are unlayered, so they win over the Tailwind utilities, which live in a layer.
+ */
+@media (min-width: 768px) {
+  [data-density='compact'] .vh-dense .min-h-11 {
+    min-height: 1.75rem;
+  }
+  [data-density='compact'] .vh-dense .min-w-11 {
+    min-width: 1.75rem;
+  }
+  [data-density='compact'] .vh-dense td,
+  [data-density='compact'] .vh-dense th {
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+  }
+  [data-density='compact'] .vh-dense table {
+    font-size: 0.875rem;
+  }
+}
