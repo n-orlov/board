@@ -842,8 +842,9 @@ expired (§5.1):
   whose `next_check_at` is past; its last check is its latest `check_recorded` event.
 - A conflict is a resource that two or more live leases hold (§5.2, so two leases of one actor on
   different tasks count); it lists every holder in lease-number order and the distinct tasks.
-- `initiative` (repeatable: any of them) and `tag` (repeatable: the initiative carries all of
-  them) keep the items on a task or ask of a matching initiative; an ask on no initiative is left
+- `initiative` (repeatable: any of them) and `tag` (repeatable: all of
+  them must match, each as the task's own tag, its initiative's tag or a derived actor-kind tag, §6.4) keep the items on a
+  task or ask that matches; an ask on no task matches only by its initiative's tags, an ask on no initiative is left
   out under either filter, and a conflict is kept when any of its leases is on a kept task. The
   counts and `total` (their sum) follow the filters. An empty board counts 0 everywhere.
 
@@ -1207,8 +1208,12 @@ principal may use them. The server answers 503 problem documents when it runs wi
   one `dep_added` per blocker (§4.3). A new task cannot close a dependency cycle.
 - **`GET /api/v1/tasks`** lists tasks in id order (creation order), a page at a time, each item the task document (so with its `tags`)
   without `deps` and `blocking` (`TaskListItem`: the fields below plus `live_leases`, `attention` and `stranded_lease`). Filters combine, and none is
-  needed: `initiative` (slug or ULID, either letter case) and `tag` (an initiative tag) may repeat, a task being kept
-  when it belongs to any initiative given and its initiative carries every tag given (`domain.NormalizeTags` rules);
+  needed: `initiative` (slug or ULID, either letter case) and `tag` may repeat, a task being kept
+  when it belongs to any initiative given (OR) and matches every tag given (AND, `domain.NormalizeTags` rules). **A task
+  matches a tag** when it is one of its own tags (§4.3), one of its initiative's tags, or a derived actor-kind tag (§5.5:
+  `ralph`, `claude`, `pi`, `codex` or `deck`, when any lease on the task, live or ended, is held by a handle of that kind);
+  one value therefore means what it meant when only initiative tags matched, and the same rule serves `status=closed`, the
+  Archive list, and `GET /api/v1/timeline` and `GET /api/v1/attention` (§6.8, §6.10);
   `status` is `open`, `done`, `closed`, `not_closed` (the default) or `all`; `kind` is `work` or `watch`; `active`
   (a live lease, as in the task document), `blocked` (an open dependency or an open blocking ask) and `overdue` (§4.3, §4.6) keep the tasks whose derived state is
   `true` or `false`; `attention` is `true` (the tasks with a non-empty `attention` list, §5.3) or `false` (an empty list), derived once per request by `attention.Store.Reasons` at the same instant the documents are, so a task selected by `attention=true` carries a non-empty `attention`; `closed_within` is `7d`, `30d`, `90d` or a whole number of days from 1 to 36500 and needs `status`
@@ -1541,8 +1546,9 @@ are those of `internal/notes` (§4.7); `PUT /api/v1/cursors/{stream}`, `since=cu
 (v1 has no ACL) and a server without a store answers **503**. It first expires the leases that ran out (§5.1), which
 writes their `lease_expired` events, and judges all five sections at that one instant.
 
-- **Parameters.** `initiative` (a slug or ULID, repeatable: an item on any of them is kept) and `tag` (repeatable: the
-  initiative carries every one given); with neither the whole board is read. An `initiative` that names nothing is
+- **Parameters.** `initiative` (a slug or ULID, repeatable: an item on any of them is kept) and `tag` (repeatable: every one given
+  must match, as the task's own tag, its initiative's tag or a derived actor-kind tag, §6.4; an ask on no task matches by its
+  initiative's tags only); with neither the whole board is read. An `initiative` that names nothing is
   **404** (`there is no initiative zz`), a `tag` that is not a valid tag is **400**, each with a `next` line. `fields`
   is `full` (the default, also when empty) or `counts`; anything else is **400** with a `next`.
 - **The answer** is `{counts, open_asks, done_not_closed, expired_leases, overdue_watches, conflicts}`. Every section is
@@ -1605,8 +1611,8 @@ their `lease_expired` events, then reads; it writes nothing else.
   after) and at most 400 days after it (400 days exactly is answered); a time that is not RFC 3339 (a date without a
   time included) is **400**, and so is `to` not after `from` and a window over 400 days, each with a `next` line.
 - **Filters.** `initiative` (a slug or ULID, repeatable: a task of any of them is kept; one that names nothing is
-  **404**) and `tag` (repeatable: the initiative carries every one given; a `tag` that is not a valid tag is **400**)
-  keep tasks as `GET /api/v1/tasks` does. `actor` is a handle and keeps the tasks on which that actor held a lease in the
+  **404**) and `tag` (repeatable: a task must match every one given, as its own tag, its initiative's tag or a derived
+  actor-kind tag, §6.4; a `tag` that is not a valid tag is **400**) keep tasks as `GET /api/v1/tasks` does. `actor` is a handle and keeps the tasks on which that actor held a lease in the
   window (a lease overlapping it, below); a handle that holds none keeps nothing, and the other leases of a kept task
   are still listed. `closed_within` (`7d`, `30d`, `90d` or a number of days, as for tasks; anything else is **400**)
   adds the tasks closed within that many days of now. Without it closed tasks are left out, and with it open and done
@@ -2284,7 +2290,7 @@ The ask line is `A<n>  <age>  <task, or board for an ask on no task>  <asker>  "
 and, when a lease on the task ended, `  L<n> "<outcome>"` (`L<n> ended` when the holder wrote none). The expired line is
 `L<n>  <task>  <holder>  "<intent>"  renewed <age>`. The watch line is `<task>  <title>  <owner>  due <age>` and, when a check
 was ever recorded, `  last check "<summary>" by <actor> <age>`. The conflict line is `CONFLICT <resource>: ` and each holder as
-`L<n> <actor> <task>`, comma separated. `--tag` (repeated: the initiative carries every tag) and `--init` narrow it as the API's
+`L<n> <actor> <task>`, comma separated. `--tag` (repeated: every tag must match, §6.8) and `--init` narrow it as the API's
 `tag` and `initiative` do; each section shows at most 5 lines, then `  +K more → vh attention <same filters> --all`, and
 `--limit N` or `--all` change that cap. `--json` prints the API document, every item and no cap. An unknown `--init` exits 4
 with `→ vh init ls`; a malformed command line (an argument, an unknown flag, `--limit 0`) exits 2 with the usage line

@@ -27,7 +27,7 @@ var ErrBadCursor = errors.New("unknown cursor")
 // Query selects a page of tasks ordered by id.
 //
 // Initiatives are slugs or ULIDs: a task is kept when it belongs to any of them.
-// Tags are initiative tags: the task's initiative must carry every one. Status
+// Tags are tags a task must match every one of: its own, its initiative's or a derived actor-kind tag. Status
 // is open, done, closed, not_closed (the default when empty) or all, and Kind
 // work or watch, empty for either. Active, Blocked and Overdue keep the tasks
 // whose derived state equals the value, nil for either. Attention keeps the tasks whose ref is in AttentionRefs (true) or
@@ -191,9 +191,8 @@ func (s Store) scope(ctx context.Context, f *filter, q Query) error {
 	if err != nil {
 		return InvalidError{Msg: err.Error(), Next: initiatives.NextTags}
 	}
-	if len(tags) > 0 {
-		f.add(`(SELECT COUNT(*) FROM initiative_tags it WHERE it.initiative_id = t.initiative_id AND it.tag IN (`+marks(len(tags))+`)) = ?`,
-			append(anys(tags), len(tags))...)
+	if cond, args := store.TagMatch(`t.id`, `t.initiative_id`, tags); cond != "" {
+		f.add(cond, args...)
 	}
 	return nil
 }

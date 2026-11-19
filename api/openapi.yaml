@@ -556,8 +556,8 @@ paths:
       summary: List the tasks
       description: >-
         A page of tasks ordered by id (creation order), each with its live leases. Filters combine.
-        `initiative` (slug or ULID) and `tag` (an initiative tag) may repeat: a task is kept when it is in any of the
-        initiatives given and its initiative carries every tag given. `status` is `open`, `done`, `closed`,
+        `initiative` (slug or ULID) and `tag` may repeat: a task is kept when it is in any of the
+        initiatives given (OR) and matches every tag given (AND); a task matches a tag when the tag is one of its own tags, one of its initiative's tags or a derived actor-kind tag (a kind among ralph, claude, pi, codex, deck of any holder of a lease on it, live or ended). A single value means what it always did. `status=closed` is the Archive list. `status` is `open`, `done`, `closed`,
         `not_closed` (the default) or `all`. `kind` is `work` or `watch`. `active` (has a live lease), `blocked` (has
         an open dependency or an open blocking ask) and `overdue` (a watch task past its `next_check_at`) are `true` or `false`.
         `attention` is `true` (keeps the tasks that need a person: a non-empty `attention` list) or `false` (those that
@@ -585,7 +585,7 @@ paths:
         - name: tag
           in: query
           required: false
-          description: Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+          description: Keep tasks that match this tag as their own, their initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
           schema:
             type: array
             items:
@@ -1270,8 +1270,8 @@ paths:
         after it was created) or its planned span overlaps it; a lease when its span (`started_at` to its end, open
         while it is live) overlaps it, so a window that cuts a lease keeps it; a marker when its `at` is inside it. Closed tasks are left out unless `closed_within` (`7d`, `30d`, `90d` or an
         integer of days) keeps those closed that recently; the leases and markers of a task that is left out are left
-        out with it. `initiative` (by slug or ULID, repeatable) and `tag` (repeatable; the initiative must carry every
-        tag given) keep tasks as they do for `GET /api/v1/tasks`; `actor` (a handle) keeps the tasks on which that actor
+        out with it. `initiative` (by slug or ULID, repeatable) and `tag` (repeatable; a task must match every
+        tag given, as its own, its initiative's or a derived actor-kind tag) keep tasks as they do for `GET /api/v1/tasks`; `actor` (a handle) keeps the tasks on which that actor
         held a lease in the window. `rows` `all` keeps the tasks wherever their spans fall, so the window picks only the
         leases and markers and the rows of a view stay the same as it pans or zooms; `actor` then keeps the tasks on
         which that actor ever held a lease. `rows` `window` (the default) keeps the tasks in the window. Each task's
@@ -1308,7 +1308,7 @@ paths:
         - name: tag
           in: query
           required: false
-          description: Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+          description: Keep tasks that match this tag as their own, their initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
           schema:
             type: array
             items:
@@ -2333,8 +2333,9 @@ paths:
         `expired_leases` (expired, not acknowledged, and with no later lease on the task), `overdue_watches` (open
         watches whose `next_check_at` is past) and `conflicts` (a resource that two or more live leases hold). `counts`
         is the size of each section and `total`, their sum. After expiring the leases that are due the sections are
-        judged at one instant. `initiative` (slug or ULID, repeatable: any of them) and `tag` (repeatable: the
-        initiative carries all of them) keep the items on a task or ask of a matching initiative; an ask on no
+        judged at one instant. `initiative` (slug or ULID, repeatable: any of them) and `tag` (repeatable: all of them
+        must match) keep the items on a task or ask that matches: a task matches a tag as its own tag, its initiative's or a
+        derived actor-kind tag, and an ask on no task matches only by its initiative's tags; an ask on no
         initiative is left out when either is given. An `initiative` that names nothing is 404 and a malformed `tag` is
         400. `fields=counts` answers only `counts`, and `fields=full` (the default) the sections too; any other `fields`
         is 400. An empty board counts 0 everywhere.
@@ -2355,7 +2356,7 @@ paths:
         - name: tag
           in: query
           required: false
-          description: Keep items whose initiative carries this tag. Repeatable; every tag given must match.
+          description: Keep items on a task that matches this tag as its own, its initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
           schema:
             type: array
             items:

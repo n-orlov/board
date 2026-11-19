@@ -2709,7 +2709,7 @@ type GetAttentionParams struct {
 	// Initiative Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept.
 	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
 
-	// Tag Keep items whose initiative carries this tag. Repeatable; every tag given must match.
+	// Tag Keep items on a task that matches this tag as its own, its initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
 	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
 
 	// Fields `full` (the default) answers the sections and the counts, `counts` only the counts.
@@ -2943,7 +2943,7 @@ type ListTasksParams struct {
 	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
 	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
 
-	// Tag Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+	// Tag Keep tasks that match this tag as their own, their initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
 	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
 
 	// Status The task status to keep. Default `not_closed`.
@@ -3045,7 +3045,7 @@ type GetTimelineParams struct {
 	// Initiative Keep tasks of this initiative, by slug or ULID. Repeatable.
 	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
 
-	// Tag Keep tasks whose initiative carries this tag. Repeatable; every tag given must match.
+	// Tag Keep tasks that match this tag as their own, their initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
 	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
 
 	// Actor A handle. Keeps the tasks on which this actor held a lease in the window.

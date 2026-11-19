@@ -271,12 +271,8 @@ func (f *filter) tagFilter(raw []string) error {
 	if len(tags) == 0 {
 		return nil
 	}
-	args := make([]any, 0, len(tags)+1)
-	for _, tag := range tags {
-		args = append(args, tag)
-	}
-	f.add(`(SELECT COUNT(*) FROM initiative_tags it WHERE it.initiative_id = t.initiative_id AND it.tag IN (`+marks(len(tags))+`)) = ?`,
-		append(args, len(tags))...)
+	cond, args := store.TagMatch(`t.id`, `t.initiative_id`, tags)
+	f.add(cond, args...)
 	return nil
 }
 

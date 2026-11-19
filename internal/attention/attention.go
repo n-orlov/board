@@ -297,11 +297,9 @@ func (sc scope) and(col string) (string, []any) {
 		cond += ` AND ` + col + ` IN (` + marks(len(sc.initiatives)) + `)`
 		args = append(args, anys(sc.initiatives)...)
 	}
-	if len(sc.tags) > 0 {
-		cond += ` AND (SELECT COUNT(*) FROM initiative_tags it WHERE it.initiative_id = ` + col +
-			` AND it.tag IN (` + marks(len(sc.tags)) + `)) = ?`
-		args = append(args, anys(sc.tags)...)
-		args = append(args, len(sc.tags))
+	if tagCond, tagArgs := store.TagMatch(`t.id`, col, sc.tags); tagCond != "" {
+		cond += ` AND ` + tagCond
+		args = append(args, tagArgs...)
 	}
 	return cond, args
 }
@@ -317,7 +315,8 @@ func (c section) list() string {
 }
 func (c section) count() string { return `SELECT COUNT(*) FROM ` + c.from }
 
-// scoped builds a section whose rows are kept by the initiative column col.
+// scoped builds a section whose rows are kept by the initiative column col and,
+// for a tag, by the task t of the row (NULL for an ask on no task).
 func scoped(sc scope, col, cols, from, order string, args ...any) section {
 	cond, more := sc.and(col)
 	return section{cols: cols, from: from + cond, order: order, args: append(args, more...)}
