@@ -793,7 +793,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page) => {
       await page.goto('/#/actors?sort=seen&dir=asc');
       await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`)).toBeVisible();
-      await expectSorted(page, 'seen', 'asc');
+      await expectSorted(page, 'seen', 'asc', true);
     },
   },
   {

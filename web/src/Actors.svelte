@@ -1,19 +1,20 @@
 <script lang="ts">
   import { replaceHash } from './lib/historyEntry';
-  import SortHeader from './SortHeader.svelte';
-  import SortSelect from './SortSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import SortControl from './SortControl.svelte';
   import Toast from './Toast.svelte';
-  import { ACTORS_VIEW, ACTOR_COLUMNS, ACTOR_SORT_LABELS, ActorsApi, ActorsStore, actorRows, actorsHash, affectsActors, copyToast, copyWayBackLabel, sortOfQuery, type ActorRow, type ActorsState } from './lib/actorsView';
+  import { ACTORS_VIEW, ACTOR_COLUMNS, ACTOR_SORT_LABELS, ActorsApi, ActorsStore, actorRows, actorTagChoices, actorsHash, affectsActors, copyToast, copyWayBackLabel, filterActors, viewFromQuery, viewToQuery, type ActorRow, type ActorsState } from './lib/actorsView';
   import { copyText } from './lib/clipboard';
   import { live } from './lib/live';
   import { currentBrowser } from './lib/session';
-  import { sortRows, sortToQuery, type SortState } from './lib/tableSort';
+  import { type ChipState } from './lib/chipFilter';
+  import { sortRows, type SortState } from './lib/tableSort';
   import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
 
   // The Actors view (PRD R7, SPEC 11): who is on the board. Actors with a live lease come first, each lease linking to
-  // its task, then the rest by last seen; every actor with a way back has a button that copies it. The table sorts by Actor,
-  // Live leases and Last seen (headers from 768 px, the Sort select on the phone), and the sort rides in the fragment query and
-  // is saved under vh.view.v1.actors. The data layer is lib/actorsView.ts.
+  // its task, then the rest by last seen; every actor with a way back has a button that copies it. The shared chip filter (tags only)
+  // keeps the actors whose live leases are on tasks that carry every tag chosen, and the shared sort control orders the rows; both ride in
+  // the fragment query and are saved under vh.view.v1.actors. The data layer is lib/actorsView.ts.
   let { csrf }: { csrf: string; param?: string } = $props();
 
   const store = new ActorsStore(new ActorsApi(currentBrowser(), () => csrf), (s) => (view = s));
@@ -23,22 +24,35 @@
   const viewEnv = currentViewEnv();
   const queryOf = (hash: string) => (hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '');
   // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
-  let sort: SortState = $state(sortOfQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(window.location.hash))));
+  const opened = viewFromQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(window.location.hash)));
+  let sort: SortState = $state(opened.sort);
+  let tags: string[] = $state(opened.tags);
   // Ages are phrased at the moment of each draw; a refetch redraws them. The default order (live leases first) is the one a sort replaces.
-  const rows = $derived(sortRows(actorRows(view.actors, new Date()), sort, ACTOR_COLUMNS));
+  const all = $derived(actorRows(view.actors, new Date()));
+  const rows = $derived(sortRows(filterActors(all, tags, view.leased), sort, ACTOR_COLUMNS));
+  const choices = $derived(actorTagChoices(view.leased, tags));
 
-  // A sort only reorders the rows the view holds: the fragment and the saved query follow it, and no request is made.
+  // A sort or a tag only reorders or narrows the rows the view holds: the fragment and the saved query follow it, and no request is made.
+  function persist(next: { tags: string[]; sort: SortState }) {
+    replaceHash(actorsHash(next));
+    saveViewQuery(viewEnv.storage, ACTORS_VIEW, viewToQuery(next));
+  }
   function setSort(next: SortState) {
     sort = next;
-    replaceHash(actorsHash(next));
-    saveViewQuery(viewEnv.storage, ACTORS_VIEW, sortToQuery(next));
+    persist({ tags, sort });
+  }
+  function setChips(next: ChipState) {
+    tags = next.tags;
+    persist({ tags, sort });
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare '#/actors' restores the saved query.
   function hashChanged() {
     const hash = window.location.hash;
     if (hash !== '#/actors' && !hash.startsWith('#/actors?')) return;
-    sort = sortOfQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(hash)));
+    const next = viewFromQuery(openView(viewEnv, ACTORS_VIEW, '#/actors', queryOf(hash)));
+    sort = next.sort;
+    tags = next.tags;
   }
 
   $effect(() => {
@@ -65,18 +79,27 @@
   {/if}
   {#if !view.loaded && view.error === ''}
     <p class="text-sm text-text-muted" data-testid="actors-loading">Loading the actors…</p>
-  {:else if view.loaded && rows.length === 0}
+  {:else if view.loaded && all.length === 0}
     <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="actors-empty">No actor has acted on the board yet.</p>
+  {:else}
+    <div class="mb-3 flex"><SortControl columns={ACTOR_SORT_LABELS} {sort} onsort={setSort} /></div>
+    {#if choices.length > 0}
+      <div class="mb-4">
+        <ChipFilter tags={choices} initiatives={[]} withInitiatives={false} value={{ tags, initiatives: [] }} onchange={setChips} />
+      </div>
+    {/if}
+  {/if}
+  {#if view.loaded && all.length > 0 && rows.length === 0}
+    <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="actors-none">No actor holds a lease on a task with every chosen tag.</p>
   {:else if rows.length > 0}
-    <div class="mb-3 flex"><SortSelect columns={ACTOR_SORT_LABELS} {sort} onsort={setSort} /></div>
     <!-- One table: from 768 px a dense table, below it each actor is a card. -->
     <table class="block w-full text-left wrap-anywhere md:table md:table-fixed md:border-collapse">
       <thead class="sr-only md:table-header-group md:not-sr-only">
         <tr class="md:border-b md:border-border">
-          <SortHeader column="actor" label="Actor" {sort} onsort={setSort} class="{head} md:w-1/5" />
-          <SortHeader column="leases" label="Live leases" {sort} onsort={setSort} class={head} />
-          <SortHeader column="seen" label="Last seen" {sort} onsort={setSort} class="{head} md:w-32" />
-          <SortHeader column="wayBack" label="Way back" {sort} onsort={setSort} class="{head} md:w-1/4" />
+          <th scope="col" class="{head} md:w-1/5">Actor</th>
+          <th scope="col" class={head}>Live leases</th>
+          <th scope="col" class="{head} md:w-32">Last seen</th>
+          <th scope="col" class="{head} md:w-1/4">Way back</th>
         </tr>
       </thead>
       <tbody class="flex flex-col gap-3 md:table-row-group">

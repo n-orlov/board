@@ -29,7 +29,7 @@ for (const vp of viewports) {
         await post(api, '/api/v1/leases', { task, intent: `work of ${name}`, resources: [`repo:${slug}-${name}`] }, 201);
         await api.dispose();
       }
-      await walk(page, sortRoute('#/actors', 'actor', phone));
+      await walk(page, sortRoute('#/actors', 'actor', true) /* the shared sort control is a select at every width */);
     });
 
     test('Settings -> API keys: Back to the default entry shows the default order, Back to the sorted entry its sort', async ({ page }) => {

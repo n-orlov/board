@@ -3,7 +3,7 @@ import { expectInitiatives, foldChips, pickInitiative } from './chips';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
-// (scroll only), the Actors view (sort only), the Archive view (window and sort), the Notes view (filter and scroll),
+// (scroll only), the Actors view (tag chips and sort), the Archive view (window and sort), the Notes view (filter and scroll),
 // Settings -> API keys (sort only) and the Timeline (filters, window and the chart's rows) each come back with the scroll position
 // of the history entry, the filters in the fragment, the sort column and direction (the header's aria-sort at desktop,
 // the Sort select at phone, the fragment's `sort` and `dir`) and the row order they had when a link was followed. Forward
@@ -333,7 +333,7 @@ for (const vp of viewports) {
       await page.goto('/#/actors');
       await expect.poll(() => own(page), FIVE_SECONDS).toHaveLength(names.length);
       const byDefault = await own(page);
-      await sortBy(page, phone, 'actor', 'desc');
+      await sortBy(page, true, 'actor', 'desc'); // the shared sort control is a select at every width
       await expect(page).toHaveURL((url) => url.hash === '#/actors?sort=actor&dir=desc');
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual(byDefault);
@@ -345,6 +345,7 @@ for (const vp of viewports) {
         links: (p) => p.getByTestId('lease-task'),
         landing: /#\/t\//,
         sortColumn: 'actor',
+        sharedSort: true,
       };
       await leaveAndReturn(page, route, phone);
     });

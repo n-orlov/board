@@ -1,8 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Actors table sort and saved view state (PRD R16, SPEC 11): the table sorts by Actor (text), Live leases (ref, the
-// actor's first live lease), Last seen (time) and Way back (text) through the shared header (desktop, with the keyboard) and the Sort select
-// (phone); the sort rides in the fragment query and is saved under `vh.view.v1.actors`, so it survives nav away and back.
+// The Actors sort and saved view state (PRD R16, R7, SPEC 11): the rows sort by Actor (text), Live leases (ref, the
+// actor's first live lease), Last seen (time) and Way back (text) through the shared sort control (a select at every width); the sort rides in the fragment query and is saved under `vh.view.v1.actors`, so it survives nav away and back.
 // The table has no status or kind column. The server is shared with every other spec, so each test reads only the rows of
 // the three actors it seeded.
 const viewports = [
@@ -49,7 +48,6 @@ async function seed(playwright: PlaywrightTestArgs['playwright'], baseURL: strin
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const endsWith = (fragment: string) => new RegExp(`${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 const stored = (page: Page) => page.evaluate((k) => localStorage.getItem(k), KEY);
 
@@ -68,16 +66,9 @@ async function goTo(page: Page, label: string) {
   }
 }
 
-async function sortBy(page: Page, phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
-  if (phone) {
-    await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
-  } else {
-    // The header cycles none -> ascending -> descending -> none: click until the target is reached.
-    const cycle = ['none', 'ascending', 'descending'];
-    const now = cycle.indexOf((await th(page, column).getAttribute('aria-sort')) ?? 'none');
-    const target = cycle.indexOf(dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none');
-    for (let i = 0; i < (target - now + 3) % 3; i++) await page.getByTestId(`sort-${column}`).click();
-  }
+// The shared sort control is one select at every width: `column:dir`, or the empty value for the default order.
+async function sortBy(page: Page, _phone: boolean, column: string, dir: 'asc' | 'desc' | null) {
+  await page.getByTestId('sort-select').selectOption(dir === null ? '' : `${column}:${dir}`);
 }
 
 for (const vp of viewports) {
@@ -85,50 +76,49 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    test('sorting by one column of each type (text, ref, time) orders the rows and sets aria-sort, and the third step is the default', async ({ page, playwright, baseURL }) => {
+    test('sorting by one column of each type (text, ref, time) orders the rows through the shared sort control, and the third step is the default', async ({ page, playwright, baseURL }) => {
       const { prefix, mike, zed, amy } = await seed(playwright, baseURL, `sort-${vp.name}`);
       await page.goto('/#/actors');
       // The default order: the holders first, the newest first, then the idle actor.
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
-      if (phone) await expect(page.getByTestId('sort-select')).toBeVisible();
-      else await expect(page.getByTestId('sort-select')).toBeHidden();
-      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(th(page, column)).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toBeVisible();
+      await expect(page.locator('th [data-testid^="sort-"]')).toHaveCount(0); // the headers are plain: the control is the one sort
+      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(page.getByTestId('sort-select')).toHaveValue('');
 
       // text: the handle, ascending and descending.
       await sortBy(page, phone, 'actor', 'asc');
-      await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('actor:asc');
       await expect.poll(() => order(page, prefix)).toEqual([amy, mike, zed]);
       await sortBy(page, phone, 'actor', 'desc');
-      await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('actor:desc');
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
       await expect(page).toHaveURL(endsWith('#/actors?sort=actor&dir=desc'));
 
       // ref: the first live lease by its number, the actor without one last in both directions.
       await sortBy(page, phone, 'leases', 'asc');
-      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'ascending');
-      await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'none');
-      await expect.poll(() => order(page, prefix)).toEqual([mike, zed, amy]);
+      await expect(page.getByTestId('sort-select')).toHaveValue('leases:asc');
+            await expect.poll(() => order(page, prefix)).toEqual([mike, zed, amy]);
       await sortBy(page, phone, 'leases', 'desc');
-      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('leases:desc');
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
 
       // time: last seen, oldest first ascending, newest first descending.
       await sortBy(page, phone, 'seen', 'asc');
-      await expect(th(page, 'seen')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('seen:asc');
       await expect.poll(() => order(page, prefix)).toEqual([mike, zed, amy]);
       await sortBy(page, phone, 'seen', 'desc');
-      await expect(th(page, 'seen')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('seen:desc');
       await expect.poll(() => order(page, prefix)).toEqual([amy, zed, mike]);
       await expect(page).toHaveURL(endsWith('#/actors?sort=seen&dir=desc'));
       expect(await saved(page)).toEqual({ v: 1, query: 'sort=seen&dir=desc' });
 
       // Third step: the default order, gone from the fragment and from the saved state.
       await sortBy(page, phone, 'seen', null);
-      await expect(th(page, 'seen')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('');
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
       await expect(page).toHaveURL(endsWith('#/actors'));
       expect(await stored(page)).toBeNull();
-      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('');
+      await expect(page.getByTestId('sort-select')).toHaveValue('');
     });
 
     // Way back used to be the one data column of this table with no sort.
@@ -154,21 +144,21 @@ for (const vp of viewports) {
 
       await page.goto('/#/actors');
       await expect.poll(() => order(page, prefix)).toHaveLength(3);
-      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('');
       await sortBy(page, phone, 'wayBack', 'asc');
-      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:asc');
       await expect.poll(() => order(page, prefix)).toEqual([cat, bee, none]);
       await expect(page).toHaveURL(endsWith('#/actors?sort=wayBack&dir=asc'));
       await sortBy(page, phone, 'wayBack', 'desc');
-      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:desc');
       await expect.poll(() => order(page, prefix)).toEqual([bee, cat, none]);
       expect(await saved(page)).toEqual({ v: 1, query: 'sort=wayBack&dir=desc' });
       await page.reload();
       await expect.poll(() => order(page, prefix)).toEqual([bee, cat, none]);
-      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'descending');
-      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:desc');
+      await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:desc');
+      await expect(page.getByTestId('sort-select')).toHaveValue('wayBack:desc');
       await sortBy(page, phone, 'wayBack', null);
-      await expect(th(page, 'wayBack')).toHaveAttribute('aria-sort', 'none');
+      await expect(page.getByTestId('sort-select')).toHaveValue('');
       expect(await stored(page)).toBeNull();
     });
 
@@ -188,8 +178,8 @@ for (const vp of viewports) {
       await expect(page.getByTestId('actors-view')).toBeVisible();
       await expect.poll(() => order(page, prefix)).toEqual([amy, mike, zed]);
       await expect(page).toHaveURL(endsWith('#/actors?sort=actor&dir=asc'));
-      await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'ascending');
-      if (phone) await expect(page.getByTestId('sort-select')).toHaveValue('actor:asc');
+      await expect(page.getByTestId('sort-select')).toHaveValue('actor:asc');
+      await expect(page.getByTestId('sort-select')).toHaveValue('actor:asc');
 
       // A change after coming back is what is saved, and a new page of the same context opens the bare route with it.
       await sortBy(page, phone, 'seen', 'desc');
@@ -198,14 +188,14 @@ for (const vp of viewports) {
       await second.goto('/#/actors');
       await expect.poll(() => order(second, prefix)).toEqual([amy, zed, mike]);
       await expect(second).toHaveURL(endsWith('#/actors?sort=seen&dir=desc'));
-      await expect(th(second, 'seen')).toHaveAttribute('aria-sort', 'descending');
+      await expect(second.getByTestId('sort-select')).toHaveValue('seen:desc');
 
       // A reload of the fragment keeps the sort, and a link with its own query wins and is saved.
       await second.reload();
       await expect.poll(() => order(second, prefix)).toEqual([amy, zed, mike]);
       await second.goto('/#/actors?sort=leases&dir=asc');
       await expect.poll(() => order(second, prefix)).toEqual([mike, zed, amy]);
-      await expect(th(second, 'leases')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(second.getByTestId('sort-select')).toHaveValue('leases:asc');
       expect(await saved(second)).toEqual({ v: 1, query: 'sort=leases&dir=asc' });
       await second.close();
     });
@@ -218,7 +208,7 @@ for (const vp of viewports) {
       const fresh = await page.context().newPage();
       await fresh.goto('/#/actors');
       await expect.poll(() => order(fresh, prefix)).toEqual([zed, mike, amy]);
-      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(th(fresh, column)).toHaveAttribute('aria-sort', 'none');
+      for (const column of ['actor', 'leases', 'seen', 'wayBack']) await expect(fresh.getByTestId('sort-select')).toHaveValue('');
       await fresh.close();
     });
 
@@ -248,10 +238,10 @@ for (const vp of viewports) {
       // The default order: holders first by last seen newest first (mike acted last), then the idle actors newest first.
       await expect.poll(() => order(page, prefix)).toEqual([mike, zed, bob, amy]);
       await sortBy(page, phone, 'leases', 'asc');
-      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'ascending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('leases:asc');
       await expect.poll(() => order(page, prefix)).toEqual([mike, zed, bob, amy]);
       await sortBy(page, phone, 'leases', 'desc');
-      await expect(th(page, 'leases')).toHaveAttribute('aria-sort', 'descending');
+      await expect(page.getByTestId('sort-select')).toHaveValue('leases:desc');
       await expect.poll(() => order(page, prefix)).toEqual([zed, mike, bob, amy]);
       await expect(page).toHaveURL(endsWith('#/actors?sort=leases&dir=desc'));
     });
@@ -262,40 +252,19 @@ for (const vp of viewports) {
         await page.goto('/#/actors');
         await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
         await sortBy(page, phone, column, 'desc');
-        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
+        await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:desc`);
         expect(await saved(page)).toEqual({ v: 1, query: `sort=${column}&dir=desc` });
         await goTo(page, 'Tasks');
         await expect(page.getByTestId('actors-view')).toHaveCount(0);
         await goTo(page, 'Actors');
         await expect(page).toHaveURL(endsWith(`#/actors?sort=${column}&dir=desc`));
-        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
-        if (phone) await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:desc`);
+        await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:desc`);
         await page.reload();
-        await expect(th(page, column)).toHaveAttribute('aria-sort', 'descending');
+        await expect(page.getByTestId('sort-select')).toHaveValue(`${column}:desc`);
         await sortBy(page, phone, column, null);
         expect(await stored(page)).toBeNull();
       }
     });
 
-    if (!phone) {
-      test('a header sorts from the keyboard: Enter and Space, asc then desc then the default', async ({ page, playwright, baseURL }) => {
-        const { prefix, mike, zed, amy } = await seed(playwright, baseURL, `keys-${vp.name}`);
-        await page.goto('/#/actors');
-        await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
-        const actor = page.getByTestId('sort-actor');
-        await actor.focus();
-        await expect(actor).toBeFocused();
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'ascending');
-        await expect.poll(() => order(page, prefix)).toEqual([amy, mike, zed]);
-        await expect(actor).toBeFocused();
-        await page.keyboard.press('Space');
-        await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'descending');
-        await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
-        await page.keyboard.press('Enter');
-        await expect(th(page, 'actor')).toHaveAttribute('aria-sort', 'none');
-        await expect.poll(() => order(page, prefix)).toEqual([zed, mike, amy]);
-      });
-    }
   });
 }

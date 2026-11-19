@@ -15,6 +15,13 @@ import {
   orderActors,
   type ActorsState,
   type ActorView,
+  type LeasedTask,
+  actorMatches,
+  actorTagChoices,
+  filterActors,
+  leaseTagsByTask,
+  viewFromQuery,
+  viewToQuery,
 } from './actorsView';
 import type { Browser } from './session';
 import { sortRows } from './tableSort';
@@ -112,14 +119,14 @@ describe('ActorsApi', () => {
 });
 
 describe('ActorsStore', () => {
-  function setup(list: () => Promise<ActorView[]>) {
+  function setup(list: () => Promise<ActorView[]>, leasedTasks: () => Promise<LeasedTask[]> = async () => []) {
     const states: ActorsState[] = [];
-    const store = new ActorsStore({ list }, (s) => states.push(s));
+    const store = new ActorsStore({ list, leasedTasks }, (s) => states.push(s));
     return { store, states };
   }
 
   it('starts loading, with nothing loaded', () => {
-    expect(setup(async () => []).store.state).toEqual({ actors: [], loaded: false, loading: true, error: '' });
+    expect(setup(async () => []).store.state).toEqual({ actors: [], leased: [], loaded: false, loading: true, error: '' });
   });
 
   it('shows the actors once the read lands', async () => {
@@ -173,9 +180,9 @@ function memory(initial: Record<string, string> = {}): ViewStorage & { data: Map
 
 describe('sort <-> query encoding', () => {
   it('writes the sort as sort= and dir=, and nothing for the default order', () => {
-    expect(actorsHash({ column: 'seen', dir: 'desc' })).toBe('#/actors?sort=seen&dir=desc');
-    expect(actorsHash({ column: 'actor', dir: 'asc' })).toBe('#/actors?sort=actor&dir=asc');
-    expect(actorsHash(null)).toBe('#/actors');
+    expect(actorsHash({ tags: [], sort: { column: 'seen', dir: 'desc' } })).toBe('#/actors?sort=seen&dir=desc');
+    expect(actorsHash({ tags: [], sort: { column: 'actor', dir: 'asc' } })).toBe('#/actors?sort=actor&dir=asc');
+    expect(actorsHash({ tags: [], sort: null })).toBe('#/actors');
   });
 
   it('reads the sort back, with dir defaulting to ascending', () => {
@@ -193,7 +200,7 @@ describe('sort <-> query encoding', () => {
   it('round-trips every sortable column in both directions', () => {
     for (const column of ACTOR_SORT_COLUMNS) {
       for (const dir of ['asc', 'desc'] as const) {
-        expect(sortOfQuery(actorsHash({ column, dir }).split('?')[1] ?? '')).toEqual({ column, dir });
+        expect(sortOfQuery(actorsHash({ tags: [], sort: { column, dir } }).split('?')[1] ?? '')).toEqual({ column, dir });
       }
     }
   });
@@ -299,9 +306,9 @@ describe('every column is sortable and survives a reload', () => {
   it('has a phone label, a query encoding and a saved-state restore for each column', () => {
     for (const column of ACTOR_SORT_COLUMNS) {
       expect(ACTOR_SORT_LABELS.some((l) => l.column === column)).toBe(true);
-      expect(actorsHash({ column, dir: 'desc' })).toBe(`#/actors?sort=${column}&dir=desc`);
+      expect(actorsHash({ tags: [], sort: { column, dir: 'desc' } })).toBe(`#/actors?sort=${column}&dir=desc`);
       const storage = memory();
-      saveViewQuery(storage, ACTORS_VIEW, actorsHash({ column, dir: 'desc' }).split('?')[1] ?? '');
+      saveViewQuery(storage, ACTORS_VIEW, actorsHash({ tags: [], sort: { column, dir: 'desc' } }).split('?')[1] ?? '');
       const query = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', '');
       expect(sortOfQuery(query)).toEqual({ column, dir: 'desc' });
     }
@@ -325,5 +332,86 @@ describe('saved state', () => {
     const query = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', 'sort=leases&dir=desc');
     expect(sortOfQuery(query)).toEqual({ column: 'leases', dir: 'desc' });
     expect(JSON.parse(storage.data.get('vh.view.v1.actors')!)).toEqual({ v: 1, query: 'sort=leases&dir=desc' });
+  });
+});
+
+const TASK_A: LeasedTask = {
+  ref: 'aa-3',
+  tag_marks: [
+    { tag: 'infra', source: 'task' },
+    { tag: 'web', source: 'initiative' },
+  ],
+};
+const TASK_B: LeasedTask = { ref: 'bb-1', tag_marks: [{ tag: 'claude', source: 'actor' }] };
+const leaseOn = (task: string) => ({ ...LEASE, task });
+
+describe('the tag filter over the tasks an actor holds leases on', () => {
+  const byTask = leaseTagsByTask([TASK_A, TASK_B]);
+
+  it('keeps an actor whose leased tasks carry every chosen tag, whatever the source of the tag', () => {
+    const row = { leases: [leaseOn('aa-3'), leaseOn('bb-1')] } as never;
+    expect(actorMatches(row, ['infra'], byTask)).toBe(true);
+    expect(actorMatches(row, ['web', 'claude'], byTask)).toBe(true);
+    expect(actorMatches(row, [], byTask)).toBe(true);
+  });
+
+  it('drops an actor when one chosen tag is carried by none of its leased tasks', () => {
+    const row = { leases: [leaseOn('aa-3')] } as never;
+    expect(actorMatches(row, ['infra', 'claude'], byTask)).toBe(false);
+    expect(actorMatches({ leases: [leaseOn('unknown-9')] } as never, ['infra'], byTask)).toBe(false);
+  });
+
+  it('drops an actor with no lease as soon as a tag is chosen, and keeps it when none is', () => {
+    expect(actorMatches({ leases: [] }, ['infra'], byTask)).toBe(false);
+    expect(actorMatches({ leases: [] }, [], byTask)).toBe(true);
+  });
+
+  it('filters the rows in the order given', () => {
+    const rows = actorRows(
+      [actor('idle', '2026-03-10T11:00:00Z'), actor('ann', '2026-03-10T11:00:00Z', { leases: [leaseOn('aa-3')] }), actor('bob', '2026-03-10T10:00:00Z', { leases: [leaseOn('bb-1')] })],
+      NOW,
+    );
+    expect(filterActors(rows, ['web'], [TASK_A, TASK_B]).map((r) => r.handle)).toEqual(['ann']);
+    expect(filterActors(rows, [], [TASK_A, TASK_B]).map((r) => r.handle)).toEqual(['ann', 'bob', 'idle']);
+  });
+
+  it('offers every tag of the leased tasks and the chosen ones, sorted, with their sources', () => {
+    expect(actorTagChoices([TASK_A, TASK_B], ['zzz']).map((c) => c.tag)).toEqual(['claude', 'infra', 'web', 'zzz']);
+    expect(actorTagChoices([TASK_A], []).find((c) => c.tag === 'web')!.sources).toEqual(['initiative']);
+    expect(actorTagChoices([], [])).toEqual([]);
+  });
+
+  it('round-trips two chosen tags and the sort through the fragment', () => {
+    const state = { tags: ['infra', 'web'], sort: { column: 'seen', dir: 'desc' } as const };
+    expect(viewToQuery(state)).toBe('tag=infra&tag=web&sort=seen&dir=desc');
+    expect(actorsHash(state)).toBe('#/actors?tag=infra&tag=web&sort=seen&dir=desc');
+    expect(viewFromQuery(actorsHash(state).split('?')[1] ?? '')).toEqual(state);
+    expect(actorsHash({ tags: [], sort: null })).toBe('#/actors');
+  });
+
+  it('restores the saved filter when the fragment is empty, and lets a fragment with tags win', () => {
+    const storage = memory();
+    saveViewQuery(storage, ACTORS_VIEW, 'tag=infra&tag=web&sort=actor&dir=asc');
+    const replaced: string[] = [];
+    const query = openView({ storage, replaceHash: (h) => replaced.push(h) }, ACTORS_VIEW, '#/actors', '');
+    expect(replaced).toEqual(['#/actors?tag=infra&tag=web&sort=actor&dir=asc']);
+    expect(viewFromQuery(query)).toEqual({ tags: ['infra', 'web'], sort: { column: 'actor', dir: 'asc' } });
+    const won = openView({ storage, replaceHash: () => undefined }, ACTORS_VIEW, '#/actors', 'tag=claude');
+    expect(viewFromQuery(won).tags).toEqual(['claude']);
+    expect(JSON.parse(storage.data.get('vh.view.v1.actors')!)).toEqual({ v: 1, query: 'tag=claude' });
+  });
+});
+
+describe('ActorsApi.leasedTasks', () => {
+  it('reads the tasks with a live lease, page by page, same origin', async () => {
+    const urls: string[] = [];
+    const fetchFn = vi.fn(async (input: string) => {
+      urls.push(input);
+      return json(urls.length === 1 ? { items: [TASK_A], next_after: 'aa-3' } : { items: [TASK_B] });
+    });
+    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
+    expect((await new ActorsApi(browser, () => 't').leasedTasks()).map((t) => t.ref)).toEqual(['aa-3', 'bb-1']);
+    expect(urls[0]).toBe('/board/api/v1/tasks?active=true&status=all&limit=1000');
+    expect(urls[1]).toBe('/board/api/v1/tasks?active=true&status=all&limit=1000&after=aa-3');
   });
 });

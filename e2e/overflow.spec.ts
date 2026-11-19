@@ -704,7 +704,7 @@ const PHASE3_STATES: Phase3State[] = [
     open: async (page) => {
       await page.goto('/#/actors?sort=leases&dir=desc');
       await expect(page.locator(`[data-testid=actor-row][data-handle="${P3_ACTOR}"]`)).toBeVisible();
-      await sortedHeader(page);
+      await expect(page.getByTestId('sort-select')).toHaveValue('leases:desc'); // the shared sort control
     },
   },
   {
