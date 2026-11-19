@@ -29,7 +29,7 @@ const out = process.env.E2E_OUT ?? 'out';
 
 // The specs that load the unfiltered Timeline or every view in turn, or that Tab through a list the store's
 // volume lengthens (dialogs.spec.ts reaches a button below the Initiatives list): see `projects` below.
-const earlySpecs = ['dialogs.spec.ts', 'shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];
+const earlySpecs = ['a11y.spec.ts', 'dialogs.spec.ts', 'shell.spec.ts', 'timeline*.spec.ts', 'wide.spec.ts'];
 
 export default defineConfig({
   testDir: '.',
@@ -75,6 +75,11 @@ export default defineConfig({
   // navigation chrome, not store volume, so they run first, on a store that only the specs before them have filled.
   // dialogs.spec.ts is in the early project for the same reason from the other side: it reaches a button by Tab alone
   // (150 presses at most) and on a phone that button sits below the whole Initiatives list, so it needs the list short.
+  // a11y.spec.ts is in the early project too, and so runs first of all (files run in name order): axe's cost follows
+  // the size of the page it scans, and the beforeEach of every one of its scans loads the unfiltered Initiatives list.
+  // Run after the early specs had filled the store, its scans took most of a second longer each on the workstation
+  // (measured), and it was the Suite's largest single cost on the Jenkins agent. Its own seed is a handful of
+  // initiatives, which leaves dialogs.spec.ts's Tab walk well inside its bound.
   // No test, assertion, timeout or retry changes; the project name only appears in a test's title.
   projects: [
     { name: 'chromium-early', testMatch: earlySpecs, use: { browserName: 'chromium' } },

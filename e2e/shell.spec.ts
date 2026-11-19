@@ -47,16 +47,22 @@ function viewOf(id: string) {
 // The nav entry of a view: the view itself, or the view it is a page of.
 const navIdOf = (id: string): string => ('parent' in viewOf(id) ? (viewOf(id) as { parent: string }).parent : id);
 
+// A nav entry's link by its label. The accessible name begins with the label and may go on with a badge's words
+// ("Now 5 items need attention 2 live tasks"), so the label is matched as the name's first word: a bare substring
+// match would also find the Now entry when looking for "Tasks".
+const entryLink = (scope: Locator, route: { label: string }): Locator =>
+  scope.getByRole('link', { name: new RegExp(`^${route.label}(\\s|$)`) });
+
 // Follows a nav entry the way the viewport allows: a link of the bar itself, or at phone width through the "More" dialog.
 async function goTo(page: Page, nav: Locator, phone: boolean, route: { id: string; label: string }) {
   if (phone && !isTab(route)) {
     await nav.getByTestId('more-button').click();
     const dialog = page.getByRole('dialog', { name: 'More' });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('link', { name: route.label }).click();
+    await entryLink(dialog, route).click();
     await expect(dialog).toHaveCount(0);
   } else {
-    await nav.getByRole('link', { name: route.label }).click();
+    await entryLink(nav, route).click();
   }
 }
 
@@ -64,7 +70,7 @@ async function goTo(page: Page, nav: Locator, phone: boolean, route: { id: strin
 async function expectCurrent(nav: Locator, phone: boolean, route: { id: string; label: string }) {
   await expect(nav.locator('[aria-current]')).toHaveCount(1);
   if (phone && !isTab(route)) await expect(nav.getByTestId('more-button')).toHaveAttribute('aria-current', 'true');
-  else await expect(nav.getByRole('link', { name: route.label })).toHaveAttribute('aria-current', 'page');
+  else await expect(entryLink(nav, route)).toHaveAttribute('aria-current', 'page');
 }
 
 async function noHorizontalOverflow(page: Page) {
@@ -120,7 +126,7 @@ for (const vp of viewports) {
         const current = navIdOf(state.view);
         await expectCurrent(nav, phone, viewOf(current));
         for (const route of shown) {
-          if (route.id !== current) await expect(nav.getByRole('link', { name: route.label })).not.toHaveAttribute('aria-current', /.*/);
+          if (route.id !== current) await expect(entryLink(nav, route)).not.toHaveAttribute('aria-current', /.*/);
         }
         await expect(page.getByTestId(state.loaded).first()).toBeVisible();
         // The live indicator is on screen in this layout with its accessible name (the other two layouts' are display: none).
