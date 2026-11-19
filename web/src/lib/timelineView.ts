@@ -670,6 +670,8 @@ export interface Chart {
   moveTo(window: TimeWindow): void;
   /** Sets the chart's tallest (the screen changed size). */
   setHeight(px: number): void;
+  /** Draws the chart again at its frame's size (UX prototype: the label column's width changed). */
+  redraw(): void;
   /** Scrolls the rows to `px` once they are drawn tall enough (Back to this view). */
   scrollRows(px: number): void;
   /**
@@ -862,6 +864,9 @@ export function mountChart(lib: ChartLib, container: HTMLElement, model: Timelin
     },
     setHeight(px: number) {
       timeline.setOptions({ maxHeight: px });
+    },
+    redraw() {
+      timeline.redraw();
     },
     scrollRows(px: number) {
       rows.restore(px);
