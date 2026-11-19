@@ -131,7 +131,7 @@ minutes with full mutation, Core about 33 of them:
 
 Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
 `MUTATION_FULL`; the choice `MUTATION_MODE` (`incremental`, the default, or
-`full`) sets the nightly's mutation mode. The nightly timer (`17 3 * * *`, on
+`full`) sets the nightly's mutation mode. The nightly timer (`17 0 * * *`, clear of the deck, ralphd and s3-browser nightlies that share int21h-ws from 02:17; on
 `main` only; every other branch has no timer) counts as `EXTENDED` plus the
 nightly's mutation, and so does `EXTENDED=true` on `main`.
 
@@ -338,7 +338,7 @@ last, in `post { cleanup }`.
 Mutation side by side, then Perf, with the Core units and Quality's wait for
 Suite and Image; the Perf unit (30 minutes, after the stability and mutation units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
 booleanParams, `disableConcurrentBuilds`, the 300-minute timeout, the
-per-attempt container cleanup by exact ID); the nightly lane (cron `17 3 * * *`
+per-attempt container cleanup by exact ID); the nightly lane (cron `17 0 * * *`
 on `main` only); the Quality unit; the three Mutation modes (diff: one 45-minute
 unit over the lines changed since the merge base, `HEAD~1` on `main`; full: three
 110-minute single-attempt units whose lanes cover every lane exactly once, Stryker

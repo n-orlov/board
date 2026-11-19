@@ -329,13 +329,13 @@ func TestJenkinsfileDeclaresTheJobShape(t *testing.T) {
 	})
 }
 
-// nightlyProblems: main is built nightly at 03:17 and nowhere else has a
+// nightlyProblems: main is built nightly at 00:17 and nowhere else has a
 // timer, and a nightly (or EXTENDED) build adds -race and fresh vulnerability
 // databases to Core and runs the Stability phase.
 func nightlyProblems(jf string) []string {
 	var problems []string
 	for _, want := range []string{
-		`cron(env.BRANCH_NAME == 'main' ? '17 3 * * *' : '')`,
+		`cron(env.BRANCH_NAME == 'main' ? '17 0 * * *' : '')`,
 		"currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause')",
 		"boolean nightly = params.EXTENDED || timer",
 		"env.CI_NIGHTLY = nightly ? 'true' : 'false'",
@@ -353,15 +353,15 @@ func nightlyProblems(jf string) []string {
 	return problems
 }
 
-// TestJenkinsfileNightlyLane: main is built nightly at 03:17 (and no other
+// TestJenkinsfileNightlyLane: main is built nightly at 00:17 (and no other
 // branch has a timer), and a nightly or EXTENDED build adds -race, drops the
 // vulnerability databases and runs the Stability phase.
 func TestJenkinsfileNightlyLane(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	expectProblems(t, jf, nightlyProblems, map[string]string{
-		"a timer on every branch":             replaceOnce(t, jf, "cron(env.BRANCH_NAME == 'main' ? '17 3 * * *' : '')", "cron('17 3 * * *')"),
-		"a timer on another branch":           replaceOnce(t, jf, "env.BRANCH_NAME == 'main' ? '17 3 * * *'", "env.BRANCH_NAME == 'dev' ? '17 3 * * *'"),
-		"another time":                        replaceOnce(t, jf, "'17 3 * * *'", "'17 4 * * *'"),
+		"a timer on every branch":             replaceOnce(t, jf, "cron(env.BRANCH_NAME == 'main' ? '17 0 * * *' : '')", "cron('17 0 * * *')"),
+		"a timer on another branch":           replaceOnce(t, jf, "env.BRANCH_NAME == 'main' ? '17 0 * * *'", "env.BRANCH_NAME == 'dev' ? '17 0 * * *'"),
+		"another time":                        replaceOnce(t, jf, "'17 0 * * *'", "'17 1 * * *'"),
 		"a second timer":                      replaceOnce(t, jf, "  triggers {", "  triggers {\n    cron('5 5 * * *')"),
 		"a nightly decided by the timer only": replaceOnce(t, jf, "params.EXTENDED || timer", "timer"),
 		"no -race":                            replaceOnce(t, jf, "nightly ? '-race' : ''", "''"),

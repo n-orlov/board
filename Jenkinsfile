@@ -477,7 +477,7 @@ pipeline {
   }
 
   triggers {
-    cron(env.BRANCH_NAME == 'main' ? '17 3 * * *' : '')
+    cron(env.BRANCH_NAME == 'main' ? '17 0 * * *' : '')
   }
 
   environment {
