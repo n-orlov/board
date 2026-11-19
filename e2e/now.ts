@@ -48,17 +48,17 @@ export async function openBand(page: Page, key: BandKey): Promise<void> {
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 }
 
-async function actorApi(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, actor: string): Promise<APIRequestContext> {
+export async function actorApi(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, actor: string): Promise<APIRequestContext> {
   return playwright.request.newContext({
     baseURL,
     extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': actor, 'Board-Actor-Way-Back': `ralphctl status ${actor}` },
   });
 }
 
-async function created(api: APIRequestContext, path: string, data: object): Promise<{ ref: string }> {
+export async function created<T = { ref: string }>(api: APIRequestContext, path: string, data: object): Promise<T> {
   const response = await api.post(path, { data });
   expect(response.status(), `${path} ${await response.text()}`).toBe(201);
-  return (await response.json()) as { ref: string };
+  return (await response.json()) as T;
 }
 
 export interface NeedsSeed {
@@ -91,4 +91,38 @@ export async function seedNeedsMe(playwright: PlaywrightTestArgs['playwright'], 
   await a.dispose();
   await b.dispose();
   return { slug, ask, doneTask, watchTask, conflictTasks: [first, second] };
+}
+
+export const FLIGHT_KEY = 'vh.now.window.v1';
+
+export interface FlightSeed {
+  slug: string;
+  /** A task with two live leases (held by `holders`) and its ref. */
+  live: string;
+  holders: [string, string];
+  /** A task whose only lease has ended: it is Recently touched, not In flight. */
+  ended: string;
+  /** The first holder's API client, for more calls; the caller disposes it. */
+  api: APIRequestContext;
+}
+
+/**
+ * One initiative of this test's own with a task held by two actors (In flight, two nested leases) and a task whose lease
+ * was ended (Recently touched). The caller disposes `api`.
+ */
+export async function seedFlight(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string): Promise<FlightSeed> {
+  const slug = `e2e-flight-${name}`;
+  const holders: [string, string] = [`flight-a-${name}`, `flight-b-${name}`];
+  const a = await actorApi(playwright, baseURL, holders[0]);
+  const b = await actorApi(playwright, baseURL, holders[1]);
+  await created(a, '/api/v1/initiatives', { slug, title: `Flight ${name}` });
+  const live = (await created(a, '/api/v1/tasks', { initiative: slug, title: 'Being worked on' })).ref;
+  const ended = (await created(a, '/api/v1/tasks', { initiative: slug, title: 'Was worked on' })).ref;
+  await created(a, '/api/v1/leases', { task: live, intent: `edit ${name}` });
+  await created(b, '/api/v1/leases', { task: live, intent: `review ${name}` });
+  const first = await created<{ lease: { ref: string } }>(a, '/api/v1/leases', { task: ended, intent: 'quick fix' });
+  const response = await a.post(`/api/v1/leases/${first.lease.ref}/end`, { data: {} });
+  expect(response.status(), await response.text()).toBe(200);
+  await b.dispose();
+  return { slug, live, holders, ended, api: a };
 }

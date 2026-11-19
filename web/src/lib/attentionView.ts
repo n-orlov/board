@@ -1,5 +1,5 @@
 // The Now view's Needs me data layer and row model (PRD R1, R9, SPEC 5.3, 6.8.1 and 11). `AttentionApi` reads
-// `GET /attention/now` under the filter and keeps its `attention` part, `AttentionStore` holds the latest answer, and `rowsFor` turns one section into the rows the
+// `GET /attention/now` under the filter and the window, `AttentionStore` holds the latest answer (its attention part, In flight and Recently touched), and `rowsFor` turns one section into the rows the
 // view draws: a title, a link to the task, detail lines and the actors involved, each with the way back to copy.
 import { mountPrefix } from './apibase';
 import type { components } from './api/schema';
@@ -17,6 +17,7 @@ import {
 import { errorText, Fetches } from './fetches';
 import { relativeTime } from './format';
 import { problemText } from './keys';
+import { DEFAULT_WINDOW, type InFlight, type NowWindow, type Recent } from './nowFlight';
 import type { Browser } from './session';
 import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
@@ -155,8 +156,11 @@ export class AttentionApi {
     this.browser = browser;
   }
 
-  async get(filter: AttentionFilter): Promise<Attention> {
-    const query = apiQuery(filter).toString();
+  /** The whole Now answer under the filter and the window (the window is sent only when it is not the default). */
+  async board(filter: AttentionFilter, window: NowWindow = DEFAULT_WINDOW): Promise<NowBoard> {
+    const params = apiQuery(filter);
+    if (window !== DEFAULT_WINDOW) params.set('window', window);
+    const query = params.toString();
     const path = `/api/v1/attention/now${query === '' ? '' : `?${query}`}`;
     let response: Response;
     try {
@@ -168,27 +172,36 @@ export class AttentionApi {
       throw new Error('The server is not reachable.');
     }
     if (!response.ok) throw new Error(await problemText(response, 'Reading what needs attention'));
-    return ((await response.json()) as NowBoard).attention;
+    return (await response.json()) as NowBoard;
   }
 }
 
 export interface AttentionState {
   attention: Attention | undefined;
+  /** The In flight and Recently touched parts of the same answer; undefined until it lands. */
+  flight: InFlight[] | undefined;
+  recent: Recent[] | undefined;
   filter: AttentionFilter;
+  window: NowWindow;
   loading: boolean;
   error: string | undefined;
 }
 
 export class AttentionStore {
-  private readonly api: Pick<AttentionApi, 'get'>;
+  private readonly api: Pick<AttentionApi, 'board'>;
   private readonly onChange: (state: AttentionState) => void;
   private current: AttentionState;
   private readonly fetches = new Fetches();
 
-  constructor(api: Pick<AttentionApi, 'get'>, onChange: (state: AttentionState) => void, filter: AttentionFilter = DEFAULT_ATTENTION_FILTER) {
+  constructor(
+    api: Pick<AttentionApi, 'board'>,
+    onChange: (state: AttentionState) => void,
+    filter: AttentionFilter = DEFAULT_ATTENTION_FILTER,
+    window: NowWindow = DEFAULT_WINDOW,
+  ) {
     this.api = api;
     this.onChange = onChange;
-    this.current = { attention: undefined, filter, loading: true, error: undefined };
+    this.current = { attention: undefined, flight: undefined, recent: undefined, filter, window, loading: true, error: undefined };
   }
 
   private publish(change: Partial<AttentionState>): void {
@@ -199,21 +212,28 @@ export class AttentionStore {
   /** Reads the sections under the current filter. A refresh keeps what is shown until the answer lands. */
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
-    const filter = this.current.filter;
+    const { filter, window } = this.current;
     this.publish({ loading: true });
     let outcome: Partial<AttentionState>;
     try {
-      outcome = { attention: await this.api.get(filter), error: undefined };
+      const board = await this.api.board(filter, window);
+      outcome = { attention: board.attention, flight: board.in_flight, recent: board.recent, error: undefined };
     } catch (e) {
       outcome = { error: errorText(e) };
     }
     // An answer that lands after a newer one, or for a filter no longer set, is dropped.
-    const show = this.fetches.end(ticket) && filter === this.current.filter;
+    const show = this.fetches.end(ticket) && filter === this.current.filter && window === this.current.window;
     this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy });
   }
 
   async setFilter(filter: AttentionFilter): Promise<void> {
     this.current = { ...this.current, filter };
+    await this.load();
+  }
+
+  /** Reads the board again for another window. */
+  async setWindow(window: NowWindow): Promise<void> {
+    this.current = { ...this.current, window };
     await this.load();
   }
 }

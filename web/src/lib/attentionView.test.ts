@@ -215,37 +215,46 @@ function browser(respond: (url: string) => Promise<Response>, pathname = '/'): {
 }
 
 describe('AttentionApi', () => {
-  it('reads /attention/now with the filter as repeated keys and the session cookie, and keeps its attention part', async () => {
+  it('reads /attention/now with the filter as repeated keys and the session cookie, and gives the whole answer', async () => {
     const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: full, in_flight: [], recent: [] })));
-    const got = await new AttentionApi(b).get({ tags: ['a', 'b'], initiatives: ['x'] });
-    expect(got).toEqual(full);
+    const got = await new AttentionApi(b).board({ tags: ['a', 'b'], initiatives: ['x'] });
+    expect(got.attention).toEqual(full);
     expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/attention/now?tag=a&tag=b&initiative=x');
     expect(fetchFn.mock.calls[0]![1]).toMatchObject({ credentials: 'same-origin', headers: { Accept: 'application/json' } });
   });
 
   it('asks for no query without a filter and follows the mount prefix', async () => {
     const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: { counts }, in_flight: [], recent: [] })), '/board/');
-    await new AttentionApi(b).get(DEFAULT_ATTENTION_FILTER);
+    await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER);
     expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/attention/now');
+  });
+
+  it('sends the window only when it is not the default, after the filter', async () => {
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '3d', attention: { counts }, in_flight: [], recent: [] })));
+    await new AttentionApi(b).board({ tags: ['a'], initiatives: [] }, '3d');
+    await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER, '8h');
+    await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER, '24h');
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/attention/now?tag=a&window=3d', '/api/v1/attention/now?window=8h', '/api/v1/attention/now']);
   });
 
   it('says the server is not reachable when the fetch throws', async () => {
     const { browser: b } = browser(async () => Promise.reject(new TypeError('down')));
-    await expect(new AttentionApi(b).get(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('The server is not reachable.');
+    await expect(new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('The server is not reachable.');
   });
 
   it('reports a refusal by its problem detail, else by its status', async () => {
     const problem = browser(async () => new Response(JSON.stringify({ detail: 'no such initiative' }), { status: 404, headers: { 'Content-Type': 'application/problem+json' } }));
-    await expect(new AttentionApi(problem.browser).get(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('no such initiative');
+    await expect(new AttentionApi(problem.browser).board(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('no such initiative');
     const bare = browser(async () => new Response('x', { status: 500 }));
-    await expect(new AttentionApi(bare.browser).get(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('Reading what needs attention failed (HTTP 500).');
+    await expect(new AttentionApi(bare.browser).board(DEFAULT_ATTENTION_FILTER)).rejects.toThrow('Reading what needs attention failed (HTTP 500).');
   });
 });
 
 describe('AttentionStore', () => {
   function rig(get: (f: unknown) => Promise<Attention>) {
     const states: AttentionState[] = [];
-    const store = new AttentionStore({ get } as never, (s) => states.push(s));
+    const board = async (f: unknown) => ({ window: '24h', attention: await get(f), in_flight: [], recent: [] });
+    const store = new AttentionStore({ board } as never, (s) => states.push(s));
     return { store, states, last: () => states[states.length - 1]! };
   }
 
@@ -308,6 +317,44 @@ describe('AttentionStore', () => {
     waits[0]!(full);
     await p;
     expect(last().loading).toBe(false);
+  });
+});
+
+describe('AttentionStore flight and window', () => {
+  const flight = [{ task: { task: 'aa-1', title: 't', initiative: 'aa', status: 'open', kind: 'work' }, leases: [] }];
+  const recent = [{ task: { task: 'aa-2', title: 'u', initiative: 'aa', status: 'open', kind: 'work' }, last_event: { type: 'x', summary: 's', actor: { handle: 'bob' }, at: '2026-01-01T11:00:00Z' } }];
+
+  it('keeps In flight and Recently touched from the same answer, and reads again for another window', async () => {
+    const seen: unknown[] = [];
+    const board = vi.fn(async (f: unknown, w: unknown) => {
+      seen.push([f, w]);
+      return { window: w, attention: full, in_flight: flight, recent };
+    });
+    const states: AttentionState[] = [];
+    const store = new AttentionStore({ board } as never, (s) => states.push(s), DEFAULT_ATTENTION_FILTER, '8h');
+    expect(states).toEqual([]);
+    await store.load();
+    expect(states[states.length - 1]).toMatchObject({ flight, recent, window: '8h', loading: false });
+    await store.setWindow('3d');
+    expect(seen[1]).toEqual([DEFAULT_ATTENTION_FILTER, '3d']);
+    expect(states[states.length - 1]).toMatchObject({ window: '3d' });
+  });
+
+  it('drops an answer for an older window that lands late', async () => {
+    const waits: ((b: unknown) => void)[] = [];
+    const board = () => new Promise((resolve) => waits.push(resolve));
+    const states: AttentionState[] = [];
+    const store = new AttentionStore({ board } as never, (s) => states.push(s));
+    const first = store.load();
+    const second = store.setWindow('8h');
+    waits[1]!({ window: '8h', attention: { counts }, in_flight: [], recent });
+    await second;
+    waits[0]!({ window: '24h', attention: full, in_flight: flight, recent: [] });
+    await first;
+    const last = states[states.length - 1]!;
+    expect(last.window).toBe('8h');
+    expect(last.flight).toEqual([]);
+    expect(last.recent).toEqual(recent);
   });
 });
 
