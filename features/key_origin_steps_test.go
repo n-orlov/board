@@ -249,6 +249,9 @@ func registerKeyOriginSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I create the admin key "([^"]*)" owned by "([^"]*)"$`, func(ctx context.Context, name, owner string) error {
 		return h.adminKey(ctx, st, name, owner)
 	})
+	sc.Step(`^I create the admin key "([^"]*)" with no owner$`, func(ctx context.Context, name string) error {
+		return h.adminKey(ctx, st, name, "")
+	})
 	sc.Step(`^the key "([^"]*)" as actor "([^"]*)" creates the initiative "([^"]*)"$`, func(ctx context.Context, key, actor, slug string) error {
 		return h.keyCreatesInitiative(ctx, st, key, actor, slug)
 	})
@@ -260,6 +263,12 @@ func registerKeyOriginSteps(sc *godog.ScenarioContext, h *harness) {
 	})
 	sc.Step(`^the key "([^"]*)" reads the actor "([^"]*)" with origin "([^"]*)"$`, func(ctx context.Context, key, handle, origin string) error {
 		return h.apiActorOrigin(ctx, st, key, handle, origin)
+	})
+	sc.Step(`^the key "([^"]*)" reads the event of the initiative "([^"]*)" with no origin$`, func(ctx context.Context, key, slug string) error {
+		return h.apiEventOrigin(ctx, st, key, slug, none)
+	})
+	sc.Step(`^the key "([^"]*)" reads the actor "([^"]*)" with no origin$`, func(ctx context.Context, key, handle string) error {
+		return h.apiActorOrigin(ctx, st, key, handle, none)
 	})
 	sc.Step(`^the key "([^"]*)" reads the key "([^"]*)" owned by "([^"]*)"$`, func(ctx context.Context, key, listed, owner string) error {
 		return h.apiKeyOwner(ctx, st, key, listed, owner)
@@ -273,5 +282,3 @@ func registerKeyOriginSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the event "([^"]*)" of the (initiative|key) "([^"]*)" has origin "([^"]*)"$`, h.typedEventOrigin)
 	sc.Step(`^the api_keys table holds (\d+) rows$`, h.keyRowsHold)
 }
-
-

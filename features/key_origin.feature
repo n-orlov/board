@@ -64,6 +64,22 @@ Feature: Key ownership and origin
     And the key "alice-key" reads the event of the initiative "first" with origin "alice-op"
     And the key "alice-key" reads the event of the initiative "second" with origin "bob-op"
 
+  Scenario: a write through a key with no owner clears the agent's origin and keeps the earlier event's
+    Given a new database for the board commands
+    When I run "vh admin migrate"
+    And the operators "alice-op" exist
+    And I create the admin key "alice-key" owned by "alice-op"
+    And I create the admin key "loose-key" with no owner
+    And the api_keys row "loose-key" has no owner
+    And the board server is running on a free port
+    And the key "alice-key" as actor "claude@laptop" creates the initiative "by-alice"
+    And the key "alice-key" reads the actor "claude@laptop" with origin "alice-op"
+    And the key "loose-key" as actor "claude@laptop" creates the initiative "by-loose"
+    Then the response status is 201
+    And the key "alice-key" reads the actor "claude@laptop" with no origin
+    And the key "alice-key" reads the event of the initiative "by-loose" with no origin
+    And the key "alice-key" reads the event of the initiative "by-alice" with origin "alice-op"
+
   Scenario: a key made through a key is owned by that key's owner
     Given a new database for the board commands
     When I run "vh admin migrate"

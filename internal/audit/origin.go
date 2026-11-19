@@ -26,16 +26,19 @@ func OriginFrom(ctx context.Context) (string, bool) {
 	return h, ok
 }
 
-// setOrigin makes the operator the handle names the origin of the agent row
-// actorID. An operator row, an empty handle and a handle that names no
-// operator leave the row as it is.
-func setOrigin(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID, handle string) error {
-	if handle == "" {
+// setOrigin records the origin of the agent row actorID from its latest write:
+// the operator the handle names, or null when the handle is empty (a key with
+// no owner) or names no operator, so a write through an ownerless key clears
+// the origin an earlier key left. A nil handle (a write outside any request,
+// or the actor a write is made on behalf of) and an operator row leave the row
+// as it is.
+func setOrigin(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, handle *string) error {
+	if handle == nil {
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, d.Rebind(`UPDATE actors SET origin = (SELECT o.id FROM actors o WHERE o.handle = ? AND o.kind = 'operator')
-		WHERE id = ? AND kind = 'agent' AND EXISTS (SELECT 1 FROM actors o WHERE o.handle = ? AND o.kind = 'operator')`),
-		handle, actorID, handle)
+		WHERE id = ? AND kind = 'agent'`),
+		*handle, actorID)
 	if err != nil {
 		return fmt.Errorf("record actor origin: %w", err)
 	}

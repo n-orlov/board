@@ -54,15 +54,18 @@ type Event struct {
 // operator's handle leaves it.
 //
 // An agent row also takes the origin the request carries (WithOrigin): the
-// owner of the key behind its latest write.
+// owner of the key behind its latest write, null when that key has none.
 func UpsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.Time) (string, error) {
-	origin, _ := OriginFrom(ctx)
+	var origin *string
+	if h, ok := OriginFrom(ctx); ok {
+		origin = &h
+	}
 	return upsertActor(ctx, tx, d, a, now, origin)
 }
 
 // upsertActor is UpsertActor with the origin handle to record on an agent row,
-// or "" to leave the row's origin as it is.
-func upsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.Time, origin string) (string, error) {
+// or nil to leave the row's origin as it is.
+func upsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now time.Time, origin *string) (string, error) {
 	id, err := domain.NewULID(now)
 	if err != nil {
 		return "", err
@@ -88,7 +91,7 @@ func upsertActor(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now 
 // refineActor makes the writes a use of the actor row actorID adds to its
 // creation: the promotion of an agent row a session acts as, the origin and the
 // way back and meta the request sent.
-func refineActor(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, a Actor, origin string) error {
+func refineActor(ctx context.Context, tx *sql.Tx, d store.Dialect, actorID string, a Actor, origin *string) error {
 	if a.Operator {
 		if _, err := tx.ExecContext(ctx, d.Rebind(`UPDATE actors SET kind = 'operator' WHERE id = ? AND kind <> 'operator'`), actorID); err != nil {
 			return fmt.Errorf("record actor kind: %w", err)
@@ -121,7 +124,7 @@ func OnBehalf(ctx context.Context, tx *sql.Tx, d store.Dialect, a Actor, now tim
 	if handle == "" {
 		return "", nil
 	}
-	return upsertActor(ctx, tx, d, Actor{Handle: handle}, now, "")
+	return upsertActor(ctx, tx, d, Actor{Handle: handle}, now, nil)
 }
 
 // nullable is the column value of an optional text field.

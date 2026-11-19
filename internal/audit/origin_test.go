@@ -86,6 +86,44 @@ func TestARequestWithoutAKnownOperatorWritesANullOrigin(t *testing.T) {
 	}
 }
 
+func TestAnOwnerlessWriteClearsTheAgentsEarlierOrigin(t *testing.T) {
+	st := newStore(t)
+	d := st.Dialect()
+	bg := context.Background()
+	write := func(ctx context.Context, summary string) {
+		inTx(t, st, func(tx *sql.Tx) {
+			if err := Append(ctx, tx, d, Actor{Handle: "claude"}, t0, Event{Principal: "key:k", Type: "t", Summary: summary}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	inTx(t, st, func(tx *sql.Tx) {
+		if _, err := UpsertActor(bg, tx, d, Actor{Handle: "alice-op", Operator: true}, t0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, step := range []struct{ origin, summary, want string }{
+		{"alice-op", "through alice's key", "alice-op"},
+		{"", "through an ownerless key", ""},
+		{"alice-op", "through alice's key again", "alice-op"},
+		{"ghost", "through a key whose owner is no operator", ""},
+	} {
+		write(WithOrigin(bg, step.origin), step.summary)
+		if got := originOf(t, st, actorOriginQuery, "claude"); got != step.want {
+			t.Errorf("after a write %s the agent's origin = %q, want %q", step.summary, got, step.want)
+		}
+		if got := originOf(t, st, eventOriginQuery, step.summary); got != step.want {
+			t.Errorf("the event written %s has origin %q, want %q", step.summary, got, step.want)
+		}
+	}
+	// A write outside any request leaves the agent's origin as its latest keyed write left it.
+	write(WithOrigin(bg, "alice-op"), "keyed")
+	write(bg, "outside a request")
+	if got := originOf(t, st, actorOriginQuery, "claude"); got != "alice-op" {
+		t.Errorf("a write outside a request changed the agent's origin to %q", got)
+	}
+}
+
 func TestOnBehalfRowsAndWritesOutsideARequestFollowTheActorRow(t *testing.T) {
 	st := newStore(t)
 	d := st.Dialect()

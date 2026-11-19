@@ -2048,7 +2048,8 @@ export interface components {
             way_back?: string;
             /**
              * @description The handle of the operator actor whose key made the agent's latest write (its owner). Absent for an
-             *     operator and for an agent that no keyed write has reached an owner for.
+             *     operator, for an agent no keyed write has reached, and for one whose latest write came through a key
+             *     with no owner.
              */
             origin?: string;
             /** Format: date-time */

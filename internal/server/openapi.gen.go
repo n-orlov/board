@@ -944,7 +944,8 @@ type ActorView struct {
 	Leases []ActorLease `json:"leases"`
 
 	// Origin The handle of the operator actor whose key made the agent's latest write (its owner). Absent for an
-	// operator and for an agent that no keyed write has reached an owner for.
+	// operator, for an agent no keyed write has reached, and for one whose latest write came through a key
+	// with no owner.
 	Origin *string `json:"origin,omitempty"`
 
 	// WayBack How to reach the actor again. Absent when the board has none.
