@@ -23,7 +23,7 @@ export interface Route {
   param?: true;
   /** A route that is a page inside another view and has no navigation entry of its own. */
   parent?: string;
-  /** The count this entry's navigation link carries as a badge (the Attention total); a view without one has none. */
+  /** The count this entry's navigation link carries as a badge (the Needs me total); a view without one has none. */
   badge?: 'attention';
   /**
    * True for the entries that keep their own link in the phone tab bar; every other navigation entry is listed
@@ -34,13 +34,13 @@ export interface Route {
 
 export const ROUTES = [
   {
-    id: 'attention',
-    hash: '#/attention',
+    id: 'now',
+    hash: '#/now',
     phone: true,
-    title: 'Attention',
-    label: 'Attention',
+    title: 'Now',
+    label: 'Now',
     badge: 'attention',
-    icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+    icon: 'M22 12h-4l-3 9L9 3l-3 9H2',
   },
   {
     id: 'initiatives',
@@ -133,9 +133,22 @@ function selects(route: Route, hash: string): boolean {
   return route.param === true ? segment(path, route.hash) !== '' : route.hash === path;
 }
 
-/** The route a fragment names; anything the table does not name (`#/` included) is its first entry, the Attention view. */
+/** The route a fragment names; anything the table does not name is its first entry, the Now view. */
 export function resolveRoute<R extends Route>(hash: string, table: readonly R[]): R {
   return table.find((route) => selects(route, hash)) ?? table[0];
+}
+
+/** The paths that land on Now: the root, and `#/attention`, the address of the view Now replaced. */
+const NOW_LANDINGS: readonly string[] = ['', '#', '#/', '#/attention'];
+
+/**
+ * The fragment a page should rewrite itself to, or undefined when it is already where it belongs. The root (`#/`, or
+ * none) and `#/attention` land on `#/now` and keep the query after the `?`, so a filter in an old link still applies.
+ */
+export function redirectHash(hash: string): string | undefined {
+  if (!NOW_LANDINGS.includes(hashPath(hash))) return undefined;
+  const at = hash.indexOf('?');
+  return `#/now${at < 0 ? '' : hash.slice(at)}`;
 }
 
 /** The parameter of the route the fragment selects (`#/i/phone-onboard` gives `phone-onboard`), else the empty string. */

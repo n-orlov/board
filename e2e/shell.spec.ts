@@ -26,8 +26,8 @@ const seeded = { taskRef: '' };
 // route-table id the fragment must select, `loaded` a test id that exists only once the view has its content (so the
 // overflow check sees the long seeded text); its nav entry (the view itself, or its parent) is the one marked current.
 const states = [
-  { name: '#/', hash: () => '#/', view: 'attention', loaded: 'section-open_asks' },
-  { name: '#/attention', hash: () => '#/attention', view: 'attention', loaded: 'section-open_asks' },
+  { name: '#/', hash: () => '#/', view: 'now', loaded: 'band-asks' },
+  { name: '#/now', hash: () => '#/now', view: 'now', loaded: 'band-asks' },
   { name: '#/initiatives', hash: () => '#/initiatives', view: 'initiatives', loaded: 'initiative-row' },
   { name: '#/tasks', hash: () => '#/tasks', view: 'tasks', loaded: 'task-row' },
   { name: '#/i/<slug>', hash: () => `#/i/${SEED_SLUG}`, view: 'initiative', loaded: 'initiative-title' },
@@ -151,7 +151,7 @@ for (const vp of viewports) {
       if (vp.name === 'phone') {
         await expect(topbar).toBeVisible();
         await expect(topbar).toContainText('Village Hall');
-        await expect(page.getByTestId('topbar-title')).toHaveText('Attention');
+        await expect(page.getByTestId('topbar-title')).toHaveText('Now');
         await expect(foot).toBeHidden();
       } else {
         await expect(topbar).toBeHidden();
@@ -222,25 +222,25 @@ async function sendTotal(page: Page, total: number) {
 }
 
 test.describe('the route table and the navigation order', () => {
-  test('the table holds Attention first, then Timeline, Actors and Archive before Notes, and the default route is Attention', async ({ page }) => {
-    expect(ROUTES.map((route) => route.id)).toEqual(['attention', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'archive', 'notes', 'keys']);
-    expect(navRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
+  test('the table holds Now first, then Timeline, Actors and Archive before Notes, and the default route is Now', async ({ page }) => {
+    expect(ROUTES.map((route) => route.id)).toEqual(['now', 'initiatives', 'initiative', 'tasks', 'task', 'timeline', 'actors', 'archive', 'notes', 'keys']);
+    expect(navRoutes.map((route) => route.label)).toEqual(['Now', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
     // The phone tab bar keeps four of them; the rest is listed under "More", in table order.
-    expect(tabRoutes.map((route) => route.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes']);
+    expect(tabRoutes.map((route) => route.label)).toEqual(['Now', 'Initiatives', 'Tasks', 'Notes']);
     expect(moreRoutes.map((route) => route.label)).toEqual(['Timeline', 'Actors', 'Archive', 'Settings']);
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const hash of ['/', '/#/', '/#/nowhere']) {
       await page.goto(hash);
-      await expect(page.getByTestId('nav-sidebar').getByRole('link', { name: 'Attention' })).toHaveAttribute('aria-current', 'page');
-      await expect(page.getByTestId('section-open_asks').first()).toBeVisible();
+      await expect(page.getByTestId('nav-sidebar').getByRole('link', { name: 'Now' })).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId('band-asks').first()).toBeVisible();
     }
     const links = page.getByTestId('nav-sidebar').getByRole('link');
-    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/attention', '#/initiatives', '#/tasks', '#/timeline', '#/actors', '#/archive', '#/notes', '#/settings/keys']);
+    expect(await links.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual(['#/now', '#/initiatives', '#/tasks', '#/timeline', '#/actors', '#/archive', '#/notes', '#/settings/keys']);
   });
 });
 
 for (const vp of viewports) {
-  test.describe(`the Attention badge at ${vp.name}`, () => {
+  test.describe(`the Needs me badge at ${vp.name}`, () => {
     test.use({ viewport: vp.size });
 
     for (const [total, text] of [
@@ -255,13 +255,13 @@ for (const vp of viewports) {
         await expect(nav).toBeVisible();
         await sendTotal(page, total);
         const badge = nav.getByTestId('attention-badge');
-        const link = nav.getByRole('link', { name: /^Attention/ });
+        const link = nav.getByRole('link', { name: /^Now/ });
         if (total === 0) {
           await expect(badge).toHaveCount(0);
-          await expect(link).toHaveAccessibleName('Attention');
+          await expect(link).toHaveAccessibleName('Now');
         } else {
           await expect(badge).toHaveText(text);
-          await expect(link).toHaveAccessibleName(`Attention ${total} items need attention`);
+          await expect(link).toHaveAccessibleName(`Now ${total} items need attention`);
         }
         // No other entry carries a badge, and the page does not overflow.
         await expect(nav.getByTestId('attention-badge')).toHaveCount(total === 0 ? 0 : 1);
@@ -279,9 +279,9 @@ for (const vp of viewports) {
 test.describe('the phone tab bar', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('holds Attention, Initiatives, Tasks, Notes and More, each a 44 px target inside 390 px, even with the badge at 99+', async ({ page }) => {
+  test('holds Now, Initiatives, Tasks, Notes and More, each a 44 px target inside 390 px, even with the badge at 99+', async ({ page }) => {
     await feedStream(page);
-    await page.goto('/#/attention');
+    await page.goto('/#/now');
     const nav = page.getByTestId('nav-tabbar');
     await expect(nav).toBeVisible();
     await sendTotal(page, 120);
@@ -313,10 +313,10 @@ test.describe('the phone tab bar', () => {
   });
 
   test('More opens the one dialog listing Timeline, Actors, Archive and Settings in table order as 44 px links that reach their views, and Escape closes it', async ({ page }) => {
-    await page.goto('/#/attention');
+    await page.goto('/#/now');
     const nav = page.getByTestId('nav-tabbar');
     const more = nav.getByTestId('more-button');
-    await expect(nav.locator('[aria-current]')).toHaveCount(1); // Attention's link: More is not current there
+    await expect(nav.locator('[aria-current]')).toHaveCount(1); // Now's link: More is not current there
     await expect(more).not.toHaveAttribute('aria-current', /.*/);
     await more.click();
     const dialog = page.getByRole('dialog', { name: 'More' });

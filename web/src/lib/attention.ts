@@ -1,6 +1,6 @@
-// The Attention view's presentation and filters (PRD R9, SPEC 5.3 and 11): the five sections in order with their
+// The Needs me presentation and filters of the Now view (PRD R1, R9, SPEC 5.3 and 11): the five sections in order with their
 // empty states, the age of an ask, the asker-waiting label, and the tag/initiative filter's encoding in the URL
-// fragment's query (`#/attention?tag=work&tag=home&initiative=aa`) and in the query of `GET /attention`.
+// fragment's query (`#/now?tag=work&tag=home&initiative=aa`) and in the query of `GET /attention`.
 import type { components } from './api/schema';
 import type { Tone } from './presentation';
 
@@ -87,10 +87,10 @@ export function filterToQuery(filter: AttentionFilter): string {
   return params.toString();
 }
 
-/** The fragment of the view under a filter: `#/attention`, or `#/attention?...` when a value is set. */
-export function attentionHash(filter: AttentionFilter): string {
+/** The fragment of the Now view under a filter: `#/now`, or `#/now?...` when a value is set. */
+export function nowHash(filter: AttentionFilter): string {
   const query = filterToQuery(filter);
-  return query === '' ? '#/attention' : `#/attention?${query}`;
+  return query === '' ? '#/now' : `#/now?${query}`;
 }
 
 /** The filter held by a fragment: everything after the first `?` is the query. */

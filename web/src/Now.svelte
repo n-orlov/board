@@ -18,7 +18,7 @@
     type ActionsState,
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
-  import { SECTIONS, attentionHash, emptyText, isFiltered, sectionCount, toggled, type AttentionFilter } from './lib/attention';
+  import { isFiltered, nowHash, toggled, type AttentionFilter } from './lib/attention';
   import {
     AttentionApi,
     AttentionStore,
@@ -27,7 +27,6 @@
     filterChoices,
     forgetAttention,
     openAttention,
-    rowsFor,
     saveAttention,
     startFilter,
     type AttentionState,
@@ -35,6 +34,19 @@
   } from './lib/attentionView';
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
+  import {
+    BANDS,
+    WIDE_QUERY,
+    bandCount,
+    bandRows,
+    isOpen,
+    layoutOf,
+    loadBandPrefs,
+    saveBandPrefs,
+    withChoice,
+    type BandInfo,
+    type Layout,
+  } from './lib/nowBands';
   import { live } from './lib/live';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
@@ -93,7 +105,7 @@
 
   // The filter lives in the fragment and in the saved query: a change rewrites both in place (no history entry per choice).
   function persist(filter: AttentionFilter) {
-    replaceHash(attentionHash(filter));
+    replaceHash(nowHash(filter));
     saveAttention(viewEnv.storage, filter);
   }
 
@@ -109,13 +121,13 @@
     turns.begin();
     turns.reading();
     forgetAttention(viewEnv.storage);
-    replaceHash('#/attention');
+    replaceHash('#/now');
     void store.setFilter({ initiatives: [], tags: [] });
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare fragment restores the saved filter.
   async function hashChanged() {
-    if (resolveRoute(window.location.hash, ROUTES).id !== 'attention') return;
+    if (resolveRoute(window.location.hash, ROUTES).id !== 'now') return;
     const next = openAttention(viewEnv, window.location.hash);
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
@@ -123,7 +135,7 @@
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     const filter = startFilter(next, looked);
     if (filter !== next.filter) persist(filter);
-    if (!turns.mustRead(attentionHash(filter) === attentionHash(view.filter))) return;
+    if (!turns.mustRead(nowHash(filter) === nowHash(view.filter))) return;
     turns.reading();
     void store.setFilter(filter);
   }
@@ -139,6 +151,22 @@
     if (done !== undefined) toast = done;
   }
 
+  // The bands' open state: remembered apart for wide and narrow screens, and followed live as the window is resized.
+  let prefs = $state(loadBandPrefs(viewEnv.storage));
+  const wideQuery = typeof window.matchMedia === 'function' ? window.matchMedia(WIDE_QUERY) : undefined;
+  let layout: Layout = $state(layoutOf(wideQuery?.matches ?? true));
+  $effect(() => {
+    if (wideQuery === undefined) return;
+    const follow = () => (layout = layoutOf(wideQuery.matches));
+    wideQuery.addEventListener('change', follow);
+    return () => wideQuery.removeEventListener('change', follow);
+  });
+
+  function toggle(band: BandInfo, open: boolean) {
+    prefs = withChoice(prefs, band.key, layout, open);
+    saveBandPrefs(viewEnv.storage, prefs);
+  }
+
   const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
   const choices = $derived(filterChoices(known, view.filter));
   const now = new Date();
@@ -149,11 +177,11 @@
 
 <svelte:window onhashchange={hashChanged} />
 
-<section aria-labelledby="attention-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="attention-view">
-  <h2 id="attention-heading" class="mb-4 text-xl font-bold">Attention</h2>
+<section aria-labelledby="now-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
+  <h2 id="now-heading" class="mb-4 text-xl font-bold">Now</h2>
 
   {#if choices.tags.length + choices.initiatives.length > 0}
-    <div class="mb-4 flex flex-col gap-3" data-testid="attention-filters">
+    <div class="mb-4 flex flex-col gap-3" data-testid="now-filters">
       {#if choices.tags.length > 0}
         <div role="group" aria-label="Tags" class="flex flex-wrap items-center gap-2">
           <span class="text-sm text-text-muted">Tags</span>
@@ -194,7 +222,7 @@
 
   {#if view.attention === undefined}
     {#if view.error === undefined}
-      <div aria-busy="true" class="flex flex-col gap-3" data-testid="attention-skeleton">
+      <div aria-busy="true" class="flex flex-col gap-3" data-testid="now-skeleton">
         <span class="sr-only">Loading what needs attention…</span>
         {#each [0, 1, 2] as n (n)}
           <div class="h-16 animate-pulse rounded-md bg-border"></div>
@@ -203,75 +231,93 @@
     {/if}
   {:else}
     {@const data = view.attention}
-    <div class="flex flex-col gap-6 2xl:grid 2xl:grid-cols-2 2xl:items-start min-[144rem]:grid-cols-3" data-testid="attention-sections">
-      {#each SECTIONS as section (section.key)}
-        {@const rows = rowsFor(section.key, data, now)}
-        <section aria-labelledby="section-{section.key}" class="min-w-0 2xl:rounded-lg 2xl:border 2xl:border-border 2xl:p-4" data-testid="section-{section.key}">
-          <h3 id="section-{section.key}" class="mb-2 flex items-baseline gap-2 text-lg font-semibold">
-            {section.title}
-            <span class="text-sm font-normal text-text-muted" data-testid="section-count">{sectionCount(data.counts, section.key)}</span>
-          </h3>
-          {#if rows.length === 0}
-            <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="section-empty">{emptyText(section.key)}</p>
-          {:else}
-            <ul class="flex flex-col gap-3">
-              {#each rows as row (row.id)}
-                {@const initiative = row.initiative}
-                <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item">
-                  <p class="font-medium">
-                    {#if row.href !== undefined}
-                      <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="item-link">{row.title}</a>
-                    {:else}
-                      <span data-testid="item-title">{row.title}</span>
-                    {/if}
-                  </p>
-                  {#if row.details.length > 0}
-                    <p class="text-sm text-text-muted" data-testid="item-details">{row.details.join(' · ')}</p>
-                  {/if}
-                  <ul class="flex flex-col gap-2">
-                    {#each row.actors as actor, n (n)}
-                      <li class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="item-actor">
-                        <span class="text-text-muted">{actor.role}</span>
-                        <span class="font-medium" data-testid="actor-handle">{actor.handle}</span>
-                        {#if actor.wayBack !== undefined}
-                          <code class="font-mono text-text-muted" data-testid="actor-way-back">{actor.wayBack}</code>
-                          <button type="button" class={action} aria-label={copyLabel(actor)} data-testid="copy-way-back" onclick={() => void copy(actor)}
-                            >Copy way back</button
-                          >
+    <section aria-labelledby="needs-heading" data-testid="now-needs">
+      <h3 id="needs-heading" class="mb-3 text-lg font-semibold">Needs me</h3>
+      <div class="flex flex-col gap-3" data-testid="now-bands">
+        {#each BANDS as band (band.key)}
+          {@const rows = bandRows(band, data, now)}
+          {@const count = bandCount(data.counts, band)}
+          {@const open = isOpen(prefs, band.key, layout, count)}
+          <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid="band-{band.key}" data-open={open}>
+            <h4>
+              <button
+                type="button"
+                id="band-toggle-{band.key}"
+                class="flex min-h-11 w-full items-center gap-2 rounded-lg px-4 py-2 text-left text-base font-semibold"
+                aria-expanded={open}
+                aria-controls="band-panel-{band.key}"
+                data-testid="band-toggle"
+                onclick={() => toggle(band, !open)}
+              >
+                <svg viewBox="0 0 24 24" class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                <span>{band.title}</span>
+                <span class="text-sm font-normal text-text-muted" data-testid="band-count">{count}</span>
+              </button>
+            </h4>
+            <div id="band-panel-{band.key}" role="region" aria-labelledby="band-toggle-{band.key}" hidden={!open} class="px-4 pb-4" data-testid="band-panel">
+              {#if rows.length === 0}
+                <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="band-empty">{band.empty}</p>
+              {:else}
+                <ul class="flex flex-col gap-3">
+                  {#each rows as { section, row } (`${section}:${row.id}`)}
+                    {@const initiative = row.initiative}
+                    <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item" data-section={section}>
+                      <p class="font-medium">
+                        {#if row.href !== undefined}
+                          <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="item-link">{row.title}</a>
                         {:else}
-                          <span class="text-text-muted">no way back on record</span>
+                          <span data-testid="item-title">{row.title}</span>
                         {/if}
-                      </li>
-                    {/each}
-                  </ul>
-                  {#if initiative !== undefined}
-                    <p class="text-sm">
-                      <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(initiative)} data-testid="initiative-link">Initiative {initiative}</a>
-                    </p>
-                  {/if}
-                  {#if acting.itemError?.target === row.id}
-                    <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="item-error">{acting.itemError.text}</p>
-                  {/if}
-                  {#if actionsFor(section.key).length > 0}
-                    <div class="flex flex-wrap gap-2" data-testid="item-actions">
-                      {#each actionsFor(section.key) as kind (kind)}
-                        <button
-                          type="button"
-                          class={action}
-                          aria-label={actionName(kind, row.id)}
-                          data-testid="action-{kind}"
-                          onclick={() => void actions.open(kind, row.id)}>{actionLabel(kind)}</button
-                        >
-                      {/each}
-                    </div>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
-      {/each}
-    </div>
+                      </p>
+                      {#if row.details.length > 0}
+                        <p class="text-sm text-text-muted" data-testid="item-details">{row.details.join(' · ')}</p>
+                      {/if}
+                      <ul class="flex flex-col gap-2">
+                        {#each row.actors as actor, n (n)}
+                          <li class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="item-actor">
+                            <span class="text-text-muted">{actor.role}</span>
+                            <span class="font-medium" data-testid="actor-handle">{actor.handle}</span>
+                            {#if actor.wayBack !== undefined}
+                              <code class="font-mono text-text-muted" data-testid="actor-way-back">{actor.wayBack}</code>
+                              <button type="button" class={action} aria-label={copyLabel(actor)} data-testid="copy-way-back" onclick={() => void copy(actor)}
+                                >Copy way back</button
+                              >
+                            {:else}
+                              <span class="text-text-muted">no way back on record</span>
+                            {/if}
+                          </li>
+                        {/each}
+                      </ul>
+                      {#if initiative !== undefined}
+                        <p class="text-sm">
+                          <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={initiativeHref(initiative)} data-testid="initiative-link">Initiative {initiative}</a>
+                        </p>
+                      {/if}
+                      {#if acting.itemError?.target === row.id}
+                        <p role="alert" class="rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="item-error">{acting.itemError.text}</p>
+                      {/if}
+                      {#if actionsFor(section).length > 0}
+                        <div class="flex flex-wrap gap-2" data-testid="item-actions">
+                          {#each actionsFor(section) as kind (kind)}
+                            <button
+                              type="button"
+                              class={action}
+                              aria-label={actionName(kind, row.id)}
+                              data-testid="action-{kind}"
+                              onclick={() => void actions.open(kind, row.id)}>{actionLabel(kind)}</button
+                            >
+                          {/each}
+                        </div>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          </section>
+        {/each}
+      </div>
+    </section>
   {/if}
 </section>
 

@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
-import { SECTIONS } from '../web/src/lib/attention';
+import { BANDS } from '../web/src/lib/nowBands';
+import { band, items, showAllBands } from './now';
 
-// The Attention view (PRD R9, SPEC 5.3 and 11): five sections in order with their counts and empty states, items with
-// their actors and a button that copies the actor's way back, `#/` landing on it, the tag and initiative filters in the
+// The Needs me bands of the Now view (PRD R1, R9, SPEC 5.3 and 11): four bands in order with their counts and empty states,
+// items with their actors and a button that copies the actor's way back, `#/` landing on it, the tag and initiative filters in the
 // fragment's query, and a change made through the API showing up without a reload. The board is shared with the other
 // specs, so every assertion is scoped to an initiative this test made (the view's own initiative filter does the scoping).
 const viewports = [
@@ -107,25 +108,27 @@ async function ground(playwright: PlaywrightTestArgs['playwright'], baseURL: str
 
 const dialog = (page: Page) => page.getByTestId('dialog');
 
-const section = (page: Page, key: string) => page.getByTestId(`section-${key}`);
+// These tests need every band's items on screen, and the phone starts with some bands closed: seed them all open.
+test.beforeEach(async ({ page }) => showAllBands(page));
 
 for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    test('the five sections come in order with their counts, items, actors and way backs', async ({ page, playwright, baseURL }) => {
+    test('the four bands come in order with their counts, items, actors and way backs', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `five-${vp.name}`);
-      await page.goto(`/#/attention?initiative=${s.slug}`);
-      await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+      await page.goto(`/#/now?initiative=${s.slug}`);
+      await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
 
-      await expect(page.getByRole('heading', { level: 3 })).toHaveText(SECTIONS.map((x) => new RegExp(`^${x.title}`)), FIVE_SECONDS);
-      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts']) {
-        await expect(section(page, key).getByTestId('section-count')).toHaveText('1', FIVE_SECONDS);
-        await expect(section(page, key).getByTestId('section-empty')).toHaveCount(0);
-        await expect(section(page, key).getByTestId('attention-item')).toHaveCount(1);
+      await expect(page.getByRole('heading', { level: 3, name: 'Needs me' })).toBeVisible();
+      await expect(page.getByTestId('band-toggle')).toHaveText(BANDS.map((x) => new RegExp(`^\\s*${x.title}\\s*\\d+\\s*$`)), FIVE_SECONDS);
+      await expect(page.getByTestId('band-count')).toHaveText(['1', '2', '1', '1'], FIVE_SECONDS);
+      await expect(page.getByTestId('band-empty')).toHaveCount(0);
+      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts'] as const) {
+        await expect(items(page, key)).toHaveCount(1);
       }
 
-      const asks = section(page, 'open_asks').getByTestId('attention-item');
+      const asks = items(page, 'open_asks');
       await expect(asks).toContainText(s.ask);
       await expect(asks).toContainText(`Which way for five-${vp.name}?`);
       await expect(asks).toContainText('asker not waiting');
@@ -134,22 +137,22 @@ for (const vp of viewports) {
       await expect(asks.getByTestId('actor-way-back')).toHaveText(s.wayBack);
       await expect(asks.getByTestId('item-link')).toHaveAttribute('href', /^#\/t\//);
 
-      const done = section(page, 'done_not_closed').getByTestId('attention-item');
+      const done = items(page, 'done_not_closed');
       await expect(done).toContainText('Finished work');
       await expect(done.getByTestId('item-link')).toHaveAttribute('href', `#/t/${s.doneTask}`);
       await expect(done.getByTestId('actor-handle').first()).toHaveText(s.asker);
 
-      const lease = section(page, 'expired_leases').getByTestId('attention-item');
+      const lease = items(page, 'expired_leases');
       await expect(lease).toContainText(s.expiredLease);
       await expect(lease).toContainText('long edit');
       await expect(lease.getByTestId('actor-handle')).toHaveText(s.asker);
 
-      const watch = section(page, 'overdue_watches').getByTestId('attention-item');
+      const watch = items(page, 'overdue_watches');
       await expect(watch).toContainText('Slow watch');
       await expect(watch.getByTestId('item-link')).toHaveAttribute('href', `#/t/${s.watchTask}`);
       await expect(watch.getByTestId('actor-handle')).toHaveText(s.asker);
 
-      const conflict = section(page, 'conflicts').getByTestId('attention-item');
+      const conflict = items(page, 'conflicts');
       await expect(conflict).toContainText(s.resource);
       await expect(conflict.getByTestId('actor-handle')).toHaveText([s.asker, s.other]);
       await expect(conflict.getByTestId('copy-way-back')).toHaveCount(2);
@@ -157,23 +160,23 @@ for (const vp of viewports) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
 
-    test('a filter that keeps nothing shows the five empty states and zero counts', async ({ page, playwright, baseURL }) => {
+    test('a filter that keeps nothing shows the four empty states and zero counts', async ({ page, playwright, baseURL }) => {
       const api = await apiAs(playwright, baseURL, `quiet-${vp.name}`);
       const slug = `e2e-att-quiet-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug, title: 'Nothing to see' }, 201);
       await api.dispose();
-      await page.goto(`/#/attention?initiative=${slug}`);
-      await expect(page.getByTestId('section-empty')).toHaveCount(5, FIVE_SECONDS);
-      await expect(page.getByTestId('section-empty')).toHaveText(SECTIONS.map((x) => x.empty));
-      await expect(page.getByTestId('section-count')).toHaveText(['0', '0', '0', '0', '0']);
+      await page.goto(`/#/now?initiative=${slug}`);
+      await expect(page.getByTestId('band-empty')).toHaveCount(4, FIVE_SECONDS);
+      await expect(page.getByTestId('band-empty')).toHaveText(BANDS.map((x) => x.empty));
+      await expect(page.getByTestId('band-count')).toHaveText(['0', '0', '0', '0']);
       await expect(page.getByTestId('attention-item')).toHaveCount(0);
     });
 
     test('copy way back puts the actor\'s way back on the clipboard', async ({ page, context, playwright, baseURL }) => {
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       const s = await seed(playwright, baseURL, `copy-${vp.name}`);
-      await page.goto(`/#/attention?initiative=${s.slug}`);
-      const ask = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${s.slug}`);
+      const ask = items(page, 'open_asks');
       await expect(ask).toBeVisible(FIVE_SECONDS);
       await ask.getByRole('button', { name: `Copy way back of ${s.asker}` }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Copied the way back of ${s.asker}`, FIVE_SECONDS);
@@ -182,26 +185,26 @@ for (const vp of viewports) {
 
     test('the tag and initiative filters live in the fragment and survive a reload', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `filt-${vp.name}`);
-      await page.goto('/#/attention');
+      await page.goto('/#/now');
       const tag = page.getByRole('button', { name: s.tag, exact: true });
       await expect(tag).toBeVisible(FIVE_SECONDS);
       await tag.click();
-      await expect(page).toHaveURL(new RegExp(`#/attention\\?tag=${s.tag}$`));
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`));
       await expect(tag).toHaveAttribute('aria-pressed', 'true');
-      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(1, FIVE_SECONDS);
+      await expect(items(page, 'open_asks')).toHaveCount(1, FIVE_SECONDS);
 
       await page.getByRole('button', { name: s.slug, exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`#/attention\\?tag=${s.tag}&initiative=${s.slug}$`));
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}&initiative=${s.slug}$`));
 
       await page.reload();
       await expect(page.getByRole('button', { name: s.tag, exact: true })).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(page.getByRole('button', { name: s.slug, exact: true })).toHaveAttribute('aria-pressed', 'true');
-      await expect(page).toHaveURL(new RegExp(`#/attention\\?tag=${s.tag}&initiative=${s.slug}$`));
-      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(1, FIVE_SECONDS);
-      await expect(section(page, 'conflicts').getByTestId('attention-item')).toHaveCount(1);
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}&initiative=${s.slug}$`));
+      await expect(items(page, 'open_asks')).toHaveCount(1, FIVE_SECONDS);
+      await expect(items(page, 'conflicts')).toHaveCount(1);
 
       await page.getByTestId('clear-filters').click();
-      await expect(page).toHaveURL(/#\/attention$/);
+      await expect(page).toHaveURL(/#\/now$/);
       await expect(page.getByRole('button', { name: s.tag, exact: true })).toHaveAttribute('aria-pressed', 'false');
     });
 
@@ -214,8 +217,8 @@ for (const vp of viewports) {
         { question: 'Left or right?', details: 'Pick **one** <script>window.pwned = 1</script>', options: ['Left', 'Right'], task },
         201,
       );
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await expect(item).toContainText(ask.ref, FIVE_SECONDS);
       await expect(item.getByTestId('item-link')).toHaveAttribute('href', `#/t/${task}`);
       await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
@@ -234,8 +237,8 @@ for (const vp of viewports) {
 
       await expect(page.getByTestId('toast')).toHaveText(`Answered ${ask.ref}`, FIVE_SECONDS);
       await expect(dialog(page)).toHaveCount(0);
-      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
-      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('0', FIVE_SECONDS);
+      await expect(items(page, 'open_asks')).toHaveCount(0, FIVE_SECONDS);
+      await expect(band(page, 'asks').getByTestId('band-count')).toHaveText('0', FIVE_SECONDS);
       const got = await api.get(`/api/v1/asks/${ask.ref}`);
       expect(await got.json()).toMatchObject({ state: 'answered', answer: 'Right', channel: 'ui' });
       await api.dispose();
@@ -244,8 +247,8 @@ for (const vp of viewports) {
     test('an ask raised on an initiative with no task links its initiative and no task; a global ask links neither', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `ini-${vp.name}`);
       const direct = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Which direction overall?', initiative: slug }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await expect(item).toHaveCount(1, FIVE_SECONDS);
       await expect(item).toContainText(direct.ref);
       await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
@@ -254,8 +257,8 @@ for (const vp of viewports) {
       const global = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Anything at all?' }, 201);
       // The view saves its filter (R16), so a bare route would restore the initiative filter: clear it first.
       await page.getByTestId('clear-filters').click();
-      await page.goto('/#/attention');
-      const mine = section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: global.ref });
+      await page.goto('/#/now');
+      const mine = items(page, 'open_asks').filter({ hasText: global.ref });
       await expect(mine).toHaveCount(1, FIVE_SECONDS);
       await expect(mine.getByTestId('initiative-link')).toHaveCount(0);
       await expect(mine.getByTestId('item-link')).toHaveCount(0);
@@ -266,8 +269,8 @@ for (const vp of viewports) {
     test('Answer with free text sends what was typed', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `free-${vp.name}`);
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'What now?', initiative: slug }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await item.getByRole('button', { name: `Answer ${ask.ref}` }).click();
       await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
       await expect(page.getByTestId('answer-option')).toHaveCount(0);
@@ -276,7 +279,7 @@ for (const vp of viewports) {
       await dialog(page).getByRole('textbox', { name: 'Answer' }).fill('Ship it on Friday');
       await dialog(page).getByRole('button', { name: 'Send answer' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Answered ${ask.ref}`, FIVE_SECONDS);
-      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(items(page, 'open_asks')).toHaveCount(0, FIVE_SECONDS);
       expect(await (await api.get(`/api/v1/asks/${ask.ref}`)).json()).toMatchObject({ state: 'answered', answer: 'Ship it on Friday' });
       await api.dispose();
     });
@@ -284,8 +287,8 @@ for (const vp of viewports) {
     test('a refused answer is shown inside the dialog and the dialog stays', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `refuse-${vp.name}`);
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Too late?', initiative: slug }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await item.getByRole('button', { name: `Answer ${ask.ref}` }).click();
       await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
       await dialog(page).getByRole('button', { name: 'Send answer' }).click();
@@ -304,14 +307,14 @@ for (const vp of viewports) {
     test('Withdraw takes a reason and the ask leaves its section', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `wd-${vp.name}`);
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Never mind?', initiative: slug }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await item.getByRole('button', { name: `Withdraw ${ask.ref}` }).click();
       await expect(dialog(page)).toBeVisible(FIVE_SECONDS);
       await dialog(page).getByRole('textbox', { name: 'Reason (optional)' }).fill('Found it myself');
       await dialog(page).getByRole('button', { name: 'Withdraw ask' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Withdrew ${ask.ref}`, FIVE_SECONDS);
-      await expect(section(page, 'open_asks').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(items(page, 'open_asks')).toHaveCount(0, FIVE_SECONDS);
       expect(await (await api.get(`/api/v1/asks/${ask.ref}`)).json()).toMatchObject({ state: 'withdrawn' });
       await api.dispose();
     });
@@ -320,8 +323,8 @@ for (const vp of viewports) {
       const { slug, api } = await ground(playwright, baseURL, `close-${vp.name}`);
       const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Finished for good' }, 201)).ref;
       await post(api, `/api/v1/tasks/${task}/done`, {}, 200);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'done_not_closed').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'done_not_closed');
       await expect(item).toContainText('Finished for good', FIVE_SECONDS);
       await expect(item.getByTestId('initiative-link')).toHaveAttribute('href', `#/i/${slug}`);
       await item.getByRole('button', { name: `Close ${task}` }).click();
@@ -329,7 +332,7 @@ for (const vp of viewports) {
       await dialog(page).getByLabel('Resolution').selectOption('duplicate');
       await dialog(page).getByRole('button', { name: 'Close task' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Task ${task} closed as duplicate`, FIVE_SECONDS);
-      await expect(section(page, 'done_not_closed').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(items(page, 'done_not_closed')).toHaveCount(0, FIVE_SECONDS);
       expect(await (await api.get(`/api/v1/tasks/${task}`)).json()).toMatchObject({ status: 'closed', resolution: 'duplicate' });
       await api.dispose();
     });
@@ -339,8 +342,8 @@ for (const vp of viewports) {
       const task = (await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Ran out' }, 201)).ref;
       const lease = (await post<{ lease: { ref: string } }>(api, '/api/v1/leases', { task, intent: 'slow edit', resources: [`repo:ack-${vp.name}`] }, 201)).lease.ref;
       await expireLease(api, lease);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'expired_leases').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'expired_leases');
       await expect(item).toContainText(lease, FIVE_SECONDS);
       await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
       const dialog = page.getByRole('dialog', { name: `Acknowledge ${lease}` });
@@ -351,7 +354,7 @@ for (const vp of viewports) {
       await item.getByRole('button', { name: `Acknowledge ${lease}` }).click();
       await dialog.getByRole('button', { name: 'Acknowledge lease' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Lease ${lease} acknowledged`, FIVE_SECONDS);
-      await expect(section(page, 'expired_leases').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(items(page, 'expired_leases')).toHaveCount(0, FIVE_SECONDS);
       expect(await (await api.get(`/api/v1/leases/${lease}`)).json()).toMatchObject({ acked_by: 'operator' });
       await api.dispose();
     });
@@ -361,25 +364,25 @@ for (const vp of viewports) {
       const task = (
         await post<{ ref: string }>(api, '/api/v1/tasks', { initiative: slug, title: 'Late watch', kind: 'watch', cadence_seconds: 900, next_check_at: '2020-01-01T00:00:00Z' }, 201)
       ).ref;
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'overdue_watches').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'overdue_watches');
       await expect(item).toContainText('Late watch', FIVE_SECONDS);
       await item.getByRole('button', { name: `Record check ${task}` }).click();
       await expect(dialog(page)).toBeVisible();
       await dialog(page).getByRole('textbox', { name: 'Summary' }).fill('Nothing moved');
       await dialog(page).getByRole('button', { name: 'Record check' }).click();
       await expect(page.getByTestId('toast')).toHaveText(`Check recorded on ${task}`, FIVE_SECONDS);
-      await expect(section(page, 'overdue_watches').getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
+      await expect(items(page, 'overdue_watches')).toHaveCount(0, FIVE_SECONDS);
       await api.dispose();
     });
 
-    // R8, R9: whether an ask's asker is waiting reaches an open Attention view through the stream alone. Each held wait is a
+    // R8, R9: whether an ask's asker is waiting reaches an open Now view through the stream alone. Each held wait is a
     // real `GET /asks/<ref>?wait=10`, started after the view showed "asker not waiting".
     test('an ask shows its asker waiting while a wait is held and leaves its section once answered, without a reload', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `held-${vp.name}`);
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Is the asker waiting?', initiative: slug, mode: 'poll', blocking: true }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const item = section(page, 'open_asks').getByTestId('attention-item');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const item = items(page, 'open_asks');
       await expect(item).toContainText(ask.ref, FIVE_SECONDS);
       await expect(item).toContainText('asker not waiting');
       await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
@@ -394,7 +397,7 @@ for (const vp of viewports) {
         await held;
       }
       await expect(item).toHaveCount(0, FIVE_SECONDS);
-      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('0', FIVE_SECONDS);
+      await expect(band(page, 'asks').getByTestId('band-count')).toHaveText('0', FIVE_SECONDS);
       expect(await page.evaluate(() => (window as unknown as { liveMark?: boolean }).liveMark)).toBe(true);
       await api.dispose();
     });
@@ -403,8 +406,8 @@ for (const vp of viewports) {
       const { slug, api } = await ground(playwright, baseURL, `two-${vp.name}`);
       const first = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'First?', initiative: slug, mode: 'poll' }, 201)).ref;
       const second = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Second?', initiative: slug, mode: 'poll' }, 201)).ref;
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const row = (ref: string) => section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: ref });
+      await page.goto(`/#/now?initiative=${slug}`);
+      const row = (ref: string) => items(page, 'open_asks').filter({ hasText: ref });
       await expect(row(first)).toContainText('asker not waiting', FIVE_SECONDS);
       await expect(row(second)).toContainText('asker not waiting');
       await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
@@ -420,15 +423,15 @@ for (const vp of viewports) {
       }
       await expect(row(first)).toHaveCount(0, FIVE_SECONDS);
       await expect(row(second)).toContainText('asker not waiting');
-      await expect(section(page, 'open_asks').getByTestId('section-count')).toHaveText('1', FIVE_SECONDS);
+      await expect(band(page, 'asks').getByTestId('band-count')).toHaveText('1', FIVE_SECONDS);
       await api.dispose();
     });
 
     test('an ask raised by a wait that is already held appears as asker waiting, and a second wait on another ask follows on its own', async ({ page, playwright, baseURL }) => {
       const { slug, api } = await ground(playwright, baseURL, `late-${vp.name}`);
       const first = (await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Early?', initiative: slug, mode: 'poll' }, 201)).ref;
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const row = (ref: string) => section(page, 'open_asks').getByTestId('attention-item').filter({ hasText: ref });
+      await page.goto(`/#/now?initiative=${slug}`);
+      const row = (ref: string) => items(page, 'open_asks').filter({ hasText: ref });
       await expect(row(first)).toContainText('asker not waiting', FIVE_SECONDS);
       await expect(page.getByRole('status', { name: /^Live updates:/ })).toHaveText('live', FIVE_SECONDS);
 
@@ -449,15 +452,16 @@ for (const vp of viewports) {
     });
 
     for (const entry of ['/', '/#/']) {
-      test(`${entry} opens the Attention view`, async ({ page }) => {
+      test(`${entry} opens the Now view`, async ({ page }) => {
         await page.goto(entry);
-        await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
-        await expect(page.getByTestId('attention-view')).toBeVisible();
+        await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
+        await expect(page.getByTestId('now-view')).toBeVisible();
+        await expect(page).toHaveURL(/#\/now$/);
         const nav = page.getByRole('navigation', { name: 'Main' }).locator('visible=true');
-        await expect(nav.getByRole('link', { name: 'Attention' })).toHaveAttribute('aria-current', 'page');
+        await expect(nav.getByRole('link', { name: 'Now' })).toHaveAttribute('aria-current', 'page');
         // First in the nav. The name, not the text: the badge drawn on the icon (aria-hidden) comes before the label in the
         // text whenever the shared board has items, and the badge's words follow the label in the name.
-        await expect(nav.getByRole('link').first()).toHaveAccessibleName(/^Attention( \d+ items? needs? attention)?$/);
+        await expect(nav.getByRole('link').first()).toHaveAccessibleName(/^Now( \d+ items? needs? attention)?$/);
       });
     }
 
@@ -465,19 +469,19 @@ for (const vp of viewports) {
       const api = await apiAs(playwright, baseURL, `live-${vp.name}`, `ralphctl status live-${vp.name}`);
       const slug = `e2e-att-live-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug, title: 'Live attention' }, 201);
-      await page.goto(`/#/attention?initiative=${slug}`);
-      const asks = section(page, 'open_asks');
-      await expect(asks.getByTestId('section-empty')).toBeVisible(FIVE_SECONDS);
-      await expect(asks.getByTestId('section-count')).toHaveText('0');
+      await page.goto(`/#/now?initiative=${slug}`);
+      const asks = band(page, 'asks');
+      await expect(asks.getByTestId('band-empty')).toBeVisible(FIVE_SECONDS);
+      await expect(asks.getByTestId('band-count')).toHaveText('0');
 
       const ask = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Raised while you watch', initiative: slug }, 201);
       await expect(asks.getByTestId('attention-item')).toContainText(ask.ref, FIVE_SECONDS);
-      await expect(asks.getByTestId('section-count')).toHaveText('1', FIVE_SECONDS);
+      await expect(asks.getByTestId('band-count')).toHaveText('1', FIVE_SECONDS);
 
       await post(api, `/api/v1/asks/${ask.ref}/answer`, { answer: 'Left' }, 200);
       await expect(asks.getByTestId('attention-item')).toHaveCount(0, FIVE_SECONDS);
-      await expect(asks.getByTestId('section-empty')).toBeVisible(FIVE_SECONDS);
-      await expect(asks.getByTestId('section-count')).toHaveText('0', FIVE_SECONDS);
+      await expect(asks.getByTestId('band-empty')).toBeVisible(FIVE_SECONDS);
+      await expect(asks.getByTestId('band-count')).toHaveText('0', FIVE_SECONDS);
       await api.dispose();
     });
   });

@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
-// The Attention view's saved filters (PRD R16, SPEC 11): the tag and initiative filters are saved under
-// `vh.view.v1.attention`, a bare `#/attention` restores them before the first fetch (one `GET /attention`), a fragment
+// The Now view's saved filters (PRD R16, SPEC 11): the tag and initiative filters are saved under
+// `vh.view.v1.attention`, a bare `#/now` restores them before the first fetch (one `GET /attention/now`), a fragment
 // with its own query wins, Clear filters forgets them, and a restored initiative or tag the board does not have is dropped.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
@@ -25,12 +25,12 @@ const goTo = async (page: Page, label: string) => {
 const chip = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
 const saved = async (page: Page) => JSON.parse((await page.evaluate((k) => localStorage.getItem(k), KEY)) as string) as { v: number; query: string };
 
-// The `GET /attention` requests a page sends.
+// The `GET /attention/now` requests a page sends (the read behind the Needs me bands).
 function attentionReads(page: Page) {
   const reads = { count: 0, queries: [] as string[] };
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.pathname !== '/api/v1/attention') return;
+    if (url.pathname !== '/api/v1/attention/now') return;
     reads.count++;
     reads.queries.push(url.search);
   });
@@ -60,40 +60,40 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    test('a tag and an initiative filter survive Initiatives and back, and a new page of the same context, with one GET /attention each', async ({ page, playwright, baseURL }) => {
+    test('a tag and an initiative filter survive Initiatives and back, and a new page of the same context, with one GET /attention/now each', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const slug = `e2e-av-restore-${vp.name}`;
       const tag = `av-restore-${vp.name}`;
       await post(api, '/api/v1/initiatives', { slug, title: `Attention view ${vp.name}`, tags: [tag] }, 201);
 
-      await page.goto('/#/attention');
+      await page.goto('/#/now');
       await expect(chip(page, tag)).toBeVisible(FIVE_SECONDS);
       await chip(page, tag).click();
       await chip(page, slug).click();
       const query = `tag=${tag}&initiative=${slug}`;
-      await expect(page).toHaveURL(new RegExp(`#/attention\\?${query}$`));
+      await expect(page).toHaveURL(new RegExp(`#/now\\?${query}$`));
       expect(await saved(page)).toEqual({ v: 1, query });
 
       // Away through the nav and back through the nav: the bare route restores the filters with one fetch.
       await goTo(page, 'Initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
       const reads = attentionReads(page);
-      await goTo(page, 'Attention');
-      await expect(page).toHaveURL(new RegExp(`#/attention\\?${query}$`));
+      await goTo(page, 'Now');
+      await expect(page).toHaveURL(new RegExp(`#/now\\?${query}$`));
       await expect(chip(page, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(chip(page, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
+      await expect(page.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
       expect(reads.count).toBe(1);
       expect(reads.queries).toEqual([`?${query}`]);
 
-      // A new page of the same context opens `#/attention` bare and gets the same filters, again with one fetch.
+      // A new page of the same context opens `#/now` bare and gets the same filters, again with one fetch.
       const second = await page.context().newPage();
       const secondReads = attentionReads(second);
-      await second.goto('/#/attention');
+      await second.goto('/#/now');
       await expect(chip(second, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(chip(second, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(second.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
-      await expect(second).toHaveURL(new RegExp(`#/attention\\?${query}$`));
+      await expect(second.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(second).toHaveURL(new RegExp(`#/now\\?${query}$`));
       expect(secondReads.count).toBe(1);
       expect(secondReads.queries).toEqual([`?${query}`]);
       await second.close();
@@ -107,35 +107,35 @@ for (const vp of viewports) {
       await post(api, '/api/v1/initiatives', { slug: a, title: `Own a ${vp.name}` }, 201);
       await post(api, '/api/v1/initiatives', { slug: b, title: `Own b ${vp.name}` }, 201);
 
-      await page.goto(`/#/attention?initiative=${b}`);
+      await page.goto(`/#/now?initiative=${b}`);
       await expect(chip(page, b)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       expect((await saved(page)).query).toBe(`initiative=${b}`);
 
       // A new page opens a link with its own query: that one wins and is what is saved from now on.
       const link = await page.context().newPage();
-      await link.goto(`/#/attention?initiative=${a}`);
+      await link.goto(`/#/now?initiative=${a}`);
       await expect(chip(link, a)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(chip(link, b)).toHaveAttribute('aria-pressed', 'false');
       expect((await saved(link)).query).toBe(`initiative=${a}`);
 
       await goTo(link, 'Initiatives');
       await expect(link.getByTestId('initiative-row').first()).toBeVisible();
-      await goTo(link, 'Attention');
+      await goTo(link, 'Now');
       await expect(chip(link, a)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(chip(link, b)).toHaveAttribute('aria-pressed', 'false');
 
       // Clear filters: the defaults at once, nothing saved, and the defaults again after nav away and back.
       await link.getByTestId('clear-filters').click();
-      await expect(link).toHaveURL(/#\/attention$/);
+      await expect(link).toHaveURL(/#\/now$/);
       await expect(chip(link, a)).toHaveAttribute('aria-pressed', 'false');
       await expect(link.getByTestId('clear-filters')).toHaveCount(0);
       expect(await link.evaluate((k) => localStorage.getItem(k), KEY)).toBeNull();
       await goTo(link, 'Initiatives');
       await expect(link.getByTestId('initiative-row').first()).toBeVisible();
       const reads = attentionReads(link);
-      await goTo(link, 'Attention');
-      await expect(link.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
-      await expect(link).toHaveURL(/#\/attention$/);
+      await goTo(link, 'Now');
+      await expect(link.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(link).toHaveURL(/#\/now$/);
       await expect(chip(link, a)).toHaveAttribute('aria-pressed', 'false');
       await expect(link.getByTestId('clear-filters')).toHaveCount(0);
       expect(reads.queries).toEqual(['']);
@@ -156,12 +156,12 @@ for (const vp of viewports) {
 
       const fresh = await page.context().newPage();
       const reads = attentionReads(fresh);
-      await fresh.goto('/#/attention');
+      await fresh.goto('/#/now');
       const kept = `tag=${tag}&initiative=${slug}`;
-      await expect(fresh).toHaveURL(new RegExp(`#/attention\\?${kept}$`));
+      await expect(fresh).toHaveURL(new RegExp(`#/now\\?${kept}$`));
       await expect(chip(fresh, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await expect(chip(fresh, slug)).toHaveAttribute('aria-pressed', 'true');
-      await expect(fresh.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
       await expect(chip(fresh, 'av-ghost-tag')).toHaveCount(0);
       await expect(chip(fresh, 'e2e-av-ghost')).toHaveCount(0);
       // The unknown values never reached the server, and the saved query was rewritten without them.
@@ -183,15 +183,15 @@ for (const vp of viewports) {
       const fresh = await page.context().newPage();
       const lookups = await holdLookups(fresh);
       const reads = attentionReads(fresh);
-      await fresh.goto('/#/attention');
+      await fresh.goto('/#/now');
       await expect.poll(() => lookups.held()).toBeGreaterThan(0);
-      await fresh.evaluate((hash) => (window.location.hash = hash), `#/attention?initiative=${slug}`);
+      await fresh.evaluate((hash) => (window.location.hash = hash), `#/now?initiative=${slug}`);
       await expect.poll(() => reads.count, FIVE_SECONDS).toBe(1);
       lookups.release();
       await lookups.answered;
       await expect(chip(fresh, slug)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
       await fresh.waitForTimeout(500); // the late check's answer has had time to (wrongly) apply itself
-      await expect(fresh).toHaveURL(new RegExp(`#/attention\\?initiative=${slug}$`));
+      await expect(fresh).toHaveURL(new RegExp(`#/now\\?initiative=${slug}$`));
       expect((await saved(fresh)).query).toBe(`initiative=${slug}`);
       // Only the link's query was read: the restored values never reached the server, and nothing read again after.
       expect(reads.queries).toEqual([`?initiative=${slug}`]);
@@ -199,7 +199,7 @@ for (const vp of viewports) {
       await api.dispose();
     });
 
-    test('leaving for another view while a restored filter is still being checked: the departed Attention rewrites nothing and reads nothing', async ({ page }) => {
+    test('leaving for another view while a restored filter is still being checked: the departed Now rewrites nothing and reads nothing', async ({ page }) => {
       await page.goto('/#/initiatives');
       await expect(page.getByTestId('initiative-row').first()).toBeVisible();
       const restored = `tag=av-depart-gone-${vp.name}&initiative=e2e-av-depart-ghost-${vp.name}`;
@@ -208,11 +208,11 @@ for (const vp of viewports) {
       const fresh = await page.context().newPage();
       const lookups = await holdLookups(fresh);
       const reads = attentionReads(fresh);
-      await fresh.goto('/#/attention');
+      await fresh.goto('/#/now');
       await expect.poll(() => lookups.held()).toBeGreaterThan(0);
       await fresh.evaluate((hash) => (window.location.hash = hash), '#/tasks?kind=watch');
       await expect(fresh.getByTestId('tasks-view')).toBeVisible(FIVE_SECONDS);
-      await expect(fresh.getByTestId('attention-view')).toHaveCount(0);
+      await expect(fresh.getByTestId('now-view')).toHaveCount(0);
       lookups.release();
       await lookups.answered;
       await fresh.waitForTimeout(500); // the departed view's late check has had time to (wrongly) apply itself
@@ -240,9 +240,9 @@ for (const vp of viewports) {
         },
       );
       const reads = attentionReads(fresh);
-      await fresh.goto('/#/attention');
-      await expect(fresh.getByTestId('attention-sections')).toBeVisible(FIVE_SECONDS);
-      await expect(fresh).toHaveURL(/#\/attention$/);
+      await fresh.goto('/#/now');
+      await expect(fresh.getByTestId('now-bands')).toBeVisible(FIVE_SECONDS);
+      await expect(fresh).toHaveURL(/#\/now$/);
       expect(lookups).toBeGreaterThan(0);
       // The unknown values never reached the server, and the saved query is gone (the empty filter is the default).
       expect(reads.queries).toEqual(['']);

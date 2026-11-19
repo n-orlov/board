@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { expectInitiatives, foldChips, pickInitiative } from './chips';
+import { showAllBands } from './now';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
@@ -95,7 +96,7 @@ interface Route {
   sharedSort?: boolean;
   /** Leaves the page, for a route whose rows hold no link (the API keys table): the page is left by the navigation. */
   leave?: (page: Page) => Promise<void>;
-  /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table, the Attention view its chips). */
+  /** Where to scroll to, when the rows start further down than `SCROLL_TO` reaches (the Tasks view has the Now panel above its table, the Now view its chips). */
   scrollTo?: (page: Page) => Promise<number>;
 }
 
@@ -137,7 +138,7 @@ for (const vp of viewports) {
   test.describe(`${vp.name} ${vp.size.width}x${vp.size.height}`, () => {
     test.use({ viewport: vp.size });
 
-    test('the Attention view comes back with its tag and initiative filters and its scroll', async ({ page, playwright, baseURL }) => {
+    test('the Now view comes back with its tag and initiative filters and its scroll', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const slug = `e2e-hr-att-${vp.name}`;
       const tag = `hr-att-${vp.name}`;
@@ -148,11 +149,12 @@ for (const vp of viewports) {
         await post(api, `/api/v1/tasks/${task.ref}/done`, {}, 200);
       }
 
-      await page.goto('/#/attention');
+      await showAllBands(page);
+      await page.goto('/#/now');
       await expect(chip(page, tag)).toBeVisible(FIVE_SECONDS);
       await chip(page, tag).click();
       await chip(page, slug).click();
-      await expect(page).toHaveURL((url) => url.hash === `#/attention?tag=${tag}&initiative=${slug}`);
+      await expect(page).toHaveURL((url) => url.hash === `#/now?tag=${tag}&initiative=${slug}`);
       await expect(page.getByTestId('attention-item').first()).toBeVisible(FIVE_SECONDS);
       await expect.poll(() => page.getByTestId('attention-item').count(), FIVE_SECONDS).toBeGreaterThanOrEqual(16);
 
@@ -461,8 +463,8 @@ for (const vp of viewports) {
 
       const left = { scrollY: await scrollY(page), fragment: fragment(page), window: await windowShown(), rows: await rowsScroll() };
       expect(queryOf(page).get('initiative')).toBe(slug);
-      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }).click();
-      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+      await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Now' }).click();
+      await expect(page).toHaveURL(/#\/now/, FIVE_SECONDS);
 
       const restored = async () => {
         await expect(page).toHaveURL((url) => url.hash === left.fragment, FIVE_SECONDS);
@@ -476,7 +478,7 @@ for (const vp of viewports) {
       await page.goBack();
       await restored();
       await page.goForward();
-      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+      await expect(page).toHaveURL(/#\/now/, FIVE_SECONDS);
       await page.goBack();
       await restored();
       await api.dispose();
@@ -505,9 +507,9 @@ for (const vp of viewports) {
         rows: own,
         shown: async () => undefined, // the view has no filter
         // The table holds no link: the page is left by the navigation (a fixed bar, so nothing scrolls on the way).
-        links: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }),
-        leave: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Attention' }).click(),
-        landing: /#\/attention/,
+        links: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Now' }),
+        leave: (p) => p.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Now' }).click(),
+        landing: /#\/now/,
         sortColumn: 'name',
       };
       await leaveAndReturn(page, route, phone);

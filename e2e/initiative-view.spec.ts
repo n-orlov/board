@@ -273,8 +273,8 @@ for (const vp of viewports) {
     test('a saved query with an unknown status or column opens at the defaults', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const s = await seed(api, `e2e-ip-bad-${vp.name}`);
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'status=bogus&sort=bogus&dir=asc'] as const);
       const fresh = await page.context().newPage();
       await fresh.goto(`/#/i/${s.slug}`);

@@ -228,8 +228,8 @@ for (const vp of viewports) {
     test('a restored initiative the board does not have is dropped, the other restored values stay', async ({ page, playwright, baseURL }) => {
       const api = await apiContext(playwright, baseURL);
       const { slug } = await seed(api, `e2e-tv-drop-${vp.name}`);
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(
         ([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })),
         [KEY, 'initiative=e2e-tv-ghost&kind=watch&status=bogus&sort=title&dir=asc'] as const,
@@ -255,8 +255,8 @@ for (const vp of viewports) {
     });
 
     test('a link opened while a restored initiative is still being checked wins: the late check rewrites nothing and reads nothing', async ({ page }) => {
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, `initiative=e2e-tv-race-ghost-${vp.name}&kind=watch`] as const);
 
       const fresh = await page.context().newPage();
@@ -284,8 +284,8 @@ for (const vp of viewports) {
     });
 
     test('leaving for another view while a restored initiative is still being checked: the departed Tasks rewrites nothing and reads nothing', async ({ page }) => {
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, `initiative=e2e-tv-depart-ghost-${vp.name}&kind=watch`] as const);
 
       const fresh = await page.context().newPage();
@@ -307,8 +307,8 @@ for (const vp of viewports) {
     });
 
     test('a restored initiative is dropped when the initiatives lookup answers with no initiatives at all', async ({ page }) => {
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'initiative=e2e-tv-empty-ghost&kind=watch'] as const);
 
       const fresh = await page.context().newPage();

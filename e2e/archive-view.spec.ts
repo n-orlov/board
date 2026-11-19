@@ -180,8 +180,8 @@ for (const vp of viewports) {
 
     test('a saved query with an unknown column or window opens the default order and the default window', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `bad-${vp.name}`);
-      await page.goto('/#/attention');
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await page.goto('/#/now');
+      await expect(page.getByTestId('band-asks')).toBeVisible();
       await page.evaluate(([k, query]) => localStorage.setItem(k, JSON.stringify({ v: 1, query })), [KEY, 'window=14&sort=action&dir=asc'] as const);
       const fresh = await page.context().newPage();
       await fresh.goto('/#/archive');

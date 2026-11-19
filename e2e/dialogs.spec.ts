@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
+import { showAllBands } from './now';
 import { expect, test as base, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // R8: the four dialogs/sheets of the R4 set (new initiative, new API key, revoke confirmation, account menu),
@@ -327,7 +328,8 @@ async function expireLease(api: APIRequestContext, ref: string) {
 const attentionRow = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
 
 const onAttention = async (page: Page, ref: string) => {
-  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
+  await showAllBands(page);
+  await page.goto(`/#/now?initiative=${P2_SLUG}`);
   await expect(attentionRow(page, ref)).toBeVisible();
 };
 

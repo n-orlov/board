@@ -5,7 +5,7 @@ import {
   ageText,
   apiQuery,
   askerWaitingLabel,
-  attentionHash,
+  nowHash,
   emptyText,
   filterFromHash,
   filterFromQuery,
@@ -72,14 +72,14 @@ const set = (patch: Partial<AttentionFilter>): AttentionFilter => ({ ...DEFAULT_
 describe('the default filter', () => {
   it('has an empty query and the bare fragment', () => {
     expect(filterToQuery(DEFAULT_ATTENTION_FILTER)).toBe('');
-    expect(attentionHash(DEFAULT_ATTENTION_FILTER)).toBe('#/attention');
+    expect(nowHash(DEFAULT_ATTENTION_FILTER)).toBe('#/now');
     expect(isFiltered(DEFAULT_ATTENTION_FILTER)).toBe(false);
     expect(apiQuery(DEFAULT_ATTENTION_FILTER).toString()).toBe('');
   });
   it('is what an empty query and a bare fragment read as', () => {
     expect(filterFromQuery('')).toEqual(DEFAULT_ATTENTION_FILTER);
-    expect(filterFromHash('#/attention')).toEqual(DEFAULT_ATTENTION_FILTER);
-    expect(filterFromHash('#/attention?')).toEqual(DEFAULT_ATTENTION_FILTER);
+    expect(filterFromHash('#/now')).toEqual(DEFAULT_ATTENTION_FILTER);
+    expect(filterFromHash('#/now?')).toEqual(DEFAULT_ATTENTION_FILTER);
   });
 });
 
@@ -97,8 +97,8 @@ describe('the filter round trip', () => {
     expect(filterToQuery(filter)).toBe(query);
     expect(isFiltered(filter)).toBe(true);
     expect(filterFromQuery(query)).toEqual(filter);
-    expect(attentionHash(filter)).toBe(`#/attention?${query}`);
-    expect(filterFromHash(attentionHash(filter))).toEqual(filter);
+    expect(nowHash(filter)).toBe(`#/now?${query}`);
+    expect(filterFromHash(nowHash(filter))).toEqual(filter);
     expect(apiQuery(filter).toString()).toBe(query);
   });
   it('sends repeated tags as repeated API keys', () => {

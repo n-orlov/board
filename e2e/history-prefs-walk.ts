@@ -9,7 +9,7 @@ export const viewports = [
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
 export const FIVE_SECONDS = { timeout: 5000 };
-const AWAY = '#/attention';
+const AWAY = '#/now';
 
 export async function post(api: APIRequestContext, path: string, data: object, status: number): Promise<{ ref: string }> {
   const response = await api.post(path, { data });

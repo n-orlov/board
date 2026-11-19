@@ -30,7 +30,7 @@ for (const vp of viewports) {
       baseURL,
     }) => {
       await page.goto('/');
-      await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
 
       const cookies = await page.context().cookies();
       const session = cookies.find((c) => c.name === 'board_session');
@@ -66,7 +66,7 @@ for (const vp of viewports) {
       await old.dispose();
 
       await page.getByRole('link', { name: 'Sign in' }).click();
-      await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
       expect(visited).toContain('/auth/login');
       await expect(page.getByTestId('signed-out')).toHaveCount(0);
     });
@@ -81,7 +81,7 @@ for (const vp of [viewports[0], viewports[2]]) {
     await page.goto('/');
     const session = (await (await sessionResponse).json()) as { actor: string; email: string };
     expect(session.actor).not.toBe('');
-    await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
 
     // Two account buttons exist (rail and sidebar foot); only the one at this width is visible.
     await page.getByRole('button', { name: 'Account menu' }).locator('visible=true').click();
@@ -99,12 +99,12 @@ test('the signing-in card shows the product name and a spinner while the session
   await page.goto('/');
   await expect(page.getByTestId('spinner')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Village Hall' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
 });
 
 test('a session that cannot be read shows the problem and a Retry that loads it again', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
   let failing = true;
   await page.route('**/auth/session', async (route) => {
     if (!failing) return route.continue();
@@ -119,6 +119,6 @@ test('a session that cannot be read shows the problem and a Retry that loads it 
   await expect(page.getByTestId('session-error')).toHaveText('The session store is temporarily unavailable.');
   failing = false;
   await page.getByRole('button', { name: 'Retry' }).click();
-  await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Now' })).toBeVisible();
   expect(visited).not.toContain('/auth/login');
 });

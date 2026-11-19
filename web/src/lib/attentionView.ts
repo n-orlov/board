@@ -1,5 +1,5 @@
-// The Attention view's data layer and row model (PRD R9, SPEC 5.3 and 11). `AttentionApi` reads `GET /attention`
-// under the filter, `AttentionStore` holds the latest answer, and `rowsFor` turns one section into the rows the
+// The Now view's Needs me data layer and row model (PRD R1, R9, SPEC 5.3, 6.8.1 and 11). `AttentionApi` reads
+// `GET /attention/now` under the filter and keeps its `attention` part, `AttentionStore` holds the latest answer, and `rowsFor` turns one section into the rows the
 // view draws: a title, a link to the task, detail lines and the actors involved, each with the way back to copy.
 import { mountPrefix } from './apibase';
 import type { components } from './api/schema';
@@ -21,6 +21,7 @@ import type { Browser } from './session';
 import { clearViewQuery, openView, saveViewQuery, type ViewEnv, type ViewStorage } from './viewState';
 
 export type Attention = components['schemas']['Attention'];
+type NowBoard = components['schemas']['AttentionNow'];
 type Actor = components['schemas']['AttentionActor'];
 type BoardEvent = components['schemas']['Event'];
 
@@ -156,7 +157,7 @@ export class AttentionApi {
 
   async get(filter: AttentionFilter): Promise<Attention> {
     const query = apiQuery(filter).toString();
-    const path = `/api/v1/attention${query === '' ? '' : `?${query}`}`;
+    const path = `/api/v1/attention/now${query === '' ? '' : `?${query}`}`;
     let response: Response;
     try {
       response = await this.browser.fetch(mountPrefix(this.browser.pathname) + path, {
@@ -167,7 +168,7 @@ export class AttentionApi {
       throw new Error('The server is not reachable.');
     }
     if (!response.ok) throw new Error(await problemText(response, 'Reading what needs attention'));
-    return (await response.json()) as Attention;
+    return ((await response.json()) as NowBoard).attention;
   }
 }
 
@@ -217,7 +218,7 @@ export class AttentionStore {
   }
 }
 
-/** The name of the view's saved state (PRD R16): the key is `vh.view.v1.attention`. */
+/** The name of the view's saved state (PRD R16): the key is `vh.view.v1.attention`, kept from when the view was Attention. */
 export const ATTENTION_VIEW = 'attention';
 
 /** What opening the view found: the filter to start with, and whether it came from the saved query (a bare route). */
@@ -228,13 +229,13 @@ export interface OpenedAttention {
 
 /**
  * Opens the view for the fragment it is on, before its first fetch. A fragment with a query wins and is saved; a bare
- * one (`#/attention`, or any fragment the router sends here) restores the saved query by rewriting the fragment in
+ * one (`#/now`, or any fragment the router sends here) restores the saved query by rewriting the fragment in
  * place, so the view reads `GET /attention` once, under the restored filter.
  */
 export function openAttention(env: ViewEnv, hash: string): OpenedAttention {
   const at = hash.indexOf('?');
   const own = at < 0 ? '' : hash.slice(at + 1);
-  const query = openView(env, ATTENTION_VIEW, '#/attention', own);
+  const query = openView(env, ATTENTION_VIEW, '#/now', own);
   return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
 }
 

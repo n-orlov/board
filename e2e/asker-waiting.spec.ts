@@ -59,8 +59,8 @@ for (const viewport of viewports) {
       });
       try {
         const { slug, ref } = await seed(api, viewport.name, 'attention');
-        await page.goto(`/#/attention?initiative=${slug}`);
-        const row = page.getByTestId('section-open_asks').getByTestId('attention-item');
+        await page.goto(`/#/now?initiative=${slug}`);
+        const row = page.getByTestId('band-asks').getByTestId('attention-item');
         await expect(row).toContainText(ref, FIVE_SECONDS);
         await expect(row).toContainText('asker not waiting', FIVE_SECONDS);
         await expect(page.getByRole('status', { name: 'Live updates: live' })).toBeVisible(FIVE_SECONDS);

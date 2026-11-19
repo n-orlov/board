@@ -19,7 +19,7 @@ async function post<T = Record<string, never>>(api: APIRequestContext, path: str
   return (await response.json()) as T;
 }
 
-// Runs a lease out the way attention.spec.ts does: its expiry moves into the past in the e2e store, then an API read expires it.
+// Runs a lease out the way needs-me.spec.ts does: its expiry moves into the past in the e2e store, then an API read expires it.
 async function expireLease(api: APIRequestContext, ref: string) {
   const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
   try {

@@ -215,18 +215,18 @@ function browser(respond: (url: string) => Promise<Response>, pathname = '/'): {
 }
 
 describe('AttentionApi', () => {
-  it('reads /attention with the filter as repeated keys and the session cookie', async () => {
-    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify(full)));
+  it('reads /attention/now with the filter as repeated keys and the session cookie, and keeps its attention part', async () => {
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: full, in_flight: [], recent: [] })));
     const got = await new AttentionApi(b).get({ tags: ['a', 'b'], initiatives: ['x'] });
     expect(got).toEqual(full);
-    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/attention?tag=a&tag=b&initiative=x');
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/attention/now?tag=a&tag=b&initiative=x');
     expect(fetchFn.mock.calls[0]![1]).toMatchObject({ credentials: 'same-origin', headers: { Accept: 'application/json' } });
   });
 
   it('asks for no query without a filter and follows the mount prefix', async () => {
-    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ counts })), '/board/');
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: { counts }, in_flight: [], recent: [] })), '/board/');
     await new AttentionApi(b).get(DEFAULT_ATTENTION_FILTER);
-    expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/attention');
+    expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/attention/now');
   });
 
   it('says the server is not reachable when the fetch throws', async () => {
@@ -347,8 +347,8 @@ describe('saved Attention filters', () => {
 
   it('restores a bare route in place, before any fetch, and reports it as restored', () => {
     const e = env(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work&initiative=aa' }) }));
-    expect(openAttention(e, '#/attention')).toEqual({ filter: { tags: ['work'], initiatives: ['aa'] }, restored: true });
-    expect(e.hashes).toEqual(['#/attention?tag=work&initiative=aa']);
+    expect(openAttention(e, '#/now')).toEqual({ filter: { tags: ['work'], initiatives: ['aa'] }, restored: true });
+    expect(e.hashes).toEqual(['#/now?tag=work&initiative=aa']);
     // Any fragment the router sends to Attention is bare too.
     expect(openAttention(env(memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=work' }) })), '#/').restored).toBe(true);
   });
@@ -356,7 +356,7 @@ describe('saved Attention filters', () => {
   it('lets a fragment with its own query win and saves it, without restoring', () => {
     const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=old' }) });
     const e = env(storage);
-    expect(openAttention(e, '#/attention?tag=new')).toEqual({ filter: { tags: ['new'], initiatives: [] }, restored: false });
+    expect(openAttention(e, '#/now?tag=new')).toEqual({ filter: { tags: ['new'], initiatives: [] }, restored: false });
     expect(e.hashes).toEqual([]);
     expect(JSON.parse(storage.data.get(KEY)!).query).toBe('tag=new');
   });
@@ -364,17 +364,17 @@ describe('saved Attention filters', () => {
   it('starts at the defaults with nothing saved, a malformed value, another version or no storage', () => {
     for (const raw of [undefined, 'nope', '{"v":2,"query":"tag=x"}', '{"v":1,"query":5}']) {
       const e = env(memory(raw === undefined ? {} : { [KEY]: raw }));
-      expect(openAttention(e, '#/attention')).toEqual({ filter: DEFAULT_ATTENTION_FILTER, restored: false });
+      expect(openAttention(e, '#/now')).toEqual({ filter: DEFAULT_ATTENTION_FILTER, restored: false });
       expect(e.hashes).toEqual([]);
     }
-    expect(openAttention(env(undefined), '#/attention').restored).toBe(false);
+    expect(openAttention(env(undefined), '#/now').restored).toBe(false);
   });
 
   it('forgets the saved filter', () => {
     const storage = memory({ [KEY]: JSON.stringify({ v: 1, query: 'tag=x' }) });
     forgetAttention(storage);
     expect(storage.data.has(KEY)).toBe(false);
-    expect(openAttention(env(storage), '#/attention').restored).toBe(false);
+    expect(openAttention(env(storage), '#/now').restored).toBe(false);
   });
 });
 
@@ -431,7 +431,7 @@ describe('startFilter', () => {
 
   it('restores from storage and drops through the same module, the empty answer included', () => {
     const e = env(memory({ ['vh.view.v1.attention']: JSON.stringify({ v: 1, query: 'tag=gone&initiative=ghost' }) }));
-    const opened = openAttention(e, '#/attention');
+    const opened = openAttention(e, '#/now');
     expect(opened.restored).toBe(true);
     expect(startFilter(opened, [])).toEqual(DEFAULT_ATTENTION_FILTER);
   });

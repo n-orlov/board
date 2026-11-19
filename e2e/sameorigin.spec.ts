@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { expectInitiatives } from './chips';
+import { showAllBands } from './now';
 
 // R1: the UI makes no cross-origin request (no web font, CDN, remote icon or script). Signs in through the
 // mock provider (another port, so another origin: recording starts only afterwards, and no API key rides
@@ -10,7 +11,7 @@ import { expectInitiatives } from './chips';
 // views `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, each loaded in full over a seeded watch task with a blocker, a
 // dependent, a milestone, a lease and a conflict, and each again with a dialog opened on the page (edit initiative,
 // new task, edit task, add dependency, end lease): 8 states x 2 viewports = 16 more visits. Every recorded http(s)/ws(s) URL must have the board
-// server's origin. R13 adds PHASE2_STATES, the 2 views `#/attention` and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close
+// server's origin. R13 adds PHASE2_STATES, the 2 views `#/now` and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close
 // from attention, acknowledge and record check from attention: 8 states x 2 viewports = 16 more visits, each of which must also
 // record the `/api/v1/stream` request, so the EventSource is held to the same bar as every fetch. R12 adds PHASE3_STATES, the finite list of the 3 views
 // `#/timeline`, `#/actors` and `#/archive`, the Needs attention sections of `#/tasks` and `#/i/<slug>`, the Stranded panel, the 3 attention chips and badges and the 3 new dialogs
@@ -25,10 +26,10 @@ const viewports = [
 
 const views = [
   {
-    name: 'Attention',
+    name: 'Now',
     hash: '#/',
     ready: async (page: Page) => {
-      await expect(page.getByTestId('section-open_asks')).toBeVisible();
+      await expect(page.getByTestId('band-asks')).toBeVisible();
     },
   },
   {
@@ -236,7 +237,8 @@ async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL:
 const attentionItem = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
 
 const openAttention = async (page: Page, seed: Seed2) => {
-  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
+  await showAllBands(page);
+  await page.goto(`/#/now?initiative=${P2_SLUG}`);
   await expect(attentionItem(page, seed.ask)).toBeVisible();
 };
 
@@ -249,7 +251,7 @@ type Phase2State = { name: string; open: (page: Page, seed: Seed2, api: APIReque
 
 // The finite list of Phase 2 states this spec records: 2 views and the six dialogs opened on them.
 const PHASE2_STATES: Phase2State[] = [
-  { name: 'view #/attention', open: openAttention },
+  { name: 'view #/now', open: openAttention },
   {
     name: 'view #/notes',
     open: async (page, seed) => {
@@ -604,7 +606,7 @@ test('the Phase 3 list names the 3 views, the Needs attention sections, the Stra
 
 test('the Phase 2 list names the 2 views and the six dialogs', () => {
   const names = PHASE2_STATES.map((s) => s.name);
-  expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes']);
+  expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/now', 'view #/notes']);
   expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
     'answer ask',
     'withdraw ask',

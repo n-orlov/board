@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { expectInitiatives } from './chips';
+import { items, showAllBands } from './now';
 
 // Signs in through the mock provider, so no API key rides along (see login.spec.ts).
 // R4 at the phone viewport: on each view and with each dialog/sheet of the R4 set open, every visible
@@ -10,7 +11,7 @@ import { expectInitiatives } from './chips';
 // R12 extends it to the Phase 1 views and dialogs as a finite, named list of states (PHASE1_STATES below): the views
 // `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, and the 9 dialogs edit initiative, close initiative, new task, edit task,
 // close task, milestone, record check, add dependency and end lease.
-// R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/attention` with its five sections
+// R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/now` with its five sections
 // filled, `#/notes`, the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge and record check
 // from attention, and the live indicator in its three states.
 // R12 extends it to the Phase 3 views and dialogs (PHASE3_STATES below): `#/timeline`, `#/actors`, `#/archive`, the Needs attention
@@ -318,8 +319,9 @@ async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL:
 const attentionItem = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
 
 const openAttention = async (page: Page, seed: Seed2) => {
-  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
-  await expect(page.getByTestId('section-count')).toHaveCount(5);
+  await showAllBands(page);
+  await page.goto(`/#/now?initiative=${P2_SLUG}`);
+  await expect(page.getByTestId('band-count')).toHaveCount(4);
   await expect(attentionItem(page, seed.ask)).toBeVisible();
 };
 
@@ -329,12 +331,12 @@ type Phase2State = { name: string; minimum: number; open: (page: Page, seed: See
 // Acknowledge's state is its confirmation sheet.
 const PHASE2_STATES: Phase2State[] = [
   {
-    name: 'view #/attention',
+    name: 'view #/now',
     minimum: 15,
     open: async (page, seed) => {
       await openAttention(page, seed);
-      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts']) {
-        await expect(page.getByTestId(`section-${key}`).getByTestId('attention-item').first()).toBeVisible();
+      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts'] as const) {
+        await expect(items(page, key).first()).toBeVisible();
       }
       await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
     },
@@ -623,7 +625,7 @@ test.describe('phone 390x844', () => {
       expect((await seed.post('/api/v1/asks', { data: { question: 'Is this big enough?', initiative: 'e2e-touch-att' } })).status()).toBe(201);
     }
     await seed.dispose();
-    await page.goto('/#/attention?initiative=e2e-touch-att');
+    await page.goto('/#/now?initiative=e2e-touch-att');
     await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
     await expectTouchFriendly(page, 6);
   });
@@ -786,7 +788,7 @@ test.describe('phone 390x844', () => {
           (window as unknown as { EventSource: unknown }).EventSource = Silent;
         });
       }
-      await page.goto('/#/attention');
+      await page.goto('/#/now');
       if (word === 'reconnecting') await page.reload(); // beforeEach already loaded the app: the stand-in applies to a fresh document
       const indicator = page.getByRole('status', { name: /^Live updates:/ });
       await expect(indicator).toBeVisible();
@@ -819,7 +821,7 @@ test.describe('phone 390x844', () => {
 
   test('the Phase 2 list names the views, the six dialogs and the three live indicator states', () => {
     const names = PHASE2_STATES.map((s) => s.name);
-    expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes']);
+    expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/now', 'view #/notes']);
     expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
       'answer ask',
       'withdraw ask',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, phoneSplit, resolveRoute, routeParam, type Route } from './routes';
+import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, phoneSplit, redirectHash, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -20,27 +20,27 @@ describe('resolveRoute', () => {
 
   it.each([
     ['#/settings/keys', 'keys'],
-    ['#/', 'attention'],
-    ['', 'attention'],
-    ['#/attention', 'attention'],
-    ['#/attention?tag=work&initiative=aa', 'attention'],
+    ['#/', 'now'],
+    ['', 'now'],
+    ['#/now', 'now'],
+    ['#/now?tag=work&initiative=aa', 'now'],
     ['#/initiatives', 'initiatives'],
-    ['#/settings', 'attention'],
-    ['#/settings/keys/', 'attention'],
+    ['#/settings', 'now'],
+    ['#/settings/keys/', 'now'],
     ['#/tasks', 'tasks'],
     ['#/timeline', 'timeline'],
     ['#/timeline?initiative=aa&closed=30', 'timeline'],
     ['#/actors', 'actors'],
-    ['#/actors/', 'attention'],
+    ['#/actors/', 'now'],
     ['#/archive', 'archive'],
     ['#/archive?window=7', 'archive'],
-    ['#/archive/', 'attention'],
+    ['#/archive/', 'now'],
     ['#/tasks?status=done&kind=watch', 'tasks'],
-    ['#/tasks/', 'attention'],
+    ['#/tasks/', 'now'],
     ['#/i/phone-onboard?x=1', 'initiative'],
     ['#/t/aa-1', 'task'],
-    ['#/t/', 'attention'],
-    ['#/t/aa-1/x', 'attention'],
+    ['#/t/', 'now'],
+    ['#/t/aa-1/x', 'now'],
   ])('maps the app table %j to %s', (hash, want) => {
     expect(resolveRoute(hash, ROUTES).id).toBe(want);
   });
@@ -119,7 +119,7 @@ describe('ROUTES', () => {
     expect(routeParam('#/i/phone-onboard', ROUTES)).toBe('phone-onboard');
     expect(routeParam('#/i/phone-onboard?x=1', ROUTES)).toBe('phone-onboard');
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
-      ['attention', false],
+      ['now', false],
       ['initiatives', true],
       ['tasks', false],
       ['timeline', false],
@@ -136,7 +136,7 @@ describe('ROUTES', () => {
     expect(routeParam('#/t/aa-1', ROUTES)).toBe('aa-1');
     expect(routeParam('#/t/', ROUTES)).toBe('');
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
-      ['attention', false],
+      ['now', false],
       ['initiatives', false],
       ['tasks', true],
       ['timeline', false],
@@ -150,7 +150,7 @@ describe('ROUTES', () => {
   it('puts Tasks between Initiatives and Timeline in the navigation, current on its filtered fragment', () => {
     const route = resolveRoute('#/tasks?status=done', ROUTES);
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.href, e.current])).toEqual([
-      ['attention', '#/attention', false],
+      ['now', '#/now', false],
       ['initiatives', '#/initiatives', false],
       ['tasks', '#/tasks', true],
       ['timeline', '#/timeline', false],
@@ -169,16 +169,17 @@ describe('ROUTES', () => {
     }
   });
 
-  it('starts with the Attention view, the default: `#/` names no entry and so lands on it', () => {
-    expect(ROUTES[0].id).toBe('attention');
-    expect(ROUTES[0].hash).toBe('#/attention');
+  it('starts with the Now view, the default: a fragment naming no entry lands on it', () => {
+    expect(ROUTES[0].id).toBe('now');
+    expect(ROUTES[0].hash).toBe('#/now');
+    expect(ROUTES[0].label).toBe('Now');
     expect(resolveRoute('#/', ROUTES)).toBe(ROUTES[0]);
   });
 
-  it('keeps the filter query on the Attention fragment and marks it current', () => {
-    const route = resolveRoute('#/attention?tag=work', ROUTES);
+  it('keeps the filter query on the Now fragment and marks it current', () => {
+    const route = resolveRoute('#/now?tag=work', ROUTES);
     expect(navEntries(route, ROUTES).map((e) => [e.id, e.current])).toEqual([
-      ['attention', true],
+      ['now', true],
       ['initiatives', false],
       ['tasks', false],
       ['timeline', false],
@@ -200,11 +201,11 @@ describe('hashPath', () => {
 });
 
 describe('the navigation order', () => {
-  it('lists Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, then Settings, Attention first and the default', () => {
+  it('lists Now, Initiatives, Tasks, Timeline, Actors, Archive, Notes, then Settings, Now first and the default', () => {
     const entries = navEntries(ROUTES[0], ROUTES);
-    expect(entries.map((e) => e.id)).toEqual(['attention', 'initiatives', 'tasks', 'timeline', 'actors', 'archive', 'notes', 'keys']);
-    expect(entries.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
-    expect(resolveRoute('', ROUTES).id).toBe('attention');
+    expect(entries.map((e) => e.id)).toEqual(['now', 'initiatives', 'tasks', 'timeline', 'actors', 'archive', 'notes', 'keys']);
+    expect(entries.map((e) => e.label)).toEqual(['Now', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
+    expect(resolveRoute('', ROUTES).id).toBe('now');
   });
 });
 
@@ -238,8 +239,8 @@ describe('badgeLabel', () => {
   });
 });
 
-describe('the Attention badge on the navigation entries', () => {
-  it('rides on the Attention entry only, from the total handed in', () => {
+describe('the Needs me badge on the navigation entries', () => {
+  it('rides on the Now entry only, from the total handed in', () => {
     for (const [total, text, label] of [
       [0, '', ''],
       [3, '3', '3 items need attention'],
@@ -247,7 +248,7 @@ describe('the Attention badge on the navigation entries', () => {
     ] as const) {
       const entries = navEntries(ROUTES[0], ROUTES, total);
       expect(entries.map((e) => [e.id, e.badge, e.badgeLabel])).toEqual([
-        ['attention', text, label],
+        ['now', text, label],
         ['initiatives', '', ''],
         ['tasks', '', ''],
         ['timeline', '', ''],
@@ -270,9 +271,9 @@ describe('the Attention badge on the navigation entries', () => {
 });
 
 describe('the phone tab bar split', () => {
-  it('keeps Attention, Initiatives, Tasks and Notes as tabs and puts Timeline, Actors, Archive and Settings under More, in table order', () => {
-    const { tabs, more } = phoneSplit(navEntries(resolveRoute('#/attention', ROUTES), ROUTES));
-    expect(tabs.map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Notes']);
+  it('keeps Now, Initiatives, Tasks and Notes as tabs and puts Timeline, Actors, Archive and Settings under More, in table order', () => {
+    const { tabs, more } = phoneSplit(navEntries(resolveRoute('#/now', ROUTES), ROUTES));
+    expect(tabs.map((e) => e.label)).toEqual(['Now', 'Initiatives', 'Tasks', 'Notes']);
     expect(more.map((e) => [e.label, e.href])).toEqual([
       ['Timeline', '#/timeline'],
       ['Actors', '#/actors'],
@@ -281,8 +282,8 @@ describe('the phone tab bar split', () => {
     ]);
   });
 
-  it('lists the route table in the order Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings', () => {
-    expect(navEntries(ROUTES[0], ROUTES).map((e) => e.label)).toEqual(['Attention', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
+  it('lists the route table in the order Now, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings', () => {
+    expect(navEntries(ROUTES[0], ROUTES).map((e) => e.label)).toEqual(['Now', 'Initiatives', 'Tasks', 'Timeline', 'Actors', 'Archive', 'Notes', 'Settings']);
   });
 
   it('is a function of the table: a table with no phone flag has no tabs, one that flags all has no More', () => {
@@ -296,5 +297,23 @@ describe('the phone tab bar split', () => {
     const entries = navEntries(resolveRoute('#/archive', ROUTES), ROUTES);
     expect(entries.filter((e) => e.current).map((e) => e.id)).toEqual(['archive']);
     expect(phoneSplit(entries).more.some((e) => e.current)).toBe(true);
+  });
+});
+
+describe('redirectHash', () => {
+  it.each([
+    ['', '#/now'],
+    ['#', '#/now'],
+    ['#/', '#/now'],
+    ['#/attention', '#/now'],
+    ['#/attention?tag=work&initiative=aa', '#/now?tag=work&initiative=aa'],
+    ['#/?tag=work', '#/now?tag=work'],
+    ['#/attention?', '#/now?'],
+  ])('sends %j to %j, keeping the filter in the fragment', (hash, to) => {
+    expect(redirectHash(hash)).toBe(to);
+  });
+
+  it.each([['#/now'], ['#/now?tag=work'], ['#/tasks'], ['#/nope'], ['#/attention/'], ['#/attentions'], ['#/i/x']])('leaves %j where it is', (hash) => {
+    expect(redirectHash(hash)).toBeUndefined();
   });
 });

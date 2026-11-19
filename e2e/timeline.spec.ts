@@ -23,7 +23,7 @@ async function post<T = Record<string, never>>(api: APIRequestContext, path: str
 }
 
 // The e2e store is written to move history: tasks and leases are made now through the API, then dated back so the bars
-// have a length on a window of three weeks (the same way attention.spec.ts runs a lease out).
+// have a length on a window of three weeks (the same way needs-me.spec.ts runs a lease out).
 function store<T>(work: (db: DatabaseSync) => T): T {
   const db = new DatabaseSync(join(process.env.E2E_WORK!, 'board.db'));
   try {

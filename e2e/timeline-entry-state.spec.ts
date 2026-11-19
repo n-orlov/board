@@ -108,7 +108,7 @@ for (const vp of viewports) {
           dateTask(slug, ref, now - (4 - i) * DAY);
         }
       }
-      await page.goto('/#/attention');
+      await page.goto('/#/now');
       await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
       await page.evaluate((query) => {
         window.location.hash = `#/timeline?${query}`;
@@ -124,7 +124,7 @@ for (const vp of viewports) {
         label.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
         window.history.back();
       });
-      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+      await expect(page).toHaveURL(/#\/now/, FIVE_SECONDS);
       await page.goForward();
       await expect(page.getByTestId('timeline-view')).toBeVisible();
       await expect(taskRows(page)).toHaveCount(2, FIVE_SECONDS);
@@ -141,7 +141,7 @@ for (const vp of viewports) {
       for (let i = 0; i < 30; i++) await post(client, '/api/v1/tasks', { initiative: slug, title: `Row ${String(i).padStart(2, '0')}` }, 201);
       const labels = page.locator('.vis-labelset .vis-label');
 
-      await page.goto('/#/attention');
+      await page.goto('/#/now');
       await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
       await page.evaluate((query) => {
         window.location.hash = `#/timeline?${query}`;
@@ -156,7 +156,7 @@ for (const vp of viewports) {
         document.querySelector<HTMLElement>('.vis-panel.vis-left')!.scrollTop = 400;
         window.history.back();
       });
-      await expect(page).toHaveURL(/#\/attention/, FIVE_SECONDS);
+      await expect(page).toHaveURL(/#\/now/, FIVE_SECONDS);
       await page.goForward();
       await expect(labels).toHaveCount(31, FIVE_SECONDS);
       await expect.poll(async () => Math.abs((await rowsScroll(page)) - 400), FIVE_SECONDS).toBeLessThanOrEqual(2);

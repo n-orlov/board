@@ -3,12 +3,13 @@ import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { expectInitiatives } from './chips';
+import { items, showAllBands } from './now';
 
 // R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
-// theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
+// theme. `states` holds the 22 earlier states (the Now view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
 // `#/i/<slug>` and `#/t/<ref>` and the 9 dialogs edit initiative, close initiative, new task, edit task, close task,
 // milestone, record check, add dependency and end lease, over a seeded watch task with links, a milestone, a check, an
-// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/attention` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. R12 (Phase 3) adds PHASE3_STATES, the finite list of 20 states: the views `#/timeline` (also with a focused initiative label and with a focused task label), `#/actors` and `#/archive`, the Needs attention sections of the Tasks view and the initiative page, the Stranded panel, the attention chip, badges and navigation badge, the three new dialogs (acknowledge on the task page, archive Reopen, force-done confirm) and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables; they run at the phone and the desktop viewport in both themes. WIDE_STATES scans the Tasks view, the task page, the initiative page and Attention at 2560x1080 in both themes. No
+// expired and a live lease, a blocking ask, a note with its body expanded, a blocker, a dependent and a conflict. R13 adds PHASE2_STATES, the 2 views `#/now` (all five sections filled) and `#/notes` and the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge (its confirmation sheet) and record check from attention, and the live indicator reading live, offline and reconnecting. The 34 earlier states and these 8 + 3 = 11 make 45 x 2 viewports x 2 themes = 180 scans. R12 (Phase 3) adds PHASE3_STATES, the finite list of 20 states: the views `#/timeline` (also with a focused initiative label and with a focused task label), `#/actors` and `#/archive`, the Needs attention sections of the Tasks view and the initiative page, the Stranded panel, the attention chip, badges and navigation badge, the three new dialogs (acknowledge on the task page, archive Reopen, force-done confirm) and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables; they run at the phone and the desktop viewport in both themes. WIDE_STATES scans the Tasks view, the task page, the initiative page and Attention at 2560x1080 in both themes. No
 // rule is disabled and no element is excluded; a serious or critical violation fails the scan with the rule, the
 // elements and the contrast data named. Signs in through the mock provider, so no API key rides along.
 const test = base;
@@ -41,17 +42,18 @@ type State = { name: string; open: (page: Page) => Promise<void> };
 
 const states: State[] = [
   {
-    name: 'Attention view',
+    name: 'Now view',
     open: async (page) => {
-      await page.goto('/#/attention?initiative=e2e-a11y');
+      await showAllBands(page);
+      await page.goto('/#/now?initiative=e2e-a11y');
       await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
-      await expect(page.getByTestId('section-conflicts').getByTestId('attention-item')).toHaveCount(1);
+      await expect(items(page, 'conflicts')).toHaveCount(1);
     },
   },
   {
     name: 'Answer sheet',
     open: async (page) => {
-      await page.goto('/#/attention?initiative=e2e-a11y');
+      await page.goto('/#/now?initiative=e2e-a11y');
       await page.getByTestId('action-answer').first().click();
       await expect(page.getByRole('dialog')).toBeVisible();
       await expect(page.getByTestId('answer-question')).toContainText('Is the page readable?');
@@ -486,8 +488,9 @@ const attentionItem = (page: Page, text: string) =>
   page.getByTestId('attention-item').filter({ hasText: new RegExp(`(?<![\\w-])${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`) });
 
 const openAttention = async (page: Page, seed: Seed2) => {
-  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
-  await expect(page.getByTestId('section-count')).toHaveCount(5);
+  await showAllBands(page);
+  await page.goto(`/#/now?initiative=${P2_SLUG}`);
+  await expect(page.getByTestId('band-count')).toHaveCount(4);
   await expect(attentionItem(page, seed.ask)).toBeVisible();
 };
 
@@ -497,11 +500,11 @@ type Phase2State = { name: string; open: (page: Page, seed: Seed2, api: APIReque
 // sheet, opened over a lease of its own.
 const PHASE2_STATES: Phase2State[] = [
   {
-    name: 'view #/attention',
+    name: 'view #/now',
     open: async (page, seed) => {
       await openAttention(page, seed);
-      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts']) {
-        await expect(page.getByTestId(`section-${key}`).getByTestId('attention-item').first()).toBeVisible();
+      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts'] as const) {
+        await expect(items(page, key).first()).toBeVisible();
       }
       await expect(page.getByTestId('copy-way-back').first()).toBeVisible();
     },
@@ -823,7 +826,7 @@ const WIDE_STATES: { name: string; open: (page: Page, seed: Seed, seed2: Seed2) 
       await expect(page.locator(`[data-testid=task-row][data-ref=${seed.watch}], [data-testid=needs-row][data-ref=${seed.watch}]`)).toBeVisible();
     },
   },
-  { name: 'Attention', open: async (page, _seed, seed2) => openAttention(page, seed2) },
+  { name: 'Now', open: async (page, _seed, seed2) => openAttention(page, seed2) },
 ];
 
 const LIVE_STATES = ['live', 'offline', 'reconnecting'] as const;
@@ -847,7 +850,7 @@ for (const vp of viewports) {
           expect(task.status()).toBe(201);
           const { ref } = (await task.json()) as { ref: string };
           expect((await seed.post('/api/v1/leases', { data: { task: ref, intent: 'scanning', resources: ['repo:a11y'] } })).status()).toBe(201);
-          // An open ask by an actor with a way back, for the Attention view.
+          // An open ask by an actor with a way back, for the Now view.
           const ask = await seed.post('/api/v1/asks', {
             data: { question: 'Is the page readable?', task: ref, blocking: true },
             headers: { 'Board-Actor': 'a11y-asker', 'Board-Actor-Way-Back': 'ralphctl status a11y-asker' },
@@ -924,7 +927,7 @@ for (const vp of viewports) {
               (window as unknown as { EventSource: unknown }).EventSource = Silent;
             });
           }
-          await page.goto('/#/attention');
+          await page.goto('/#/now');
           if (word === 'reconnecting') await page.reload(); // beforeEach already loaded the app: the stand-in applies to a fresh document
           const indicator = page.getByRole('status', { name: /^Live updates:/ });
           await expect(indicator).toBeVisible();
@@ -973,7 +976,7 @@ test('the Phase 1 list names the 3 views and the 9 dialogs', () => {
 
 test('the Phase 2 list names the 2 views, the six dialogs and the three live indicator states', () => {
   const names = PHASE2_STATES.map((s) => s.name);
-  expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes']);
+  expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/now', 'view #/notes']);
   expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
     'answer ask',
     'withdraw ask',
@@ -1008,5 +1011,5 @@ test('the Phase 3 list names the 3 views (the Timeline also with a focused label
     'sorted Actors table',
     'sorted Archive table',
   ]);
-  expect(WIDE_STATES.map((s) => s.name)).toEqual(['Tasks view', 'task page', 'initiative page', 'Attention']);
+  expect(WIDE_STATES.map((s) => s.name)).toEqual(['Tasks view', 'task page', 'initiative page', 'Now']);
 });

@@ -2,9 +2,9 @@
   import type { Component } from 'svelte';
   import Actors from './Actors.svelte';
   import Archive from './Archive.svelte';
-  import Attention from './Attention.svelte';
-  import ApiKeys from './ApiKeys.svelte';
+    import ApiKeys from './ApiKeys.svelte';
   import Notes from './Notes.svelte';
+  import Now from './Now.svelte';
   import InitiativePage from './InitiativePage.svelte';
   import Initiatives from './Initiatives.svelte';
   import SessionCard from './SessionCard.svelte';
@@ -14,11 +14,12 @@
   import Timeline from './Timeline.svelte';
   import { live } from './lib/live';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
-  import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
+  import { replaceHash } from './lib/historyEntry';
+  import { ROUTES, navEntries, redirectHash, resolveRoute, routeParam, type RouteId } from './lib/routes';
 
   // The component of each view; the table in lib/routes.ts decides which one is on screen.
   const VIEWS: Record<RouteId, Component<{ csrf: string; param: string }>> = {
-    attention: Attention,
+    now: Now,
     initiatives: Initiatives,
     initiative: InitiativePage,
     tasks: Tasks,
@@ -30,13 +31,20 @@
     keys: ApiKeys,
   };
 
+  // The root and `#/attention` land on `#/now`, in place (no history entry), keeping the query of the fragment.
+  function land() {
+    const to = redirectHash(window.location.hash);
+    if (to !== undefined) replaceHash(to);
+  }
+  land();
+
   const browser = currentBrowser();
   let auth: SessionState = $state({ kind: 'loading' });
   let route = $state(resolveRoute(window.location.hash, ROUTES));
   let param = $state(routeParam(window.location.hash, ROUTES));
   let signOutFailed = $state(false);
 
-  // The Attention badge in the navigation: the total of the stream's latest `attention` message.
+  // The Needs me badge in the navigation: the total of the stream's latest `attention` message.
   let attentionTotal = $state(0);
 
   const session = new SessionController(browser, (s) => (auth = s), window.location.hash);
@@ -52,6 +60,7 @@
   }
 
   function hashChanged() {
+    land();
     route = resolveRoute(window.location.hash, ROUTES);
     param = routeParam(window.location.hash, ROUTES);
     void session.hashChanged(window.location.hash);

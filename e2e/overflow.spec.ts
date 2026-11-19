@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { expectInitiatives } from './chips';
+import { items, showAllBands } from './now';
 
 // R3: at 390, 820, 1024 and 1440 px the page never scrolls sideways, whatever text the API accepts. Signs in through the mock provider.
 // Every case seeds the longest unbroken text the server takes (no space to wrap at): a 200-character
@@ -10,7 +11,7 @@ import { expectInitiatives } from './chips';
 // R12 extends it to the Phase 1 views and dialogs as a finite, named list of states (PHASE1_STATES below): the views
 // `#/tasks`, `#/i/<slug>` and `#/t/<ref>`, and the 9 dialogs edit initiative, close initiative, new task, edit task,
 // close task, milestone, record check, add dependency and end lease, each filled with the longest values the API takes.
-// R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/attention` with its five
+// R13 extends it to the Phase 2 views and dialogs the same way (PHASE2_STATES below): `#/now` with its five
 // sections filled, `#/notes`, the six dialogs answer ask, withdraw ask, post note, close from attention, acknowledge
 // and record check from attention, and the live indicator in its three states.
 // R12 extends it to the Phase 3 views, dialogs and tables the same way (PHASE3_STATES below): `#/timeline`, `#/actors` and
@@ -376,12 +377,13 @@ async function seedPhase2(playwright: PlaywrightTestArgs['playwright'], baseURL:
 const attentionItem = (page: Page, text: string) => page.getByTestId('attention-item').filter({ hasText: text });
 
 const openAttention = async (page: Page, seed: Seed2) => {
-  await page.goto(`/#/attention?initiative=${P2_SLUG}`);
-  await expect(page.getByTestId('section-count')).toHaveCount(5);
+  await showAllBands(page);
+  await page.goto(`/#/now?initiative=${P2_SLUG}`);
+  await expect(page.getByTestId('band-count')).toHaveCount(4);
   await expect(attentionItem(page, seed.ask)).toBeVisible();
 };
 
-const ATTENTION_WITHIN = '[data-testid=attention-view], [data-testid=attention-view] *';
+const ATTENTION_WITHIN = '[data-testid=now-view], [data-testid=now-view] *';
 const DIALOG_WITHIN = '[role=dialog] *';
 
 type Phase2State = { name: string; open: (page: Page, seed: Seed2) => Promise<void>; within: string };
@@ -389,14 +391,14 @@ type Phase2State = { name: string; open: (page: Page, seed: Seed2) => Promise<vo
 // The finite list of Phase 2 states this spec holds to the no-sideways-scroll bar: 2 views, 6 dialogs and the live indicator.
 const PHASE2_STATES: Phase2State[] = [
   {
-    name: 'view #/attention',
+    name: 'view #/now',
     within: ATTENTION_WITHIN,
     open: async (page, seed) => {
       await openAttention(page, seed);
-      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts']) {
-        await expect(page.getByTestId(`section-${key}`).getByTestId('attention-item').first()).toBeVisible();
-        await expect(page.getByTestId(`section-${key}`).getByTestId('section-empty')).toHaveCount(0);
+      for (const key of ['open_asks', 'done_not_closed', 'expired_leases', 'overdue_watches', 'conflicts'] as const) {
+        await expect(items(page, key).first()).toBeVisible();
       }
+      await expect(page.getByTestId('band-empty')).toHaveCount(0);
       await expect(page.getByTestId('actor-handle').filter({ hasText: P2_ACTOR }).first()).toBeVisible();
       await expect(page.getByTestId('actor-way-back').filter({ hasText: P2_WAY_BACK }).first()).toBeVisible();
       await expect(page.getByTestId('actor-handle').filter({ hasText: P2_HOLDER }).first()).toBeVisible();
@@ -724,7 +726,7 @@ const WIDE_VIEWPORTS = [
   { name: 'wide', size: { width: 2560, height: 1080 } },
   { name: 'ultrawide', size: { width: 3440, height: 1440 } },
 ] as const;
-const WIDE_STATE_NAMES = ['view #/tasks', 'view #/i/<slug>', 'view #/t/<ref>', 'view #/attention'];
+const WIDE_STATE_NAMES = ['view #/tasks', 'view #/i/<slug>', 'view #/t/<ref>', 'view #/now'];
 
 const LIVE_STATES = ['live', 'offline', 'reconnecting'] as const;
 
@@ -924,7 +926,7 @@ for (const vp of viewports) {
     for (const word of LIVE_STATES) {
       test(`the live indicator reading ${word} stays inside the viewport without scrolling sideways`, async ({ page, context }) => {
         if (word === 'reconnecting') await neverOpen(page);
-        await page.goto('/#/attention');
+        await page.goto('/#/now');
         const indicator = page.getByRole('status', { name: /^Live updates:/ });
         await expect(indicator).toBeVisible();
         if (word === 'offline') await context.setOffline(true);
@@ -961,7 +963,7 @@ for (const vp of viewports) {
 
     test('the Phase 2 list names the views, the six dialogs and the three live indicator states', () => {
       const names = PHASE2_STATES.map((s) => s.name);
-      expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/attention', 'view #/notes', 'view #/notes broadcasts']);
+      expect(names.filter((n) => n.startsWith('view '))).toEqual(['view #/now', 'view #/notes', 'view #/notes broadcasts']);
       // Acknowledge has its own test above: its sheet, then the toast it raises, over a lease with the longest values.
       expect(names.filter((n) => n.startsWith('dialog ')).map((n) => n.slice('dialog '.length))).toEqual([
         'answer ask',
