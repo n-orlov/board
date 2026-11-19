@@ -401,6 +401,48 @@ describe('a stored layout', () => {
     expect(sum(l)).toBeCloseTo(1, 9);
   });
 
+  it('is the default when a width is under 18% by any visible amount, not clamped', () => {
+    const pair = (a: number, b: number) => parse({ columns: [{ width: a, widgets: ['asks'] }, { width: b, widgets: WIDGETS.slice(1) }] });
+    for (const [a, b] of [
+      [0.176, 0.824],
+      [0.1799, 0.8201],
+      [0.17999, 0.82001],
+    ] as const) {
+      expect(pair(a, b), `${a}/${b}`).toEqual(defaultLayout());
+      expect(pair(b, a), `${b}/${a}`).toEqual(defaultLayout());
+    }
+    const edge = pair(0.18, 0.82);
+    expect(edge.columns.map((c) => c.width)).toEqual([0.18, 0.82]);
+  });
+
+  it('is the default when widths miss 1 by any visible amount', () => {
+    for (const [a, b] of [
+      [0.5, 0.496],
+      [0.5, 0.504],
+      [0.5, 0.4999],
+    ] as const) {
+      expect(parse({ columns: [{ width: a, widgets: ['asks'] }, { width: b, widgets: WIDGETS.slice(1) }] }), `${a}+${b}`).toEqual(defaultLayout());
+    }
+  });
+
+  it('accepts every layout the model itself writes', () => {
+    let l = defaultLayout();
+    const steps: ((x: NowLayout) => NowLayout)[] = [
+      (x) => resizeColumns(x, 0, -0.4),
+      (x) => addColumn(x),
+      (x) => addColumn(x),
+      (x) => resizeColumns(x, 1, 0.123456789),
+      (x) => moveWidget(x, 'flight', { kind: 'col', col: 3, index: 0 }),
+      (x) => removeColumn(x, 2),
+      (x) => resizeColumns(x, 0, -1),
+    ];
+    for (const step of steps) {
+      l = step(l);
+      expect(l.columns.every((c) => c.width >= MIN_WIDTH - 1e-9)).toBe(true);
+      expect(parseLayout(JSON.stringify(l))).toEqual(l);
+    }
+  });
+
   it('falls back to the default when storage throws', () => {
     const blocked = {
       getItem: () => {

@@ -46,6 +46,8 @@ export const LAYOUT_STORAGE_KEY = 'vh.now.layout.v1';
 const EPS = 1e-9;
 /** How far a width may be from the default and still count as the default (rounding of a drag). */
 const DEFAULT_TOLERANCE = 0.005;
+/** A stored width is checked exactly: only floating-point noise is forgiven, never a width under 18%. */
+const STORED_TOLERANCE = 1e-6;
 
 /** Needs me on the left, In flight on the right, half each, nothing sized and nothing toggled. */
 export function defaultLayout(): NowLayout {
@@ -240,7 +242,7 @@ function validColumns(raw: unknown): DockColumn[] | undefined {
   }
   if (seen.size !== WIDGETS.length) return undefined;
   const sum = columns.reduce((a, c) => a + c.width, 0);
-  if (Math.abs(sum - 1) > DEFAULT_TOLERANCE || columns.some((c) => c.width < MIN_WIDTH - DEFAULT_TOLERANCE)) return undefined;
+  if (Math.abs(sum - 1) > STORED_TOLERANCE || columns.some((c) => c.width < MIN_WIDTH - STORED_TOLERANCE)) return undefined;
   return columns;
 }
 
