@@ -92,6 +92,10 @@ for (const vp of viewports) {
       await expect.poll(() => order(page, s.all)).toEqual([s.charlie, s.delta, s.alpha, s.bravo]);
       await expect(sortSelect(page)).toBeVisible();
       await expect(sortSelect(page)).toHaveValue('');
+      // The headers are plain: no aria-sort and no sort button, the shared control is the one sort.
+      await expect(page.locator('[data-testid=archive-view] th')).toHaveCount(5);
+      await expect(page.locator('[data-testid=archive-view] th[aria-sort]')).toHaveCount(0);
+      await expect(page.locator('[data-testid=archive-view] th button')).toHaveCount(0);
 
       // text: the title, ignoring case.
       await sortBy(page, 'item', 'asc');
