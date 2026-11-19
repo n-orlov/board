@@ -68,10 +68,10 @@ Feature: Creating and starting a task from the command line, vh new
     And the counts of tasks, leases and events changed by 0, 0 and 0
 
     Examples:
-      | command                              | line                                                                                              |
-      | vh new                               | usage: vh new <initiative> "<title>" --start "<intent>" [--res r]... [--ttl D] [--json]           |
-      | vh new aa "Title"                    | usage: vh new <initiative> "<title>" --start "<intent>" [--res r]... [--ttl D] [--json]           |
-      | vh new aa                            | usage: vh new <initiative> "<title>" --start "<intent>" [--res r]... [--ttl D] [--json]           |
-      | vh new aa "Title" --start            | usage: vh new <initiative> "<title>" --start "<intent>" [--res r]... [--ttl D] [--json]           |
-      | vh new aa "Title" extra --start x    | usage: vh new <initiative> "<title>" --start "<intent>" [--res r]... [--ttl D] [--json]           |
-      | vh new aa "Title" --start x --ttl 2  | invalid duration "2": want a whole number and a unit s, m, h or d, such as 90m                    |
+      | command                             | line                                                                                                 |
+      | vh new                              | usage: vh new <initiative> "<title>" --start "<intent>" [--tag t]... [--res r]... [--ttl D] [--json] |
+      | vh new aa "Title"                   | usage: vh new <initiative> "<title>" --start "<intent>" [--tag t]... [--res r]... [--ttl D] [--json] |
+      | vh new aa                           | usage: vh new <initiative> "<title>" --start "<intent>" [--tag t]... [--res r]... [--ttl D] [--json] |
+      | vh new aa "Title" --start           | usage: vh new <initiative> "<title>" --start "<intent>" [--tag t]... [--res r]... [--ttl D] [--json] |
+      | vh new aa "Title" extra --start x   | usage: vh new <initiative> "<title>" --start "<intent>" [--tag t]... [--res r]... [--ttl D] [--json] |
+      | vh new aa "Title" --start x --ttl 2 | invalid duration "2": want a whole number and a unit s, m, h or d, such as 90m                       |

@@ -2328,7 +2328,7 @@ calls, the server has a composite endpoint doing it in **one round trip and one 
 |---|---|---|---|
 | `vh start <task> "<intent>" [--res r]… [--ttl D]` | check in and start (or renew) a lease; prints the lease line, conflicts, and the `now` summary | `whoami` + `now --resources` + `lease start` | `POST /api/v1/start` |
 | `vh finish [<task>] "<outcome>" [--done]` | end my lease on the task (my only live lease if omitted), write the outcome as a note on the task, optionally mark done | `lease end` + `note --task` + `task done` | `POST /api/v1/finish` |
-| `vh new <initiative> "<title>" --start "<intent>" [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
+| `vh new <initiative> "<title>" --start "<intent>" [--tag t]… [--res r]…` | create a task and start a lease on it | `task add` + `start` | `POST /api/v1/start` with `new_task` |
 | `vh ping ["<progress>"]` | renew all my live leases; with text, also a milestone on each leased task | `lease renew` (all) + `milestone` | `POST /api/v1/ping` |
 | `vh block <task> "<question>" [--poll D \| --stop]` | raise an ask on the task; `--poll` keeps the lease and waits (renewing it while waiting); `--stop` ends the lease with outcome "blocked on A…" | `ask` + `lease end` (stop) | `POST /api/v1/asks` with `lease_action` |
 | `vh catchup` | notes since my cursor (acknowledged), plus answers to my asks since then | `notes --since last --ack` + `asks --mine --answered-since` | `POST /api/v1/catchup` (a POST: it moves the notes cursor) |
