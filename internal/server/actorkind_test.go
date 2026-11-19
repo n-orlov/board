@@ -162,11 +162,12 @@ func TestEachMappedEmailActsAsItsOwnOperatorAndAnUnmappedOneAsTheDefault(t *test
 	t.Parallel()
 	s := newKindServer(t)
 	s.l.Operators = map[string]string{"alice@example.com": "alice-op", "bob@example.com": "shared-op", "carol@example.com": "shared-op"}
-	for email, want := range map[string]string{
-		"alice@example.com": "alice-op", "Bob@Example.COM": "shared-op", "carol@example.com": "shared-op", "dave@example.com": "operator",
+	// An ordered slice, not a map: the principals assertion below depends on sign-in order.
+	for _, c := range []struct{ email, want string }{
+		{"alice@example.com", "alice-op"}, {"Bob@Example.COM", "shared-op"}, {"carol@example.com", "shared-op"}, {"dave@example.com", "operator"},
 	} {
-		if got := s.sessionWriteAs(email); got != want {
-			t.Errorf("GET /auth/session for %s: actor %q, want %q", email, got, want)
+		if got := s.sessionWriteAs(c.email); got != c.want {
+			t.Errorf("GET /auth/session for %s: actor %q, want %q", c.email, got, c.want)
 		}
 	}
 	k := s.kinds()
