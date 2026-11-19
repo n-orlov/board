@@ -12,7 +12,6 @@ import {
   filterToQuery,
   isFiltered,
   sectionCount,
-  toggled,
   type AttentionFilter,
   type TaskAttention,
   attentionBadges,
@@ -112,14 +111,6 @@ describe('the filter round trip', () => {
     expect(filterFromQuery('tag=&tag=%20&tag=a&tag=a&initiative=')).toEqual({ initiatives: [], tags: ['a'] });
     expect(filterToQuery(set({ tags: ['a', '', 'a', ' b '] }))).toBe('tag=a&tag=b');
     expect(isFiltered(set({ tags: [' '] }))).toBe(false);
-  });
-});
-
-describe('toggling a value', () => {
-  it('adds an absent value at the end and removes a present one', () => {
-    expect(toggled(['a'], 'b')).toEqual(['a', 'b']);
-    expect(toggled(['a', 'b'], 'a')).toEqual(['b']);
-    expect(toggled([], 'a')).toEqual(['a']);
   });
 });
 

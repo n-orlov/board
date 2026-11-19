@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { BANDS } from '../web/src/lib/nowBands';
+import { initiativeChip, openChips, pickInitiative, pickTag, tagChip } from './chips';
 import { band, items, showAllBands } from './now';
 
 // The Needs me bands of the Now view (PRD R1, R9, SPEC 5.3 and 11): four bands in order with their counts and empty states,
@@ -186,26 +187,27 @@ for (const vp of viewports) {
     test('the tag and initiative filters live in the fragment and survive a reload', async ({ page, playwright, baseURL }) => {
       const s = await seed(playwright, baseURL, `filt-${vp.name}`);
       await page.goto('/#/now');
-      const tag = page.getByRole('button', { name: s.tag, exact: true });
-      await expect(tag).toBeVisible(FIVE_SECONDS);
-      await tag.click();
+      await openChips(page);
+      await expect(tagChip(page, s.tag)).toBeVisible(FIVE_SECONDS);
+      await pickTag(page, s.tag);
       await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`));
-      await expect(tag).toHaveAttribute('aria-pressed', 'true');
+      await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true');
       await expect(items(page, 'open_asks')).toHaveCount(1, FIVE_SECONDS);
 
-      await page.getByRole('button', { name: s.slug, exact: true }).click();
+      await pickInitiative(page, s.slug);
       await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}&initiative=${s.slug}$`));
 
       await page.reload();
-      await expect(page.getByRole('button', { name: s.tag, exact: true })).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
-      await expect(page.getByRole('button', { name: s.slug, exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
+      await expect(initiativeChip(page, s.slug)).toHaveAttribute('aria-pressed', 'true');
       await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}&initiative=${s.slug}$`));
       await expect(items(page, 'open_asks')).toHaveCount(1, FIVE_SECONDS);
       await expect(items(page, 'conflicts')).toHaveCount(1);
 
-      await page.getByTestId('clear-filters').click();
+      await openChips(page);
+      await page.getByTestId('chip-clear').click();
       await expect(page).toHaveURL(/#\/now$/);
-      await expect(page.getByRole('button', { name: s.tag, exact: true })).toHaveAttribute('aria-pressed', 'false');
+      await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'false');
     });
 
     test('Answer with an option button fills the answer, sends it and the ask leaves its section', async ({ page, playwright, baseURL }) => {
@@ -256,7 +258,8 @@ for (const vp of viewports) {
 
       const global = await post<{ ref: string }>(api, '/api/v1/asks', { question: 'Anything at all?' }, 201);
       // The view saves its filter (R16), so a bare route would restore the initiative filter: clear it first.
-      await page.getByTestId('clear-filters').click();
+      await openChips(page);
+      await page.getByTestId('chip-clear').click();
       await page.goto('/#/now');
       const mine = items(page, 'open_asks').filter({ hasText: global.ref });
       await expect(mine).toHaveCount(1, FIVE_SECONDS);

@@ -7,7 +7,8 @@ import {
   affectsAttention,
   copyLabel,
   dropUnknown,
-  filterChoices,
+  nowQuery,
+  nowTagChoices,
   forgetAttention,
   openAttention,
   rowsFor,
@@ -198,14 +199,35 @@ describe('copyLabel', () => {
   });
 });
 
-describe('filterChoices', () => {
-  it('offers the initiatives and tags, sorted and once, plus what the filter names', () => {
-    const list = [
-      { slug: 'b', tags: ['work', 'a'] },
-      { slug: 'a', tags: ['work'] },
-    ];
-    expect(filterChoices(list, { initiatives: ['z'], tags: ['q', 'a'] })).toEqual({ initiatives: ['a', 'b', 'z'], tags: ['a', 'q', 'work'] });
-    expect(filterChoices([], DEFAULT_ATTENTION_FILTER)).toEqual({ initiatives: [], tags: [] });
+describe('nowTagChoices', () => {
+  it('offers each initiative tag once as an initiative tag, plus the chosen ones, sorted', () => {
+    const list = [{ tags: ['work', 'a'] }, { tags: ['work'] }];
+    expect(nowTagChoices(list, ['q', 'a'])).toEqual([
+      { tag: 'a', sources: ['initiative'] },
+      { tag: 'q', sources: [] },
+      { tag: 'work', sources: ['initiative'] },
+    ]);
+    expect(nowTagChoices([], [])).toEqual([]);
+  });
+});
+
+describe('nowQuery', () => {
+  it('is empty with no chips and the default window', () => {
+    expect(nowQuery({ tags: [], initiatives: [] })).toBe('');
+  });
+
+  it('repeats tag for every tag chosen', () => {
+    expect(nowQuery({ tags: ['work', 'home'], initiatives: [] })).toBe('tag=work&tag=home');
+  });
+
+  it('repeats initiative for every initiative chosen', () => {
+    expect(nowQuery({ tags: [], initiatives: ['aa', 'bb'] })).toBe('initiative=aa&initiative=bb');
+  });
+
+  it('carries both kinds of chip and a window that is not the default', () => {
+    expect(nowQuery({ tags: ['work', 'home'], initiatives: ['aa', 'bb'] }, '8h')).toBe('tag=work&tag=home&initiative=aa&initiative=bb&window=8h');
+    expect(nowQuery({ tags: [], initiatives: [] }, '3d')).toBe('window=3d');
+    expect(nowQuery({ tags: [], initiatives: [] }, '24h')).toBe('');
   });
 });
 

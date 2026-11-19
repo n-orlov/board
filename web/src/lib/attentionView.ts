@@ -14,6 +14,7 @@ import {
   type AttentionFilter,
   type SectionKey,
 } from './attention';
+import { mergeChoices, type ChipState, type TagChoice } from './chipFilter';
 import { errorText, Fetches } from './fetches';
 import { relativeTime } from './format';
 import { problemText } from './keys';
@@ -139,14 +140,25 @@ export function copyLabel(a: ItemActor): string {
   return `Copy way back of ${a.handle}`;
 }
 
-/** The initiatives and tags the filter can offer: those of the initiatives, plus what the filter already names, sorted. */
-export function filterChoices(
-  initiatives: readonly { slug: string; tags: readonly string[] }[],
-  filter: AttentionFilter,
-): { initiatives: string[]; tags: string[] } {
-  const slugs = new Set([...initiatives.map((i) => i.slug), ...filter.initiatives]);
-  const tags = new Set([...initiatives.flatMap((i) => i.tags), ...filter.tags]);
-  return { initiatives: [...slugs].sort(), tags: [...tags].sort() };
+/**
+ * The tag chips Now offers: the tags the board's initiatives carry, each once and marked as an initiative's, plus the
+ * chosen ones (a link may name a tag no initiative carries; the server still filters by it). The initiative chips are
+ * the slugs of the same list, which the shared chip filter adds the chosen ones to.
+ */
+export function nowTagChoices(initiatives: readonly { tags: readonly string[] }[], chosen: readonly string[]): TagChoice[] {
+  const marks = initiatives.flatMap((i) => i.tags.map((tag) => ({ tag, source: 'initiative' as const })));
+  return mergeChoices([], marks, chosen);
+}
+
+/**
+ * The query of `GET /attention/now` for the chip state and the window: a repeated `tag` for each tag chosen (all of them
+ * must match), a repeated `initiative` for each initiative (any of them), and `window` only when it is not the default.
+ * No chips and the default window make the empty query.
+ */
+export function nowQuery(chips: ChipState, window: NowWindow = DEFAULT_WINDOW): string {
+  const params = apiQuery(chips);
+  if (window !== DEFAULT_WINDOW) params.set('window', window);
+  return params.toString();
 }
 
 export class AttentionApi {
@@ -158,9 +170,7 @@ export class AttentionApi {
 
   /** The whole Now answer under the filter and the window (the window is sent only when it is not the default). */
   async board(filter: AttentionFilter, window: NowWindow = DEFAULT_WINDOW): Promise<NowBoard> {
-    const params = apiQuery(filter);
-    if (window !== DEFAULT_WINDOW) params.set('window', window);
-    const query = params.toString();
+    const query = nowQuery(filter, window);
     const path = `/api/v1/attention/now${query === '' ? '' : `?${query}`}`;
     let response: Response;
     try {

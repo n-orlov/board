@@ -1,6 +1,7 @@
 <script lang="ts">
   import { replaceHash } from './lib/historyEntry';
   import AnswerForm from './AnswerForm.svelte';
+  import ChipFilter from './ChipFilter.svelte';
   import Dialog from './Dialog.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import TaskCloseForm from './TaskCloseForm.svelte';
@@ -19,13 +20,14 @@
     type ActionsState,
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
-  import { isFiltered, nowHash, toggled, type AttentionFilter } from './lib/attention';
+  import { nowHash, type AttentionFilter } from './lib/attention';
+  import { chipsActive, initiativeChoices, type ChipState } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
     affectsAttention,
     copyLabel,
-    filterChoices,
+    nowTagChoices,
     forgetAttention,
     openAttention,
     saveAttention,
@@ -120,7 +122,14 @@
     void store.setFilter(filter);
   }
 
-  // Clear filters: the defaults, and nothing saved.
+  // A chip change: the chips as the fragment and the saved query, and the board read again under them. No chip left is Clear
+  // chips: the defaults, and nothing saved.
+  function setChips(next: ChipState) {
+    if (chipsActive(next)) apply(next);
+    else clear();
+  }
+
+  // Clear chips: the defaults, and nothing saved.
   function clear() {
     turns.begin();
     turns.reading();
@@ -178,7 +187,8 @@
   }
 
   const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
-  const choices = $derived(filterChoices(known, view.filter));
+  const tagChoices = $derived(nowTagChoices(known, view.filter.tags));
+  const initiativeSlugs = $derived(initiativeChoices(known.map((i) => i.slug), view.filter.initiatives));
   // The ages and the time left on a lease are phrased against this instant: it moves with every answer and every half minute.
   let now = $state(new Date());
   $effect(() => {
@@ -189,8 +199,6 @@
     const timer = setInterval(() => (now = new Date()), 30_000);
     return () => clearInterval(timer);
   });
-  const chip =
-    'min-h-11 min-w-11 max-w-full rounded-md border border-border bg-surface-raised px-3 py-1 text-sm wrap-anywhere text-text aria-pressed:border-accent aria-pressed:font-semibold aria-pressed:text-accent';
   const action = 'min-h-11 min-w-11 rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text';
 </script>
 
@@ -199,41 +207,9 @@
 <section aria-labelledby="now-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
   <h2 id="now-heading" class="mb-4 text-xl font-bold">Now</h2>
 
-  {#if choices.tags.length + choices.initiatives.length > 0}
-    <div class="mb-4 flex flex-col gap-3" data-testid="now-filters">
-      {#if choices.tags.length > 0}
-        <div role="group" aria-label="Tags" class="flex flex-wrap items-center gap-2">
-          <span class="text-sm text-text-muted">Tags</span>
-          {#each choices.tags as tag (tag)}
-            <button
-              type="button"
-              class={chip}
-              aria-pressed={view.filter.tags.includes(tag)}
-              data-testid="tag-filter"
-              onclick={() => apply({ ...view.filter, tags: toggled(view.filter.tags, tag) })}>{tag}</button
-            >
-          {/each}
-        </div>
-      {/if}
-      {#if choices.initiatives.length > 0}
-        <div role="group" aria-label="Initiatives" class="flex flex-wrap items-center gap-2">
-          <span class="text-sm text-text-muted">Initiatives</span>
-          {#each choices.initiatives as slug (slug)}
-            <button
-              type="button"
-              class={chip}
-              aria-pressed={view.filter.initiatives.includes(slug)}
-              data-testid="initiative-filter"
-              onclick={() => apply({ ...view.filter, initiatives: toggled(view.filter.initiatives, slug) })}>{slug}</button
-            >
-          {/each}
-        </div>
-      {/if}
-      {#if isFiltered(view.filter)}
-        <div><button type="button" class={action} data-testid="clear-filters" onclick={clear}>Clear filters</button></div>
-      {/if}
-    </div>
-  {/if}
+  <div class="mb-4" data-testid="now-filters">
+    <ChipFilter tags={tagChoices} initiatives={initiativeSlugs} value={view.filter} onchange={setChips} />
+  </div>
 
   {#if view.error !== undefined}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>

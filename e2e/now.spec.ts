@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
-import { BANDS_KEY, FLIGHT_KEY, band, created, seedFlight, seedNeedsMe } from './now';
+import { expect, test, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { initiativeChip, openChips, pickInitiative, pickTag, tagChip } from './chips';
+import { BANDS_KEY, FLIGHT_KEY, actorApi, band, created, seedFlight, seedNeedsMe, showAllBands } from './now';
 
 // The Now view's Needs me bands (PRD R1, SPEC 11): the four bands in order with their counts, every band open on the desktop
 // but Done, not closed, an accordion on the phone (Open asks and Expired leases and conflicts open when they hold something,
@@ -157,7 +158,7 @@ test.describe('landing', () => {
     const s = await seedNeedsMe(playwright, baseURL, 'land-filter');
     await page.goto(`/#/attention?initiative=${s.slug}`);
     await expect(page).toHaveURL(new RegExp(`#/now\\?initiative=${s.slug}$`), FIVE_SECONDS);
-    await expect(page.getByRole('button', { name: s.slug, exact: true })).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
+    await expect(initiativeChip(page, s.slug)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
     await expect(band(page, 'asks').getByTestId('attention-item')).toHaveCount(1, FIVE_SECONDS);
   });
 
@@ -347,4 +348,119 @@ for (const vp of [
       });
     }
   }
+}
+
+// The shared chip filter on Now (PRD R7, SPEC 11): tags combine with AND and initiatives with OR, both are sent to the server
+// as repeated `tag` and `initiative` on `GET /attention/now`, so Needs me, In flight and Recently touched all narrow together.
+// The filter is in the fragment and in the saved view state. Each test seeds two initiatives of its own, one with a tag and
+// one without, each holding an open ask and a task with a live lease.
+interface ChipSeed {
+  tag: string;
+  tagged: { slug: string; ask: string; live: string };
+  plain: { slug: string; ask: string; live: string };
+}
+
+async function seedChips(playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string): Promise<ChipSeed> {
+  const tag = `nowchip-${name}`;
+  const api = await actorApi(playwright, baseURL, `nowchip-${name}`);
+  const one = async (suffix: string, tags: string[]) => {
+    const slug = `e2e-nowchip-${name}-${suffix}`;
+    await created(api, '/api/v1/initiatives', { slug, title: `Chips ${name} ${suffix}`, tags });
+    const asked = (await created(api, '/api/v1/tasks', { initiative: slug, title: `Asks in ${suffix}` })).ref;
+    const live = (await created(api, '/api/v1/tasks', { initiative: slug, title: `Leased in ${suffix}` })).ref;
+    const ask = (await created(api, '/api/v1/asks', { question: `Which way in ${suffix} ${name}?`, task: asked, mode: 'poll' })).ref;
+    await created(api, '/api/v1/leases', { task: live, intent: `work in ${suffix}` });
+    return { slug, ask, live };
+  };
+  const tagged = await one('a', [tag]);
+  const plain = await one('b', []);
+  await api.dispose();
+  return { tag, tagged, plain };
+}
+
+const askItem = (page: Page, ref: string) => band(page, 'asks').locator('[data-testid=attention-item]', { hasText: ref });
+
+for (const vp of [
+  { name: 'phone', size: PHONE },
+  { name: 'desktop', size: DESKTOP },
+]) {
+  test.describe(`the chip filter on Now, ${vp.name}`, () => {
+    test.use({ viewport: vp.size });
+
+    test('the shared chip filter renders on Now with its tag and initiative chips', async ({ page, playwright, baseURL }) => {
+      const s = await seedChips(playwright, baseURL, `render-${vp.name}`);
+      await page.goto('/#/now');
+      await expect(page.getByTestId('now-filters').getByTestId('chip-filter')).toBeVisible(FIVE_SECONDS);
+      await openChips(page);
+      await expect(page.getByTestId('chip-tags')).toBeVisible();
+      await expect(tagChip(page, s.tag)).toBeVisible();
+      await expect(page.getByTestId('chip-initiatives')).toBeVisible();
+      await expect(page.getByTestId('chip-tag').first()).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('picking a tag removes a non-matching task from Needs me and from In flight, a matching one stays', async ({ page, playwright, baseURL }) => {
+      const s = await seedChips(playwright, baseURL, `pick-${vp.name}`);
+      await showAllBands(page);
+      await page.goto('/#/now');
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(askItem(page, s.plain.ask)).toHaveCount(1);
+      await expect(flightRow(page, s.tagged.live)).toHaveCount(1);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(1);
+
+      await pickTag(page, s.tag);
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`));
+      await expect(askItem(page, s.plain.ask)).toHaveCount(0, FIVE_SECONDS);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(0);
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1);
+      await expect(flightRow(page, s.tagged.live)).toHaveCount(1);
+
+      // Clearing the chips brings the other initiative's task back.
+      await openChips(page);
+      await page.getByTestId('chip-clear').click();
+      await expect(askItem(page, s.plain.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(1);
+    });
+
+    test('initiatives combine with OR: two initiatives show both, one shows its own', async ({ page, playwright, baseURL }) => {
+      const s = await seedChips(playwright, baseURL, `or-${vp.name}`);
+      await showAllBands(page);
+      await page.goto(`/#/now?initiative=${s.tagged.slug}`);
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(askItem(page, s.plain.ask)).toHaveCount(0);
+      await pickInitiative(page, s.plain.slug);
+      await expect(askItem(page, s.plain.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(1);
+      await expect(flightRow(page, s.tagged.live)).toHaveCount(1);
+    });
+
+    test('the URL holds the filter and a reload keeps it', async ({ page, playwright, baseURL }) => {
+      const s = await seedChips(playwright, baseURL, `url-${vp.name}`);
+      await showAllBands(page);
+      await page.goto('/#/now');
+      await pickTag(page, s.tag);
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`));
+      await expect(askItem(page, s.plain.ask)).toHaveCount(0, FIVE_SECONDS);
+
+      await page.reload();
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`));
+      await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(askItem(page, s.plain.ask)).toHaveCount(0);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(0);
+      await expect(flightRow(page, s.tagged.live)).toHaveCount(1);
+    });
+
+    test('a filter carried over from a #/attention link applies, and is saved with the view state', async ({ page, playwright, baseURL }) => {
+      const s = await seedChips(playwright, baseURL, `link-${vp.name}`);
+      await showAllBands(page);
+      await page.goto(`/#/attention?tag=${s.tag}`);
+      await expect(page).toHaveURL(new RegExp(`#/now\\?tag=${s.tag}$`), FIVE_SECONDS);
+      await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true');
+      await expect(askItem(page, s.tagged.ask)).toHaveCount(1, FIVE_SECONDS);
+      await expect(askItem(page, s.plain.ask)).toHaveCount(0);
+      await expect(flightRow(page, s.plain.live)).toHaveCount(0);
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('vh.view.v1.attention') ?? 'null') as unknown)).toEqual({ v: 1, query: `tag=${s.tag}` });
+    });
+  });
 }

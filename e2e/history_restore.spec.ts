@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
-import { expectInitiatives, foldChips, pickInitiative } from './chips';
+import { expectInitiatives, foldChips, initiativeChip, pickInitiative, pickTag, tagChip } from './chips';
 import { showAllBands } from './now';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
@@ -29,7 +29,6 @@ const actorContext = (playwright: PlaywrightTestArgs['playwright'], baseURL: str
   playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': handle } });
 
 const th = (page: Page, column: string): Locator => page.locator('th', { has: page.getByTestId(`sort-${column}`) });
-const chip = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
 const scrollY = (page: Page) => page.evaluate(() => window.scrollY);
 const fragment = (page: Page) => new URL(page.url()).hash;
 const queryOf = (page: Page) => new URLSearchParams(fragment(page).split('?')[1] ?? '');
@@ -151,18 +150,19 @@ for (const vp of viewports) {
 
       await showAllBands(page);
       await page.goto('/#/now');
-      await expect(chip(page, tag)).toBeVisible(FIVE_SECONDS);
-      await chip(page, tag).click();
-      await chip(page, slug).click();
+      await expect(page.getByTestId('chip-filter')).toBeVisible(FIVE_SECONDS);
+      await pickTag(page, tag);
+      await pickInitiative(page, slug);
       await expect(page).toHaveURL((url) => url.hash === `#/now?tag=${tag}&initiative=${slug}`);
+      await foldChips(page); // a fresh mount folds the filter on a phone: measure the page as it comes back
       await expect(page.getByTestId('attention-item').first()).toBeVisible(FIVE_SECONDS);
       await expect.poll(() => page.getByTestId('attention-item').count(), FIVE_SECONDS).toBeGreaterThanOrEqual(16);
 
       const route: Route = {
         rows: (p) => p.getByTestId('item-link').allTextContents(),
         shown: async (p) => {
-          await expect(chip(p, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
-          await expect(chip(p, slug)).toHaveAttribute('aria-pressed', 'true');
+          await expect(tagChip(p, tag)).toHaveAttribute('aria-pressed', 'true', FIVE_SECONDS);
+          await expect(initiativeChip(p, slug)).toHaveAttribute('aria-pressed', 'true');
         },
         links: (p) => p.getByTestId('item-link'),
         landing: /#\/t\//,

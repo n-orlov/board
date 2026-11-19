@@ -109,11 +109,6 @@ export function isFiltered(filter: AttentionFilter): boolean {
   return clean(filter.tags).length + clean(filter.initiatives).length > 0;
 }
 
-/** The list with `value` added when absent, or removed when present (a tag chip toggles). */
-export function toggled(values: readonly string[], value: string): string[] {
-  return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
-}
-
 export type TaskAttention = components['schemas']['TaskAttention'];
 
 /** One reason a task needs a person, as a badge: visible text, a tone (colour is never the only signal) and an accessible name. */
