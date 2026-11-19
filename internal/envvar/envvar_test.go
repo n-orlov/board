@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-// r1Suffixes is the PRD's list of the 24 product variables, in its order.
+// r1Suffixes is the list of the 25 product variables (R1's 24 and R12's OIDC_OPERATORS), in table order.
 var r1Suffixes = []string{
 	"URL", "API_KEY", "ACTOR", "WAY_BACK", "PUBLIC_URL", "LISTEN", "DB_URL", "MIGRATE",
 	"SQLITE_CHECKPOINT", "SWEEP_INTERVAL", "NOTIFY_URL", "NOTIFY_ON", "NOTIFY_HEADER", "NOTIFY_TIMEOUT",
-	"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE", "OIDC_ALLOWED_EMAILS",
+	"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE", "OIDC_ALLOWED_EMAILS", "OIDC_OPERATORS",
 	"OPERATOR_HANDLE", "SESSION_TTL", "SESSION_IDLE", "STREAM_POLL", "STREAM_HEARTBEAT",
 }
 
-func TestTableHoldsExactlyTheTwentyFourProductVariables(t *testing.T) {
+func TestTableHoldsExactlyTheTwentyFiveProductVariables(t *testing.T) {
 	var got []string
 	for _, v := range All() {
 		got = append(got, v.Suffix())
@@ -21,8 +21,8 @@ func TestTableHoldsExactlyTheTwentyFourProductVariables(t *testing.T) {
 	if !slices.Equal(got, r1Suffixes) {
 		t.Fatalf("table suffixes = %v, want %v", got, r1Suffixes)
 	}
-	if len(got) != 24 {
-		t.Fatalf("table has %d variables, want 24", len(got))
+	if len(got) != 25 {
+		t.Fatalf("table has %d variables, want 25", len(got))
 	}
 }
 

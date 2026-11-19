@@ -100,3 +100,71 @@ func TestServeRefusesToStartWithAnIncompleteLoginConfiguration(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }
+
+func TestParseOperatorsReadsEmailHandlePairs(t *testing.T) {
+	t.Parallel()
+	got, err := parseOperators(" Alice@Example.com = ann , bob@example.com=shared,carol@example.com=shared,, ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"alice@example.com": "ann", "bob@example.com": "shared", "carol@example.com": "shared"}
+	if len(got) != len(want) {
+		t.Fatalf("parseOperators = %v, want %v", got, want)
+	}
+	for email, handle := range want {
+		if got[email] != handle {
+			t.Errorf("%s maps to %q, want %q", email, got[email], handle)
+		}
+	}
+	if none, err := parseOperators(""); err != nil || len(none) != 0 {
+		t.Errorf("an empty setting = %v, %v, want nothing and no error", none, err)
+	}
+	if same, err := parseOperators("a@example.com=x,A@example.com=x"); err != nil || same["a@example.com"] != "x" {
+		t.Errorf("one email twice for one handle = %v, %v, want it accepted", same, err)
+	}
+}
+
+func TestParseOperatorsRefusesAMalformedEntryAndNamesIt(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ in, want string }{
+		"missing equals":         {"alice@example.com", `"alice@example.com": want email=handle`},
+		"invalid handle":         {"alice@example.com=a b", "no whitespace"},
+		"empty handle":           {"alice@example.com=", "not empty"},
+		"handle too long":        {"alice@example.com=" + strings.Repeat("h", 101), "at most 100"},
+		"empty email":            {"=ann", "is not an email"},
+		"email without at sign":  {"alice=ann", "is not an email"},
+		"email with a space":     {"al ice@example.com=ann", "is not an email"},
+		"one email, two handles": {"alice@example.com=ann,ALICE@example.com=bea", `is already mapped to "ann"`},
+	} {
+		_, err := parseOperators(tc.in)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "VH_OIDC_OPERATORS") {
+			t.Errorf("%s: parseOperators(%q) = %v, want an error naming VH_OIDC_OPERATORS and saying %q", name, tc.in, err, tc.want)
+		}
+	}
+	_, err := parseOperators("good@example.com=ok,bad,worse=x")
+	if err == nil || !strings.Contains(err.Error(), `"bad"`) || !strings.Contains(err.Error(), `"worse=x"`) {
+		t.Errorf("two bad entries = %v, want both named", err)
+	}
+}
+
+func TestLoginCarriesTheOperatorMapAndRefusesAMalformedOne(t *testing.T) {
+	t.Parallel()
+	env := oidcEnv()
+	env["VH_OIDC_OPERATORS"] = "Alice@example.com=ann,bob@example.com=bea"
+	l, err := loginFromEnv(envOf(env), nil)
+	if err != nil || l.Operators["alice@example.com"] != "ann" || l.Operators["bob@example.com"] != "bea" || l.ActorFor("zed@example.com") != "operator" {
+		t.Fatalf("login %+v, %v", l, err)
+	}
+	env["BOARD_OIDC_OPERATORS"] = "ignored"
+	if l, err = loginFromEnv(envOf(env), nil); err != nil || l.Operators["bob@example.com"] != "bea" {
+		t.Errorf("VH_ must win over BOARD_: %+v, %v", l, err)
+	}
+	env["VH_OIDC_OPERATORS"] = "alice@example.com"
+	if _, err := loginFromEnv(envOf(env), nil); err == nil || !strings.Contains(err.Error(), "VH_OIDC_OPERATORS") {
+		t.Errorf("a malformed mapping with login on: %v", err)
+	}
+	off := map[string]string{"VH_OIDC_OPERATORS": "alice@example.com"}
+	if l, err := loginFromEnv(envOf(off), nil); l != nil || err == nil || !strings.Contains(err.Error(), "VH_OIDC_OPERATORS") {
+		t.Errorf("a malformed mapping with login off: %v, %v", l, err)
+	}
+}

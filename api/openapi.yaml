@@ -2530,7 +2530,7 @@ paths:
       summary: The caller's browser session
       description: >-
         Describes the session the cookie names: the principal, the actor it acts
-        as (the operator), and the session's CSRF token.
+        as (the operator handle of its email), and the session's CSRF token.
       security:
         - cookieAuth: []
       responses:
@@ -4395,7 +4395,7 @@ components:
           description: Who authenticated, `oidc:<email>`.
         actor:
           type: string
-          description: The actor the session acts as, the operator handle.
+          description: The actor the session acts as, the operator handle of its email.
         csrf_token:
           type: string
           description: The value cookie-authenticated writes send as `X-CSRF-Token`.

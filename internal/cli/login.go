@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/n-orlov/village-hall/internal/auth"
+	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/envvar"
 	"github.com/n-orlov/village-hall/internal/oidc"
 	"github.com/n-orlov/village-hall/internal/server"
@@ -23,6 +24,7 @@ const DefaultOperatorHandle = "operator"
 type loginSettings struct {
 	issuer, clientID, secret, publicURL string
 	allowed                             map[string]bool
+	operators                           map[string]string
 	ttl, idle                           time.Duration
 	operator                            string
 }
@@ -32,7 +34,9 @@ type loginSettings struct {
 // other OIDC setting must be set too.
 func loginFromEnv(env Env, st *store.Store) (*server.Login, error) {
 	if envvar.OIDCIssuer.Get(env) == "" {
-		return nil, nil
+		// Login is off, but a malformed mapping still refuses to start.
+		_, err := parseOperators(envvar.OIDCOperators.Get(env))
+		return nil, err
 	}
 	cfg, err := readLoginSettings(env)
 	if err != nil {
@@ -46,6 +50,7 @@ func loginFromEnv(env Env, st *store.Store) (*server.Login, error) {
 		Identity:  provider,
 		Sessions:  auth.Sessions{Store: st, TTL: cfg.ttl, Idle: cfg.idle},
 		Allowed:   cfg.allowed,
+		Operators: cfg.operators,
 		PublicURL: cfg.publicURL,
 		Operator:  cfg.operator,
 	}, nil
@@ -55,15 +60,16 @@ func readLoginSettings(env Env) (loginSettings, error) {
 	secret, secretErr := clientSecret(env)
 	ttl, ttlErr := duration(env, envvar.SessionTTL, auth.DefaultSessionTTL)
 	idle, idleErr := duration(env, envvar.SessionIdle, auth.DefaultSessionIdle)
+	operators, opErr := parseOperators(envvar.OIDCOperators.Get(env))
 	cfg := loginSettings{
 		issuer: envvar.OIDCIssuer.Get(env), clientID: envvar.OIDCClientID.Get(env), secret: secret,
 		publicURL: envvar.PublicURL.Get(env), allowed: allowedEmails(envvar.OIDCAllowedEmails.Get(env)),
-		ttl: ttl, idle: idle, operator: envvar.OperatorHandle.Get(env),
+		ttl: ttl, idle: idle, operator: envvar.OperatorHandle.Get(env), operators: operators,
 	}
 	if cfg.operator == "" {
 		cfg.operator = DefaultOperatorHandle
 	}
-	err := errors.Join(secretErr, ttlErr, idleErr, requireSet(env, envvar.OIDCClientID, envvar.OIDCAllowedEmails, envvar.PublicURL), validPublicURL(cfg.publicURL))
+	err := errors.Join(secretErr, ttlErr, idleErr, opErr, requireSet(env, envvar.OIDCClientID, envvar.OIDCAllowedEmails, envvar.PublicURL), validPublicURL(cfg.publicURL))
 	if len(cfg.allowed) == 0 && err == nil {
 		err = fmt.Errorf("%s names no email", envvar.OIDCAllowedEmails.Name())
 	}
@@ -118,6 +124,48 @@ func allowedEmails(list string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// parseOperators parses VH_OIDC_OPERATORS (`email=handle,email=handle`) into a
+// map of lower-case email to operator handle (SPEC 13). Entries are trimmed and
+// empty ones skipped, like VH_OIDC_ALLOWED_EMAILS. Two emails may share a
+// handle; one email may not name two. An entry without `=`, with an empty or
+// space-holding email, or whose handle is not valid under SPEC 9 is an error,
+// and every bad entry is reported.
+func parseOperators(list string) (map[string]string, error) {
+	out := map[string]string{}
+	var errs []error
+	for _, entry := range strings.Split(list, ",") {
+		if entry = strings.TrimSpace(entry); entry == "" {
+			continue
+		}
+		email, handle, err := parseOperatorEntry(entry)
+		if err == nil && out[email] != "" && out[email] != handle {
+			err = fmt.Errorf("%q: %s is already mapped to %q", entry, email, out[email])
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", envvar.OIDCOperators.Name(), err))
+			continue
+		}
+		out[email] = handle
+	}
+	return out, errors.Join(errs...)
+}
+
+// parseOperatorEntry splits one `email=handle` entry at its first `=`.
+func parseOperatorEntry(entry string) (email, handle string, err error) {
+	email, handle, found := strings.Cut(entry, "=")
+	email, handle = strings.ToLower(strings.TrimSpace(email)), strings.TrimSpace(handle)
+	switch {
+	case !found:
+		return "", "", fmt.Errorf("%q: want email=handle", entry)
+	case !strings.Contains(email, "@") || strings.ContainsAny(email, " \t"):
+		return "", "", fmt.Errorf("%q: %q is not an email", entry, email)
+	}
+	if err := domain.ValidateHandle(handle); err != nil {
+		return "", "", fmt.Errorf("%q: %w", entry, err)
+	}
+	return email, handle, nil
 }
 
 // duration reads a Go duration from name, or returns def when it is unset.

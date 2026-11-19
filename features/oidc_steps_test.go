@@ -252,17 +252,25 @@ func (h *harness) serverWithOIDC(ctx context.Context, allowed string) (context.C
 // serverWithOIDCSetting starts the server with OIDC login and, when name is
 // not empty, one more BOARD_* setting.
 func (h *harness) serverWithOIDCSetting(ctx context.Context, allowed, name, value string) (context.Context, error) {
-	if h.idp == nil {
-		return ctx, errors.New("the mock OIDC provider is not running")
-	}
-	extra := []string{
-		"BOARD_PUBLIC_URL=http://{addr}", "BOARD_OIDC_ISSUER=" + h.idp.URL(), "BOARD_OIDC_CLIENT_ID=" + oidcClientID,
-		"BOARD_OIDC_CLIENT_SECRET=" + h.idpSecret, "BOARD_OIDC_ALLOWED_EMAILS=" + allowed,
+	extra, err := h.oidcEnv(allowed)
+	if err != nil {
+		return ctx, err
 	}
 	if name != "" {
 		extra = append(extra, name+"="+value)
 	}
 	return h.startServerWith(ctx, extra...)
+}
+
+// oidcEnv is the BOARD_* settings of a server with OIDC login on.
+func (h *harness) oidcEnv(allowed string) ([]string, error) {
+	if h.idp == nil {
+		return nil, errors.New("the mock OIDC provider is not running")
+	}
+	return []string{
+		"BOARD_PUBLIC_URL=http://{addr}", "BOARD_OIDC_ISSUER=" + h.idp.URL(), "BOARD_OIDC_CLIENT_ID=" + oidcClientID,
+		"BOARD_OIDC_CLIENT_SECRET=" + h.idpSecret, "BOARD_OIDC_ALLOWED_EMAILS=" + allowed,
+	}, nil
 }
 
 func (h *harness) providerSawAuthorization() error {
@@ -368,8 +376,9 @@ func (h *harness) sessionsStoredHashed(ctx context.Context, n int) error {
 func registerOIDCSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^the mock OIDC provider signs in "([^"]*)" with (a verified|an unverified) email$`, h.providerSignsIn)
 	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)"$`, h.serverWithOIDC)
-	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE|BOARD_SWEEP_INTERVAL) set to "([^"]*)"$`, h.serverWithOIDCSetting)
+	sc.Step(`^the board server is running with OIDC login allowing "([^"]*)" and (BOARD_SESSION_TTL|BOARD_SESSION_IDLE|BOARD_SWEEP_INTERVAL|BOARD_OIDC_OPERATORS) set to "([^"]*)"$`, h.serverWithOIDCSetting)
 	registerSessionSteps(sc, h)
+	registerManyOperatorSteps(sc, h)
 	sc.Step(`^the browser opens "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser requests GET "([^"]*)"$`, h.browserOpens)
 	sc.Step(`^the browser follows the redirects$`, h.followRedirects)

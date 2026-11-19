@@ -64,7 +64,8 @@ All configuration is by `VH_*` environment variables (SPEC §13); each older `BO
 | `VH_PUBLIC_URL` | the external base URL; needed for browser login and for links in alerts |
 | `VH_OIDC_ISSUER`, `VH_OIDC_CLIENT_ID`, `VH_OIDC_CLIENT_SECRET` (or `_FILE`), `VH_OIDC_ALLOWED_EMAILS` | browser login for the operator; with the issuer unset only API keys authenticate |
 | `VH_NOTIFY_URL`, `VH_NOTIFY_HEADER`, `VH_NOTIFY_ON` | alerts for stranded tasks, asks and done tasks (unset: alerts off) |
-| `VH_OPERATOR_HANDLE` | the actor a browser session acts as (default `operator`) |
+| `VH_OIDC_OPERATORS` | `email=handle,email=handle`: the operator handle each admitted email acts as; an email with no entry acts as `VH_OPERATOR_HANDLE` |
+| `VH_OPERATOR_HANDLE` | the actor a browser session acts as when its email has no `VH_OIDC_OPERATORS` entry (default `operator`) |
 
 Create an API key for an agent with the admin CLI, which talks to the database directly:
 

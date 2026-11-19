@@ -213,19 +213,79 @@ func TestShortRefIdentityIsNeverReused(t *testing.T) {
 	}
 }
 
-func TestOneOperatorActorOnly(t *testing.T) {
+// insertOperator writes one operator actors row with the first and last seen times 1.
+func insertOperator(s *Store, id, handle string) error {
+	ins := s.Dialect().Insert("actors", []string{"id", "handle", "kind", "first_seen_at", "last_seen_at"})
+	_, err := s.Writer().ExecContext(context.Background(), ins, id, handle, "operator", 1, 1)
+	return err
+}
+
+// TestSeveralOperatorActorsMayExist: migration 00012 drops actors_one_operator,
+// so each handle may be an operator row, while a handle stays unique.
+func TestSeveralOperatorActorsMayExist(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	ins := s.Dialect().Insert("actors", []string{"id", "handle", "kind", "first_seen_at", "last_seen_at"})
-	if _, err := s.Writer().ExecContext(ctx, ins, "A1", "op", "operator", 1, 1); err != nil {
+	if err := insertOperator(s, "A1", "op"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.Writer().ExecContext(ctx, ins, "A2", "op2", "operator", 1, 1)
-	if err == nil || !s.Dialect().IsUniqueViolation(err) {
-		t.Fatalf("a second operator = %v, want a unique violation", err)
+	if err := insertOperator(s, "A2", "op2"); err != nil {
+		t.Fatalf("a second operator = %v, want it accepted", err)
+	}
+	if err := insertOperator(s, "A3", "op2"); err == nil || !s.Dialect().IsUniqueViolation(err) {
+		t.Fatalf("a second row for one handle = %v, want a unique violation", err)
+	}
+}
+
+// TestTheOneOperatorIndexIsTheOnlyThingMigration00012Changes: at version 11 a
+// second operator is refused by the unique index, at 12 it is accepted, and
+// rolling 12 back restores the index, first demoting every operator but the
+// earliest seen.
+func TestTheOneOperatorIndexIsTheOnlyThingMigration00012Changes(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.MigrateTo(ctx, 11); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertOperator(s, "A1", "op"); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertOperator(s, "A2", "op2"); err == nil || !s.Dialect().IsUniqueViolation(err) {
+		t.Fatalf("a second operator at version 11 = %v, want a unique violation", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := insertOperator(s, "A2", "op2"); err != nil {
+		t.Fatalf("a second operator at the head = %v, want it accepted", err)
+	}
+	p, err := s.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 11); err != nil {
+		t.Fatalf("rolling back to 11 with two operators = %v", err)
+	}
+	kinds := map[string]string{}
+	rows, err := s.Reader().QueryContext(ctx, "SELECT handle, kind FROM actors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var h, k string
+		if err := rows.Scan(&h, &k); err != nil {
+			t.Fatal(err)
+		}
+		kinds[h] = k
+	}
+	if kinds["op"] != "operator" || kinds["op2"] != "agent" || len(kinds) != 2 {
+		t.Errorf("kinds after the roll back = %v, want op an operator and op2 an agent", kinds)
+	}
+	if err := insertOperator(s, "A3", "op3"); err == nil || !s.Dialect().IsUniqueViolation(err) {
+		t.Fatalf("a second operator after the roll back = %v, want a unique violation", err)
 	}
 }
 
@@ -281,7 +341,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 11 || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
+		if len(files) != 12 || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {

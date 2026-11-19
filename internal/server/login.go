@@ -48,8 +48,12 @@ type Login struct {
 	// PublicURL is the external base URL: a cookie-authenticated write must
 	// come from its origin (SPEC 3.2).
 	PublicURL string
-	// Operator is the handle of the operator actor sessions act as.
+	// Operator is the handle of the operator actor a session acts as when its
+	// email has no entry in Operators (VH_OPERATOR_HANDLE).
 	Operator string
+	// Operators maps a lower-case admitted email to the operator handle its
+	// sessions act as (VH_OIDC_OPERATORS). Nil or empty maps nothing.
+	Operators map[string]string
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 
@@ -103,6 +107,15 @@ func (l *Login) take(id string) (pendingLogin, bool) {
 	p, ok := l.pending[id]
 	delete(l.pending, id)
 	return p, ok && l.now().Before(p.expires)
+}
+
+// ActorFor is the operator handle a session of email acts as: the handle
+// Operators maps the email to (case-insensitively), else Operator.
+func (l *Login) ActorFor(email string) string {
+	if handle, ok := l.Operators[strings.ToLower(strings.TrimSpace(email))]; ok {
+		return handle
+	}
+	return l.Operator
 }
 
 // admitted reports whether claims may log in: the provider vouches for the

@@ -119,7 +119,7 @@ func TestUpsertActorKeepsWayBackAndMetaUnlessANewOneIsSent(t *testing.T) {
 	}
 }
 
-func TestOperatorRowIsCreatedByTheFirstOperatorWriteAndOnlyOneExists(t *testing.T) {
+func TestOperatorRowIsCreatedByTheFirstOperatorWriteAndEachOperatorHandleHasOne(t *testing.T) {
 	st := newStore(t)
 	d := st.Dialect()
 	count := func() (n int) {
@@ -131,21 +131,49 @@ func TestOperatorRowIsCreatedByTheFirstOperatorWriteAndOnlyOneExists(t *testing.
 	if count() != 0 {
 		t.Fatal("a fresh database has an operator row before any write")
 	}
-	inTx(t, st, func(tx *sql.Tx) {
-		if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: "operator", Operator: true}, t0); err != nil {
-			t.Fatal(err)
-		}
-	})
+	upsert := func(handle string, operator bool) {
+		inTx(t, st, func(tx *sql.Tx) {
+			if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: handle, Operator: operator}, t0); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	upsert("operator", true)
 	if count() != 1 {
 		t.Fatal("the first operator write did not create the operator row")
 	}
-	tx, err := st.Writer().BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	upsert("other-operator", true)
+	if count() != 2 || kindOf(t, st, "operator") != "operator" || kindOf(t, st, "other-operator") != "operator" {
+		t.Errorf("a second handle's operator write left %d operator rows, want 2", count())
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: "other-operator", Operator: true}, t0); err == nil {
-		t.Error("a second operator row was accepted")
+	upsert("other-operator", true)
+	if count() != 2 {
+		t.Errorf("a repeated operator write left %d operator rows, want 2", count())
+	}
+}
+
+// TestPromotionAppliesPerHandle: an operator write promotes only the handle it
+// acts as, and a key write under an operator's handle never demotes it.
+func TestPromotionAppliesPerHandle(t *testing.T) {
+	st := newStore(t)
+	d := st.Dialect()
+	upsert := func(handle string, operator bool) {
+		inTx(t, st, func(tx *sql.Tx) {
+			if _, err := UpsertActor(context.Background(), tx, d, Actor{Handle: handle, Operator: operator}, t0); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	upsert("alice", false)
+	upsert("bob", false)
+	upsert("alice", true)
+	if kindOf(t, st, "alice") != "operator" || kindOf(t, st, "bob") != "agent" {
+		t.Errorf("after alice's session write: alice %s, bob %s; want operator, agent", kindOf(t, st, "alice"), kindOf(t, st, "bob"))
+	}
+	upsert("bob", true)
+	upsert("alice", false)
+	if kindOf(t, st, "alice") != "operator" || kindOf(t, st, "bob") != "operator" {
+		t.Errorf("after bob's session write and alice's key write: alice %s, bob %s; want operator, operator", kindOf(t, st, "alice"), kindOf(t, st, "bob"))
 	}
 }
 

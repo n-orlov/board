@@ -180,7 +180,7 @@ func (o loginOps) GetAuthSession(ctx context.Context, _ GetAuthSessionRequestObj
 		return failure(http.StatusUnauthorized, "no browser session"), nil
 	}
 	return GetAuthSession200JSONResponse(Session{
-		Email: s.session.Email, Principal: "oidc:" + s.session.Email, Actor: o.login.Operator, CsrfToken: s.session.CSRFToken,
+		Email: s.session.Email, Principal: "oidc:" + s.session.Email, Actor: o.login.ActorFor(s.session.Email), CsrfToken: s.session.CSRFToken,
 	}), nil
 }
 

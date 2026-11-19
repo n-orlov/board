@@ -107,8 +107,10 @@ Two separate things are recorded on every write:
 
 - **Principal**: who authenticated. `oidc:<email>` for a browser session, `key:<key name>` for
   an API key.
-- **Actor**: who acts on the board (§2). A session principal always acts as the **operator**
-  actor. A key principal acts as the actor named in the `Board-Actor` header (the handle an
+- **Actor**: who acts on the board (§2). A session principal acts as the **operator** actor of its
+  email: the handle `VH_OIDC_OPERATORS` maps the email to, else `VH_OPERATOR_HANDLE` (§13). Several
+  operator actors may exist at once, one row per handle (§4.1), and two emails may share a handle.
+  A key principal acts as the actor named in the `Board-Actor` header (the handle an
   agent derives, §9); the header is required on key-authenticated requests.
 
 Events (§4.6) store both `principal` and `actor_id`. Revoking a key cuts off every actor that
@@ -141,12 +143,15 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   4. On success it starts the session and redirects to `/`. The pre-login cookie is left to expire:
      its login is already spent server-side, so it opens nothing.
 - Session endpoints: `GET /auth/session` describes the caller's session (`email`,
-  `principal` = `oidc:<email>`, `actor` = the operator handle, `csrf_token`), and
+  `principal` = `oidc:<email>`, `actor` = the operator handle of that email (§3.1), `csrf_token`), and
   `POST /auth/logout` deletes the session row and clears the cookie (204). Both need a session
   and answer 401 to anything else, a key included.
 - Admission: `email_verified` must be true and the email must be in the allowed list
   (case-insensitive, exact). Anything else gets 403 and no session. An admitted email acts as
-  the **operator** actor (§3.1).
+  the **operator** actor of its handle (§3.1): `VH_OIDC_OPERATORS` maps `alice@example.com=alice`
+  style, and an email with no entry acts as `VH_OPERATOR_HANDLE`, so a deployment that sets only
+  `VH_OPERATOR_HANDLE` has one operator as before. The handle is read from the setting on every
+  request, never stored on the session row.
 - Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie `board_session`, path
   `/`, `Max-Age` = the absolute lifetime; stored server-side as SHA-256 hash (§4.9), so logout and
   expiry are real. The cookie value is never stored. Two expiries end a session, both enforced
@@ -281,8 +286,7 @@ that slug exists, in one transaction with its one `initiative_created` event: th
 (`VH_OPERATOR_HANDLE`, `operator` when unset, kind `operator`, created if absent, §4.1) and the principal is
 `system:bootstrap`. An `inbox` that exists is left exactly as it is: another title or tags, a closed status and its
 events all stay, and no second event is written. Two servers started together on one database leave one `inbox` and
-one event: the unique slug, or on Postgres the one operator row the winner's transaction also wrote, makes the loser's
-transaction roll back, and the loser looks once more, finds that `inbox` and carries on. A database that is
+one event: the unique slug makes the loser's transaction roll back, and the loser looks once more, finds that `inbox` and carries on. A database that is
 not migrated (`VH_MIGRATE=off`) waits for the next start. The inbox is an ordinary initiative afterwards: it
 lists first in a list in creation order (§6.3), can be edited, closed and reopened, and is never recreated while it
 exists.
@@ -293,7 +297,7 @@ exists.
 |---|---|---|
 | id | ulid | |
 | handle | text, unique | stable identity string (§9) |
-| kind | `operator` \| `agent` | at most one `operator` row exists; `serve` seeds it at start-up when the inbox bootstrap creates `inbox` (§4); otherwise (a database not served yet, or one whose `inbox` already existed) it is created by the first write made by a session (below) |
+| kind | `operator` \| `agent` | any number of `operator` rows may exist, one per handle (migration 00012 dropped the `actors_one_operator` index that allowed one); `serve` seeds the `VH_OPERATOR_HANDLE` row at start-up when the inbox bootstrap creates `inbox` (§4); otherwise (a database not served yet, or one whose `inbox` already existed) a handle's row is created by the first write a session acting as it makes (below) |
 | display_name | text | optional; never set in Phase 0 |
 | host | text | optional, from the handle; never set in Phase 0 |
 | way_back | text | optional: command/URL to reach this actor; set from `Board-Actor-Way-Back` (§6.1) |
@@ -305,14 +309,16 @@ An actor row is created on first use of a handle (upsert). In Phase 0 a use is a
 appends an event (`POST /initiatives`, `POST /keys`, `POST /keys/{name}/revoke`) and `PUT /actors/me/protocol-seen`.
 A read (`GET /meta`, the lists and gets) authenticates and echoes the identity but never touches `actors`, so a handle
 that has only read has no row, and the operator row exists after the start of `serve` whose inbox bootstrap created `inbox` (it writes the row, §4), or else not until the first write made by a session (its
-actor is `VH_OPERATOR_HANDLE`, kind `operator`). A handle's kind follows the strongest write seen for it: a session write (acting as `VH_OPERATOR_HANDLE`) makes
-that handle's row `operator`, promoting a row an earlier key write created as `agent` under the same handle, and an
+actor is the operator handle of the session's email, §3.1, kind `operator`). A handle's kind follows the strongest write seen for it, **per handle**: a session write acting as a handle (an email's mapped handle, or `VH_OPERATOR_HANDLE` for an unmapped one) makes
+that handle's row `operator` and no other handle's, promoting a row an earlier key write created as `agent` under the same handle, and an
 `operator` row is never demoted, so a key write that names the operator's handle after a session write leaves the
 kind `operator` (the event's `principal` still records `key:<name>` or `oidc:<email>`, so the two stay
 distinguishable). Which kind a row has therefore never depends on the order the key and the session arrive in.
 A write that carries a non-empty `Board-Actor-Way-Back` or
-`Board-Actor-Meta` replaces that column; a write that carries neither leaves the stored values. Actors are never deleted. A unique partial index
-on `kind WHERE kind = 'operator'` allows at most one `operator` row.
+`Board-Actor-Meta` replaces that column; a write that carries neither leaves the stored values. Actors are never deleted. No index limits `operator` rows: migration 00012 dropped the unique partial index
+`actors_one_operator` (on `kind WHERE kind = 'operator'`), the `kind` column keeps its two values and every row is
+left as it was. Its Down restores the index after turning every `operator` row but the earliest seen
+(`first_seen_at`, then `id`) back into an `agent`.
 
 ### 4.2 `initiatives`, `initiative_tags`
 
@@ -2550,6 +2556,10 @@ Always include the host when the identifier is not globally unique.
 Subagents never register: they act under their parent's handle.
 ```
 
+A **handle** is 1 to 100 characters with no whitespace and no control character
+(`domain.ValidateHandle`). The server applies this rule to the handles of `VH_OIDC_OPERATORS` (§13); a
+`Board-Actor` header is not checked against it today.
+
 The CLI's built-in fallback: `VH_ACTOR` if set, else `agent:<hostname>:<ppid>`, with way
 back `pid <ppid> on <hostname>, cwd <cwd>`. It never reads tool-specific variables.
 
@@ -3696,7 +3706,7 @@ also accepted (§13.1).
 | `VH_LISTEN` | `:8080` | listen address |
 | `VH_DB_URL` | `sqlite:///data/board.db` | §12.2 |
 | `VH_MIGRATE` | `auto` | `auto` \| `off` |
-| `VH_OPERATOR_HANDLE` | `operator` | the operator actor; a session acts as this actor. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
+| `VH_OPERATOR_HANDLE` | `operator` | the operator actor a session acts as when its email has no `VH_OIDC_OPERATORS` entry. `serve` seeds its row at start-up when the inbox bootstrap creates the `inbox` initiative (§4), as that initiative's creator; on a database whose `inbox` already exists, or that is not migrated, the row is created by the first write a session makes (§4.1) |
 | `BOARD_LEASE_DEFAULT_TTL` | `2h` | |
 | `BOARD_LEASE_MAX_TTL` | `12h` | |
 | `VH_SWEEP_INTERVAL` | `15s` | how often `vh serve` expires due leases and deletes expired sessions and Idempotency-Key rows older than 24 hours (§5.1). A Go duration above zero; `off` (also `0` or `0s`) turns the sweeper off, and reads still expire leases lazily. Any other value exits 1 |
@@ -3713,7 +3723,8 @@ also accepted (§13.1).
 | `VH_OIDC_ISSUER` | (unset: browser login off) | issuer URL (discovery); setting it turns browser login on |
 | `VH_OIDC_CLIENT_ID` | (required with the issuer) | |
 | `VH_OIDC_CLIENT_SECRET` | (required with the issuer) | or `VH_OIDC_CLIENT_SECRET_FILE` |
-| `VH_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as the operator |
+| `VH_OIDC_ALLOWED_EMAILS` | (required with the issuer) | comma-separated; these log in as an operator (§3.1) |
+| `VH_OIDC_OPERATORS` | (unset: every admitted email acts as `VH_OPERATOR_HANDLE`) | `email=handle,email=handle`: the operator handle each admitted email acts as. Emails are trimmed and case-insensitive; empty entries are skipped; two emails may map to one handle, one email may not map to two; a handle is valid under §9. An entry without `=`, with an email that has no `@` or holds a space, or with an invalid handle, or a second handle for one email, exits 1 (one stderr line per bad entry, naming the setting), whether or not `VH_OIDC_ISSUER` is set. A mapped email absent from `VH_OIDC_ALLOWED_EMAILS` is harmless: it is never admitted |
 | `VH_SESSION_TTL` | `168h` | absolute session lifetime (§3.2) |
 | `VH_SESSION_IDLE` | `24h` | idle timeout (§3.2) |
 
@@ -3742,10 +3753,10 @@ outside this repository.
 
 Every product environment variable has a `VH_` name and an older `BOARD_` alias. All lookups go through one
 table in code (`internal/envvar`); no other code passes a `VH_` or `BOARD_` literal to `os.Getenv` or
-`os.LookupEnv`, and a static test fails when it does. The 24 variables are listed by suffix after `VH_` or
+`os.LookupEnv`, and a static test fails when it does. The 25 variables are listed by suffix after `VH_` or
 `BOARD_`: `URL`, `API_KEY`, `ACTOR`, `WAY_BACK`, `PUBLIC_URL`, `LISTEN`, `DB_URL`, `MIGRATE`,
 `SQLITE_CHECKPOINT`, `SWEEP_INTERVAL`, `NOTIFY_URL`, `NOTIFY_ON`, `NOTIFY_HEADER`, `NOTIFY_TIMEOUT`,
-`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_CLIENT_SECRET_FILE`, `OIDC_ALLOWED_EMAILS`,
+`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_CLIENT_SECRET_FILE`, `OIDC_ALLOWED_EMAILS`, `OIDC_OPERATORS`,
 `OPERATOR_HANDLE`, `SESSION_TTL`, `SESSION_IDLE`, `STREAM_POLL` and `STREAM_HEARTBEAT`. Every `VH_` name in this
 document stands for the pair. For each variable:
 

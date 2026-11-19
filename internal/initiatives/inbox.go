@@ -22,9 +22,8 @@ const (
 // whatever its title, tags and status, and so is the case of a second server
 // that creates it a moment earlier. That server commits the operator row and
 // the inbox in one transaction, and this call's insert of either one waits for
-// it and is then refused: by the slug, which reports the inbox exists, or by
-// the one operator row (actors_one_operator) on Postgres, which fails the
-// transaction. One more look after a failure finds that server's inbox.
+// it and is then refused by the slug, which reports the inbox exists or fails
+// the transaction. One more look after a failure finds that server's inbox.
 func (s Store) EnsureInbox(ctx context.Context, operator string) (bool, error) {
 	made, err := s.ensureInbox(ctx, operator)
 	if err != nil {

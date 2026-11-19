@@ -1029,7 +1029,7 @@ export interface paths {
         };
         /**
          * The caller's browser session
-         * @description Describes the session the cookie names: the principal, the actor it acts as (the operator), and the session's CSRF token.
+         * @description Describes the session the cookie names: the principal, the actor it acts as (the operator handle of its email), and the session's CSRF token.
          */
         get: operations["getAuthSession"];
         put?: never;
@@ -2107,7 +2107,7 @@ export interface components {
             email: string;
             /** @description Who authenticated, `oidc:<email>`. */
             principal: string;
-            /** @description The actor the session acts as, the operator handle. */
+            /** @description The actor the session acts as, the operator handle of its email. */
             actor: string;
             /** @description The value cookie-authenticated writes send as `X-CSRF-Token`. */
             csrf_token: string;

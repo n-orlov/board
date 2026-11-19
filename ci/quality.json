@@ -134,7 +134,9 @@
                 "tasklist.go",
                 "taskops.go",
                 "timelineops.go",
-                "actorops.go"
+                "actorops.go",
+                "login.go",
+                "loginops.go"
             ],
             "internal/cli": [
                 "adminkeys.go",
@@ -216,7 +218,8 @@
                     "pingops.go",
                     "startops.go",
                     "timelineops.go",
-                    "actorops.go"
+                    "actorops.go",
+                    "loginops.go"
                 ],
                 "streams": [
                     "askwait.go",
@@ -227,6 +230,7 @@
                     "api.go",
                     "auth.go",
                     "idempotency.go",
+                    "login.go",
                     "server.go",
                     "taskattention.go",
                     "tasklist.go",

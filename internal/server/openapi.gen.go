@@ -2021,7 +2021,7 @@ type ProtocolSeenRequest struct {
 
 // Session A browser session.
 type Session struct {
-	// Actor The actor the session acts as, the operator handle.
+	// Actor The actor the session acts as, the operator handle of its email.
 	Actor string `json:"actor"`
 
 	// CsrfToken The value cookie-authenticated writes send as `X-CSRF-Token`.

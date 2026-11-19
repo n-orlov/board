@@ -212,7 +212,7 @@ func serveBrowser(next http.Handler, login *Login, w http.ResponseWriter, r *htt
 			return
 		}
 		ctx := withSession(r.Context(), sessionIdentity{id: id, session: sess})
-		who := auth.Identity{Principal: "oidc:" + sess.Email, Actor: login.Operator, Operator: true}
+		who := auth.Identity{Principal: "oidc:" + sess.Email, Actor: login.ActorFor(sess.Email), Operator: true}
 		next.ServeHTTP(w, r.WithContext(withIdentity(ctx, who)))
 	}
 }

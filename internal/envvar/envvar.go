@@ -35,7 +35,7 @@ func define(suffix string) Var {
 	return v
 }
 
-// The 24 product variables.
+// The 25 product variables.
 var (
 	URL                  = define("URL")
 	APIKey               = define("API_KEY")
@@ -56,6 +56,7 @@ var (
 	OIDCClientSecret     = define("OIDC_CLIENT_SECRET")
 	OIDCClientSecretFile = define("OIDC_CLIENT_SECRET_FILE")
 	OIDCAllowedEmails    = define("OIDC_ALLOWED_EMAILS")
+	OIDCOperators        = define("OIDC_OPERATORS")
 	OperatorHandle       = define("OPERATOR_HANDLE")
 	SessionTTL           = define("SESSION_TTL")
 	SessionIdle          = define("SESSION_IDLE")
