@@ -42,15 +42,24 @@
             <Icon d={entry.icon} />
             {#if entry.badge !== ''}
               <span
-                class="absolute -right-3 -top-2 min-w-5 rounded-full bg-danger px-1 text-center text-[11px] font-bold leading-5 text-surface-raised"
+                class="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-danger px-0.5 text-center text-[9px] font-bold leading-4 text-surface-raised"
                 data-testid="attention-badge"
+                title="Needs attention (incl. done, not closed)"
                 aria-hidden="true">{entry.badge}</span
+              >
+            {/if}
+            {#if entry.live}
+              <span
+                class="absolute -bottom-1.5 -right-2.5 min-w-4 rounded-full bg-success px-0.5 text-center text-[9px] font-bold leading-4 text-surface-raised"
+                data-testid="live-badge"
+                title="Live now: tasks with a live lease"
+                aria-hidden="true">{entry.live}</span
               >
             {/if}
           </span>
           <!-- The badge's words ride in the link's content, not in an aria-label, so the name keeps the visible text (axe label-content-name-mismatch). -->
           <span class={variant === 'rail' ? 'sr-only' : ''}
-            >{entry.label}{#if entry.badgeLabel !== ''}<span class="sr-only">{entry.badgeLabel}</span>{/if}</span
+            >{entry.label}{#if entry.badgeLabel !== ''}<span class="sr-only">{entry.badgeLabel}</span>{/if}{#if entry.live}<span class="sr-only">, {entry.live} live now</span>{/if}</span
           >
         </a>
       </li>

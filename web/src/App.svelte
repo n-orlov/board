@@ -14,6 +14,7 @@
   import Timeline from './Timeline.svelte';
   import { live } from './lib/live';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
+  import { TasksApi } from './lib/tasks';
   import { ROUTES, navEntries, redirectedHash, resolveRoute, routeParam, type RouteId } from './lib/routes';
   import { replaceHash } from './lib/historyEntry';
   import { applyDensity } from './lib/proto/prefs.svelte';
@@ -56,6 +57,24 @@
   });
 
   $effect(() => live().onAttention((counts) => (attentionTotal = counts.total)));
+
+  // UX prototype: the "live now" badge, tasks with a live lease, refreshed on every board event.
+  let liveNow = $state(0);
+  const navTasks = new TasksApi(browser, () => '');
+  async function loadLiveNow() {
+    try {
+      const open = await navTasks.listQuery(new URLSearchParams({ status: 'open' }));
+      liveNow = open.filter((t) => t.live_leases.length > 0).length;
+    } catch {
+      // keep the last count
+    }
+  }
+  $effect(() => {
+    if (auth.kind !== 'loading' && auth.kind !== 'redirecting' && auth.kind !== 'error' && auth.kind !== 'signed-out') {
+      void loadLiveNow();
+      return live().subscribe(() => true, loadLiveNow);
+    }
+  });
 
   async function signOut() {
     signOutFailed = (await session.signOut()) === 'failed';
@@ -100,7 +119,7 @@
     >
   </SessionCard>
 {:else}
-  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal)} email={auth.session.email} onsignout={signOut}>
+  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal, liveNow)} email={auth.session.email} onsignout={signOut}>
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}

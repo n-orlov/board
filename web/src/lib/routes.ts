@@ -166,6 +166,8 @@ export interface NavEntry {
   badge: string;
   /** The badge's words for assistive technology ("3 items need attention"), the empty string with no badge. */
   badgeLabel: string;
+  /** UX prototype: the "live now" count (tasks with a live lease) on the same entry, the empty string with none. */
+  live?: string;
 }
 
 /** The most the badge prints before it says "more": a total above it shows as `99+`. */
@@ -187,7 +189,7 @@ export function badgeLabel(total: number): string {
  * One navigation entry per table entry that is not a page inside another view; the current one, or its parent,
  * flagged. An entry whose route has a `badge` carries the badge of `attentionTotal`, the stream's `counts.total`.
  */
-export function navEntries(current: Route, table: readonly Route[], attentionTotal = 0): NavEntry[] {
+export function navEntries(current: Route, table: readonly Route[], attentionTotal = 0, liveNow = 0): NavEntry[] {
   return table
     .filter((route) => route.parent === undefined)
     .map((route) => ({
@@ -199,6 +201,7 @@ export function navEntries(current: Route, table: readonly Route[], attentionTot
       phone: route.phone === true,
       badge: route.badge === 'attention' ? badgeText(attentionTotal) : '',
       badgeLabel: route.badge === 'attention' ? badgeLabel(attentionTotal) : '',
+      live: route.badge === 'attention' ? badgeText(liveNow) : '',
     }));
 }
 
