@@ -34,11 +34,11 @@ export interface Route {
 
 export const ROUTES = [
   {
-    id: 'attention',
-    hash: '#/attention',
+    id: 'now',
+    hash: '#/now',
     phone: true,
-    title: 'Attention',
-    label: 'Attention',
+    title: 'Now',
+    label: 'Now',
     badge: 'attention',
     icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
   },
@@ -131,6 +131,15 @@ export function hashPath(hash: string): string {
 function selects(route: Route, hash: string): boolean {
   const path = hashPath(hash);
   return route.param === true ? segment(path, route.hash) !== '' : route.hash === path;
+}
+
+/** The fragment the Attention view had before it became Now; a link to it is rewritten to `#/now`, query kept. */
+export const OLD_ATTENTION_HASH = '#/attention';
+
+/** `#/attention?x` becomes `#/now?x`; any other fragment is returned unchanged. */
+export function redirectedHash(hash: string): string {
+  const path = hashPath(hash);
+  return path === OLD_ATTENTION_HASH ? `#/now${hash.slice(path.length)}` : hash;
 }
 
 /** The route a fragment names; anything the table does not name (`#/` included) is its first entry, the Attention view. */

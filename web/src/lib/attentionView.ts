@@ -234,7 +234,7 @@ export interface OpenedAttention {
 export function openAttention(env: ViewEnv, hash: string): OpenedAttention {
   const at = hash.indexOf('?');
   const own = at < 0 ? '' : hash.slice(at + 1);
-  const query = openView(env, ATTENTION_VIEW, '#/attention', own);
+  const query = openView(env, ATTENTION_VIEW, '#/now', own);
   return { filter: filterFromQuery(query), restored: own === '' && query !== '' };
 }
 

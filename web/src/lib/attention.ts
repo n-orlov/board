@@ -90,7 +90,7 @@ export function filterToQuery(filter: AttentionFilter): string {
 /** The fragment of the view under a filter: `#/attention`, or `#/attention?...` when a value is set. */
 export function attentionHash(filter: AttentionFilter): string {
   const query = filterToQuery(filter);
-  return query === '' ? '#/attention' : `#/attention?${query}`;
+  return query === '' ? '#/now' : `#/now?${query}`;
 }
 
 /** The filter held by a fragment: everything after the first `?` is the query. */

@@ -2,7 +2,7 @@
   import type { Component } from 'svelte';
   import Actors from './Actors.svelte';
   import Archive from './Archive.svelte';
-  import Attention from './Attention.svelte';
+  import Now from './Now.svelte';
   import ApiKeys from './ApiKeys.svelte';
   import Notes from './Notes.svelte';
   import InitiativePage from './InitiativePage.svelte';
@@ -14,11 +14,21 @@
   import Timeline from './Timeline.svelte';
   import { live } from './lib/live';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
-  import { ROUTES, navEntries, resolveRoute, routeParam, type RouteId } from './lib/routes';
+  import { ROUTES, navEntries, redirectedHash, resolveRoute, routeParam, type RouteId } from './lib/routes';
+  import { replaceHash } from './lib/historyEntry';
+  import { applyDensity } from './lib/proto/prefs.svelte';
+
+  // The old `#/attention` links land on Now (the view's new name), with their query.
+  function redirectOld() {
+    const next = redirectedHash(window.location.hash);
+    if (next !== window.location.hash) replaceHash(next);
+  }
+  redirectOld();
+  applyDensity();
 
   // The component of each view; the table in lib/routes.ts decides which one is on screen.
   const VIEWS: Record<RouteId, Component<{ csrf: string; param: string }>> = {
-    attention: Attention,
+    now: Now,
     initiatives: Initiatives,
     initiative: InitiativePage,
     tasks: Tasks,
@@ -52,6 +62,7 @@
   }
 
   function hashChanged() {
+    redirectOld();
     route = resolveRoute(window.location.hash, ROUTES);
     param = routeParam(window.location.hash, ROUTES);
     void session.hashChanged(window.location.hash);
