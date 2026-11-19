@@ -279,7 +279,7 @@
   // Phones: every band is an accordion; asks and expired open by default when they have rows. Desktop: all open.
   const wide = typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 1024px)').matches;
   let opens: Record<string, boolean | undefined> = $state({});
-  const isOpen = (key: string, count: number) => opens[key] ?? (wide || ((key === 'asks' || key === 'stuck') && count > 0));
+  const isOpen = (key: string, count: number) => opens[key] ?? ((wide && key !== 'done') || ((key === 'asks' || key === 'stuck') && count > 0));
   const toggleBand = (key: string, e: Event) => (opens = { ...opens, [key]: (e.currentTarget as HTMLDetailsElement).open });
 
   const timeLeft = (expires: string) => Date.parse(expires) - now.getTime();

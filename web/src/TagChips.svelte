@@ -46,7 +46,7 @@
       {:else}
         <button
           type="button"
-          class="rounded-full border border-dashed border-border px-1.5 text-xs leading-5 text-text-muted hover:text-accent"
+          class="rounded-full border border-dashed border-border px-1.5 text-xs leading-5 text-text-muted opacity-40 hover:text-accent hover:opacity-100 focus-visible:opacity-100"
           title="Add a tag (prototype: stored in this browser only)"
           onclick={() => (adding = true)}>+ tag</button
         >

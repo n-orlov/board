@@ -15,7 +15,22 @@
   let open = $state(false);
   const shownInitiatives = $derived(open || initiatives.length <= FOLD ? initiatives : initiatives.filter((s, n) => n < FOLD || value.initiatives.includes(s)));
   const active = $derived(value.tags.length + value.initiatives.length > 0);
+  // Phones fold the whole filter behind one line; wider screens show it open.
+  const wide = typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 768px)').matches;
+  let shown = $state(wide);
+  const picked = $derived(value.tags.length + value.initiatives.length);
 </script>
+
+<button
+  type="button"
+  class="flex min-h-9 w-full items-center gap-2 text-left text-sm md:hidden"
+  aria-expanded={shown}
+  onclick={() => (shown = !shown)}
+  ><span class="font-medium">Filter</span><span class="text-text-muted">{picked > 0 ? `${picked} selected` : 'tags, initiatives'}</span><span class="ml-auto text-text-muted"
+    >{shown ? '▴' : '▾'}</span
+  ></button
+>
+{#if shown}
 
 <div class="flex flex-col gap-1.5" data-testid="chip-filter">
   {#if tags.length > 0}
@@ -58,3 +73,4 @@
     </div>
   {/if}
 </div>
+{/if}

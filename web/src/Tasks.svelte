@@ -6,6 +6,12 @@
   import NewTaskDialog from './NewTaskDialog.svelte';
   import NowPanel from './NowPanel.svelte';
   import Toast from './Toast.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import DensitySwitch from './DensitySwitch.svelte';
+  import TagChips from './TagChips.svelte';
+  import { isChipState, loadPref, manualTagsOf, prefs, savePref } from './lib/proto/prefs.svelte';
+  import { chipsActive, NO_CHIPS, passesChips, tagChoices, taskTags, type ChipState, type TaskTag } from './lib/proto/tags';
+  import type { TaskListItem } from './lib/initiatives';
   import { InitiativesApi } from './lib/initiatives';
   import { taskRows } from './lib/initiativePage';
   import { NO_NEEDS, NeedsStore, withoutNeeds, type NeedsState } from './lib/needsAttention';
@@ -56,6 +62,13 @@
   let sort: SortState = $state(opened.sort);
   let view: TasksState = $state({ tasks: [], filter: initial, loading: true, error: undefined });
   let initiatives: string[] = $state([]);
+  let initiativeTagList: { slug: string; tags: string[] }[] = $state([]);
+  // Prototype: the chip filter (tags AND, initiatives OR) runs in the browser on the rows read, saved in this browser.
+  let chips: ChipState = $state(loadPref('tasks.chips', NO_CHIPS, isChipState));
+  function setChips(next: ChipState) {
+    chips = next;
+    savePref('tasks.chips', next);
+  }
   // Whether the list answered: an empty answer still drops a restored initiative, only a failed lookup keeps it.
   let listAnswered = false;
   let formOpen = $state(false);
@@ -85,6 +98,7 @@
       .list('all')
       .then((list) => {
         initiatives = list.map((i) => i.slug);
+        initiativeTagList = list.map((i) => ({ slug: i.slug, tags: i.tags }));
         listAnswered = true;
       })
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
@@ -157,9 +171,24 @@
 
   const setFlag = (name: FlagName, value: string) => apply({ ...view.filter, [name]: value });
   const needs = $derived(needsView.needs);
-  const needsRows = $derived(taskRows(needs.items, 'all'));
+  const initiativeTags = $derived(new Map(initiativeTagList.map((i) => [i.slug, i.tags] as const)));
+  const byRef = $derived(new Map([...view.tasks, ...needs.items].map((t) => [t.ref, t] as const)));
+  const tagsOfTask = (t: TaskListItem): TaskTag[] => taskTags(t, initiativeTags, manualTagsOf(t.ref));
+  const tagsFor = (ref: string): TaskTag[] => {
+    const t = byRef.get(ref);
+    return t === undefined ? [] : tagsOfTask(t);
+  };
+  const chipped = (list: readonly TaskListItem[]) => {
+    void prefs.manual;
+    return chipsActive(chips) ? list.filter((t) => passesChips(tagsOfTask(t).map((x) => x.tag), t.initiative, chips)) : [...list];
+  };
+  const tagOptions = $derived.by(() => {
+    void prefs.manual;
+    return tagChoices([...view.tasks, ...needs.items].map(tagsOfTask), initiativeTagList.map((i) => i.tags), chips.tags);
+  });
+  const needsRows = $derived(taskRows(chipped(needs.items), 'all'));
   // The table sorts by the chosen column; the Needs attention section above it keeps its own order.
-  const rows = $derived(sortRows(taskRows(withoutNeeds(view.tasks, needs), 'all'), sort, TASK_COLUMNS));
+  const rows = $derived(sortRows(taskRows(chipped(withoutNeeds(view.tasks, needs)), 'all'), sort, TASK_COLUMNS));
   const empty = $derived(!view.loading && view.error === undefined && rows.length === 0 && needsRows.length === 0);
 
   function created(ref: string) {
@@ -181,11 +210,12 @@
 <!-- From 1536 px: the heading and the rest in the main column, the Now panel in a 400 px side column that sticks at the top and scrolls on its own; the pair is at most 2560 px wide, centred. Below it the panel sits above the filters. -->
 <section
   aria-labelledby="tasks-heading"
-  class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-x-6"
+  class="vh-dense mx-auto w-full max-w-[2560px] pb-16 md:pb-0 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-x-6"
   data-testid="tasks-view"
 >
   <div class="mb-4 flex items-center justify-between gap-3 2xl:col-start-1 2xl:row-start-1">
     <h2 id="tasks-heading" class="text-xl font-bold">Tasks</h2>
+    <span class="ml-auto"><DensitySwitch /></span>
     <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={() => (formOpen = true)}>New task</button>
   </div>
 
@@ -200,7 +230,10 @@
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="task-filters">
     <FilterSelect label="Status" options={STATUS_OPTIONS} value={view.filter.status} onchange={(v) => apply({ ...view.filter, status: v })} testid="status-filter" />
     <FilterSelect label="Kind" options={KIND_OPTIONS} value={view.filter.kind} onchange={(v) => apply({ ...view.filter, kind: v })} testid="kind-filter" />
-    <FilterSelect label="Initiative" options={initiativeOptions(initiatives, view.filter.initiative)} value={view.filter.initiative} onchange={(v) => apply({ ...view.filter, initiative: v })} testid="initiative-filter" />
+    {#if view.filter.initiative !== ''}
+      <!-- A link may still name one initiative; the chips below are the way to pick several. -->
+      <FilterSelect label="Initiative" options={initiativeOptions(initiatives, view.filter.initiative)} value={view.filter.initiative} onchange={(v) => apply({ ...view.filter, initiative: v })} testid="initiative-filter" />
+    {/if}
     <FilterSelect label="Active" options={flagOptions('active')} value={view.filter.active} onchange={(v) => setFlag('active', v)} testid="active-filter" />
     <FilterSelect label="Blocked" options={flagOptions('blocked')} value={view.filter.blocked} onchange={(v) => setFlag('blocked', v)} testid="blocked-filter" />
     <FilterSelect label="Overdue" options={flagOptions('overdue')} value={view.filter.overdue} onchange={(v) => setFlag('overdue', v)} testid="overdue-filter" />
@@ -221,6 +254,10 @@
     {/if}
   </div>
 
+  <div class="mb-4 rounded-lg border border-border bg-surface-raised px-3 py-2" data-testid="task-chips">
+    <ChipFilter tags={tagOptions} initiatives={initiatives} value={chips} onchange={setChips} />
+  </div>
+
   {#if view.error !== undefined}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger">{view.error}</p>
   {/if}
@@ -230,7 +267,7 @@
   {/if}
 
   {#if !view.loading}
-    <NeedsAttention rows={needsRows} more={needs.more} moreHref={attentionHref(view.filter)} showInitiative />
+    <NeedsAttention rows={needsRows} more={needs.more} moreHref={attentionHref(view.filter)} showInitiative {tagsFor} />
   {/if}
 
   {#if view.loading}
@@ -245,7 +282,7 @@
     </div>
   {:else if empty}
     <p class="rounded-md border border-dashed border-border px-4 py-8 text-center text-text-muted" data-testid="no-tasks">
-      {isFiltered(view.filter) ? 'No tasks match these filters.' : 'No tasks yet.'}
+      {isFiltered(view.filter) || chipsActive(chips) ? 'No tasks match these filters.' : 'No tasks yet.'}
     </p>
   {:else if rows.length > 0}
     <!-- One table: from 768 px a dense table, below it each row is a card. -->
@@ -269,7 +306,9 @@
             class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface-raised p-4 md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0"
           >
             <td class="font-mono text-sm {cell}" data-testid="task-ref"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href={taskHref(row.ref)}>{row.ref}</a></td>
-            <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title">{row.title}</td>
+            <td class="order-last w-full min-w-0 font-medium md:order-none {cell}" data-testid="task-title"
+              >{row.title} <TagChips tags={tagsFor(row.ref)} taskRef={row.ref} editable /></td
+            >
             <td class="text-sm {cell}"><a class="inline-flex min-h-11 min-w-11 items-center text-accent hover:underline" href="#/i/{row.initiative}" data-testid="task-initiative">{row.initiative}</a></td>
             <td class="text-sm {cell}" data-testid="task-kind">{row.kind}</td>
             <td class={cell} data-testid="task-status"><span class="{badge} border-border text-text-muted">{row.status}</span></td>

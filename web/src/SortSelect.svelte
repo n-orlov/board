@@ -2,7 +2,7 @@
   import { choiceOf, sortChoices, sortOfChoice, type SortState } from './lib/tableSort';
 
   // The phone's Sort select: cards have no headers to click, so it offers the same choices as the headers.
-  // 44 px high and 16 px text; the tables from 768 px hide it.
+  // 44 px high and 16 px text on phones. Prototype: shown at every width, so every list has the same sort control.
   let {
     columns,
     sort,
@@ -13,10 +13,10 @@
   const choices = $derived(sortChoices(columns));
 </script>
 
-<label class="flex max-w-full items-center gap-2 text-sm text-text-muted md:hidden">
+<label class="flex max-w-full items-center gap-2 text-sm text-text-muted">
   <span>Sort</span>
   <select
-    class="min-h-11 min-w-0 max-w-full rounded-md border border-border bg-surface-raised px-3 text-base text-text"
+    class="min-h-11 min-w-0 max-w-full rounded-md border border-border bg-surface-raised px-3 text-base text-text md:min-h-8 md:px-2 md:text-sm"
     data-testid={testid}
     value={choiceOf(sort)}
     onchange={(event) => onsort(sortOfChoice(event.currentTarget.value))}
