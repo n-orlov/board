@@ -1073,6 +1073,14 @@ describe('mountChart', () => {
     expect(shown).toEqual([{ from: new Date(0), to: new Date(2 * DAY_MS) }]);
   });
 
+  it('draws the chart again on request (the label column changed width)', () => {
+    const { lib, made } = fakeLib();
+    const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h);
+    const before = made[0]!.redraw.mock.calls.length;
+    chart.redraw();
+    expect(made[0]!.redraw.mock.calls.length).toBe(before + 1);
+  });
+
   it('zooms in and out by the factor, without animation', () => {
     const { lib, made } = fakeLib();
     const chart = mountChart(lib, {} as HTMLElement, model(['A1']), initialWindow(NOW), hooks().h);

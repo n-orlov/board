@@ -1,7 +1,7 @@
 <script lang="ts">
   import { pushHash, replaceHash } from './lib/historyEntry';
   import { TimelineEntry } from './lib/timelineEntry';
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { DataSet } from 'vis-data/peer';
   import { Timeline } from 'vis-timeline/peer';
   import 'vis-timeline/styles/vis-timeline-graph2d.min.css';
@@ -13,6 +13,7 @@
   import ChipFilter from './ChipFilter.svelte';
   import SortControl from './SortControl.svelte';
   import SegmentedRadio from './SegmentedRadio.svelte';
+  import { LABEL_DEFAULT, clampLabelWidth, labelMax, labelWidthForKey, loadLabelWidth, saveLabelWidth, LABEL_MIN } from './lib/labelWidth';
   import { WINDOWS, loadWindow, saveWindow, type NowWindow } from './lib/nowFlight';
   import { ACTIVE_CHOICES, ACTIVE_COLUMNS, WINDOW_HINT, windowVisible, type TimelineOrder } from './lib/timelineActive';
   import type { SortState } from './lib/tableSort';
@@ -231,6 +232,7 @@
         chart = mountChart(lib, target, model, view.window, hooks, heightFor(target));
         const rows = entry.rows();
         if (rows !== undefined) chart.scrollRows(rows);
+        void placeHandle();
       } else if (model !== shown) chart.show(model);
       shown = model;
     });
@@ -283,6 +285,60 @@
 
   function resized() {
     if (chart !== undefined && frame !== undefined) chart.setHeight(heightFor(frame));
+    void setLabelWidth(labelWidth); // a narrower window may no longer hold the width
+  }
+
+  // The label column (md and wider; a phone keeps its capped column): a separator beside it resizes it by drag or arrow keys,
+  // double click resets it; the width is held between a minimum and a share of the chart and remembered per browser.
+  let labelWidth = $state(loadLabelWidth(viewEnv.storage));
+  /** The label panel's right edge inside the frame, where the handle sits. */
+  let labelEdge = $state(0);
+  let chartW = $state(1000);
+  let watched: Element | undefined;
+  const panelWatch = new ResizeObserver(() => placeHandle());
+  onDestroy(() => panelWatch.disconnect());
+  /** Puts the handle on the edge vis-timeline drew; it follows the panel however vis-timeline resizes it. */
+  function placeHandle() {
+    if (frame === undefined) return;
+    const left = frame.querySelector('.vis-panel.vis-left');
+    if (left === null) return;
+    if (left !== watched) {
+      watched = left;
+      panelWatch.observe(left);
+    }
+    chartW = frame.clientWidth;
+    labelEdge = left.getBoundingClientRect().right - frame.getBoundingClientRect().left;
+  }
+  async function setLabelWidth(px: number, save = false) {
+    chartW = frame?.clientWidth ?? chartW;
+    labelWidth = clampLabelWidth(px, chartW);
+    if (save) saveLabelWidth(viewEnv.storage, labelWidth);
+    await tick(); // the frame's --tl-label-w first, then vis-timeline measures the labels
+    chart?.redraw();
+    placeHandle();
+  }
+  function dragLabel(e: PointerEvent) {
+    const bar = e.currentTarget as HTMLElement;
+    const x0 = e.clientX;
+    const w0 = labelWidth;
+    bar.setPointerCapture(e.pointerId);
+    const move = (m: PointerEvent) => void setLabelWidth(w0 + m.clientX - x0);
+    const up = () => {
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+      saveLabelWidth(viewEnv.storage, labelWidth);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+    e.preventDefault();
+  }
+  function labelKey(e: KeyboardEvent) {
+    const next = labelWidthForKey(e.key, labelWidth, chartW);
+    if (next === undefined) return;
+    e.preventDefault();
+    void setLabelWidth(next, true);
   }
 
   const button = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border bg-surface-raised px-3 text-sm font-medium text-text enabled:hover:bg-surface disabled:opacity-60';
@@ -357,7 +413,26 @@
       {/each}
     </ul>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
-    <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" style={laneStyle()} bind:this={frame}></div>
+    <div class="relative max-w-full">
+      <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" style="{laneStyle()};--tl-label-w:{labelWidth}px" bind:this={frame}></div>
+      <!-- Drag (or Left/Right, Home, End) to resize the label column; double click resets it. -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex (a focusable separator is a widget) -->
+      <div
+        class="tl-resizer absolute top-0 bottom-0 z-10 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center md:flex"
+        style="left:{labelEdge}px"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the label column"
+        aria-valuemin={LABEL_MIN}
+        aria-valuemax={labelMax(chartW)}
+        aria-valuenow={labelWidth}
+        tabindex="0"
+        data-testid="label-resizer"
+        onpointerdown={dragLabel}
+        onkeydown={labelKey}
+        ondblclick={() => void setLabelWidth(LABEL_DEFAULT, true)}
+      ></div>
+    </div>
   {/if}
 </section>
 
@@ -425,6 +500,27 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     padding: 0 0.5rem;
+  }
+  /* From md up the column is as wide as the user set (--tl-label-w); vis-timeline sizes its panel to its labels. */
+  @media (min-width: 768px) {
+    .timeline-frame :global(.vis-label .vis-inner) {
+      width: var(--tl-label-w);
+      max-width: none;
+    }
+  }
+  .tl-resizer::after {
+    content: '';
+    width: 3px;
+    height: 100%;
+    border-radius: 2px;
+    background: transparent;
+  }
+  .tl-resizer:hover::after,
+  .tl-resizer:focus-visible::after {
+    background: var(--accent);
+  }
+  .tl-resizer:focus-visible {
+    outline: none;
   }
   .timeline-frame :global(.vis-label) {
     --tl-row: var(--tl-task-row);
