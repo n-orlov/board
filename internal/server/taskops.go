@@ -126,6 +126,15 @@ func apiLinks(list []tasks.Link) []TaskLink {
 	return out
 }
 
+// apiTagMarks is the marks of a task's tags, an empty list for none.
+func apiTagMarks(marks []tasks.TagMark) []TagMark {
+	out := make([]TagMark, len(marks))
+	for i, m := range marks {
+		out[i] = TagMark{Tag: m.Tag, Source: TagMarkSource(m.Source)}
+	}
+	return out
+}
+
 func apiExternalRefs(refs []domain.ExternalRef) []ExternalRef {
 	out := make([]ExternalRef, len(refs))
 	for i, r := range refs {
@@ -149,7 +158,7 @@ func apiTaskDetail(t tasks.Task, links tasks.Links, live []leases.Lease, open []
 		Id: t.ID, Ref: t.Ref, Initiative: t.Initiative, Seq: t.Seq, Title: t.Title, Description: t.Description,
 		Kind: TaskDetailKind(t.Kind), Status: TaskDetailStatus(t.Status), Resolution: resolution(t.Resolution),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CadenceSeconds: t.CadenceSeconds, NextCheckAt: t.NextCheckAt,
-		ExternalRefs: apiExternalRefs(t.ExternalRefs), Tags: nonNil(t.Tags),
+		ExternalRefs: apiExternalRefs(t.ExternalRefs), Tags: nonNil(t.Tags), TagMarks: apiTagMarks(t.TagMarks),
 		CreatedBy: t.CreatedBy, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		DoneAt: t.DoneAt, DoneBy: optionalText(t.DoneBy), ClosedAt: t.ClosedAt, ClosedBy: optionalText(t.ClosedBy),
 		Active: len(live) > 0, Blocked: t.Blocked, Overdue: t.Overdue,

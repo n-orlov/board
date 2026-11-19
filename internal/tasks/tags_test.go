@@ -5,6 +5,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
+	"github.com/n-orlov/village-hall/internal/leases"
 )
 
 func TestCreateStoresNormalisedTagsAndEveryReadShowsThem(t *testing.T) {
@@ -147,5 +151,44 @@ func TestATagChangeRefusedWritesNothing(t *testing.T) {
 	}
 	if after := count(t, s, `SELECT (SELECT count(*) FROM events) + (SELECT count(*) FROM task_tags) + (SELECT count(*) FROM actors)`); after != before {
 		t.Errorf("refused changes moved the row count from %d to %d", before, after)
+	}
+}
+
+func TestTagMarksCarryOwnInitiativeAndActorKindTagsEachWithItsSource(t *testing.T) {
+	s := newStore(t)
+	if _, err := (initiatives.Store{Store: s.Store, Now: s.Now}).Create(ctx, who, "key:c", initiatives.New{Slug: "aa", Title: "I", Tags: []string{"home", "ralph"}}); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := s.Create(ctx, who, "key:c", New{Initiative: "aa", Title: "t", Tags: []string{"work", "ralph"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls := leases.Store{Store: s.Store, Now: s.Now}
+	for _, h := range []string{"codex:a:b", "foo:x", "ralph", "claude:s", "codex:z"} {
+		l := startLease(t, ls, audit.Actor{Handle: h}, tk.Ref, "work")
+		if h == "codex:a:b" || h == "foo:x" {
+			if _, err := ls.End(ctx, audit.Actor{Handle: h}, "key:c", l.Ref, "done"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := s.Get(ctx, tk.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TagMark{
+		{"ralph", "task"}, {"work", "task"}, {"home", "initiative"}, {"ralph", "initiative"},
+		{"claude", "actor"}, {"codex", "actor"},
+	}
+	if !reflect.DeepEqual(got.TagMarks, want) {
+		t.Fatalf("TagMarks = %v, want %v", got.TagMarks, want)
+	}
+	if !reflect.DeepEqual(got.Tags, []string{"ralph", "work"}) || count(t, s, `SELECT count(*) FROM task_tags`) != 2 {
+		t.Fatalf("derived tags leaked into the task's own tags: %v", got.Tags)
+	}
+	plain := mk(t, s, "aa", "plain")
+	page, err := s.List(ctx, Query{})
+	if err != nil || len(page.Items) != 2 || !reflect.DeepEqual(page.Items[1].TagMarks, []TagMark{{"home", "initiative"}, {"ralph", "initiative"}}) || plain.Ref == "" {
+		t.Fatalf("list marks = %+v, %v", page.Items, err)
 	}
 }

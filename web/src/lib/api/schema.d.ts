@@ -1340,6 +1340,8 @@ export interface components {
             external_refs: components["schemas"]["ExternalRef"][];
             /** @description The task's own tags, sorted. Empty when it has none. */
             tags: string[];
+            /** @description Every tag the task shows, each marked with where it comes from: the task's own tags, then its initiative's, then the derived actor-kind tags, each source's tags in order (actor kinds in the order `ralph`, `claude`, `pi`, `codex`, `deck`). A tag that has two sources appears once for each. Derived tags are computed on read, are never stored and are not in `tags`. */
+            tag_marks: components["schemas"]["TagMark"][];
             /** @description The handle of the actor that created it. */
             created_by: string;
             /** Format: date-time */
@@ -1358,6 +1360,15 @@ export interface components {
             blocked: boolean;
             /** @description A watch task, not closed, whose `next_check_at` is before now. */
             overdue: boolean;
+        };
+        /** @description One tag of a task and its source. */
+        TagMark: {
+            tag: string;
+            /**
+             * @description `task`: one of the task's own tags. `initiative`: a tag of its initiative. `actor`: derived, the kind (`ralph`, `claude`, `pi`, `codex` or `deck`) of the holder of a live or ended lease on it, the holder's handle prefix before the first `:`.
+             * @enum {string}
+             */
+            source: "task" | "initiative" | "actor";
         };
         /** @description A task with its dependencies and live leases. */
         TaskDetail: components["schemas"]["Task"] & {

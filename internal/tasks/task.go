@@ -102,7 +102,11 @@ type Task struct {
 	NextCheckAt    *time.Time
 	ExternalRefs   []domain.ExternalRef
 	// Tags are the task's own tags, sorted; empty, never nil, when it has none.
-	Tags      []string
+	Tags []string
+	// TagMarks are the task's own, its initiative's and its derived actor-kind
+	// tags, each with its source, computed on read and never stored (SPEC 5.5).
+	// Never nil.
+	TagMarks  []TagMark
 	CreatedBy string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -116,6 +120,12 @@ type Task struct {
 	// Overdue is derived: a watch task, not closed, whose next_check_at is
 	// before the store's clock when the task was read.
 	Overdue bool
+}
+
+// TagMark is one tag a task shows and where it comes from: a domain.TagSource
+// value.
+type TagMark struct {
+	Tag, Source string
 }
 
 // fields are the editable columns of a task.

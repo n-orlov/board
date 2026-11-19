@@ -922,6 +922,20 @@ rows it points at:
 The payload never carries an API key, a session id or the `VH_NOTIFY_HEADER` value: it is built only from the
 event, the task, initiative, ask, lease and actor rows named above.
 
+### 5.5 Derived actor-kind tags
+
+A task carries a derived tag for each actor kind that has held a lease on it, live or ended. The kinds are `ralph`,
+`claude`, `pi`, `codex` and `deck` (`domain.ActorKinds`), and the kind of a holder is its handle's prefix before the first
+`:` when that is one of them (`domain.ActorKind`): `ralph:x` is `ralph`, `codex:a:b` is `codex`, `foo:x` is nothing, `ralph`
+with no `:` is nothing and the empty handle is nothing. The match is exact and case-sensitive. A lease counts in any state
+(`live`, `ended` or `expired`), so a task keeps the tag after the lease is over.
+
+The tags are computed when the task is read, from `leases` and `actors`, and are never stored: no `task_tags` row is written
+for them and a task's own `tags` list never holds one. The task read shapes the UI uses (`Task`, so `GET /api/v1/tasks`, the
+task document and the answers that carry it) add `tag_marks`: every tag the task shows as `{tag, source}`, the task's own tags
+first (`source` `task`), then its initiative's (`initiative`), then the derived kinds (`actor`, in the order above), each
+source's tags sorted. A tag with two sources appears once for each. `tags` stays the task's own tags alone.
+
 ---
 
 ## 6. HTTP API

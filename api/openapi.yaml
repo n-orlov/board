@@ -3097,8 +3097,8 @@ components:
     Task:
       type: object
       description: A task. `active`, `blocked` and `overdue` are derived. `tags` are the task's own tags.
-      required: [id, ref, initiative, seq, title, description, kind, status, external_refs, tags, created_by, created_at,
-                 updated_at, active, blocked, overdue]
+      required: [id, ref, initiative, seq, title, description, kind, status, external_refs, tags, tag_marks, created_by,
+                 created_at, updated_at, active, blocked, overdue]
       properties:
         id:
           type: string
@@ -3151,6 +3151,15 @@ components:
           description: The task's own tags, sorted. Empty when it has none.
           items:
             type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows, each marked with where it comes from: the task's own tags, then its initiative's,
+            then the derived actor-kind tags, each source's tags in order (actor kinds in the order `ralph`, `claude`,
+            `pi`, `codex`, `deck`). A tag that has two sources appears once for each. Derived tags are computed on
+            read, are never stored and are not in `tags`.
+          items:
+            $ref: "#/components/schemas/TagMark"
         created_by:
           type: string
           description: The handle of the actor that created it.
@@ -3179,6 +3188,20 @@ components:
         overdue:
           type: boolean
           description: A watch task, not closed, whose `next_check_at` is before now.
+    TagMark:
+      type: object
+      description: One tag of a task and its source.
+      required: [tag, source]
+      properties:
+        tag:
+          type: string
+        source:
+          type: string
+          enum: [task, initiative, actor]
+          description: >-
+            `task`: one of the task's own tags. `initiative`: a tag of its initiative. `actor`: derived, the kind
+            (`ralph`, `claude`, `pi`, `codex` or `deck`) of the holder of a live or ended lease on it, the holder's
+            handle prefix before the first `:`.
     TaskDetail:
       description: A task with its dependencies and live leases.
       allOf:

@@ -433,6 +433,27 @@ func (e NowLeaseState) Valid() bool {
 	}
 }
 
+// Defines values for TagMarkSource.
+const (
+	TagMarkSourceActor      TagMarkSource = "actor"
+	TagMarkSourceInitiative TagMarkSource = "initiative"
+	TagMarkSourceTask       TagMarkSource = "task"
+)
+
+// Valid indicates whether the value is a known member of the TagMarkSource enum.
+func (e TagMarkSource) Valid() bool {
+	switch e {
+	case TagMarkSourceActor:
+		return true
+	case TagMarkSourceInitiative:
+		return true
+	case TagMarkSourceTask:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskKind.
 const (
 	TaskKindWatch TaskKind = "watch"
@@ -2104,6 +2125,16 @@ type StartResult struct {
 	TaskCreated bool `json:"task_created"`
 }
 
+// TagMark One tag of a task and its source.
+type TagMark struct {
+	// Source `task`: one of the task's own tags. `initiative`: a tag of its initiative. `actor`: derived, the kind (`ralph`, `claude`, `pi`, `codex` or `deck`) of the holder of a live or ended lease on it, the holder's handle prefix before the first `:`.
+	Source TagMarkSource `json:"source"`
+	Tag    string        `json:"tag"`
+}
+
+// TagMarkSource `task`: one of the task's own tags. `initiative`: a tag of its initiative. `actor`: derived, the kind (`ralph`, `claude`, `pi`, `codex` or `deck`) of the holder of a live or ended lease on it, the holder's handle prefix before the first `:`.
+type TagMarkSource string
+
 // Task A task. `active`, `blocked` and `overdue` are derived. `tags` are the task's own tags.
 type Task struct {
 	// Active It has a live lease.
@@ -2153,6 +2184,9 @@ type Task struct {
 	// Seq The number within the initiative, from 1.
 	Seq    int        `json:"seq"`
 	Status TaskStatus `json:"status"`
+
+	// TagMarks Every tag the task shows, each marked with where it comes from: the task's own tags, then its initiative's, then the derived actor-kind tags, each source's tags in order (actor kinds in the order `ralph`, `claude`, `pi`, `codex`, `deck`). A tag that has two sources appears once for each. Derived tags are computed on read, are never stored and are not in `tags`.
+	TagMarks []TagMark `json:"tag_marks"`
 
 	// Tags The task's own tags, sorted. Empty when it has none.
 	Tags      []string  `json:"tags"`
@@ -2313,6 +2347,9 @@ type TaskDetail struct {
 	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
 	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
 
+	// TagMarks Every tag the task shows, each marked with where it comes from: the task's own tags, then its initiative's, then the derived actor-kind tags, each source's tags in order (actor kinds in the order `ralph`, `claude`, `pi`, `codex`, `deck`). A tag that has two sources appears once for each. Derived tags are computed on read, are never stored and are not in `tags`.
+	TagMarks []TagMark `json:"tag_marks"`
+
 	// Tags The task's own tags, sorted. Empty when it has none.
 	Tags      []string  `json:"tags"`
 	Title     string    `json:"title"`
@@ -2418,6 +2455,9 @@ type TaskListItem struct {
 
 	// StrandedLease The lease behind the `stranded` reason. Present only on a stranded task.
 	StrandedLease *TaskStrandedLease `json:"stranded_lease,omitempty"`
+
+	// TagMarks Every tag the task shows, each marked with where it comes from: the task's own tags, then its initiative's, then the derived actor-kind tags, each source's tags in order (actor kinds in the order `ralph`, `claude`, `pi`, `codex`, `deck`). A tag that has two sources appears once for each. Derived tags are computed on read, are never stored and are not in `tags`.
+	TagMarks []TagMark `json:"tag_marks"`
 
 	// Tags The task's own tags, sorted. Empty when it has none.
 	Tags      []string  `json:"tags"`
