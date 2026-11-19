@@ -47,10 +47,17 @@
                 aria-hidden="true">{entry.badge}</span
               >
             {/if}
+            {#if entry.liveBadge !== ''}
+              <span
+                class="absolute -left-3 -top-2 min-w-5 rounded-full bg-success px-1 text-center text-[11px] font-bold leading-5 text-surface-raised"
+                data-testid="live-badge"
+                aria-hidden="true">{entry.liveBadge}</span
+              >
+            {/if}
           </span>
           <!-- The badge's words ride in the link's content, not in an aria-label, so the name keeps the visible text (axe label-content-name-mismatch). -->
           <span class={variant === 'rail' ? 'sr-only' : ''}
-            >{entry.label}{#if entry.badgeLabel !== ''}<span class="sr-only">{entry.badgeLabel}</span>{/if}</span
+            >{entry.label}{#if entry.badgeLabel !== ''}<span class="sr-only">{entry.badgeLabel}</span>{/if}{#if entry.liveBadgeLabel !== ''}<span class="sr-only">{entry.liveBadgeLabel}</span>{/if}</span
           >
         </a>
       </li>

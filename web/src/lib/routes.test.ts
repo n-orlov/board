@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BADGE_MAX, ROUTES, badgeLabel, badgeText, hashPath, navEntries, phoneSplit, redirectHash, resolveRoute, routeParam, type Route } from './routes';
+import { BADGE_MAX, ROUTES, badgeLabel, badgeText, liveBadgeLabel, hashPath, navEntries, phoneSplit, redirectHash, resolveRoute, routeParam, type Route } from './routes';
 
 // A table the code has never seen: whatever it holds must come out of the router and the nav,
 // so a view hard-coded in either one makes these tests fail.
@@ -267,6 +267,57 @@ describe('the Needs me badge on the navigation entries', () => {
   it('puts the badge on whichever entry of the table names it', () => {
     const table: Route[] = [{ ...synthetic[0] }, { ...synthetic[1], badge: 'attention' }];
     expect(navEntries(table[0], table, 7).map((e) => e.badge)).toEqual(['', '7']);
+  });
+});
+
+describe('liveBadgeLabel', () => {
+  it.each([
+    [0, ''],
+    [-1, ''],
+    [Number.NaN, ''],
+    [1, '1 open task has a live lease'],
+    [2, '2 open tasks have a live lease'],
+    [120, '120 open tasks have a live lease'],
+  ])('words %d as %j', (total, want) => {
+    expect(liveBadgeLabel(total)).toBe(want);
+  });
+});
+
+describe('the live-lease badge on the navigation entries', () => {
+  it('rides on the Now entry only, from the open tasks with a live lease handed in', () => {
+    for (const [live, text, label] of [
+      [0, '', ''],
+      [2, '2', '2 open tasks have a live lease'],
+      [150, '99+', '150 open tasks have a live lease'],
+    ] as const) {
+      const entries = navEntries(ROUTES[0], ROUTES, 0, live);
+      expect(entries.map((e) => [e.id, e.liveBadge, e.liveBadgeLabel])).toEqual(
+        entries.map((e) => (e.id === 'now' ? [e.id, text, label] : [e.id, '', ''])),
+      );
+      expect(entries.filter((e) => e.liveBadge !== '').map((e) => e.id)).toEqual(text === '' ? [] : ['now']);
+    }
+  });
+
+  it('hides each badge at zero on its own: red without green, green without red', () => {
+    const red = navEntries(ROUTES[0], ROUTES, 4, 0)[0];
+    expect([red.badge, red.liveBadge]).toEqual(['4', '']);
+    const green = navEntries(ROUTES[0], ROUTES, 0, 5)[0];
+    expect([green.badge, green.liveBadge]).toEqual(['', '5']);
+    const both = navEntries(ROUTES[0], ROUTES, 4, 5)[0];
+    expect([both.badge, both.liveBadge, both.badgeLabel, both.liveBadgeLabel]).toEqual([
+      '4',
+      '5',
+      '4 items need attention',
+      '5 open tasks have a live lease',
+    ]);
+    const none = navEntries(ROUTES[0], ROUTES, 0, 0)[0];
+    expect([none.badge, none.badgeLabel, none.liveBadge, none.liveBadgeLabel]).toEqual(['', '', '', '']);
+  });
+
+  it('has no green badge without a count, and only on a route that names one', () => {
+    expect(navEntries(ROUTES[0], ROUTES).every((e) => e.liveBadge === '' && e.liveBadgeLabel === '')).toBe(true);
+    const table: Route[] = [{ ...synthetic[0] }, { ...synthetic[1], liveBadge: true }];
+    expect(navEntries(table[0], table, 0, 7).map((e) => e.liveBadge)).toEqual(['', '7']);
   });
 });
 

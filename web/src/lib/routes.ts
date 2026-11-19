@@ -25,6 +25,8 @@ export interface Route {
   parent?: string;
   /** The count this entry's navigation link carries as a badge (the Needs me total); a view without one has none. */
   badge?: 'attention';
+  /** True for the entry whose link also carries the green badge of open tasks with a live lease. */
+  liveBadge?: true;
   /**
    * True for the entries that keep their own link in the phone tab bar; every other navigation entry is listed
    * under the tab bar's "More" entry. The tablet rail and the desktop sidebar list all of them.
@@ -40,6 +42,7 @@ export const ROUTES = [
     title: 'Now',
     label: 'Now',
     badge: 'attention',
+    liveBadge: true,
     icon: 'M22 12h-4l-3 9L9 3l-3 9H2',
   },
   {
@@ -170,6 +173,10 @@ export interface NavEntry {
   badge: string;
   /** The badge's words for assistive technology ("3 items need attention"), the empty string with no badge. */
   badgeLabel: string;
+  /** The green badge's visible text (`2`, `99+`), the empty string when there is none to show. */
+  liveBadge: string;
+  /** The green badge's words for assistive technology ("2 open tasks with a live lease"), the empty string with no badge. */
+  liveBadgeLabel: string;
 }
 
 /** The most the badge prints before it says "more": a total above it shows as `99+`. */
@@ -187,11 +194,18 @@ export function badgeLabel(total: number): string {
   return `${total} ${total === 1 ? 'item needs' : 'items need'} attention`;
 }
 
+/** The accessible label of the green badge: the whole count in words, even where the badge prints `99+`. */
+export function liveBadgeLabel(total: number): string {
+  if (!(total > 0)) return '';
+  return `${total} open ${total === 1 ? 'task has' : 'tasks have'} a live lease`;
+}
+
 /**
  * One navigation entry per table entry that is not a page inside another view; the current one, or its parent,
- * flagged. An entry whose route has a `badge` carries the badge of `attentionTotal`, the stream's `counts.total`.
+ * flagged. An entry whose route has a `badge` carries the badge of `attentionTotal`, the stream's `counts.total`; one
+ * whose route has a `liveBadge` carries the green badge of `liveTasks`, the open tasks with a live lease.
  */
-export function navEntries(current: Route, table: readonly Route[], attentionTotal = 0): NavEntry[] {
+export function navEntries(current: Route, table: readonly Route[], attentionTotal = 0, liveTasks = 0): NavEntry[] {
   return table
     .filter((route) => route.parent === undefined)
     .map((route) => ({
@@ -203,6 +217,8 @@ export function navEntries(current: Route, table: readonly Route[], attentionTot
       phone: route.phone === true,
       badge: route.badge === 'attention' ? badgeText(attentionTotal) : '',
       badgeLabel: route.badge === 'attention' ? badgeLabel(attentionTotal) : '',
+      liveBadge: route.liveBadge === true ? badgeText(liveTasks) : '',
+      liveBadgeLabel: route.liveBadge === true ? liveBadgeLabel(liveTasks) : '',
     }));
 }
 

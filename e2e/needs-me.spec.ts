@@ -464,8 +464,8 @@ for (const vp of viewports) {
         const nav = page.getByRole('navigation', { name: 'Main' }).locator('visible=true');
         await expect(nav.getByRole('link', { name: 'Now' })).toHaveAttribute('aria-current', 'page');
         // First in the nav. The name, not the text: the badge drawn on the icon (aria-hidden) comes before the label in the
-        // text whenever the shared board has items, and the badge's words follow the label in the name.
-        await expect(nav.getByRole('link').first()).toHaveAccessibleName(/^Now( \d+ items? needs? attention)?$/);
+        // text whenever the shared board has items, and the words of the badges (red, then green) follow the label in the name.
+        await expect(nav.getByRole('link').first()).toHaveAccessibleName(/^Now( \d+ items? needs? attention)?( \d+ open tasks? (has|have) a live lease)?$/);
       });
     }
 

@@ -13,6 +13,8 @@
   import Tasks from './Tasks.svelte';
   import Timeline from './Timeline.svelte';
   import { live } from './lib/live';
+  import { affectsLiveTasks, countLiveTasks } from './lib/liveTasks';
+  import { TasksApi } from './lib/tasks';
   import { loginUrl, currentBrowser, SessionController, type SessionState } from './lib/session';
   import { replaceHash } from './lib/historyEntry';
   import { ROUTES, navEntries, redirectHash, resolveRoute, routeParam, type RouteId } from './lib/routes';
@@ -46,6 +48,8 @@
 
   // The Needs me badge in the navigation: the total of the stream's latest `attention` message.
   let attentionTotal = $state(0);
+  // The green badge: how many open tasks hold a live lease, read when the shell is up and on every live event that names a task.
+  let liveTasks = $state(0);
 
   const session = new SessionController(browser, (s) => (auth = s), window.location.hash);
 
@@ -54,6 +58,21 @@
   });
 
   $effect(() => live().onAttention((counts) => (attentionTotal = counts.total)));
+
+  $effect(() => {
+    if (auth.kind !== 'signed-in') return;
+    const csrf = auth.session.csrf_token;
+    const api = new TasksApi(browser, () => csrf);
+    const read = async () => {
+      try {
+        liveTasks = await countLiveTasks(api);
+      } catch {
+        // A failed read keeps the count on screen; the next event reads again.
+      }
+    };
+    void read();
+    return live().subscribe(affectsLiveTasks, read);
+  });
 
   async function signOut() {
     signOutFailed = (await session.signOut()) === 'failed';
@@ -98,7 +117,7 @@
     >
   </SessionCard>
 {:else}
-  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal)} email={auth.session.email} actor={auth.session.actor} onsignout={signOut}>
+  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal, liveTasks)} email={auth.session.email} actor={auth.session.actor} onsignout={signOut}>
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}
