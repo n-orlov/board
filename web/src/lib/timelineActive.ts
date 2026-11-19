@@ -4,7 +4,7 @@
 // the Now view's In flight / Needs me / Recently touched can never disagree about what active means.
 import type { SortChoice } from './tableSort';
 import type { SortColumn } from './sortControl';
-import type { Timeline } from './timeline';
+import type { Timeline, TimelineAnswer } from './timeline';
 
 /** The orders of the Timeline's rows: the current one, or the active tasks above the rest. */
 export type TimelineOrder = 'default' | 'active';
@@ -31,20 +31,13 @@ export function needsActiveSet(activeOnly: boolean, order: TimelineOrder): boole
   return order === 'active' && !activeOnly;
 }
 
-/** The items of `list` for which `active` holds, then the rest, each part in its own order. */
-function activeThenRest<T>(list: readonly T[], active: (item: T) => boolean): T[] {
-  return [...list.filter(active), ...list.filter((item) => !active(item))];
-}
-
 /**
- * The answer with every active task before every idle one, each group keeping the order the answer gave it. The tasks
- * are drawn under their initiatives, so the initiatives that hold an active task come first too (their own order kept):
- * read top to bottom, no idle task is above an active one.
+ * The answer marked to be drawn Active first: `activeFirst` lists the refs of its tasks in `active`, and `buildTimeline`
+ * draws the current order of those tasks, then the current order of the rest (an initiative holding both gets a row
+ * in each part), so read top to bottom every active row is above every idle one and each part keeps the current order.
  */
-export function activeFirst(timeline: Timeline, active: ReadonlySet<string>): Timeline {
-  const tasks = activeThenRest(timeline.tasks, (t) => active.has(t.ref));
-  const lively = new Set(tasks.filter((t) => active.has(t.ref)).map((t) => t.initiative));
-  return { ...timeline, tasks, initiatives: activeThenRest(timeline.initiatives, (i) => lively.has(i.slug)) };
+export function activeFirst(timeline: Timeline, active: ReadonlySet<string>): TimelineAnswer {
+  return { ...timeline, activeFirst: timeline.tasks.filter((t) => active.has(t.ref)).map((t) => t.ref) };
 }
 
 /** The refs of the tasks an answer holds: with `active=true` that is the active set. */

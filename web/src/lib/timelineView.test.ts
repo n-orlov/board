@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Browser } from './session';
 import type { ArrowPath, ArrowSurface, Box } from './timelineArrows';
-import { apiQuery, DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
+import { apiQuery, buildTimeline, DEFAULT_TIMELINE_FILTER, type Timeline, type TimelineModel } from './timeline';
 import { RESTORE_WAIT_MS } from './historyEntry';
 import { viewKey, type ViewEnv, type ViewStorage } from './viewState';
 import {
@@ -137,7 +137,7 @@ describe('TimelineApi', () => {
     expect(fetchFn.mock.calls[0]![0]).toMatch(/&active=true&window=3d$/);
   });
 
-  it('reads the active set a second time for Active first and puts those tasks first', async () => {
+  it('reads the active set a second time for Active first and draws those tasks first', async () => {
     const base = answer().tasks[0]!;
     const tasks = ['T1', 'T2', 'T3'].map((ref) => ({ ...base, ref }));
     const fetchFn = vi.fn(async (input: string, _init?: RequestInit) =>
@@ -147,7 +147,9 @@ describe('TimelineApi', () => {
     const got = await new TimelineApi(browser, () => 't').read({ ...DEFAULT_TIMELINE_FILTER, order: 'active' }, initialWindow(NOW), '8h');
     expect(fetchFn).toHaveBeenCalledTimes(2);
     expect(fetchFn.mock.calls.filter(([url]) => url.includes('active=true&window=8h'))).toHaveLength(1);
-    expect(got.tasks.map((t) => t.ref)).toEqual(['T3', 'T1', 'T2']);
+    expect(got.activeFirst).toEqual(['T3']);
+    const rows = buildTimeline(got, NOW).groups.filter((g) => g.nestedGroups === undefined);
+    expect(rows.map((g) => g.ref)).toEqual(['T3', 'T1', 'T2']);
   });
 
   it('turns a refusal into its problem text', async () => {

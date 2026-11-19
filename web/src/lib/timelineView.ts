@@ -5,7 +5,7 @@
 import { errorText, Fetches } from './fetches';
 import { RESTORE_WAIT_MS } from './historyEntry';
 import { ThreadApi } from './threads';
-import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
+import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineAnswer, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
 import { activeFirst, needsActiveSet, refsOf } from './timelineActive';
 import { DEFAULT_WINDOW, type NowWindow } from './nowFlight';
@@ -62,7 +62,7 @@ export class TimelineApi extends ThreadApi {
    * active and Active first use): Only active sends it with `active=true`, and Active first on the whole board reads
    * the active set the same way and puts those tasks first, so the server alone decides what active means.
    */
-  async read(filter: TimelineFilter, window: TimeWindow, active: NowWindow = DEFAULT_WINDOW): Promise<Timeline> {
+  async read(filter: TimelineFilter, window: TimeWindow, active: NowWindow = DEFAULT_WINDOW): Promise<TimelineAnswer> {
     const only = filter.activeOnly ? active : undefined;
     const answer = this.fetchTimeline(apiQuery(filter, window.from, window.to, only));
     if (!needsActiveSet(filter.activeOnly, filter.order)) return answer;

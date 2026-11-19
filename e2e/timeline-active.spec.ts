@@ -35,6 +35,17 @@ const order = (page: Page) =>
       .map((l) => l.text.split(' ')[0]!),
   );
 
+/** Every row label of the chart, top to bottom: an initiative row by its title, a task row by its ref. */
+const labels = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.vis-labelset .vis-label')]
+      .filter((label) => label.classList.contains('tl-task') || label.classList.contains('tl-initiative'))
+      .filter((label) => label.getBoundingClientRect().height > 0)
+      .map((label) => ({ top: label.getBoundingClientRect().top, task: label.classList.contains('tl-task'), text: (label.textContent ?? '').trim() }))
+      .sort((x, y) => x.top - y.top)
+      .map((l) => (l.task ? l.text.split(' ')[0]! : l.text)),
+  );
+
 interface Seed {
   slug: string;
   idle: string;
@@ -82,6 +93,42 @@ for (const vp of viewports) {
       await page.getByTestId('timeline-sort').selectOption('');
       await expect.poll(() => order(page), FIVE_SECONDS).toEqual([s.idle, s.active]);
       await expect(page).toHaveURL(new RegExp(`#/timeline\\?initiative=${s.slug}$`));
+      await api.dispose();
+    });
+
+    test('Active first draws every active row above every idle one across initiatives, and the current order comes back', async ({ page, playwright, baseURL }) => {
+      // Two initiatives, each with an idle and an active task: A-idle, A-active, B-active, B-idle in the current order.
+      const api = await apiAs(playwright, baseURL);
+      const a = `e2e-tla-mixa-${vp.name}`;
+      const b = `e2e-tla-mixb-${vp.name}`;
+      const ref: Record<string, string> = {};
+      for (const [slug, tasks] of [
+        [a, ['a-idle', 'a-active']],
+        [b, ['b-active', 'b-idle']],
+      ] as const) {
+        await post(api, '/api/v1/initiatives', { slug, title: slug === a ? 'Mixed A' : 'Mixed B' }, 201);
+        for (const name of tasks) {
+          const task = await post(api, '/api/v1/tasks', { initiative: slug, title: name }, 201);
+          ref[name] = task.ref;
+          if (name.endsWith('active')) await post(api, '/api/v1/leases', { task: task.ref, intent: 'being worked' }, 201);
+          else ageTaskEvents(task.id, 400);
+        }
+      }
+      const [A, B] = ['Mixed A', 'Mixed B'];
+      const current = [A, ref['a-idle'], ref['a-active'], B, ref['b-active'], ref['b-idle']];
+      await open(page, a, `&initiative=${b}`);
+      await expect.poll(() => labels(page), FIVE_SECONDS).toEqual(current);
+
+      await page.getByTestId('timeline-sort').selectOption('active:desc');
+      // Read top to bottom: A's active task, B's active task, then A's idle task and B's idle task under a second row each.
+      await expect.poll(() => labels(page), FIVE_SECONDS).toEqual([A, ref['a-active'], B, ref['b-active'], A, ref['a-idle'], B, ref['b-idle']]);
+      expect(await order(page)).toEqual([ref['a-active'], ref['b-active'], ref['a-idle'], ref['b-idle']]);
+
+      await page.reload();
+      await expect.poll(() => labels(page), FIVE_SECONDS).toEqual([A, ref['a-active'], B, ref['b-active'], A, ref['a-idle'], B, ref['b-idle']]);
+
+      await page.getByTestId('timeline-sort').selectOption('');
+      await expect.poll(() => labels(page), FIVE_SECONDS).toEqual(current);
       await api.dispose();
     });
 

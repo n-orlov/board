@@ -15,6 +15,11 @@ import { sortFragment, sortFromFragment } from './sortControl';
 import type { NowWindow } from './nowFlight';
 
 export type Timeline = components['schemas']['Timeline'];
+/**
+ * An answer as the view draws it. With `activeFirst` (the refs of its active tasks, Active first on the whole board)
+ * the rows are drawn active first: every active task above every idle one (R8, `buildTimeline`).
+ */
+export type TimelineAnswer = Timeline & { activeFirst?: readonly string[] };
 type TimelineTask = components['schemas']['TimelineTask'];
 type TimelineLease = components['schemas']['TimelineLease'];
 type TimelineMarker = components['schemas']['TimelineMarker'];
@@ -28,7 +33,7 @@ export interface TimelineGroup {
   id: string;
   /** The row label, as HTML (escaped text, plus the attention badge's span). */
   content: string;
-  /** Position among all groups: initiatives in answer order, each followed by its tasks. */
+  /** Position among all groups: initiatives in answer order, each followed by its tasks (Active first: `buildTimeline`). */
   order: number;
   className: string;
   /** The tooltip of the row label. */
@@ -36,6 +41,11 @@ export interface TimelineGroup {
   /** An initiative lists its task groups here; it can be collapsed. */
   nestedGroups?: string[];
   showNested?: boolean;
+  /**
+   * The initiative row a task row is drawn under. Given on every task row, so a task that moves to another initiative
+   * row (Active first and back) is moved in vis-timeline too, which re-nests rows only when one is added.
+   */
+  nestedInGroup?: string;
   /** The ref of a task row, or the slug of an initiative row. */
   ref: string;
   /** The R2 attention label of a task row (the badges' texts joined); empty when the task needs nothing. */
@@ -123,6 +133,14 @@ export function escapeHtml(text: string): string {
 
 export function initiativeGroupId(slug: string): string {
   return `i:${slug}`;
+}
+
+/**
+ * The second row of an initiative under Active first: the one its idle tasks are drawn under, below every active task,
+ * when its active tasks are drawn under its first row.
+ */
+export function idleGroupId(slug: string): string {
+  return `i:${slug}:idle`;
 }
 
 export function taskGroupId(ref: string): string {
@@ -237,7 +255,7 @@ function actualEnd(task: TimelineTask, nowIso: string): string {
   return task.closed_at ?? laterOf(task.created_at, nowIso);
 }
 
-function taskGroup(task: TimelineTask, order: number): TimelineGroup {
+function taskGroup(task: TimelineTask, order: number, parent: string): TimelineGroup {
   const label = attentionBadges(task.attention)
     .map((b) => b.label)
     .join(', ');
@@ -250,6 +268,7 @@ function taskGroup(task: TimelineTask, order: number): TimelineGroup {
     title: escapeHtml(label === '' ? text : `${text} (needs attention: ${label})`),
     ref: task.ref,
     attentionLabel: label,
+    nestedInGroup: parent,
   };
 }
 
@@ -338,10 +357,38 @@ function initiativeSlugs(timeline: Timeline): string[] {
   return slugs;
 }
 
-function initiativeGroup(slug: string, info: Timeline['initiatives'][number] | undefined, own: readonly TimelineTask[], order: number): TimelineGroup {
+/** One initiative row and the task rows drawn under it. */
+interface Section {
+  id: string;
+  slug: string;
+  own: TimelineTask[];
+}
+
+/** The initiative rows in answer order, each holding its tasks in answer order (the current order). */
+function sectionsInOrder(timeline: Timeline, keep: (task: TimelineTask) => boolean, id: (slug: string) => string): Section[] {
+  return initiativeSlugs(timeline).map((slug) => ({ id: id(slug), slug, own: timeline.tasks.filter((t) => t.initiative === slug && keep(t)) }));
+}
+
+/**
+ * The rows top to bottom. In the current order: each initiative, then its tasks. Active first: the current order of
+ * the active tasks (each under its initiative's row), then the current order of the idle ones, so read top to bottom
+ * no idle task is above an active one. An initiative holding both is drawn twice: its active tasks under its row and
+ * its idle tasks under a second row further down (`idleGroupId`); an initiative with no task stays among the idle.
+ */
+function sections(timeline: TimelineAnswer): Section[] {
+  if (timeline.activeFirst === undefined) return sectionsInOrder(timeline, () => true, initiativeGroupId);
+  const active = new Set(timeline.activeFirst);
+  const lead = sectionsInOrder(timeline, (t) => active.has(t.ref), initiativeGroupId).filter((s) => s.own.length > 0);
+  const led = new Set(lead.map((s) => s.slug));
+  const rest = sectionsInOrder(timeline, (t) => !active.has(t.ref), (slug) => (led.has(slug) ? idleGroupId(slug) : initiativeGroupId(slug)));
+  return [...lead, ...rest.filter((s) => s.own.length > 0 || !led.has(s.slug))];
+}
+
+function initiativeGroup(section: Section, info: Timeline['initiatives'][number] | undefined, order: number): TimelineGroup {
+  const { slug, own } = section;
   const tags = info === undefined || info.tags.length === 0 ? '' : ` (${info.tags.join(', ')})`;
   return {
-    id: initiativeGroupId(slug),
+    id: section.id,
     content: escapeHtml(info?.title ?? slug),
     order,
     className: info?.closed === true ? 'tl-initiative tl-initiative-closed' : 'tl-initiative',
@@ -387,20 +434,19 @@ function leaseItems(leases: readonly TimelineLease[], nowIso: string): TimelineI
 }
 
 /**
- * The groups, items and dependency pairs of an answer; `now` ends the spans that are still open. Leases and markers
+ * The groups, items and dependency pairs of an answer, its rows in the order `sections` gives; `now` ends the spans that are still open. Leases and markers
  * of a task the answer does not hold, and dependencies on one it does not hold, are left out (the window cut them).
  */
-export function buildTimeline(timeline: Timeline, now: Date): TimelineModel {
+export function buildTimeline(timeline: TimelineAnswer, now: Date): TimelineModel {
   const nowIso = now.toISOString();
   const groups: TimelineGroup[] = [];
   const items: TimelineItem[] = [];
   const held = new Set(timeline.tasks.map((t) => t.ref));
 
-  for (const slug of initiativeSlugs(timeline)) {
-    const own = timeline.tasks.filter((t) => t.initiative === slug);
-    groups.push(initiativeGroup(slug, timeline.initiatives.find((i) => i.slug === slug), own, groups.length));
-    for (const task of own) {
-      groups.push(taskGroup(task, groups.length));
+  for (const section of sections(timeline)) {
+    groups.push(initiativeGroup(section, timeline.initiatives.find((i) => i.slug === section.slug), groups.length));
+    for (const task of section.own) {
+      groups.push(taskGroup(task, groups.length, section.id));
       items.push(...spanItems(task, nowIso));
     }
   }

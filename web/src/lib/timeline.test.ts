@@ -74,6 +74,7 @@ describe('groups', () => {
     const { groups } = buildTimeline(t, NOW);
     expect(groups.map((g) => g.id)).toEqual(['i:alpha', 't:T1', 't:T3', 'i:beta', 't:T2']);
     expect(groups.map((g) => g.order)).toEqual([0, 1, 2, 3, 4]);
+    expect(groups.map((g) => g.nestedInGroup)).toEqual([undefined, 'i:alpha', 'i:alpha', undefined, 'i:beta']);
     expect(groups[0]).toMatchObject({ nestedGroups: ['t:T1', 't:T3'], showNested: true, content: 'Alpha', title: 'alpha (work)', ref: 'alpha' });
     expect(groups[3]!.className).toBe('tl-initiative tl-initiative-closed');
     expect(groups[0]!.className).toBe('tl-initiative');
