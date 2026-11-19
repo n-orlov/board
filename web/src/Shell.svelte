@@ -6,6 +6,7 @@
   import LiveIndicator from './LiveIndicator.svelte';
   import Nav from './Nav.svelte';
   import type { NavEntry } from './lib/routes';
+  import { loadPref, savePref } from './lib/proto/prefs.svelte';
 
   // The responsive frame around every signed-in view. Below 768 px: a top bar (product name, view
   // title, account button) and a fixed bottom tab bar. 768-1023 px: a collapsed icon rail. 1024 px
@@ -19,6 +20,15 @@
   }: { title: string; entries: NavEntry[]; email: string; onsignout: () => void; children: Snippet } = $props();
 
   let menuOpen = $state(false);
+
+  // UX prototype: on wide screens the labelled sidebar collapses to the icon rail, remembered per browser.
+  let railed = $state(loadPref('sidebar.collapsed', false, (v) => typeof v === 'boolean'));
+  function setRailed(next: boolean) {
+    railed = next;
+    savePref('sidebar.collapsed', next);
+  }
+  const CHEVRON_LEFT = 'M15 18l-6-6 6-6';
+  const CHEVRON_RIGHT = 'M9 18l6-6-6-6';
 
   const USER = 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z';
   const button = 'flex size-11 shrink-0 items-center justify-center rounded-md text-text-muted hover:text-text';
@@ -56,9 +66,13 @@
   </header>
 
   <aside
-    class="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col items-center gap-4 border-r border-border bg-surface-raised py-4 md:flex lg:hidden"
+    class="sticky top-0 hidden h-dvh w-16 shrink-0 flex-col items-center gap-4 border-r border-border bg-surface-raised py-4 md:flex {railed ? '' : 'lg:hidden'}"
+    data-testid="rail"
   >
     <span class="font-bold" aria-hidden="true">VH</span>
+    <button type="button" class="{button} hidden lg:flex" aria-label="Expand sidebar" title="Expand sidebar" data-testid="sidebar-expand" onclick={() => setRailed(false)}>
+      <Icon d={CHEVRON_RIGHT} />
+    </button>
     <div class="flex-1">
       <Nav {entries} variant="rail" testid="nav-rail" />
     </div>
@@ -69,9 +83,14 @@
   </aside>
 
   <aside
-    class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface-raised p-3 lg:flex"
+    class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-4 border-r border-border bg-surface-raised p-3 {railed ? '' : 'lg:flex'}"
   >
-    <span class="px-3 py-2 text-lg font-bold">Village Hall</span>
+    <div class="flex items-center">
+      <span class="flex-1 px-3 py-2 text-lg font-bold">Village Hall</span>
+      <button type="button" class={button} aria-label="Collapse sidebar" title="Collapse sidebar to icons" data-testid="sidebar-collapse" onclick={() => setRailed(true)}>
+        <Icon d={CHEVRON_LEFT} />
+      </button>
+    </div>
     <div class="flex-1">
       <Nav {entries} variant="sidebar" testid="nav-sidebar" />
     </div>
