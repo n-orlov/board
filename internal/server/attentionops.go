@@ -147,3 +147,60 @@ func (o attentionOps) GetAttention(ctx context.Context, req GetAttentionRequestO
 	}
 	return GetAttention200JSONResponse(out), nil
 }
+
+func (p problemResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error { return p.write(w) }
+
+func apiNowTask(t attention.FlightTask) NowTask {
+	return NowTask{Task: t.Ref, Title: t.Title, Initiative: t.Initiative, Status: NowTaskStatus(t.Status), Kind: NowTaskKind(t.Kind)}
+}
+
+func apiFlightLease(l attention.FlightLease) NowFlightLease {
+	return NowFlightLease{Lease: l.Lease, Holder: apiActor(l.Holder), Intent: l.Intent, StartedAt: l.StartedAt, RenewedAt: l.RenewedAt,
+		ExpiresAt: l.ExpiresAt}
+}
+
+func apiInFlight(f attention.InFlight) NowInFlight {
+	return NowInFlight{Task: apiNowTask(f.Task), Leases: *mapped(f.Leases, apiFlightLease)}
+}
+
+func apiRecent(r attention.Recent) NowRecent {
+	e := r.LastEvent
+	return NowRecent{Task: apiNowTask(r.Task), LastEvent: NowLastEvent{Type: e.Type, Summary: e.Summary, Actor: apiActor(e.Actor), At: e.At}}
+}
+
+func apiBoard(b attention.Board) AttentionNow {
+	return AttentionNow{Window: NowWindow(b.Window), Attention: apiAttention(b.Attention),
+		InFlight: *mapped(b.InFlight, apiInFlight), Recent: *mapped(b.Recent, apiRecent)}
+}
+
+// nowWindow reads the window parameter: absent means the default, anything but
+// the three declared values is not a window.
+func nowWindow(w *NowWindow) (string, bool) {
+	if w == nil {
+		return attention.DefaultWindow, true
+	}
+	return string(*w), w.Valid()
+}
+
+// GetAttentionNow answers what the Now view shows in one read: the attention
+// sections, the tasks in flight with their live leases and the recently touched
+// tasks of a window. A bad window is 400 and nothing is written but the expiry of
+// leases that ran out, as in every read.
+func (o attentionOps) GetAttentionNow(ctx context.Context, req GetAttentionNowRequestObject) (GetAttentionNowResponseObject, error) {
+	if o.attention == nil {
+		return failure(http.StatusServiceUnavailable, "attention is not available"), nil
+	}
+	window, ok := nowWindow(req.Params.Window)
+	if !ok {
+		return failure(http.StatusBadRequest, "window "+window+" is not 8h, 24h or 3d").withNext(attention.NextWindow), nil
+	}
+	q := attention.Query{Initiatives: orEmpty(req.Params.Initiative), Tags: orEmpty(req.Params.Tag)}
+	b, err := o.attention.Board(ctx, q, window)
+	if p, is := attentionFailure(err); is {
+		return p, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return GetAttentionNow200JSONResponse(apiBoard(b)), nil
+}

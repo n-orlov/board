@@ -182,6 +182,11 @@ func (s Store) Get(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return s.get(ctx, sc, now)
+}
+
+// get reads the five sections of a scope at the instant now.
+func (s Store) get(ctx context.Context, sc scope, now time.Time) (Result, error) {
 	d, err := s.derive(ctx, sc, now)
 	if err != nil {
 		return Result{}, err

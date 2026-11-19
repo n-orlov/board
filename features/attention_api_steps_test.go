@@ -20,7 +20,10 @@ func (h *harness) getAttention(ctx context.Context, query, actor string) error {
 
 // attentionCountsAre checks the six numbers of counts, in the order open_asks,
 // done_not_closed, expired_leases, overdue_watches, conflicts, total.
-func (h *harness) attentionCountsAre(want string) error {
+func (h *harness) attentionCountsAre(want string) error { return h.countsAt("counts", want) }
+
+// countsAt checks the six numbers of the counts object at path.
+func (h *harness) countsAt(path, want string) error {
 	names := []string{"open_asks", "done_not_closed", "expired_leases", "overdue_watches", "conflicts", "total"}
 	wanted := splitList(want)
 	if len(wanted) != len(names) {
@@ -28,12 +31,12 @@ func (h *harness) attentionCountsAre(want string) error {
 	}
 	var got []string
 	for _, name := range names {
-		v, ok, err := h.responsePath("counts." + name)
+		v, ok, err := h.responsePath(path + "." + name)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("the response %s has no counts.%s", h.api.body, name)
+			return fmt.Errorf("the response %s has no %s.%s", h.api.body, path, name)
 		}
 		got = append(got, fieldText(v))
 	}
@@ -46,4 +49,5 @@ func (h *harness) attentionCountsAre(want string) error {
 func registerAttentionSteps(sc *godog.ScenarioContext, h *harness) {
 	sc.Step(`^I request the attention with "([^"]*)" as actor "([^"]*)"$`, h.getAttention)
 	sc.Step(`^the attention counts are "([^"]*)"$`, h.attentionCountsAre)
+	sc.Step(`^the now attention counts are "([^"]*)"$`, func(want string) error { return h.countsAt("attention.counts", want) })
 }

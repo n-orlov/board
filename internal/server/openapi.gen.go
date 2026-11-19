@@ -433,6 +433,66 @@ func (e NowLeaseState) Valid() bool {
 	}
 }
 
+// Defines values for NowTaskKind.
+const (
+	NowTaskKindWatch NowTaskKind = "watch"
+	NowTaskKindWork  NowTaskKind = "work"
+)
+
+// Valid indicates whether the value is a known member of the NowTaskKind enum.
+func (e NowTaskKind) Valid() bool {
+	switch e {
+	case NowTaskKindWatch:
+		return true
+	case NowTaskKindWork:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NowTaskStatus.
+const (
+	NowTaskStatusClosed NowTaskStatus = "closed"
+	NowTaskStatusDone   NowTaskStatus = "done"
+	NowTaskStatusOpen   NowTaskStatus = "open"
+)
+
+// Valid indicates whether the value is a known member of the NowTaskStatus enum.
+func (e NowTaskStatus) Valid() bool {
+	switch e {
+	case NowTaskStatusClosed:
+		return true
+	case NowTaskStatusDone:
+		return true
+	case NowTaskStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NowWindow.
+const (
+	N24h NowWindow = "24h"
+	N3d  NowWindow = "3d"
+	N8h  NowWindow = "8h"
+)
+
+// Valid indicates whether the value is a known member of the NowWindow enum.
+func (e NowWindow) Valid() bool {
+	switch e {
+	case N24h:
+		return true
+	case N3d:
+		return true
+	case N8h:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TagMarkSource.
 const (
 	TagMarkSourceActor      TagMarkSource = "actor"
@@ -1302,6 +1362,17 @@ type AttentionLastLease struct {
 	Outcome *string `json:"outcome,omitempty"`
 }
 
+// AttentionNow The three parts of the Now view, all narrowed by the same filters.
+type AttentionNow struct {
+	// Attention The five sections and their counts. `fields=counts` leaves the sections out, so `counts` is the only member always present.
+	Attention Attention     `json:"attention"`
+	InFlight  []NowInFlight `json:"in_flight"`
+	Recent    []NowRecent   `json:"recent"`
+
+	// Window How far back the recently touched tasks of the Now read reach.
+	Window NowWindow `json:"window"`
+}
+
 // AttentionWatch An open watch whose next check is due.
 type AttentionWatch struct {
 	// LastCheck The latest check recorded on a watch.
@@ -1968,6 +2039,39 @@ type Now struct {
 	OthersLeases []Lease `json:"others_leases"`
 }
 
+// NowFlightLease A live lease nested in an in-flight task.
+type NowFlightLease struct {
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Holder An actor involved in an item, with the way back the board has on record for it.
+	Holder AttentionActor `json:"holder"`
+	Intent string         `json:"intent"`
+
+	// Lease The lease's ref, such as `L3`.
+	Lease     string    `json:"lease"`
+	RenewedAt time.Time `json:"renewed_at"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// NowInFlight A task with at least one live lease, with its live leases in lease-number order.
+type NowInFlight struct {
+	Leases []NowFlightLease `json:"leases"`
+
+	// Task The task a Now item is about.
+	Task NowTask `json:"task"`
+}
+
+// NowLastEvent The last event written on a task.
+type NowLastEvent struct {
+	// Actor An actor involved in an item, with the way back the board has on record for it.
+	Actor   AttentionActor `json:"actor"`
+	At      time.Time      `json:"at"`
+	Summary string         `json:"summary"`
+
+	// Type The event type, such as `lease_ended`.
+	Type string `json:"type"`
+}
+
 // NowLease One of the caller's live leases, with the title of its task.
 type NowLease struct {
 	AckedAt *time.Time `json:"acked_at,omitempty"`
@@ -2005,6 +2109,36 @@ type NowLease struct {
 
 // NowLeaseState defines model for NowLease.State.
 type NowLeaseState string
+
+// NowRecent A task with no live lease whose last event is within the window.
+type NowRecent struct {
+	// LastEvent The last event written on a task.
+	LastEvent NowLastEvent `json:"last_event"`
+
+	// Task The task a Now item is about.
+	Task NowTask `json:"task"`
+}
+
+// NowTask The task a Now item is about.
+type NowTask struct {
+	// Initiative The slug of the task's initiative.
+	Initiative string        `json:"initiative"`
+	Kind       NowTaskKind   `json:"kind"`
+	Status     NowTaskStatus `json:"status"`
+
+	// Task The task's ref, such as `aa-1`.
+	Task  string `json:"task"`
+	Title string `json:"title"`
+}
+
+// NowTaskKind defines model for NowTask.Kind.
+type NowTaskKind string
+
+// NowTaskStatus defines model for NowTask.Status.
+type NowTaskStatus string
+
+// NowWindow How far back the recently touched tasks of the Now read reach.
+type NowWindow string
 
 // PingRequest The progress to record on each leased task.
 type PingRequest struct {
@@ -2716,6 +2850,18 @@ type GetAttentionParams struct {
 	Fields *string `form:"fields,omitempty" json:"fields,omitempty"`
 }
 
+// GetAttentionNowParams defines parameters for GetAttentionNow.
+type GetAttentionNowParams struct {
+	// Window How far back a task's last event may be for it to be recently touched. Default `24h`.
+	Window *NowWindow `form:"window,omitempty" json:"window,omitempty"`
+
+	// Initiative Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept.
+	Initiative *[]string `form:"initiative,omitempty" json:"initiative,omitempty"`
+
+	// Tag Keep items on a task that matches this tag as its own, its initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
+	Tag *[]string `form:"tag,omitempty" json:"tag,omitempty"`
+}
+
 // CatchupParams defines parameters for Catchup.
 type CatchupParams struct {
 	// IdempotencyKey Makes the write safe to retry. 1 to 255 printable ASCII characters (anything else is 400), scoped to the caller's principal. Within 24 hours the same method, path, query, actor and body sent again with the key is answered with the first request's status and body plus the header `Idempotent-Replayed: true`, and writes nothing. The same key with a different request is 422. A duplicate that arrives while the first is still running is 409. A key older than 24 hours counts as new. A 5xx answer is not stored, so the retry runs again. Without the header the request runs as it always did.
@@ -3168,6 +3314,9 @@ type ServerInterface interface {
 	// GetAttention What needs attention
 	// (GET /api/v1/attention)
 	GetAttention(w http.ResponseWriter, r *http.Request, params GetAttentionParams)
+	// GetAttentionNow What the Now view shows, in one read
+	// (GET /api/v1/attention/now)
+	GetAttentionNow(w http.ResponseWriter, r *http.Request, params GetAttentionNowParams)
 	// Catchup Read what happened since the caller last caught up
 	// (POST /api/v1/catchup)
 	Catchup(w http.ResponseWriter, r *http.Request, params CatchupParams)
@@ -3727,6 +3876,44 @@ func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAttention(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAttentionNow operation middleware
+func (siw *ServerInterfaceWrapper) GetAttentionNow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAttentionNowParams
+
+	bind := siw.queryBinder(w, r)
+
+	// ------------- Optional query parameter "window" -------------
+
+	bind.check("window", runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""}))
+
+	// ------------- Optional query parameter "initiative" -------------
+
+	bind.check("initiative", runtime.BindQueryParameterWithOptions("form", true, false, "initiative", r.URL.Query(), &params.Initiative, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	// ------------- Optional query parameter "tag" -------------
+
+	bind.check("tag", runtime.BindQueryParameterWithOptions("form", true, false, "tag", r.URL.Query(), &params.Tag, runtime.BindQueryParameterOptions{Type: "array", Format: ""}))
+
+	if bind.failed {
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAttentionNow(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5801,6 +5988,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/ping", wrapper.Ping)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/catchup", wrapper.Catchup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention", wrapper.GetAttention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/attention/now", wrapper.GetAttentionNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/meta", wrapper.GetMeta)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/actors/me/protocol-seen", wrapper.PutProtocolSeen)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/actors", wrapper.ListActors)
@@ -6915,6 +7103,92 @@ type GetAttention503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetAttention503ApplicationProblemPlusJSONResponse) VisitGetAttentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionNowRequestObject struct {
+	Params GetAttentionNowParams
+}
+
+type GetAttentionNowResponseObject interface {
+	VisitGetAttentionNowResponse(w http.ResponseWriter) error
+}
+
+type GetAttentionNow200JSONResponse AttentionNow
+
+func (response GetAttentionNow200JSONResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionNow400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttentionNow400ApplicationProblemPlusJSONResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionNow401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttentionNow401ApplicationProblemPlusJSONResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionNow404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttentionNow404ApplicationProblemPlusJSONResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAttentionNow503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAttentionNow503ApplicationProblemPlusJSONResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -11633,6 +11907,9 @@ type StrictServerInterface interface {
 	// GetAttention What needs attention
 	// (GET /api/v1/attention)
 	GetAttention(ctx context.Context, request GetAttentionRequestObject) (GetAttentionResponseObject, error)
+	// GetAttentionNow What the Now view shows, in one read
+	// (GET /api/v1/attention/now)
+	GetAttentionNow(ctx context.Context, request GetAttentionNowRequestObject) (GetAttentionNowResponseObject, error)
 	// Catchup Read what happened since the caller last caught up
 	// (POST /api/v1/catchup)
 	Catchup(ctx context.Context, request CatchupRequestObject) (CatchupResponseObject, error)
@@ -12178,6 +12455,32 @@ func (sh *strictHandler) GetAttention(w http.ResponseWriter, r *http.Request, pa
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAttentionResponseObject); ok {
 		if err := validResponse.VisitGetAttentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAttentionNow operation middleware
+func (sh *strictHandler) GetAttentionNow(w http.ResponseWriter, r *http.Request, params GetAttentionNowParams) {
+	var request GetAttentionNowRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAttentionNow(ctx, request.(GetAttentionNowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAttentionNow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAttentionNowResponseObject); ok {
+		if err := validResponse.VisitGetAttentionNowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

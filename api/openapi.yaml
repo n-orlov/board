@@ -2384,6 +2384,65 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/attention/now:
+    get:
+      operationId: getAttentionNow
+      tags: [attention]
+      summary: What the Now view shows, in one read
+      description: >-
+        One read for the Now view (not `GET /api/v1/now`, the agent check-in). `attention` is the answer of
+        `GET /api/v1/attention` (the five sections and their counts); `in_flight` is every task that has a live lease,
+        each with its live leases (holder, intent, expiry), the one whose lease started last first; `recent` is every task
+        with no live lease whose last event is within `window` of the call, each with that last event, the latest first.
+        A task with a live lease is never in `recent`. Leases that ran out are expired first and everything is judged at
+        one instant. The read takes a constant number of queries whatever the size of the store. `initiative` and `tag`
+        narrow all three parts as they do on `GET /api/v1/attention`. `window` is `8h`, `24h` (the default) or `3d`; any
+        other value is 400 and nothing is changed.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - name: window
+          in: query
+          required: false
+          description: How far back a task's last event may be for it to be recently touched. Default `24h`.
+          schema:
+            $ref: "#/components/schemas/NowWindow"
+        - name: initiative
+          in: query
+          required: false
+          description: Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: tag
+          in: query
+          required: false
+          description: Keep items on a task that matches this tag as its own, its initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND).
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: The attention sections, the tasks in flight and the recently touched tasks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttentionNow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/meta:
     get:
       operationId: getMeta
@@ -3925,6 +3984,102 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AttentionConflict"
+    NowWindow:
+      type: string
+      description: How far back the recently touched tasks of the Now read reach.
+      enum: ["8h", "24h", "3d"]
+    NowTask:
+      type: object
+      description: The task a Now item is about.
+      required: [task, title, initiative, status, kind]
+      properties:
+        task:
+          type: string
+          description: The task's ref, such as `aa-1`.
+        title:
+          type: string
+        initiative:
+          type: string
+          description: The slug of the task's initiative.
+        status:
+          type: string
+          enum: [open, done, closed]
+        kind:
+          type: string
+          enum: [work, watch]
+    NowFlightLease:
+      type: object
+      description: A live lease nested in an in-flight task.
+      required: [lease, holder, intent, started_at, renewed_at, expires_at]
+      properties:
+        lease:
+          type: string
+          description: The lease's ref, such as `L3`.
+        holder:
+          $ref: "#/components/schemas/AttentionActor"
+        intent:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        renewed_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    NowInFlight:
+      type: object
+      description: A task with at least one live lease, with its live leases in lease-number order.
+      required: [task, leases]
+      properties:
+        task:
+          $ref: "#/components/schemas/NowTask"
+        leases:
+          type: array
+          items:
+            $ref: "#/components/schemas/NowFlightLease"
+    NowLastEvent:
+      type: object
+      description: The last event written on a task.
+      required: [type, summary, actor, at]
+      properties:
+        type:
+          type: string
+          description: The event type, such as `lease_ended`.
+        summary:
+          type: string
+        actor:
+          $ref: "#/components/schemas/AttentionActor"
+        at:
+          type: string
+          format: date-time
+    NowRecent:
+      type: object
+      description: A task with no live lease whose last event is within the window.
+      required: [task, last_event]
+      properties:
+        task:
+          $ref: "#/components/schemas/NowTask"
+        last_event:
+          $ref: "#/components/schemas/NowLastEvent"
+    AttentionNow:
+      type: object
+      description: The three parts of the Now view, all narrowed by the same filters.
+      required: [window, attention, in_flight, recent]
+      properties:
+        window:
+          $ref: "#/components/schemas/NowWindow"
+        attention:
+          $ref: "#/components/schemas/Attention"
+        in_flight:
+          type: array
+          items:
+            $ref: "#/components/schemas/NowInFlight"
+        recent:
+          type: array
+          items:
+            $ref: "#/components/schemas/NowRecent"
     LeaseList:
       type: object
       description: A page of leases.

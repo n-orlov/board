@@ -1574,6 +1574,29 @@ writes their `lease_expired` events, and judges all five sections at that one in
   by closing it, an expired lease by acknowledging it or by any later lease on its task, an overdue watch by recording a
   check (which moves `next_check_at`) and a conflict by ending (or letting expire) one of its leases.
 
+#### 6.8.1 The Now read
+
+`GET /api/v1/attention/now` is in `api/openapi.yaml` and gives the Now view everything it shows in one read. It is **not**
+`GET /api/v1/now`, the agent check-in of §6.5, which keeps its meaning. Any authenticated principal may use it and a server
+without a store answers **503**. Like §6.8 it first expires the leases that ran out and judges everything at one instant.
+
+- **Parameters.** `window` is `8h`, `24h` (the default when absent) or `3d`; any other value, an empty one included, is
+  **400** with a `next` line and nothing is changed. `initiative` (repeatable, any of them) and `tag` (repeatable, all
+  of them) are those of §6.8 and narrow all three parts: an unknown `initiative` is **404** and a malformed `tag` **400**.
+- **The answer** is `{window, attention, in_flight, recent}`. `window` echoes the window used and `attention` is the
+  whole answer of §6.8 (the five sections and `counts`, narrowed by the same filters).
+- **In flight** (`in_flight`): every task with at least one live lease, as `{task, leases}` where `task` is
+  `{task, title, initiative, status, kind}` and `leases` are its live leases in lease-number order, each
+  `{lease, holder, intent, started_at, renewed_at, expires_at}` (`holder` an `AttentionActor`). The task whose newest
+  live lease started last comes first.
+- **Recently touched** (`recent`): every task with **no** live lease whose last event (any event written with the task,
+  of any type, such as `lease_ended` or `lease_expired`) is not older than `window`, as `{task, last_event}` with
+  `last_event` `{type, summary, actor, at}`; the latest event first. A task with a live lease is never in `recent`, and a
+  lease that has ended or run out stops counting as live, so its task moves from `in_flight` to `recent`.
+- **Cost.** The read runs a constant number of SQL statements whatever the number of tasks, leases or events: one for the
+  in-flight tasks with their leases, one for the recent tasks with their last events, and the fixed statements of §6.8.
+  A browser never pages `GET /api/v1/events` to build it.
+
 ### 6.9 Notifications
 
 `GET /api/v1/notifications` is in `api/openapi.yaml` and lists the outbox of §4.11, so the operator can see what was

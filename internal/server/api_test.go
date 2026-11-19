@@ -248,6 +248,7 @@ func (brokenResponse) VisitWithdrawAskResponse(http.ResponseWriter) error       
 func (brokenResponse) VisitPostNoteResponse(http.ResponseWriter) error            { return errBroken }
 func (brokenResponse) VisitListNotesResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetAttentionResponse(http.ResponseWriter) error        { return errBroken }
+func (brokenResponse) VisitGetAttentionNowResponse(http.ResponseWriter) error     { return errBroken }
 func (brokenResponse) VisitGetStreamResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitGetNoteResponse(http.ResponseWriter) error             { return errBroken }
 func (brokenResponse) VisitPutCursorResponse(http.ResponseWriter) error           { return errBroken }
@@ -496,6 +497,12 @@ func (s stubOperations) StartLease(context.Context, StartLeaseRequestObject) (St
 func (s stubOperations) GetAttention(context.Context, GetAttentionRequestObject) (GetAttentionResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(GetAttentionResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) GetAttentionNow(context.Context, GetAttentionNowRequestObject) (GetAttentionNowResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(GetAttentionNowResponseObject)
 	return resp, err
 }
 
@@ -926,6 +933,10 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"get attention 401", 401, GetAttention401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
 		{"get attention 404", 404, GetAttention404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
 		{"get attention 503", 503, GetAttention503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionResponse},
+		{"get attention now 400", 400, GetAttentionNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionNowResponse},
+		{"get attention now 401", 401, GetAttentionNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionNowResponse},
+		{"get attention now 404", 404, GetAttentionNow404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionNowResponse},
+		{"get attention now 503", 503, GetAttentionNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetAttentionNowResponse},
 		{"get now 400", 400, GetNow400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 401", 401, GetNow401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},
 		{"get now 503", 503, GetNow503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitGetNowResponse},

@@ -183,3 +183,70 @@ func TestAttentionAskModeAcceptsOnlyTheDeclaredValues(t *testing.T) {
 		t.Error("the attention ask mode enum does not accept exactly poll and stop")
 	}
 }
+
+func TestAttentionNowAnswers503WithoutAStore(t *testing.T) {
+	t.Parallel()
+	got, _ := attentionOps{}.GetAttentionNow(context.Background(), GetAttentionNowRequestObject{})
+	if p, ok := got.(problemResponse); !ok || p.status != http.StatusServiceUnavailable {
+		t.Errorf("now read without a store = %#v, want a 503 problem", got)
+	}
+}
+
+func TestTheNowWindowDefaultsTo24hAndAcceptsOnlyTheThreeValues(t *testing.T) {
+	t.Parallel()
+	if w, ok := nowWindow(nil); !ok || w != "24h" {
+		t.Errorf("no window = %q, %v; want 24h", w, ok)
+	}
+	for _, in := range []NowWindow{N8h, N24h, N3d} {
+		if w, ok := nowWindow(&in); !ok || w != string(in) {
+			t.Errorf("window %q = %q, %v", in, w, ok)
+		}
+	}
+	for _, in := range []NowWindow{"", "1h", "7d", "24H"} {
+		if _, ok := nowWindow(&in); ok {
+			t.Errorf("window %q was accepted", in)
+		}
+	}
+}
+
+func TestGetAttentionNowOnAnEmptyBoardAnswersEveryPartEmpty(t *testing.T) {
+	t.Parallel()
+	o := attentionOpsOnEmptyBoard(t)
+	got, err := o.GetAttentionNow(context.Background(), GetAttentionNowRequestObject{})
+	doc, ok := got.(GetAttentionNow200JSONResponse)
+	if err != nil || !ok || doc.Window != N24h || doc.InFlight == nil || doc.Recent == nil || len(doc.InFlight)+len(doc.Recent) != 0 ||
+		doc.Attention.Counts != (AttentionCounts{}) {
+		t.Fatalf("empty board = %#v, %v; want a 200 with window 24h and nothing in it", got, err)
+	}
+}
+
+func TestGetAttentionNowRefusesABadWindowTagAndInitiative(t *testing.T) {
+	t.Parallel()
+	o := attentionOpsOnEmptyBoard(t)
+	for name, tc := range map[string]struct {
+		params GetAttentionNowParams
+		status int
+	}{
+		"window":     {GetAttentionNowParams{Window: ptr(NowWindow("2d"))}, http.StatusBadRequest},
+		"tag":        {GetAttentionNowParams{Tag: &[]string{"bad tag"}}, http.StatusBadRequest},
+		"initiative": {GetAttentionNowParams{Initiative: &[]string{"zz"}}, http.StatusNotFound},
+	} {
+		got, err := o.GetAttentionNow(context.Background(), GetAttentionNowRequestObject{Params: tc.params})
+		if p, ok := got.(problemResponse); err != nil || !ok || p.status != tc.status || p.next == "" {
+			t.Errorf("%s = %#v, %v; want a %d problem with a next", name, got, err, tc.status)
+		}
+	}
+}
+
+func TestGetAttentionNowReturnsAServerErrorAsIs(t *testing.T) {
+	t.Parallel()
+	st, err := store.Open("sqlite://" + filepath.Join(t.TempDir(), "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	got, err := attentionOps{attention: &attention.Store{Store: st}}.GetAttentionNow(context.Background(), GetAttentionNowRequestObject{})
+	if err == nil || got != nil {
+		t.Errorf("a closed store = %#v, %v; want the error", got, err)
+	}
+}

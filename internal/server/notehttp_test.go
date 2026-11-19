@@ -160,6 +160,22 @@ func TestAttentionThroughTheServerAnswersFullAndCounts(t *testing.T) {
 	})
 }
 
+func TestTheNowReadThroughTheServerAnswersThreePartsAndRefusesABadWindow(t *testing.T) {
+	t.Parallel()
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		r := boardRig(t, dbs)
+		r.raiseAsk()
+		got := r.want(http.MethodGet, "/api/v1/attention/now?window=8h", "", http.StatusOK)
+		if a, _ := got["attention"].(map[string]any); got["window"] != "8h" || got["in_flight"] == nil || got["recent"] == nil || a["open_asks"] == nil {
+			t.Errorf("now read = %v, want window 8h, the attention sections, in_flight and recent", got)
+		}
+		r.want(http.MethodGet, "/api/v1/attention/now", "", http.StatusOK)
+		r.want(http.MethodGet, "/api/v1/attention/now?window=2d", "", http.StatusBadRequest)
+		r.want(http.MethodGet, "/api/v1/attention/now?tag=bad%20tag", "", http.StatusBadRequest)
+		r.want(http.MethodGet, "/api/v1/attention/now?initiative=nowhere", "", http.StatusNotFound)
+	})
+}
+
 func TestAskListAndWithdrawThroughTheServer(t *testing.T) {
 	t.Parallel()
 	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {

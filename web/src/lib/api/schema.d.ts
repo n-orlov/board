@@ -924,6 +924,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/attention/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the Now view shows, in one read
+         * @description One read for the Now view (not `GET /api/v1/now`, the agent check-in). `attention` is the answer of `GET /api/v1/attention` (the five sections and their counts); `in_flight` is every task that has a live lease, each with its live leases (holder, intent, expiry), the one whose lease started last first; `recent` is every task with no live lease whose last event is within `window` of the call, each with that last event, the latest first. A task with a live lease is never in `recent`. Leases that ran out are expired first and everything is judged at one instant. The read takes a constant number of queries whatever the size of the store. `initiative` and `tag` narrow all three parts as they do on `GET /api/v1/attention`. `window` is `8h`, `24h` (the default) or `3d`; any other value is 400 and nothing is changed.
+         */
+        get: operations["getAttentionNow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meta": {
         parameters: {
             query?: never;
@@ -1794,6 +1814,62 @@ export interface components {
             expired_leases?: components["schemas"]["AttentionExpiredLease"][];
             overdue_watches?: components["schemas"]["AttentionWatch"][];
             conflicts?: components["schemas"]["AttentionConflict"][];
+        };
+        /**
+         * @description How far back the recently touched tasks of the Now read reach.
+         * @enum {string}
+         */
+        NowWindow: "8h" | "24h" | "3d";
+        /** @description The task a Now item is about. */
+        NowTask: {
+            /** @description The task's ref, such as `aa-1`. */
+            task: string;
+            title: string;
+            /** @description The slug of the task's initiative. */
+            initiative: string;
+            /** @enum {string} */
+            status: "open" | "done" | "closed";
+            /** @enum {string} */
+            kind: "work" | "watch";
+        };
+        /** @description A live lease nested in an in-flight task. */
+        NowFlightLease: {
+            /** @description The lease's ref, such as `L3`. */
+            lease: string;
+            holder: components["schemas"]["AttentionActor"];
+            intent: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            renewed_at: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        /** @description A task with at least one live lease, with its live leases in lease-number order. */
+        NowInFlight: {
+            task: components["schemas"]["NowTask"];
+            leases: components["schemas"]["NowFlightLease"][];
+        };
+        /** @description The last event written on a task. */
+        NowLastEvent: {
+            /** @description The event type, such as `lease_ended`. */
+            type: string;
+            summary: string;
+            actor: components["schemas"]["AttentionActor"];
+            /** Format: date-time */
+            at: string;
+        };
+        /** @description A task with no live lease whose last event is within the window. */
+        NowRecent: {
+            task: components["schemas"]["NowTask"];
+            last_event: components["schemas"]["NowLastEvent"];
+        };
+        /** @description The three parts of the Now view, all narrowed by the same filters. */
+        AttentionNow: {
+            window: components["schemas"]["NowWindow"];
+            attention: components["schemas"]["Attention"];
+            in_flight: components["schemas"]["NowInFlight"][];
+            recent: components["schemas"]["NowRecent"][];
         };
         /** @description A page of leases. */
         LeaseList: {
@@ -4062,6 +4138,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Attention"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getAttentionNow: {
+        parameters: {
+            query?: {
+                /** @description How far back a task's last event may be for it to be recently touched. Default `24h`. */
+                window?: components["schemas"]["NowWindow"];
+                /** @description Keep items on this initiative (slug or ULID). Repeatable; an item on any of them is kept. */
+                initiative?: string[];
+                /** @description Keep items on a task that matches this tag as its own, its initiative's or a derived actor-kind tag. Repeatable; every tag given must match (AND). */
+                tag?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attention sections, the tasks in flight and the recently touched tasks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionNow"];
                 };
             };
             400: components["responses"]["BadRequest"];
