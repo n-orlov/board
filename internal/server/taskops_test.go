@@ -364,6 +364,33 @@ func TestDependencyOperationsAnswerTheDependentTaskAndEachRefusalWithAProblem(t 
 	}
 }
 
+func TestTagOperationsAnswerTheTaskAndEachRefusalWithAProblem(t *testing.T) {
+	t.Parallel()
+	s := newKeyServer(t)
+	s.create("aa", "")
+	s.task(`{"initiative":"aa","title":"one"}`)
+	for _, tc := range []struct {
+		method, path string
+		code         int
+		want         string
+	}{
+		{http.MethodPut, "/api/v1/tasks/aa-1/tags/Work", 200, "[work]"},
+		{http.MethodPut, "/api/v1/tasks/aa-1/tags/work", 200, "[work]"},
+		{http.MethodPut, "/api/v1/tasks/aa-1/tags/bad%21", 400, "must match"},
+		{http.MethodPut, "/api/v1/tasks/aa-9/tags/work", 404, "aa-9"},
+		{http.MethodDelete, "/api/v1/tasks/aa-1/tags/-lead", 400, "must match"},
+		{http.MethodDelete, "/api/v1/tasks/aa-9/tags/work", 404, "aa-9"},
+		{http.MethodDelete, "/api/v1/tasks/aa-1/tags/nope", 200, "[work]"},
+		{http.MethodDelete, "/api/v1/tasks/aa-1/tags/WORK", 200, "[]"},
+	} {
+		rec := s.send(tc.method, tc.path, "", "claude@host")
+		doc := decode(t, rec)
+		if rec.Code != tc.code || !strings.Contains(fmt.Sprint(doc["tags"], doc["detail"]), tc.want) {
+			t.Errorf("%s %s = %d %s, want %d and %q", tc.method, tc.path, rec.Code, rec.Body, tc.code, tc.want)
+		}
+	}
+}
+
 // WithAsks and WithTasks give the task document its open asks in either order.
 func TestTaskDocumentListsOpenAsksWhicheverOptionComesFirst(t *testing.T) {
 	t.Parallel()

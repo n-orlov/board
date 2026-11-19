@@ -179,6 +179,7 @@
                 "leaseend.go",
                 "links.go",
                 "list.go",
+                "tags.go",
                 "task.go",
                 "tasks.go",
                 "transitions.go",

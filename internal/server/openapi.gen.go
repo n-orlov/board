@@ -2580,6 +2580,9 @@ type NoteRef = string
 // TaskRef defines model for TaskRef.
 type TaskRef = string
 
+// TaskTag defines model for TaskTag.
+type TaskTag = string
+
 // BadGateway An RFC 9457 problem document.
 type BadGateway = Problem
 
@@ -3245,6 +3248,12 @@ type ServerInterface interface {
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(w http.ResponseWriter, r *http.Request, ref TaskRef, params ReopenTaskParams)
+	// RemoveTaskTag Take one tag off a task
+	// (DELETE /api/v1/tasks/{ref}/tags/{tag})
+	RemoveTaskTag(w http.ResponseWriter, r *http.Request, ref TaskRef, tag TaskTag)
+	// AddTaskTag Give a task one tag
+	// (PUT /api/v1/tasks/{ref}/tags/{tag})
+	AddTaskTag(w http.ResponseWriter, r *http.Request, ref TaskRef, tag TaskTag)
 	// GetTimeline Read the timeline of a window
 	// (GET /api/v1/timeline)
 	GetTimeline(w http.ResponseWriter, r *http.Request, params GetTimelineParams)
@@ -5370,6 +5379,76 @@ func (siw *ServerInterfaceWrapper) ReopenTask(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveTaskTag operation middleware
+func (siw *ServerInterfaceWrapper) RemoveTaskTag(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "tag" -------------
+	var tag TaskTag
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tag", r.PathValue("tag"), &tag, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveTaskTag(w, r, ref, tag)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddTaskTag operation middleware
+func (siw *ServerInterfaceWrapper) AddTaskTag(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ref" -------------
+	var ref TaskRef
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ref", r.PathValue("ref"), &ref, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "tag" -------------
+	var tag TaskTag
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tag", r.PathValue("tag"), &tag, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddTaskTag(w, r, ref, tag)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetTimeline operation middleware
 func (siw *ServerInterfaceWrapper) GetTimeline(w http.ResponseWriter, r *http.Request) {
 
@@ -5652,6 +5731,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/close", wrapper.CloseTask)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tasks/{ref}/deps/{blockedByRef}", wrapper.RemoveTaskDep)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/deps/{blockedByRef}", wrapper.AddTaskDep)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tasks/{ref}/tags/{tag}", wrapper.RemoveTaskTag)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/tasks/{ref}/tags/{tag}", wrapper.AddTaskTag)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/checks", wrapper.RecordTaskCheck)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tasks/{ref}/milestones", wrapper.RecordTaskMilestone)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tasks/{ref}/events", wrapper.ListTaskEvents)
@@ -10762,6 +10843,212 @@ func (response ReopenTask503ApplicationProblemPlusJSONResponse) VisitReopenTaskR
 	return err
 }
 
+type RemoveTaskTagRequestObject struct {
+	Ref TaskRef `json:"ref"`
+	Tag TaskTag `json:"tag"`
+}
+
+type RemoveTaskTagResponseObject interface {
+	VisitRemoveTaskTagResponse(w http.ResponseWriter) error
+}
+
+type RemoveTaskTag200JSONResponse TaskDetail
+
+func (response RemoveTaskTag200JSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTaskTag400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveTaskTag400ApplicationProblemPlusJSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTaskTag401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveTaskTag401ApplicationProblemPlusJSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTaskTag404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveTaskTag404ApplicationProblemPlusJSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTaskTag409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveTaskTag409ApplicationProblemPlusJSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTaskTag503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response RemoveTaskTag503ApplicationProblemPlusJSONResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTagRequestObject struct {
+	Ref TaskRef `json:"ref"`
+	Tag TaskTag `json:"tag"`
+}
+
+type AddTaskTagResponseObject interface {
+	VisitAddTaskTagResponse(w http.ResponseWriter) error
+}
+
+type AddTaskTag200JSONResponse TaskDetail
+
+func (response AddTaskTag200JSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTag400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskTag400ApplicationProblemPlusJSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTag401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskTag401ApplicationProblemPlusJSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTag404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskTag404ApplicationProblemPlusJSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTag409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskTag409ApplicationProblemPlusJSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddTaskTag503ApplicationProblemPlusJSONResponse struct {
+	UnavailableApplicationProblemPlusJSONResponse
+}
+
+func (response AddTaskTag503ApplicationProblemPlusJSONResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetTimelineRequestObject struct {
 	Params GetTimelineParams
 }
@@ -11426,6 +11713,12 @@ type StrictServerInterface interface {
 	// ReopenTask Reopen a task
 	// (POST /api/v1/tasks/{ref}/reopen)
 	ReopenTask(ctx context.Context, request ReopenTaskRequestObject) (ReopenTaskResponseObject, error)
+	// RemoveTaskTag Take one tag off a task
+	// (DELETE /api/v1/tasks/{ref}/tags/{tag})
+	RemoveTaskTag(ctx context.Context, request RemoveTaskTagRequestObject) (RemoveTaskTagResponseObject, error)
+	// AddTaskTag Give a task one tag
+	// (PUT /api/v1/tasks/{ref}/tags/{tag})
+	AddTaskTag(ctx context.Context, request AddTaskTagRequestObject) (AddTaskTagResponseObject, error)
 	// GetTimeline Read the timeline of a window
 	// (GET /api/v1/timeline)
 	GetTimeline(ctx context.Context, request GetTimelineRequestObject) (GetTimelineResponseObject, error)
@@ -13040,6 +13333,60 @@ func (sh *strictHandler) ReopenTask(w http.ResponseWriter, r *http.Request, ref 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReopenTaskResponseObject); ok {
 		if err := validResponse.VisitReopenTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveTaskTag operation middleware
+func (sh *strictHandler) RemoveTaskTag(w http.ResponseWriter, r *http.Request, ref TaskRef, tag TaskTag) {
+	var request RemoveTaskTagRequestObject
+
+	request.Ref = ref
+	request.Tag = tag
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveTaskTag(ctx, request.(RemoveTaskTagRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveTaskTag")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveTaskTagResponseObject); ok {
+		if err := validResponse.VisitRemoveTaskTagResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddTaskTag operation middleware
+func (sh *strictHandler) AddTaskTag(w http.ResponseWriter, r *http.Request, ref TaskRef, tag TaskTag) {
+	var request AddTaskTagRequestObject
+
+	request.Ref = ref
+	request.Tag = tag
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddTaskTag(ctx, request.(AddTaskTagRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddTaskTag")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddTaskTagResponseObject); ok {
+		if err := validResponse.VisitAddTaskTagResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

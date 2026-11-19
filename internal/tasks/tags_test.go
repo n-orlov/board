@@ -63,3 +63,89 @@ func TestCreateRefusesABadTagAndWritesNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestAddTagAndRemoveTagWriteTheRowAndOneTaskUpdatedEventEach(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	task := mk(t, s, "aa", "t")
+	got, err := s.AddTag(ctx, who, "key:caller", task.Ref, " Work ")
+	if err != nil || !reflect.DeepEqual(got.Tags, []string{"work"}) || !got.UpdatedAt.After(task.UpdatedAt) {
+		t.Fatalf("AddTag = %+v, %v, want tags [work] and a later updated_at", got, err)
+	}
+	if got, err = s.AddTag(ctx, who, "key:caller", task.Ref, "home"); err != nil || !reflect.DeepEqual(got.Tags, []string{"home", "work"}) {
+		t.Fatalf("second AddTag = %+v, %v", got.Tags, err)
+	}
+	if got, err = s.RemoveTag(ctx, who, "key:caller", task.Ref, "WORK"); err != nil || !reflect.DeepEqual(got.Tags, []string{"home"}) {
+		t.Fatalf("RemoveTag = %+v, %v", got.Tags, err)
+	}
+	if n := count(t, s, `SELECT count(*) FROM events WHERE type = 'task_updated' AND data LIKE '%"change":"added"%' AND data LIKE '%"tag":"work"%'`); n != 1 {
+		t.Fatalf("%d added work events, want 1", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM events WHERE type = 'task_updated' AND data LIKE '%"change":"removed"%' AND data LIKE '%"tag":"work"%' AND data LIKE '%"changed":["tags"]%'`); n != 1 {
+		t.Fatalf("%d removed work events, want 1", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM events WHERE type = 'task_updated'`); n != 3 {
+		t.Fatalf("%d task_updated events, want 3", n)
+	}
+}
+
+func TestATagChangeThatChangesNothingWritesNothing(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	task := mk(t, s, "aa", "t")
+	if _, err := s.AddTag(ctx, who, "key:caller", task.Ref, "work"); err != nil {
+		t.Fatal(err)
+	}
+	actors, events := count(t, s, `SELECT COUNT(*) FROM actors`), count(t, s, `SELECT COUNT(*) FROM events`)
+	if got, err := s.AddTag(ctx, audit2("new@host"), "key:other", task.Ref, "Work"); err != nil || len(got.Tags) != 1 {
+		t.Fatalf("AddTag of a held tag = %+v, %v", got.Tags, err)
+	}
+	if got, err := s.RemoveTag(ctx, audit2("new@host"), "key:other", task.Ref, "absent"); err != nil || len(got.Tags) != 1 {
+		t.Fatalf("RemoveTag of a missing tag = %+v, %v", got.Tags, err)
+	}
+	if count(t, s, `SELECT COUNT(*) FROM actors`) != actors || count(t, s, `SELECT COUNT(*) FROM events`) != events || count(t, s, `SELECT COUNT(*) FROM task_tags`) != 1 {
+		t.Error("a change that changes nothing wrote something")
+	}
+}
+
+func TestATagChangeRefusedWritesNothing(t *testing.T) {
+	s := newStore(t)
+	initiative(t, s, "aa")
+	full := mk(t, s, "aa", "full")
+	for i := 0; i < 20; i++ {
+		if _, err := s.AddTag(ctx, who, "key:caller", full.Ref, "t"+strings.Repeat("x", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closed := mk(t, s, "aa", "closed")
+	if _, err := s.Close(ctx, who, "key:caller", closed.Ref, "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	before := count(t, s, `SELECT (SELECT count(*) FROM events) + (SELECT count(*) FROM task_tags) + (SELECT count(*) FROM actors)`)
+	for name, tc := range map[string]struct {
+		ref, tag string
+		remove   bool
+		want     error
+	}{
+		"a bad tag":             {full.Ref, "has space", false, ErrInvalid},
+		"a bad tag on remove":   {full.Ref, "-lead", true, ErrInvalid},
+		"a 21st tag":            {full.Ref, "extra", false, ErrInvalid},
+		"an unknown task":       {"aa-99", "work", false, ErrNotFound},
+		"an unknown task on rm": {"aa-99", "work", true, ErrNotFound},
+		"a closed task":         {closed.Ref, "work", false, ErrClosed},
+		"a closed task on rm":   {closed.Ref, "work", true, ErrClosed},
+	} {
+		var err error
+		if tc.remove {
+			_, err = s.RemoveTag(ctx, who, "key:caller", tc.ref, tc.tag)
+		} else {
+			_, err = s.AddTag(ctx, who, "key:caller", tc.ref, tc.tag)
+		}
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+	if after := count(t, s, `SELECT (SELECT count(*) FROM events) + (SELECT count(*) FROM task_tags) + (SELECT count(*) FROM actors)`); after != before {
+		t.Errorf("refused changes moved the row count from %d to %d", before, after)
+	}
+}

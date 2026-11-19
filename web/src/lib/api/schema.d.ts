@@ -388,6 +388,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/{ref}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Give a task one tag
+         * @description Adds the tag `tag` to the task `ref`'s own tags, after trimming and lowercasing it as an initiative tag is (a-z, 0-9, `.`, `_`, `:` and `-`, starting with a letter or digit, at most 40 characters). A change inserts the row, moves `updated_at` and appends `task_updated` whose `data` is `{ref, changed: ["tags"], tag, change: "added"}`, in one transaction. Answers 200 with the task. A tag the task already has is 200 too and writes nothing. A tag that breaks the rule, or a 21st tag, is 400 and changes nothing. A closed task, or a task of a closed initiative, is 409. An unknown task is 404.
+         */
+        put: operations["addTaskTag"];
+        post?: never;
+        /**
+         * Take one tag off a task
+         * @description Removes the tag `tag` (normalised as for `PUT`) from the task `ref`'s own tags and appends `task_updated` whose `data` is `{ref, changed: ["tags"], tag, change: "removed"}`, in one transaction. Answers 200 with the task. A tag the task does not have is 200 too and writes nothing. A tag that breaks the rule is 400. A closed task, or a task of a closed initiative, is 409. An unknown task is 404.
+         */
+        delete: operations["removeTaskTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{ref}/checks": {
         parameters: {
             query?: never;
@@ -2272,6 +2296,8 @@ export interface components {
         TaskRef: string;
         /** @description The ref or ULID, in either letter case, of the task that blocks. */
         BlockedByRef: string;
+        /** @description One tag of the task's own, in either letter case; it is trimmed and lowercased. */
+        TaskTag: string;
         /** @description The lease's ref (`L<n>`, either letter case) or ULID. */
         LeaseRef: string;
         /** @description The ask's ref (`A<n>`, either letter case) or ULID. */
@@ -3016,6 +3042,66 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    addTaskTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+                /** @description One tag of the task's own, in either letter case; it is trimmed and lowercased. */
+                tag: components["parameters"]["TaskTag"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task with its `tags` after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    removeTaskTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task's ref (`<initiative slug>-<seq>`) or ULID, in either letter case. */
+                ref: components["parameters"]["TaskRef"];
+                /** @description One tag of the task's own, in either letter case; it is trimmed and lowercased. */
+                tag: components["parameters"]["TaskTag"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task with its `tags` after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

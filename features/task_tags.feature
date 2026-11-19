@@ -2,7 +2,9 @@ Feature: A task's own tags
   A task carries its own tags in task_tags (task_id, tag), under the rule of an initiative's tags: trimmed,
   lowercased, deduplicated, at most 20, each of a-z, 0-9, . _ : and - and starting with a letter or digit. POST
   /api/v1/tasks and POST /api/v1/start with new_task take them on create, and every read of a task shows them
-  sorted, an empty list when it has none. A tag that breaks the rule is 400 and creates nothing. Each scenario
+  sorted, an empty list when it has none. A tag that breaks the rule is 400 and creates nothing. PUT and DELETE
+  /api/v1/tasks/{ref}/tags/{tag} add and remove one tag, each change a task_updated event naming the tag and the
+  change, and a change that changes nothing writes nothing. Each scenario
   runs on the leg BOARD_DB_LEG names.
 
   Background:
@@ -94,3 +96,84 @@ Feature: A task's own tags
       | body                                                                              |
       | {'new_task':{'initiative':'bb','title':'t','tags':['has space']},'intent':'x'}    |
       | {'new_task':{'initiative':'bb','title':'t','tags':['ok','Bad!']},'intent':'x'}    |
+
+  Scenario: adding a tag answers the task with the tag and writes one task_updated event naming it
+    Given I create a task in "aa" titled "plain" as actor "claude@laptop"
+    When I add the tag " Work " to the task "aa-1" as actor "codex@laptop"
+    Then the response status is 200
+    And the response path "ref" is "aa-1"
+    And the response path "tags" has 1 items
+    And the response path "tags.0" is "work"
+    And the task_tags table holds 1 rows
+    And exactly 1 task_updated event exists for the task "aa-1"
+    And the latest task_updated event of "aa-1" names the tag "work" as "added"
+    When I request the task "aa-1" as actor "claude@laptop"
+    Then the response path "tags.0" is "work"
+    When I add the tag "home" to the task "aa-1" as actor "codex@laptop"
+    Then the response path "tags" has 2 items
+    And the response path "tags.0" is "home"
+    And the response path "tags.1" is "work"
+    And exactly 2 task_updated events exist for the task "aa-1"
+    And the latest task_updated event of "aa-1" names the tag "home" as "added"
+
+  Scenario: removing a tag answers the task without it and writes one task_updated event naming it
+    Given I create the task with body "{'initiative':'aa','title':'tagged','tags':['work','home']}" as actor "claude@laptop"
+    When I remove the tag "Work" from the task "aa-1" as actor "codex@laptop"
+    Then the response status is 200
+    And the response path "tags" has 1 items
+    And the response path "tags.0" is "home"
+    And the task_tags table holds 1 rows
+    And exactly 1 task_updated event exists for the task "aa-1"
+    And the latest task_updated event of "aa-1" names the tag "work" as "removed"
+
+  Scenario: adding a tag the task already has answers 200 and writes nothing
+    Given I create the task with body "{'initiative':'aa','title':'tagged','tags':['work']}" as actor "claude@laptop"
+    And I note the counts of tasks, dependencies, events and actors
+    When I add the tag "WORK" to the task "aa-1" as actor "someone-else@laptop"
+    Then the response status is 200
+    And the response path "tags" has 1 items
+    And the response path "tags.0" is "work"
+    And exactly 0 task_updated events exist for the task "aa-1"
+    And the counts of tasks, dependencies, events and actors are unchanged
+    And the task_tags table holds 1 rows
+
+  Scenario: removing a tag the task does not have answers 200 and writes nothing
+    Given I create the task with body "{'initiative':'aa','title':'tagged','tags':['work']}" as actor "claude@laptop"
+    And I note the counts of tasks, dependencies, events and actors
+    When I remove the tag "home" from the task "aa-1" as actor "someone-else@laptop"
+    Then the response status is 200
+    And the response path "tags" has 1 items
+    And exactly 0 task_updated events exist for the task "aa-1"
+    And the counts of tasks, dependencies, events and actors are unchanged
+    And the task_tags table holds 1 rows
+
+  Scenario Outline: a tag that breaks the rule is 400 on add and on remove, and nothing changes
+    Given I create the task with body "{'initiative':'aa','title':'tagged','tags':['work']}" as actor "claude@laptop"
+    And I note the counts of tasks, dependencies, events and actors
+    When I add the tag "<tag>" to the task "aa-1" as actor "refused@laptop"
+    Then the response status is 400
+    And the response path "next" is present
+    And the counts of tasks, dependencies, events and actors are unchanged
+    And the task_tags table holds 1 rows
+    When I remove the tag "<tag>" from the task "aa-1" as actor "refused@laptop"
+    Then the response status is 400
+    And the counts of tasks, dependencies, events and actors are unchanged
+    And the task_tags table holds 1 rows
+    And exactly 0 task_updated events exist for the task "aa-1"
+
+    Examples:
+      | tag                                       |
+      | has space                                 |
+      | -leading                                  |
+      | bad!                                      |
+      | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
+
+  Scenario: a tag of a task that does not exist is 404 and a 21st tag is 400, each changing nothing
+    Given I create the task with body "{'initiative':'aa','title':'tagged','tags':['t01','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20']}" as actor "claude@laptop"
+    And I note the counts of tasks, dependencies, events and actors
+    When I add the tag "work" to the task "aa-9" as actor "refused@laptop"
+    Then the response status is 404
+    When I add the tag "t21" to the task "aa-1" as actor "refused@laptop"
+    Then the response status is 400
+    And the counts of tasks, dependencies, events and actors are unchanged
+    And the task_tags table holds 20 rows

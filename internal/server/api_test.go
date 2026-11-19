@@ -218,6 +218,8 @@ func (brokenResponse) VisitReopenTaskResponse(http.ResponseWriter) error        
 func (brokenResponse) VisitCloseTaskResponse(http.ResponseWriter) error           { return errBroken }
 func (brokenResponse) VisitAddTaskDepResponse(http.ResponseWriter) error          { return errBroken }
 func (brokenResponse) VisitRemoveTaskDepResponse(http.ResponseWriter) error       { return errBroken }
+func (brokenResponse) VisitAddTaskTagResponse(http.ResponseWriter) error          { return errBroken }
+func (brokenResponse) VisitRemoveTaskTagResponse(http.ResponseWriter) error       { return errBroken }
 func (brokenResponse) VisitRecordTaskCheckResponse(http.ResponseWriter) error     { return errBroken }
 func (brokenResponse) VisitRecordTaskMilestoneResponse(http.ResponseWriter) error { return errBroken }
 func (brokenResponse) VisitListTaskEventsResponse(http.ResponseWriter) error      { return errBroken }
@@ -416,6 +418,18 @@ func (s stubOperations) AddTaskDep(context.Context, AddTaskDepRequestObject) (Ad
 func (s stubOperations) RemoveTaskDep(context.Context, RemoveTaskDepRequestObject) (RemoveTaskDepResponseObject, error) {
 	r, err := s.outcome()
 	resp, _ := r.(RemoveTaskDepResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) AddTaskTag(context.Context, AddTaskTagRequestObject) (AddTaskTagResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(AddTaskTagResponseObject)
+	return resp, err
+}
+
+func (s stubOperations) RemoveTaskTag(context.Context, RemoveTaskTagRequestObject) (RemoveTaskTagResponseObject, error) {
+	r, err := s.outcome()
+	resp, _ := r.(RemoveTaskTagResponseObject)
 	return resp, err
 }
 
@@ -815,6 +829,16 @@ func TestDeclaredProblemResponsesWriteAProblemDocument(t *testing.T) {
 		{"remove task dep 401", 401, RemoveTaskDep401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
 		{"remove task dep 404", 404, RemoveTaskDep404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
 		{"remove task dep 503", 503, RemoveTaskDep503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskDepResponse},
+		{"add task tag 400", 400, AddTaskTag400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskTagResponse},
+		{"add task tag 401", 401, AddTaskTag401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskTagResponse},
+		{"add task tag 404", 404, AddTaskTag404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskTagResponse},
+		{"add task tag 409", 409, AddTaskTag409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskTagResponse},
+		{"add task tag 503", 503, AddTaskTag503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitAddTaskTagResponse},
+		{"remove task tag 400", 400, RemoveTaskTag400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskTagResponse},
+		{"remove task tag 401", 401, RemoveTaskTag401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskTagResponse},
+		{"remove task tag 404", 404, RemoveTaskTag404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskTagResponse},
+		{"remove task tag 409", 409, RemoveTaskTag409ApplicationProblemPlusJSONResponse{ConflictApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskTagResponse},
+		{"remove task tag 503", 503, RemoveTaskTag503ApplicationProblemPlusJSONResponse{UnavailableApplicationProblemPlusJSONResponse(problem)}.VisitRemoveTaskTagResponse},
 		{"record task check 400", 400, RecordTaskCheck400ApplicationProblemPlusJSONResponse{BadRequestApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
 		{"record task check 401", 401, RecordTaskCheck401ApplicationProblemPlusJSONResponse{UnauthorizedApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},
 		{"record task check 404", 404, RecordTaskCheck404ApplicationProblemPlusJSONResponse{NotFoundApplicationProblemPlusJSONResponse(problem)}.VisitRecordTaskCheckResponse},

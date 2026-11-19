@@ -600,6 +600,14 @@ on task aa-1: it is a work task"). A milestone is accepted on a task of any kind
 `ErrNotFound`. A refused call writes no row, event or actor. Both events carry the task's `task_id`, `initiative_id`
 and `ref_id` (the task id).
 
+**A task's own tags** (`internal/tasks`: `AddTag(ref, tag)`, `RemoveTag(ref, tag)`), each in one transaction with its event. No new
+event type: both append `task_updated` on the task (summary `task <ref> added tag <tag>` or `removed tag <tag>`) with `data`
+`{ref, changed: ["tags"], tag, change}`, `tag` the normalised tag and `change` `added` or `removed`. The tag is normalised first
+(`domain.NormalizeTags`, §4.2) and a bad one is `ErrInvalid`, checked before the task is read; a 21st tag is `ErrInvalid`. The write
+inserts or deletes the `task_tags` row and sets `updated_at`. Adding a tag the task has, or removing one it lacks, returns the task and
+writes no row, event or actor. An unknown task is `ErrNotFound`; a closed task is `ErrClosed` and one of a closed initiative
+`ErrInitiativeClosed`, as for `Patch`. A refused call writes nothing.
+
 **Overdue** is derived (`domain.Overdue`, `Task.Overdue`): kind `watch`, status not `closed` (a done watch task still
 counts) and `next_check_at` strictly before the store's clock when the task is read. The `overdue` and `active` list filters use the same
 clock instant and rule as the derived fields, so a task selected by `overdue=true` has `overdue: true`, down to a clock a fraction of a millisecond past the stored value.
@@ -1037,6 +1045,7 @@ event, the task, initiative, ask, lease and actor rows named above.
 | GET/PATCH | `/tasks/{ref}` | read (with deps, live leases, open asks) / update |
 | POST | `/tasks/{ref}/done`, `/reopen`, `/close` | done takes optional `outcome` and `force` (R14), close takes `resolution`; done and close end the task's live leases |
 | POST/DELETE | `/tasks/{ref}/deps/{blockedByRef}` | |
+| PUT/DELETE | `/tasks/{ref}/tags/{tag}` | add / remove one tag of the task's own |
 | POST | `/tasks/{ref}/checks` | watch: record a check `{summary, next_check_at?}`; answers the task (§6.4) |
 | POST | `/tasks/{ref}/milestones` | `{summary, data?}`; answers the task (§6.4) |
 | GET | `/tasks/{ref}/events` | the task's events in order, with `limit`/`after` paging (§6.2 below) |
@@ -1164,7 +1173,7 @@ unknown task is **404**.
 ### 6.4 Tasks
 
 `POST /api/v1/tasks`, `GET`/`PATCH /api/v1/tasks/{ref}`, `POST /api/v1/tasks/{ref}/done`, `/reopen` and `/close`, and
-`POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}`, `POST /api/v1/tasks/{ref}/checks` and `/milestones` and
+`POST`/`DELETE /api/v1/tasks/{ref}/deps/{blockedByRef}`, `PUT`/`DELETE /api/v1/tasks/{ref}/tags/{tag}`, `POST /api/v1/tasks/{ref}/checks` and `/milestones` and
 `GET /api/v1/tasks/{ref}/events` (the events of §6.2) are in `api/openapi.yaml`, and so is the list
 (`GET /api/v1/tasks`, below). Any authenticated
 principal may use them. The server answers 503 problem documents when it runs without a store.
@@ -1246,6 +1255,15 @@ principal may use them. The server answers 503 problem documents when it runs wi
   (`detail` says `aa-2 is not blocked by aa-1`), and so is an unknown task; nothing is written then. A dependency is
   open while its blocker is not `closed`, so `blocked` stays true for a blocker that is only `done` and turns false once
   the blocker is closed (and true again if it is reopened); `GET` reads the two lists as `deps` and `blocking`.
+- **`PUT /api/v1/tasks/{ref}/tags/{tag}`** adds one tag to the task's own tags and **`DELETE /api/v1/tasks/{ref}/tags/{tag}`**
+  takes one off; each answers **200** with the task document after the change and has no body. `tag` is trimmed and lowercased
+  and must match the tag rule (§4.2: `[a-z0-9][a-z0-9._:-]{0,39}`), so `Work` names `work`. A change is written in one
+  transaction: the actor is upserted, the `task_tags` row is inserted or deleted, `updated_at` moves and one `task_updated`
+  event is appended whose `data` is `{ref, changed: ["tags"], tag, change}` with `change` `added` or `removed` (§4.6). Adding a
+  tag the task already has, and removing one it does not have, are **200** too and write no row, no event and no actor. A tag
+  that breaks the rule, on either verb, and a 21st tag are **400** with a `next`. A closed task, and a task of a closed
+  initiative, are **409** (`next` says to reopen it), an unknown task is **404**, and a refusal changes nothing. The two verbs
+  are idempotent, so they take no `Idempotency-Key`.
 - **`POST /api/v1/tasks/{ref}/checks`**, body `{summary, next_check_at?}`, records a check on a watch task and answers
   **200** with the task. `summary` is 1 to 200 characters (**400** otherwise, and for a missing body). In one
   transaction the server upserts the actor, moves `next_check_at` to the time sent, or to now plus `cadence_seconds`

@@ -24,6 +24,10 @@ func (p problemResponse) VisitAddTaskDepResponse(w http.ResponseWriter) error { 
 func (p problemResponse) VisitRemoveTaskDepResponse(w http.ResponseWriter) error {
 	return p.write(w)
 }
+func (p problemResponse) VisitAddTaskTagResponse(w http.ResponseWriter) error { return p.write(w) }
+func (p problemResponse) VisitRemoveTaskTagResponse(w http.ResponseWriter) error {
+	return p.write(w)
+}
 func (p problemResponse) VisitRecordTaskCheckResponse(w http.ResponseWriter) error {
 	return p.write(w)
 }
@@ -420,6 +424,26 @@ func (o taskOps) RemoveTaskDep(ctx context.Context, req RemoveTaskDepRequestObje
 	}
 	got, err := o.tasks.RemoveDep(ctx, who.AuditActor(), who.Principal, req.Ref, req.BlockedByRef)
 	return transitioned(ctx, o, got, err, func(d TaskDetail) RemoveTaskDepResponseObject { return RemoveTaskDep200JSONResponse(d) })
+}
+
+// AddTaskTag gives a task one tag, or leaves it as it is when it has it.
+func (o taskOps) AddTaskTag(ctx context.Context, req AddTaskTagRequestObject) (AddTaskTagResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.AddTag(ctx, who.AuditActor(), who.Principal, req.Ref, req.Tag)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) AddTaskTagResponseObject { return AddTaskTag200JSONResponse(d) })
+}
+
+// RemoveTaskTag takes one tag off a task, or leaves it as it is when it lacks it.
+func (o taskOps) RemoveTaskTag(ctx context.Context, req RemoveTaskTagRequestObject) (RemoveTaskTagResponseObject, error) {
+	who, bad := o.writer(ctx)
+	if bad != nil {
+		return *bad, nil
+	}
+	got, err := o.tasks.RemoveTag(ctx, who.AuditActor(), who.Principal, req.Ref, req.Tag)
+	return transitioned(ctx, o, got, err, func(d TaskDetail) RemoveTaskTagResponseObject { return RemoveTaskTag200JSONResponse(d) })
 }
 
 // RecordTaskCheck records a check on a watch task and moves its next_check_at.

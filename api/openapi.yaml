@@ -966,6 +966,73 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/Unavailable"
+  /api/v1/tasks/{ref}/tags/{tag}:
+    put:
+      operationId: addTaskTag
+      tags: [tasks]
+      summary: Give a task one tag
+      description: >-
+        Adds the tag `tag` to the task `ref`'s own tags, after trimming and lowercasing it as an initiative tag is
+        (a-z, 0-9, `.`, `_`, `:` and `-`, starting with a letter or digit, at most 40 characters). A change inserts
+        the row, moves `updated_at` and appends `task_updated` whose `data` is `{ref, changed: ["tags"], tag,
+        change: "added"}`, in one transaction. Answers 200 with the task. A tag the task already has is 200 too and
+        writes nothing. A tag that breaks the rule, or a 21st tag, is 400 and changes nothing. A closed task, or a
+        task of a closed initiative, is 409. An unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/TaskTag"
+      responses:
+        "200":
+          description: The task with its `tags` after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: removeTaskTag
+      tags: [tasks]
+      summary: Take one tag off a task
+      description: >-
+        Removes the tag `tag` (normalised as for `PUT`) from the task `ref`'s own tags and appends `task_updated`
+        whose `data` is `{ref, changed: ["tags"], tag, change: "removed"}`, in one transaction. Answers 200 with the
+        task. A tag the task does not have is 200 too and writes nothing. A tag that breaks the rule is 400. A
+        closed task, or a task of a closed initiative, is 409. An unknown task is 404.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskRef"
+        - $ref: "#/components/parameters/TaskTag"
+      responses:
+        "200":
+          description: The task with its `tags` after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
   /api/v1/tasks/{ref}/checks:
     post:
       operationId: recordTaskCheck
@@ -2603,6 +2670,13 @@ components:
       in: path
       required: true
       description: The ref or ULID, in either letter case, of the task that blocks.
+      schema:
+        type: string
+    TaskTag:
+      name: tag
+      in: path
+      required: true
+      description: One tag of the task's own, in either letter case; it is trimmed and lowercased.
       schema:
         type: string
     LeaseRef:
