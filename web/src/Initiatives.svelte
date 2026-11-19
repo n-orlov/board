@@ -15,7 +15,6 @@
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
   import ChipFilter from './ChipFilter.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import TagChips from './TagChips.svelte';
   import { isChipState, loadPref, savePref } from './lib/proto/prefs.svelte';
   import { chipsActive, NO_CHIPS, passesChips, tagChoices as protoTagChoices, type ChipState } from './lib/proto/tags';
@@ -110,7 +109,6 @@
 <section aria-labelledby="initiatives-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0">
   <div class="mb-4 flex items-center justify-between gap-3">
     <h2 id="initiatives-heading" class="text-xl font-bold">Initiatives</h2>
-    <span class="ml-auto"><DensitySwitch /></span>
     {#if !empty}
       <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={openForm}>New initiative</button>
     {/if}

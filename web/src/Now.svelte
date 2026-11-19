@@ -6,7 +6,6 @@
   import { replaceHash } from './lib/historyEntry';
   import AnswerForm from './AnswerForm.svelte';
   import ChipFilter from './ChipFilter.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import Dialog from './Dialog.svelte';
   import InitiativeConfirm from './InitiativeConfirm.svelte';
   import ProtoSort from './ProtoSort.svelte';
@@ -305,7 +304,6 @@
     </span>
     <div class="ml-auto flex flex-wrap items-center gap-3">
       <ProtoSort options={NOW_SORTS} value={sort} onchange={setSort} />
-      <DensitySwitch />
     </div>
   </div>
 

@@ -30,7 +30,6 @@
   import { currentBrowser } from './lib/session';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import TagChips from './TagChips.svelte';
   import { manualTagsOf, prefs } from './lib/proto/prefs.svelte';
   import { taskTags, type TaskTag } from './lib/proto/tags';
@@ -217,7 +216,6 @@
     <header class="mb-4">
       <div class="flex flex-wrap items-center gap-3">
         <h2 id="initiative-heading" class="wrap-anywhere text-xl font-bold" data-testid="initiative-title">{initiative.title}</h2>
-        <span class="ml-auto"><DensitySwitch /></span>
       </div>
       <div class="mt-1 flex flex-wrap items-center gap-2">
         <code class="wrap-anywhere font-mono text-sm text-text-muted" data-testid="initiative-slug">{initiative.slug}</code>

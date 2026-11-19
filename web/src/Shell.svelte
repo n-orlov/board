@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import AccountMenu from './AccountMenu.svelte';
   import Icon from './Icon.svelte';
+  import DisplayControls from './DisplayControls.svelte';
   import LiveIndicator from './LiveIndicator.svelte';
   import Nav from './Nav.svelte';
   import type { NavEntry } from './lib/routes';
@@ -75,6 +76,7 @@
       <Nav {entries} variant="sidebar" testid="nav-sidebar" />
     </div>
     <div class="flex flex-col gap-2 border-t border-border pt-3" data-testid="sidebar-foot">
+      <DisplayControls />
       <div class="px-3"><LiveIndicator /></div>
       <div class="flex items-center gap-2">
         <span class="min-w-0 flex-1 truncate px-3 text-sm text-text-muted" data-testid="email">{email}</span>

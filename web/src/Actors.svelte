@@ -2,7 +2,6 @@
   import { replaceHash } from './lib/historyEntry';
   import SortHeader from './SortHeader.svelte';
   import SortSelect from './SortSelect.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import Toast from './Toast.svelte';
   import { ACTORS_VIEW, ACTOR_COLUMNS, ACTOR_SORT_LABELS, ActorsApi, ActorsStore, actorRows, actorsHash, affectsActors, copyToast, copyWayBackLabel, sortOfQuery, type ActorRow, type ActorsState } from './lib/actorsView';
   import { copyText } from './lib/clipboard';
@@ -62,7 +61,6 @@
 <section aria-labelledby="actors-heading" class="vh-dense mx-auto w-full max-w-[1280px] pb-16 md:pb-0" data-testid="actors-view">
   <div class="mb-4 flex flex-wrap items-center gap-3">
     <h2 id="actors-heading" class="text-xl font-bold">Actors</h2>
-    <span class="ml-auto"><DensitySwitch /></span>
   </div>
   {#if view.error !== ''}
     <p role="alert" class="mb-4 rounded-md border border-danger px-3 py-2 text-sm text-danger" data-testid="actors-error">{view.error}</p>

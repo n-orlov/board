@@ -7,7 +7,6 @@
   import NowPanel from './NowPanel.svelte';
   import Toast from './Toast.svelte';
   import ChipFilter from './ChipFilter.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import TagChips from './TagChips.svelte';
   import { isChipState, loadPref, manualTagsOf, prefs, savePref } from './lib/proto/prefs.svelte';
   import { chipsActive, NO_CHIPS, passesChips, tagChoices, taskTags, type ChipState, type TaskTag } from './lib/proto/tags';
@@ -215,7 +214,6 @@
 >
   <div class="mb-4 flex items-center justify-between gap-3 2xl:col-start-1 2xl:row-start-1">
     <h2 id="tasks-heading" class="text-xl font-bold">Tasks</h2>
-    <span class="ml-auto"><DensitySwitch /></span>
     <button type="button" class="{primary} hidden md:inline-flex md:items-center" onclick={() => (formOpen = true)}>New task</button>
   </div>
 

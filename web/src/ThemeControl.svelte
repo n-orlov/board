@@ -4,7 +4,7 @@
 
   // The theme setting: System follows the device, Light and Dark override it. Persisted by the controller.
   let setting = $state<ThemeSetting>(theme.setting());
-  const labels: Record<ThemeSetting, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+  const labels: Record<ThemeSetting, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
 
   function choose(next: ThemeSetting) {
     setting = next;

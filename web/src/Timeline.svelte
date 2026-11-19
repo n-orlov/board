@@ -12,7 +12,6 @@
   import FilterSelect from './FilterSelect.svelte';
   import TaskPreview from './TaskPreview.svelte';
   import ChipFilter from './ChipFilter.svelte';
-  import DensitySwitch from './DensitySwitch.svelte';
   import ProtoSort from './ProtoSort.svelte';
   import { loadPref, manualTagsOf, prefs, savePref } from './lib/proto/prefs.svelte';
   import { tagChoices as protoTagChoices, taskTags, type ChipState, type TaskTag } from './lib/proto/tags';
@@ -366,7 +365,6 @@
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <div class="mb-4 flex flex-wrap items-center gap-3">
     <h2 id="timeline-heading" class="text-xl font-bold">Timeline</h2>
-    <span class="ml-auto"><DensitySwitch /></span>
   </div>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
     <FilterSelect label="Actor" options={choiceOptions(actors, view.filter.actor, 'Any actor')} value={view.filter.actor} onchange={(v) => apply({ ...view.filter, actor: v })} testid="actor-filter" />
