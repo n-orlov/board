@@ -13,9 +13,10 @@
     title,
     entries,
     email,
+    actor,
     onsignout,
     children,
-  }: { title: string; entries: NavEntry[]; email: string; onsignout: () => void; children: Snippet } = $props();
+  }: { title: string; entries: NavEntry[]; email: string; actor: string; onsignout: () => void; children: Snippet } = $props();
 
   let menuOpen = $state(false);
 
@@ -107,5 +108,5 @@
 </div>
 
 {#if menuOpen}
-  <AccountMenu {email} onclose={() => (menuOpen = false)} onsignout={signOut} />
+  <AccountMenu {email} {actor} onclose={() => (menuOpen = false)} onsignout={signOut} />
 {/if}

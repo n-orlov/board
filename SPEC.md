@@ -3367,7 +3367,7 @@ fixed bottom tab bar (icon plus label per entry, padded by `env(safe-area-inset-
 long list scrolls clear of the bar); from 768 to 1023 px a collapsed icon rail (labels are the
 links' accessible names and tooltips, the account button at its foot); from 1024 px a labelled
 sidebar whose foot shows the signed-in email, a Sign out button and the account button. The
-account button opens the account menu (the email and Sign out) in the dialog component below, at
+account button opens the account menu (the email, the operator handle the session acts as — the `actor` of `GET /auth/session` — and Sign out) in the dialog component below, at
 every width. The first focusable element of the page is a "Skip to content" link that moves focus
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:

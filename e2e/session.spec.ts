@@ -73,6 +73,24 @@ for (const vp of viewports) {
   });
 }
 
+// R12: the account menu names the operator handle the session acts as, the `actor` of GET /auth/session.
+for (const vp of [viewports[0], viewports[2]]) {
+  test(`the account menu shows the session's operator handle at ${vp.name} ${vp.size.width}x${vp.size.height}`, async ({ page }) => {
+    await page.setViewportSize(vp.size);
+    const sessionResponse = page.waitForResponse((r) => new URL(r.url()).pathname === '/auth/session');
+    await page.goto('/');
+    const session = (await (await sessionResponse).json()) as { actor: string; email: string };
+    expect(session.actor).not.toBe('');
+    await expect(page.getByRole('heading', { level: 2, name: 'Attention' })).toBeVisible();
+
+    // Two account buttons exist (rail and sidebar foot); only the one at this width is visible.
+    await page.getByRole('button', { name: 'Account menu' }).locator('visible=true').click();
+    const dialog = page.getByRole('dialog', { name: 'Account' });
+    await expect(dialog.getByTestId('menu-email')).toHaveText(session.email);
+    await expect(dialog.getByTestId('menu-handle')).toHaveText(session.actor);
+  });
+}
+
 test('the signing-in card shows the product name and a spinner while the session loads', async ({ page }) => {
   await page.route('**/auth/session', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 600));

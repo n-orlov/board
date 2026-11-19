@@ -89,7 +89,7 @@
     >
   </SessionCard>
 {:else}
-  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal)} email={auth.session.email} onsignout={signOut}>
+  <Shell title={route.title} entries={navEntries(route, ROUTES, attentionTotal)} email={auth.session.email} actor={auth.session.actor} onsignout={signOut}>
     {#if signOutFailed}
       <p role="alert">Sign out failed. Try again.</p>
     {/if}
