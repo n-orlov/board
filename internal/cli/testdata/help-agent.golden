@@ -1,4 +1,4 @@
-vh protocol v4
+vh protocol v5
 The board is the shared tracker of what is being worked on. Read this once, then follow it.
 
 IDENTITY
@@ -12,23 +12,23 @@ START, PING, FINISH
   Search before you create, never duplicate an open task: `vh init ls`, `vh task ls <slug>`.
   `vh start <task> "<intent>" --res host-a --ttl 2h` takes the task and prints your check-in.
   `vh new <slug> "<title>" --start "<intent>"` creates the task and starts it in one step.
-  A done task refuses a start: `vh task reopen <ref>` first.
+  Tag each task you create with what the work is about (`--tag t` on `vh new` and `vh task add`);
+  the initiative's tags already apply to its tasks, so do not repeat them.
   `vh ping "<progress>"` at each milestone and at least every half TTL, else the lease expires.
-  `vh finish "<outcome>" --done` ends your lease with a note and marks the task done;
-  without --done the task stays open. `vh task done <ref>` also ends your own lease.
-  A lease that ran out: `vh lease ack L5` once seen.
+  `vh finish "<outcome>" --done` ends your lease with a note and marks the task done (without
+  --done it stays open); `vh task done <ref>` also ends it. A done task refuses a start:
+  `vh task reopen <ref>` first. A lease that ran out: `vh lease ack L5` once seen.
 
 SHARED RESOURCES AND CONFLICTS
   Before a risky action (reboot, deploy, force-push, migration): `vh now --resources host-a`.
   `CONFLICT <resources>: L5 <holder> (<task>) "<intent>" exp 41m` and exit 7: another actor
-  holds a lease there, yours started anyway. Read their intent, then wait, coordinate or ask;
-  never go on through a conflict on a destructive action.
+  holds a lease there, yours started anyway. Read their intent: wait, coordinate or ask; never
+  go on through a conflict on a destructive action.
 
 BLOCK: a question only a human can answer
   `vh block <task> "<question>"` raises it and ends your lease (--stop, the default).
-  End your turn; read the answer next session: `vh ask show A3`, `vh ask ls`.
-  `vh block <task> "<question>" --poll 10m` keeps the lease and waits: exit 0 answered,
-  6 withdrawn, 3 still open at the deadline (go on without it and check back).
+  End your turn; read the answer next session: `vh ask show A3`, `vh ask ls`. With
+  `--poll 10m` it keeps the lease and waits: exit 0 answered, 6 withdrawn, 3 still open (go on).
   `vh ask withdraw A3 "<why>"` if moot. A human's chat answer: `vh answer A3 "<a>" --relay`.
 
 CATCHUP AND NOTES

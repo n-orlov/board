@@ -18,8 +18,8 @@ func TestHelpAgentPrintsTheEmbeddedProtocolAndMatchesTheGolden(t *testing.T) {
 	if code != ExitOK || errs != "" {
 		t.Fatalf("got %d %q", code, errs)
 	}
-	if !strings.HasPrefix(out, "vh protocol v4\n") {
-		t.Fatalf("the text is not headed vh protocol v4: %q", firstLine(out))
+	if !strings.HasPrefix(out, "vh protocol v5\n") {
+		t.Fatalf("the text is not headed vh protocol v5: %q", firstLine(out))
 	}
 	if *update {
 		if err := os.WriteFile(goldenPath, []byte(out), 0o600); err != nil {
@@ -98,7 +98,7 @@ func TestCommandsListsTheFlagsOfEachCommand(t *testing.T) {
 }
 
 func TestProtocolVersionIsTheNumberInTheHeader(t *testing.T) {
-	if v := ProtocolVersion(); v != 4 {
+	if v := ProtocolVersion(); v != 5 {
 		t.Fatalf("version %d", v)
 	}
 	defer func(old string) { protocolText = old }(protocolText)
@@ -115,7 +115,7 @@ func TestHelpAgentVersionPrintsJustTheNumberAndRecordsNothing(t *testing.T) {
 	srv := httptest.NewServer(f)
 	defer srv.Close()
 	code, out, errs := runEnv(f.env(srv), "help", "agent", "--version")
-	if code != ExitOK || out != "4\n" || errs != "" || len(f.requests) != 0 {
+	if code != ExitOK || out != "5\n" || errs != "" || len(f.requests) != 0 {
 		t.Fatalf("got %d %q %q with %d requests", code, out, errs, len(f.requests))
 	}
 }
@@ -134,7 +134,7 @@ func TestHelpAgentRecordsTheVersionAsRead(t *testing.T) {
 		t.Fatalf("%d requests, want 1", len(f.requests))
 	}
 	r := f.requests[0]
-	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":4}` {
+	if r.Method != http.MethodPut || r.URL.Path != "/api/v1/actors/me/protocol-seen" || f.bodies[0] != `{"version":5}` {
 		t.Fatalf("request %s %s %q", r.Method, r.URL.Path, f.bodies[0])
 	}
 	if r.Header.Get("Board-Actor") != "claude:test" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer brd_") {

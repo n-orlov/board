@@ -2547,10 +2547,10 @@ would otherwise do wrong: `vh task done <ref> ["outcome"]` ends your own live le
 `vh lease ack L<n>` acknowledges a lease that ran out (§8.1); and `vh task done --force` only
 when the operator says so, because it is the way past another actor's live lease and ends it.
 
-**Protocol v4** is the current text. It is headed `vh protocol v4` (the header regexp in
-`internal/cli/helpagent.go` is `^vh protocol v(\d+)\n`), keeps the budget of 45 lines of 100
-columns held by a test, and names no command or flag the build lacks. It is rewritten around the
-shortcuts of §8.4, and replaces v3's lease and ask commands rather than adding to them:
+**Protocol v4** was the text before v5. It was headed `vh protocol vN` (the header regexp in
+`internal/cli/helpagent.go` is `^vh protocol v(\d+)\n`), kept the budget of 45 lines of 100
+columns held by a test, and named no command or flag the build lacks. It was rewritten around the
+shortcuts of §8.4, and replaced v3's lease and ask commands rather than adding to them:
 
 - **identity** uses the `VH_*` names: `VH_URL`, `VH_API_KEY`, `VH_ACTOR`, `VH_WAY_BACK`
   (`vh whoami` checks them; subagents use the parent's handle);
@@ -2572,9 +2572,17 @@ shortcuts of §8.4, and replaces v3's lease and ask commands rather than adding 
   `vh attention`;
 - closing only when asked (`vh task close <ref> --for operator`) and the exit codes 0 to 7.
 
-`features/help_agent.feature` asserts the version line `vh protocol v4`, the version number 4 and
-each of those commands in the printed text; `internal/cli/helpagent_test.go` and the golden file
-hold the same version.
+**Protocol v5** is the current text, headed `vh protocol v5`. It is v4 plus one request, which is the whole reason for the bump: an agent tags each
+task it creates with what the work is about (`--tag t` on `vh new` and `vh task add`, §5.5), and
+does not repeat the initiative's tags, which already apply to its tasks. It makes room for the two
+lines by tightening wording, so the 45-line budget still holds. Because v5 is higher than the `4`
+that an actor which read v4 has recorded, `vh start` and `vh new` print the read-again hint of
+"Staleness hint" below for those actors until they run `vh help agent` again, and not for an actor
+at 5.
+
+`features/help_agent.feature` asserts the version line `vh protocol v5`, the version number 5,
+each of those commands and the tagging request in the printed text; `internal/cli/helpagent_test.go`
+and the golden file hold the same version.
 
 **Server side.** `GET /meta` answers `{version, revision, protocol, principal, actor}`: the server binary's
 version (as `vh version` prints it first), the commit it was built from (`revision`, omitted when the
@@ -3867,7 +3875,7 @@ name appears only where a user sees it:
 |---|---|
 | HTTP headers `Board-Actor`, `Board-Actor-Way-Back`, `Board-Actor-Meta`, `Board-On-Behalf-Of` (no `VH-*` aliases) | binary `vh`; image entrypoint `/vh` |
 | every path under `/api/v1`, every event type and SSE event name, every response field | `usage: vh …`, `→ vh …` hints, `vh version` |
-| database schema, table and column names; the default database file `/data/board.db` | protocol header `vh protocol v4` |
+| database schema, table and column names; the default database file `/data/board.db` | protocol header `vh protocol v5` |
 | cookies `board_session`, `board_login`; API key prefix `brd_` | OpenAPI `info.title` "Village Hall API" |
 | notification payload field `board_url` | page title "Village Hall", manifest `name` "Village Hall", `short_name` "Hall" |
 | CI-internal names: `BOARD_CI_*`, `BOARD_GODOG_*`, `BOARD_DB_LEG`, `BOARD_MUTATION_*`, `BOARD_IMAGE_*`, `BOARD_ALLURE_*`, `BOARD_FEATURES_*`; `board-ci:local`, `board:ci`, `board-image*.tar`; Jenkins labels `board`, `board-test`; job paths; credential IDs | Go module `github.com/n-orlov/village-hall`; `cmd/vh` |
