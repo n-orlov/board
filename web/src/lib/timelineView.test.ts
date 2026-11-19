@@ -2023,6 +2023,37 @@ describe('saved Timeline filters', () => {
   });
 });
 
+describe('a single-tag Timeline fragment from before the chip filter', () => {
+  const KEY = 'vh.view.v1.timeline';
+  const known = [{ slug: 'aa', tags: ['work', 'home'] }];
+  const week = [new Date('2026-01-01T00:00:00Z'), new Date('2026-01-08T00:00:00Z')] as const;
+
+  it('opens a linked #/timeline?tag=work as one chosen tag, sent to the server as one tag', () => {
+    const opened = openTimeline(viewEnv(memory()), '#/timeline?tag=work');
+    expect(opened.filter).toEqual({ ...DEFAULT_TIMELINE_FILTER, tags: ['work'] });
+    expect(apiQuery(opened.filter, ...week).getAll('tag')).toEqual(['work']);
+  });
+
+  it('restores a saved single tag and keeps it while the board still has it', () => {
+    const opened = openTimeline(viewEnv(memory({ [KEY]: JSON.stringify({ v: 1, query: 'initiative=aa&tag=work' }) })), '#/timeline');
+    expect(opened.restored).toBe(true);
+    expect(startFilter(opened, known)).toEqual({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['work'] });
+  });
+
+  it('keeps a second picked tag and an initiative in the fragment, the saved query and the read, in the order picked', () => {
+    const picked = { ...DEFAULT_TIMELINE_FILTER, initiatives: ['bb', 'aa'], tags: ['work', 'home'] };
+    const hash = timelineViewHash(picked);
+    expect(hash).toBe('#/timeline?initiative=bb&initiative=aa&tag=work&tag=home');
+    expect(openTimeline(viewEnv(memory()), hash).filter).toEqual(picked);
+    const storage = memory();
+    saveTimeline(storage, picked);
+    expect(openTimeline(viewEnv(storage), '#/timeline').filter).toEqual(picked);
+    const read = apiQuery(picked, ...week);
+    expect(read.getAll('tag')).toEqual(['work', 'home']);
+    expect(read.getAll('initiative')).toEqual(['bb', 'aa']);
+  });
+});
+
 describe('the collapsed initiatives of an entry', () => {
   const rows = [
     { id: 'i:a', nestedGroups: ['t:1'], showNested: true },

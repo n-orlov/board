@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives, expectTags, pickInitiative, pickTag } from './chips';
 
 // The Timeline view's saved filters (PRD R16, SPEC 11): the filters are saved under `vh.view.v1.timeline`, a bare
 // `#/timeline` restores them before the first fetch (one `GET /timeline`), a fragment with its own query wins, Clear
@@ -79,8 +80,8 @@ for (const vp of viewports) {
 
       await page.goto('/#/timeline');
       await expect(page.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
-      await page.getByTestId('initiative-filter').selectOption(slug);
-      await page.getByTestId('tag-filter').selectOption(tag);
+      await pickInitiative(page, slug);
+      await pickTag(page, tag);
       await page.getByTestId('closed-filter').selectOption('30');
       const query = `initiative=${slug}&tag=${tag}&closed=30`;
       await expect(page).toHaveURL(new RegExp(`#/timeline\\?${query}$`));
@@ -92,8 +93,8 @@ for (const vp of viewports) {
       await goToTimeline(page);
       await expect(page).toHaveURL(new RegExp(`#/timeline\\?${query}$`));
       await expect(page.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(slug);
-      await expect(page.getByTestId('tag-filter')).toHaveValue(tag);
+      await expectInitiatives(page, [slug]);
+      await expectTags(page, [tag]);
       await expect(page.getByTestId('closed-filter')).toHaveValue('30');
       expect(reads.count).toBe(1);
       const url = reads.urls[0];
@@ -106,8 +107,8 @@ for (const vp of viewports) {
       const secondReads = timelineReads(second);
       await second.goto('/#/timeline');
       await expect(second.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
-      await expect(second.getByTestId('initiative-filter')).toHaveValue(slug);
-      await expect(second.getByTestId('tag-filter')).toHaveValue(tag);
+      await expectInitiatives(second, [slug]);
+      await expectTags(second, [tag]);
       await expect(second).toHaveURL(new RegExp(`#/timeline\\?${query}$`));
       expect(secondReads.count).toBe(1);
       expect(secondReads.urls[0].searchParams.getAll('initiative')).toEqual([slug]);
@@ -123,23 +124,23 @@ for (const vp of viewports) {
       await post(api, '/api/v1/initiatives', { slug: b, title: `Own b ${vp.name}` }, 201);
 
       await page.goto(`/#/timeline?initiative=${b}`);
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(b, FIVE_SECONDS);
+      await expectInitiatives(page, [b]);
       expect((await saved(page)).query).toBe(`initiative=${b}`);
 
       // A new page opens a link with its own query: that one wins and is what is saved from now on.
       const link = await page.context().newPage();
       await link.goto(`/#/timeline?initiative=${a}`);
-      await expect(link.getByTestId('initiative-filter')).toHaveValue(a, FIVE_SECONDS);
+      await expectInitiatives(link, [a]);
       expect((await saved(link)).query).toBe(`initiative=${a}`);
 
       await goToInitiatives(link);
       await goToTimeline(link);
-      await expect(link.getByTestId('initiative-filter')).toHaveValue(a, FIVE_SECONDS);
+      await expectInitiatives(link, [a]);
 
       // Clear filters: the defaults at once, nothing saved, and the defaults again after nav away and back.
       await link.getByTestId('clear-filters').click();
       await expect(link).toHaveURL(/#\/timeline$/);
-      await expect(link.getByTestId('initiative-filter')).toHaveValue('');
+      await expectInitiatives(link, []);
       await expect(link.getByTestId('clear-filters')).toHaveCount(0);
       expect(await stored(link)).toBeNull();
       await goToInitiatives(link);
@@ -147,7 +148,7 @@ for (const vp of viewports) {
       await goToTimeline(link);
       await expect(link.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
       await expect(link).toHaveURL(/#\/timeline$/);
-      await expect(link.getByTestId('initiative-filter')).toHaveValue('');
+      await expectInitiatives(link, []);
       expect(reads.count).toBe(1);
       expect(reads.urls[0].searchParams.getAll('initiative')).toEqual([]);
       expect(await stored(link)).toBeNull();
@@ -171,8 +172,8 @@ for (const vp of viewports) {
       const kept = `tag=${tag}&actor=playwright&closed=7`;
       await expect(fresh).toHaveURL(new RegExp(`#/timeline\\?${kept}$`));
       await expect(fresh.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
-      await expect(fresh.getByTestId('tag-filter')).toHaveValue(tag);
-      await expect(fresh.getByTestId('initiative-filter')).toHaveValue('');
+      await expectTags(fresh, [tag]);
+      await expectInitiatives(fresh, []);
       await expect(fresh.getByTestId('closed-filter')).toHaveValue('7');
       // Only the valid tag (and the valid actor and window) reached the server: no initiative, no removed tag.
       expect(reads.count).toBe(1);

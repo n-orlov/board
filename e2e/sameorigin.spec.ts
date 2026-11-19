@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives } from './chips';
 
 // R1: the UI makes no cross-origin request (no web font, CDN, remote icon or script). Signs in through the
 // mock provider (another port, so another origin: recording starts only afterwards, and no API key rides
@@ -369,7 +370,7 @@ const PHASE3_STATES: Phase3State[] = [
       await expect(page.getByTestId('timeline-chart')).toBeVisible();
       // vis-timeline drew its labels from the bundled script and stylesheet.
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+      await expectInitiatives(page, [P3_SLUG]);
     },
   },
   {

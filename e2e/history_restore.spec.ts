@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
-import { expectInitiatives, pickInitiative } from './chips';
+import { expectInitiatives, foldChips, pickInitiative } from './chips';
 
 // Back and Forward restore a page the way it was left (PRD R7, SPEC 11): the Attention view (filters), the Initiatives
 // list (status filter and sort), the initiative page (task filter and sort), the Tasks view (filters and sort), the task page
@@ -419,8 +419,8 @@ for (const vp of viewports) {
 
       await page.goto('/#/timeline');
       await expect(page.getByTestId('timeline-view')).toBeVisible();
-      await expect(page.getByTestId('initiative-filter').locator(`option[value="${slug}"]`)).toHaveCount(1, FIVE_SECONDS);
-      await page.getByTestId('initiative-filter').selectOption(slug);
+      await pickInitiative(page, slug);
+      await foldChips(page); // a fresh mount folds a phone's filter, so fold it here: the page is then as tall coming back as it was going
       await page.getByTestId('closed-filter').selectOption('90');
       await expect(page).toHaveURL((url) => url.hash.startsWith(`#/timeline?initiative=${slug}`));
       await expect(page.locator('.vis-labelset .vis-label')).toHaveCount(31, FIVE_SECONDS);
@@ -430,6 +430,7 @@ for (const vp of viewports) {
       const windowShown = () =>
         page.getByTestId('timeline-span').evaluate((el) => ({ from: Number(el.getAttribute('data-from-ms')), to: Number(el.getAttribute('data-to-ms')) }));
       const opening = await windowShown();
+      await page.getByTestId('timeline-chart').scrollIntoViewIfNeeded(); // the chips above it push the chart toward the fold
       const centre = (await page.locator('.vis-panel.vis-center').boundingBox())!;
       await page.mouse.move(centre.x + centre.width / 2, centre.y + 60);
       await page.mouse.wheel(300, 0);
@@ -461,7 +462,7 @@ for (const vp of viewports) {
 
       const restored = async () => {
         await expect(page).toHaveURL((url) => url.hash === left.fragment, FIVE_SECONDS);
-        await expect(page.getByTestId('initiative-filter')).toHaveValue(slug, FIVE_SECONDS);
+        await expectInitiatives(page, [slug]);
         await expect(page.getByTestId('closed-filter')).toHaveValue('90');
         await expect.poll(async () => Math.abs((await rowsScroll()) - left.rows), FIVE_SECONDS).toBeLessThanOrEqual(2);
         await expect.poll(async () => Math.abs((await windowShown()).from - left.window.from), FIVE_SECONDS).toBeLessThanOrEqual(1000);

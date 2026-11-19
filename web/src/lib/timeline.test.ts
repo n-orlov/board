@@ -12,8 +12,6 @@ import {
   choiceOptions,
   tagChoices,
   withClosedWithin,
-  withInitiative,
-  withTag,
   actualItemId,
   itemClass,
   apiQuery,
@@ -360,16 +358,16 @@ describe('the filter controls', () => {
     expect(choiceOptions([], '', 'Any actor')).toEqual([{ value: '', label: 'Any actor' }]);
   });
 
-  it('collects the tags of the initiatives, each once', () => {
-    expect(tagChoices([{ tags: ['work', 'home'] }, { tags: ['work'] }, { tags: [] }])).toEqual(['work', 'home']);
-  });
-
-  it('sets one initiative or tag, and an empty choice clears it', () => {
-    const f = { ...DEFAULT_TIMELINE_FILTER, initiatives: ['a', 'b'], tags: ['x', 'y'], actor: 'ada' };
-    expect(withInitiative(f, 'c')).toEqual({ ...f, initiatives: ['c'] });
-    expect(withInitiative(f, '')).toEqual({ ...f, initiatives: [] });
-    expect(withTag(f, 'z')).toEqual({ ...f, tags: ['z'] });
-    expect(withTag(f, '')).toEqual({ ...f, tags: [] });
+  it('offers the tags of the initiatives as chips, each once, sorted, marked as the initiative\'s, and keeps a chosen one the board lacks', () => {
+    expect(tagChoices([{ tags: ['work', 'home'] }, { tags: ['work'] }, { tags: [] }], [])).toEqual([
+      { tag: 'home', sources: ['initiative'] },
+      { tag: 'work', sources: ['initiative'] },
+    ]);
+    expect(tagChoices([{ tags: ['work'] }], ['zed'])).toEqual([
+      { tag: 'work', sources: ['initiative'] },
+      { tag: 'zed', sources: [] },
+    ]);
+    expect(tagChoices([], [])).toEqual([]);
   });
 
   it('reads the closed-within select, an unknown value is off', () => {

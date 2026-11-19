@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives } from './chips';
 
 // R3: at 390, 820, 1024 and 1440 px the page never scrolls sideways, whatever text the API accepts. Signs in through the mock provider.
 // Every case seeds the longest unbroken text the server takes (no space to wrap at): a 200-character
@@ -551,7 +552,7 @@ const PHASE3_STATES: Phase3State[] = [
       await page.goto(`/#/timeline?initiative=${P3_SLUG}&actor=${P3_ACTOR}&tag=${tag(0)}`);
       await expect(page.getByTestId('timeline-chart')).toBeVisible();
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+      await expectInitiatives(page, [P3_SLUG]);
       await expect(page.getByTestId('actor-filter')).toHaveValue(P3_ACTOR);
     },
   },

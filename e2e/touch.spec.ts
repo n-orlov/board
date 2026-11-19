@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives } from './chips';
 
 // Signs in through the mock provider, so no API key rides along (see login.spec.ts).
 // R4 at the phone viewport: on each view and with each dialog/sheet of the R4 set open, every visible
@@ -462,7 +463,7 @@ const PHASE3_STATES: Phase3State[] = [
       await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
       await expect(page.getByTestId('timeline-chart')).toBeVisible();
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+      await expectInitiatives(page, [P3_SLUG]);
     },
   },
   {

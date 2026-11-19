@@ -10,6 +10,8 @@
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentViewEnv, FilterTurns } from './lib/viewState';
   import FilterSelect from './FilterSelect.svelte';
+  import ChipFilter from './ChipFilter.svelte';
+  import type { ChipState } from './lib/chipFilter';
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
@@ -24,8 +26,6 @@
     tagChoices,
     timelineHash,
     withClosedWithin,
-    withInitiative,
-    withTag,
     type TimelineFilter,
     type TimelineModel,
   } from './lib/timeline';
@@ -96,7 +96,8 @@
 
   /** What the filter selects offer: the board's initiatives, their tags and its actors. */
   let slugs: string[] = $state([]);
-  let tags: string[] = $state([]);
+  let boardInitiatives: { tags: string[] }[] = $state([]);
+  const tags = $derived(tagChoices(boardInitiatives, view.filter.tags));
   let actors: string[] = $state([]);
 
   // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
@@ -115,7 +116,7 @@
       .then((list) => {
         looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
         slugs = list.map((i) => i.slug);
-        tags = tagChoices(list);
+        boardInitiatives = list.map((i) => ({ tags: i.tags }));
       })
       .catch(() => undefined); // the selects then offer only what the URL names; the chart shows the error
     void api
@@ -152,6 +153,7 @@
     saveTimeline(viewEnv.storage, filter);
   }
 
+  const setChips = (chips: ChipState) => apply({ ...view.filter, ...chips });
   function apply(filter: TimelineFilter) {
     turns.begin();
     turns.reading();
@@ -276,8 +278,9 @@
 <section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
-    <FilterSelect label="Initiative" options={choiceOptions(slugs, view.filter.initiatives[0] ?? '', 'Any initiative')} value={view.filter.initiatives[0] ?? ''} onchange={(v) => apply(withInitiative(view.filter, v))} testid="initiative-filter" />
-    <FilterSelect label="Tag" options={choiceOptions(tags, view.filter.tags[0] ?? '', 'Any tag')} value={view.filter.tags[0] ?? ''} onchange={(v) => apply(withTag(view.filter, v))} testid="tag-filter" />
+    <div class="w-full">
+      <ChipFilter {tags} initiatives={slugs} value={{ tags: view.filter.tags, initiatives: view.filter.initiatives }} onchange={setChips} />
+    </div>
     <FilterSelect label="Actor" options={choiceOptions(actors, view.filter.actor, 'Any actor')} value={view.filter.actor} onchange={(v) => apply({ ...view.filter, actor: v })} testid="actor-filter" />
     <FilterSelect
       label="Closed within"

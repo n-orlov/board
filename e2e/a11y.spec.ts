@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives } from './chips';
 
 // R9/R12: axe-core over every view and dialog/sheet, at the phone and the desktop viewport, in the light and the dark
 // theme. `states` holds the 22 earlier states (the Attention view over an open ask and a conflict, its Answer sheet, the Notes view with a body expanded and its Post note sheet, among them); R12 adds PHASE1_STATES, the finite list of the Phase 1 views `#/tasks`,
@@ -631,7 +632,7 @@ type Phase3State = { name: string; open: (page: Page, seed: Seed3) => Promise<vo
 async function focusTimelineLabel(page: Page, tabs: number, selector: string) {
   await page.goto(`/#/timeline?initiative=${P3_SLUG}`);
   await expect(page.locator('.vis-labelset .vis-label.tl-task').first()).toBeVisible();
-  await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+  await expectInitiatives(page, [P3_SLUG]);
   await expect(async () => {
     await page.getByTestId('zoom-in').focus();
     for (let i = 0; i < tabs; i++) await page.keyboard.press('Tab');
@@ -649,7 +650,7 @@ const PHASE3_STATES: Phase3State[] = [
       await expect(page.getByTestId('timeline-chart')).toBeVisible();
       await expect(page.getByTestId('timeline-legend')).toBeVisible(); // the legend is part of the scanned view
       await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible();
-      await expect(page.getByTestId('initiative-filter')).toHaveValue(P3_SLUG);
+      await expectInitiatives(page, [P3_SLUG]);
     },
   },
   {

@@ -12,6 +12,12 @@ export async function openChips(page: Page): Promise<void> {
   if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
 }
 
+/** Folds the phone's filter again; a no-op where the filter is always open. */
+export async function foldChips(page: Page): Promise<void> {
+  const toggle = page.getByTestId('chip-toggle');
+  if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
+}
+
 /** Shows every initiative chip (opens "more" when the list is folded). */
 export async function showAllInitiatives(page: Page): Promise<void> {
   await openChips(page);
@@ -52,4 +58,16 @@ export async function pickTag(page: Page, tag: string): Promise<void> {
   const chip = tagChip(page, tag);
   await expect(chip).toBeVisible();
   await chip.click();
+}
+
+/** The tags the chips show as chosen, sorted. */
+export async function chosenTags(page: Page): Promise<string[]> {
+  const chips = page.locator('[data-testid="chip-tag"][aria-pressed="true"]');
+  const tags = await chips.evaluateAll((els) => els.map((el) => el.getAttribute('data-tag') ?? ''));
+  return tags.sort();
+}
+
+/** Asserts exactly these tags are chosen (an empty list is "any tag"). */
+export async function expectTags(page: Page, tags: string[]): Promise<void> {
+  await expect.poll(() => chosenTags(page)).toEqual([...tags].sort());
 }

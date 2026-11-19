@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expectInitiatives, foldChips, pickInitiative, pickTag } from './chips';
 
 // The Timeline on a phone (PRD R10, SPEC 11): opening #/timeline at 390x844 shows the first task row in full, above the
 // tab bar, with the page not scrolled, with the filters at their defaults and with all four set (values as long as the
@@ -56,7 +57,7 @@ test('with the filters at their defaults the first task row is in the viewport a
   });
   await seed(page, api, 'e2e-tlp-default', 'tlp-default');
   await page.goto('/#/timeline');
-  await expect(page.getByTestId('initiative-filter')).toHaveValue('');
+  await expectInitiatives(page, []);
   await expectFirstRowInView(page);
 });
 
@@ -71,12 +72,15 @@ test('with all four filters set the first task row is in the viewport above the 
   await seed(page, api, slug, tag);
   await page.goto('/#/timeline');
   await expect(page.getByTestId('timeline-chart')).toBeVisible(FIVE_SECONDS);
-  await page.getByTestId('initiative-filter').selectOption(slug);
-  await page.getByTestId('tag-filter').selectOption(tag);
+  await pickInitiative(page, slug);
+  await pickTag(page, tag);
   await page.getByTestId('actor-filter').selectOption(actor);
   await page.getByTestId('closed-filter').selectOption('30');
   await expect(page.getByTestId('clear-filters')).toBeVisible();
   await expect(page).toHaveURL(/closed=30/);
+  // Picking chips left the phone's folded filter open and scrolled the page to reach them: fold it again and go back to the top.
+  await foldChips(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await expectFirstRowInView(page);
   // A reload opens the same view, unscrolled.
   await page.reload();

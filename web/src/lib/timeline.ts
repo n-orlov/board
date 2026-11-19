@@ -9,6 +9,7 @@
 // Text that vis-timeline renders as HTML (`content`, `title`) is escaped here.
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
+import { mergeChoices, type TagChoice } from './chipFilter';
 
 export type Timeline = components['schemas']['Timeline'];
 type TimelineTask = components['schemas']['TimelineTask'];
@@ -498,19 +499,10 @@ export function choiceOptions(values: readonly string[], current: string, any: s
   return [{ value: '', label: any }, ...[...all].sort().map((value) => ({ value, label: value }))];
 }
 
-/** The tags the initiatives carry, each once. */
-export function tagChoices(initiatives: readonly { tags: readonly string[] }[]): string[] {
-  return [...new Set(initiatives.flatMap((i) => i.tags))];
-}
-
-/** The filter with one initiative chosen (empty clears it). The server takes several; the select picks one. */
-export function withInitiative(filter: TimelineFilter, slug: string): TimelineFilter {
-  return { ...filter, initiatives: slug === '' ? [] : [slug] };
-}
-
-/** The filter with one tag chosen (empty clears it). */
-export function withTag(filter: TimelineFilter, tag: string): TimelineFilter {
-  return { ...filter, tags: tag === '' ? [] : [tag] };
+/** The tag chips Timeline offers: the tags the board's initiatives carry, each once and marked as an initiative's, plus the chosen ones. */
+export function tagChoices(initiatives: readonly { tags: readonly string[] }[], chosen: readonly string[]): TagChoice[] {
+  const marks = initiatives.flatMap((i) => i.tags.map((tag) => ({ tag, source: 'initiative' as const })));
+  return mergeChoices([], marks, chosen);
 }
 
 /** The filter with a closed-within choice read from a select's value. */

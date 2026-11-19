@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
+import { expectInitiatives, expectTags, pickInitiative, pickTag } from './chips';
 
 // The Timeline view's filters, panning and live refresh (PRD R6, SPEC 11): the four filters (initiative, tag, actor,
 // closed within) change which task rows are drawn, live in the fragment and survive a reload; panning refetches
@@ -90,13 +91,13 @@ for (const vp of viewports) {
       await expect(row(page, s.x3)).toHaveCount(0); // closed tasks are left out until a closed-within is chosen
 
       // Initiative.
-      await select(page, 'initiative-filter').selectOption(s.x);
+      await pickInitiative(page, s.x);
       await expect(row(page, s.y1)).toHaveCount(0, FIVE_SECONDS);
       await expect(row(page, s.x1)).toHaveCount(1);
       await expect(row(page, s.x2)).toHaveCount(1);
       expect(hash(page)).toBe(`#/timeline?initiative=${s.x}`);
       await page.reload();
-      await expect(select(page, 'initiative-filter')).toHaveValue(s.x);
+      await expectInitiatives(page, [s.x]);
       await expect(row(page, s.x2)).toHaveCount(1, FIVE_SECONDS);
       await expect(row(page, s.y1)).toHaveCount(0);
 
@@ -131,12 +132,12 @@ for (const vp of viewports) {
       await expect(page.getByTestId('clear-filters')).toHaveCount(0);
 
       // Tag: the initiatives that carry it.
-      await select(page, 'tag-filter').selectOption(s.tagY);
+      await pickTag(page, s.tagY);
       await expect(row(page, s.x1)).toHaveCount(0, FIVE_SECONDS);
       await expect(row(page, s.y1)).toHaveCount(1);
       expect(hash(page)).toBe(`#/timeline?tag=${s.tagY}`);
       await page.reload();
-      await expect(select(page, 'tag-filter')).toHaveValue(s.tagY);
+      await expectTags(page, [s.tagY]);
       await expect(row(page, s.y1)).toHaveCount(1, FIVE_SECONDS);
       await expect(row(page, s.x1)).toHaveCount(0);
       await s.api.dispose();
@@ -148,7 +149,7 @@ for (const vp of viewports) {
       await page.goto(`/#/timeline?initiative=${s.y}&actor=${s.ada}&closed=30`);
       await expect(row(page, s.y1)).toHaveCount(1, FIVE_SECONDS);
       await expect(row(page, s.x1)).toHaveCount(0);
-      await expect(select(page, 'initiative-filter')).toHaveValue(s.y);
+      await expectInitiatives(page, [s.y]);
       await expect(select(page, 'actor-filter')).toHaveValue(s.ada);
       await expect(select(page, 'closed-filter')).toHaveValue('30');
       expect(reads.length).toBeGreaterThanOrEqual(1);
