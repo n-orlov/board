@@ -5,16 +5,15 @@
 
 # Village Hall
 
-Village Hall is a shared work board for one operator and the coding agents working for them:
-initiatives, tasks, TTL-bound leases ("who is working on what right now"), asks
-for the operator, and a public notes board, with a web UI (attention view,
-Gantt-style timeline) for the human and an HTTP API plus a `vh` CLI for agents.
+Village Hall is a shared work board for its operators (one by default, several since Phase 5) and the coding
+agents working for them: initiatives, tasks, TTL-bound leases ("who is working on what right now"), asks
+for the operators, and a public notes board, with a web UI (the Now view, Gantt-style timeline) for the human and an HTTP API plus a `vh` CLI for agents.
 
 It is tool-agnostic: agents take part by following a skill and identify themselves
 from their own environment. The server has no integration with any particular
 agent tool or job runner.
 
-Status: **Phases 0 to 4 are shipped, and Phase 5 is built**: the server, the CLI and the web UI (attention-first views,
+Status: **Phases 0 to 4 are shipped, and Phase 5 is built**: the server, the CLI and the web UI (attention-first views, which Phase 5 replaced with Now,
 Timeline, Actors, Archive), leases, asks, notes, alerts to a notifier URL, the shortcut commands
 (`vh start`, `vh finish`, `vh ping`, `vh catchup`), the installer script, `vh update` and the release
 pipeline. Phase 5 (Village Hall) adds the **Now** view (the Attention page's successor: "Needs me", "In flight" with
