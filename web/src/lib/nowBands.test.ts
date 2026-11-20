@@ -15,8 +15,10 @@ import {
   parseBandPrefs,
   saveBandPrefs,
   withChoice,
+  FOLD_KEYS,
   type BandKey,
   type BandStorage,
+  type FoldKey,
 } from './nowBands';
 
 const NOW = new Date('2026-01-01T12:00:00Z');
@@ -74,6 +76,24 @@ describe('default open states', () => {
     expect(keys.map((k) => defaultOpen(k, 'narrow', 0))).toEqual([false, false, false, false]);
   });
 
+  it('opens In flight only when it holds something, and Recently touched never, on a narrow screen', () => {
+    expect(defaultOpen('flight', 'narrow', 2)).toBe(true);
+    expect(defaultOpen('flight', 'narrow', 0)).toBe(false);
+    expect(defaultOpen('recent', 'narrow', 7)).toBe(false);
+    expect(defaultOpen('recent', 'narrow', 0)).toBe(false);
+  });
+
+  it('opens In flight and Recently touched on a wide screen, empty or not', () => {
+    for (const key of ['flight', 'recent'] as FoldKey[]) {
+      expect(defaultOpen(key, 'wide', 0)).toBe(true);
+      expect(defaultOpen(key, 'wide', 5)).toBe(true);
+    }
+  });
+
+  it('folds the four bands, then In flight and Recently touched', () => {
+    expect(FOLD_KEYS).toEqual(['asks', 'expired', 'watches', 'done', 'flight', 'recent']);
+  });
+
   it('maps the media query to a layout', () => {
     expect(layoutOf(true)).toBe('wide');
     expect(layoutOf(false)).toBe('narrow');
@@ -92,6 +112,18 @@ describe('remembered open state', () => {
     expect(isOpen(openDone, 'asks', 'wide', 4)).toBe(false);
   });
 
+  it('remembers In flight and Recently touched apart for wide and narrow too', () => {
+    const narrowRecent = withChoice(NO_BAND_PREFS, 'recent', 'narrow', true);
+    expect(isOpen(narrowRecent, 'recent', 'narrow', 0)).toBe(true);
+    expect(isOpen(narrowRecent, 'recent', 'wide', 0)).toBe(true);
+    const wideClosed = withChoice(narrowRecent, 'flight', 'wide', false);
+    expect(isOpen(wideClosed, 'flight', 'wide', 3)).toBe(false);
+    expect(isOpen(wideClosed, 'flight', 'narrow', 3)).toBe(true);
+    const narrowClosed = withChoice(wideClosed, 'flight', 'narrow', false);
+    expect(isOpen(narrowClosed, 'flight', 'narrow', 3)).toBe(false);
+    expect(narrowClosed).toEqual({ wide: { flight: false }, narrow: { recent: true, flight: false } });
+  });
+
   it('reads back what it saved under a versioned vh. key', () => {
     const data = new Map<string, string>();
     const storage: BandStorage = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
@@ -108,6 +140,7 @@ describe('remembered open state', () => {
       expect(parseBandPrefs(bad)).toEqual(NO_BAND_PREFS);
     }
     expect(parseBandPrefs('{"wide":{"asks":false,"ghost":true,"done":"yes"},"narrow":{"done":true}}')).toEqual({ wide: { asks: false }, narrow: { done: true } });
+    expect(parseBandPrefs('{"wide":{"flight":false,"recent":1},"narrow":{"recent":true,"flight":null}}')).toEqual({ wide: { flight: false }, narrow: { recent: true } });
   });
 
   it('survives storage that throws', () => {

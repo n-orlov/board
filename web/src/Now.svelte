@@ -53,6 +53,7 @@
     saveBandPrefs,
     withChoice,
     type BandInfo,
+    type FoldKey,
     type Layout,
   } from './lib/nowBands';
   import {
@@ -246,8 +247,8 @@
     saveOrder(viewEnv.storage, order);
   }
 
-  function toggle(band: BandInfo, open: boolean) {
-    prefs = withChoice(prefs, band.key, layout, open);
+  function toggle(key: FoldKey, open: boolean) {
+    prefs = withChoice(prefs, key, layout, open);
     saveBandPrefs(viewEnv.storage, prefs);
   }
 
@@ -375,7 +376,7 @@
   {#if recentList.length === 0}
     <p class="rounded-md border border-dashed border-border px-4 py-4 text-text-muted" data-testid="recent-empty">Nothing was touched in this window.</p>
   {:else}
-    <ul class="flex flex-col gap-3" aria-labelledby="recent-heading" data-testid="recent-list">
+    <ul class="flex flex-col gap-3" aria-labelledby="band-toggle-recent" data-testid="recent-list">
       {#each recentList as row (row.task)}
         <li class="flex flex-col gap-1 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="recent-row" data-task={row.task}>
           <p class="font-medium">
@@ -400,6 +401,32 @@
   {:else if view.attention !== undefined}
     {@render bandItems(BANDS.find((band) => band.key === key)!, view.attention)}
   {/if}
+{/snippet}
+
+<!-- One card of the narrow accordion: a Needs me band, In flight or Recently touched. Its heading is one 44 px button that
+     opens and closes the panel; the open state is the person's choice for narrow screens, else the default. -->
+{#snippet fold(key: FoldKey, title: string, count: number, testid: string, toggleId: string, countId: string, level: 'h3' | 'h4')}
+  {@const open = isOpen(prefs, key, layout, count)}
+  <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid={testid} data-open={open}>
+    <svelte:element this={level}>
+      <button
+        type="button"
+        id="band-toggle-{key}"
+        class="flex min-h-11 w-full items-center gap-2 rounded-lg px-4 py-2 text-left text-base font-semibold"
+        aria-expanded={open}
+        aria-controls="band-panel-{key}"
+        data-testid={toggleId}
+        onclick={() => toggle(key, !open)}
+      >
+        <svg viewBox="0 0 24 24" class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        <span>{title}</span>
+        <span class="text-sm font-normal text-text-muted" data-testid={countId}>{count}</span>
+      </button>
+    </svelte:element>
+    <div id="band-panel-{key}" role="region" aria-labelledby="band-toggle-{key}" hidden={!open} class="flex flex-col gap-3 px-4 pb-4" data-testid="band-panel">
+      {@render widgetBody(key)}
+    </div>
+  </section>
 {/snippet}
 
 <section aria-labelledby="now-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
@@ -448,36 +475,13 @@
           <div class="flex flex-col gap-3" data-testid="now-bands">
             {#each BANDS as band (band.key)}
               {@const count = bandCount(data.counts, band)}
-              {@const open = isOpen(prefs, band.key, layout, count)}
-              <section class="min-w-0 rounded-lg border border-border bg-surface" data-testid="band-{band.key}" data-open={open}>
-                <h4>
-                  <button
-                    type="button"
-                    id="band-toggle-{band.key}"
-                    class="flex min-h-11 w-full items-center gap-2 rounded-lg px-4 py-2 text-left text-base font-semibold"
-                    aria-expanded={open}
-                    aria-controls="band-panel-{band.key}"
-                    data-testid="band-toggle"
-                    onclick={() => toggle(band, !open)}
-                  >
-                    <svg viewBox="0 0 24 24" class="size-4 shrink-0 transition-transform {open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-                    <span>{band.title}</span>
-                    <span class="text-sm font-normal text-text-muted" data-testid="band-count">{count}</span>
-                  </button>
-                </h4>
-                <div id="band-panel-{band.key}" role="region" aria-labelledby="band-toggle-{band.key}" hidden={!open} class="px-4 pb-4" data-testid="band-panel">
-                  {@render bandItems(band, data)}
-                </div>
-              </section>
+              {@render fold(band.key, band.title, count, `band-${band.key}`, 'band-toggle', 'band-count', 'h4')}
             {/each}
           </div>
         </section>
-        <section aria-labelledby="flight-heading" class="min-w-0" data-testid="now-flight">
-          <h3 id="flight-heading" class="mb-3 text-lg font-semibold">In flight <span class="text-sm font-normal text-text-muted" data-testid="flight-count">{flightList.length}</span></h3>
-          {@render flightBody()}
-
-          <h3 id="recent-heading" class="mt-6 mb-3 text-lg font-semibold">Recently touched <span class="text-sm font-normal text-text-muted" data-testid="recent-count">{recentList.length}</span></h3>
-          {@render recentBody()}
+        <section aria-label="In flight and recently touched" class="flex min-w-0 flex-col gap-3" data-testid="now-activity">
+          {@render fold('flight', 'In flight', flightList.length, 'now-flight', 'widget-toggle', 'flight-count', 'h3')}
+          {@render fold('recent', 'Recently touched', recentList.length, 'now-recent', 'widget-toggle', 'recent-count', 'h3')}
         </section>
       </div>
     {/if}

@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { pickTag, tagChip } from './chips';
-import { actorApi, created, showAllBands } from './now';
+import { actorApi, created, openFold, showAllBands } from './now';
 
 // R9 in the UI (SPEC 11, "Task tags as chips"): a task's tags are coloured chips that name their source on the Tasks list, Now
 // (Needs me and In flight), Timeline, Archive, an initiative's page and the task page; the operator adds a tag (typing, with
@@ -242,6 +242,7 @@ for (const vp of viewports) {
       await expect(marked(flightRow, s.tag, 'task')).toBeVisible(FIVE_SECONDS);
       await expect(marked(flightRow, s.initiativeTag, 'initiative')).toBeVisible();
       await expect(marked(flightRow, 'ralph', 'actor')).toBeVisible();
+      await openFold(page, 'recent');
       const recentRow = page.locator(`[data-testid=recent-row][data-task="${ended}"]`);
       await expect(marked(recentRow, `${s.tag}-b`, 'task')).toBeVisible(FIVE_SECONDS);
       await expect(marked(recentRow, s.initiativeTag, 'initiative')).toBeVisible();

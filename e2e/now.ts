@@ -22,7 +22,9 @@ export const LAYOUT_KEY = 'vh.now.layout.v1';
 function seedAllOpen(keys: { bands: string; layout: string }): void {
   try {
     const open = { asks: true, expired: true, watches: true, done: true };
-    if (localStorage.getItem(keys.bands) === null) localStorage.setItem(keys.bands, JSON.stringify({ wide: open, narrow: open }));
+    // On the stacked view In flight and Recently touched fold too (Recently touched starts closed on a phone).
+    const folds = { ...open, flight: true, recent: true };
+    if (localStorage.getItem(keys.bands) === null) localStorage.setItem(keys.bands, JSON.stringify({ wide: folds, narrow: folds }));
     if (localStorage.getItem(keys.layout) === null) {
       const layout = {
         columns: [
@@ -56,6 +58,14 @@ export const items = (page: Page, section: keyof typeof BAND_OF): Locator =>
 /** Opens a band when it is closed (a phone starts with some closed). */
 export async function openBand(page: Page, key: BandKey): Promise<void> {
   const toggle = band(page, key).getByTestId('band-toggle');
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Opens In flight or Recently touched when it is closed (a phone starts with Recently touched closed). */
+export async function openFold(page: Page, key: 'flight' | 'recent'): Promise<void> {
+  const toggle = page.getByTestId(`now-${key}`).getByTestId('widget-toggle');
   await expect(toggle).toBeVisible();
   if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');

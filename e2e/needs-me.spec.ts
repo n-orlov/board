@@ -262,7 +262,8 @@ for (const vp of viewports) {
       await openChips(page);
       await page.getByTestId('chip-clear').click();
       await page.goto('/#/now');
-      const mine = items(page, 'open_asks').filter({ hasText: global.ref });
+      // A ref is a substring of longer ones on a grown shared store (A11 inside A110): match it whole.
+      const mine = items(page, 'open_asks').filter({ hasText: new RegExp(`\\b${global.ref}\\b`) });
       await expect(mine).toHaveCount(1, FIVE_SECONDS);
       await expect(mine.getByTestId('initiative-link')).toHaveCount(0);
       await expect(mine.getByTestId('item-link')).toHaveCount(0);

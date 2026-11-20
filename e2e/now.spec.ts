@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { initiativeChip, openChips, pickInitiative, pickTag, tagChip } from './chips';
-import { BANDS_KEY, FLIGHT_KEY, LAYOUT_KEY, actorApi, band, created, openBand, seedFlight, seedNeedsMe, showAllBands } from './now';
+import { BANDS_KEY, FLIGHT_KEY, LAYOUT_KEY, actorApi, band, created, openBand, openFold, seedFlight, seedNeedsMe, showAllBands } from './now';
 
 // The Now view's Needs me bands (PRD R1, SPEC 11): the four bands in order with their counts, every band open on the desktop
 // but Done, not closed, an accordion on the phone (Open asks and Expired leases and conflicts open when they hold something,
@@ -191,6 +191,7 @@ test.describe('the right column on the desktop', () => {
     const s = await seedFlight(playwright, baseURL, 'columns');
     await page.goto(`/#/now?initiative=${s.slug}`);
     await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
+    await openFold(page, 'recent');
     const needs = (await band(page, 'asks').boundingBox())!;
     const right = (await flight(page).boundingBox())!;
     expect(right.x).toBeGreaterThanOrEqual(needs.x + needs.width);
@@ -305,6 +306,7 @@ test.describe('the right column on the phone', () => {
     const s = await seedFlight(playwright, baseURL, 'phone');
     await page.goto(`/#/now?initiative=${s.slug}`);
     await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
+    await openFold(page, 'recent');
     const needs = (await page.getByTestId('now-needs').boundingBox())!;
     const right = (await flight(page).boundingBox())!;
     expect(right.y).toBeGreaterThanOrEqual(needs.y + needs.height);
@@ -341,6 +343,7 @@ for (const vp of [
           );
           await page.goto(`/#/now?initiative=${s.slug}`);
           await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
+          await openFold(page, 'recent');
           await expect(recentRow(page, s.ended)).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await expect(page.locator('html')).toHaveAttribute('data-density', density);

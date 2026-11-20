@@ -1,6 +1,7 @@
 // The Needs me bands of the Now view (PRD R1, SPEC 11): the four bands in order and which of the attention sections
 // each one holds, the count and rows of a band, which bands start open, and the open state a person leaves behind,
-// remembered apart for wide and narrow screens under `vh.now.bands.v1`.
+// remembered apart for wide and narrow screens under `vh.now.bands.v1`. In flight and Recently touched fold like the bands
+// below 1024 px (a fold is a band or one of those two), with the same remembered state.
 import type { AttentionCounts, SectionKey } from './attention';
 import { rowsFor, type Attention, type ItemRow } from './attentionView';
 
@@ -14,6 +15,11 @@ export interface BandInfo {
   /** What the band says when it has no items. */
   empty: string;
 }
+
+/** What folds on a screen below the dock: the four bands, then In flight and Recently touched. */
+export type FoldKey = BandKey | 'flight' | 'recent';
+
+export const FOLD_KEYS: readonly FoldKey[] = ['asks', 'expired', 'watches', 'done', 'flight', 'recent'];
 
 /** The bands in the order Needs me shows them; Done, not closed is last. */
 export const BANDS: readonly BandInfo[] = [
@@ -59,16 +65,17 @@ export function layoutOf(wide: boolean): Layout {
 }
 
 /**
- * Whether a band starts open when the person has not chosen. Wide: every band but Done, not closed, empty or not.
- * Narrow (an accordion): Open asks and Expired leases and conflicts when they hold something, the others closed.
+ * Whether a fold starts open when the person has not chosen. Wide: every one but Done, not closed, empty or not.
+ * Narrow (an accordion): Open asks, Expired leases and conflicts and In flight when they hold something, the others
+ * closed (Recently touched always starts closed, it is the quietest part).
  */
-export function defaultOpen(key: BandKey, layout: Layout, count: number): boolean {
+export function defaultOpen(key: FoldKey, layout: Layout, count: number): boolean {
   if (layout === 'wide') return key !== 'done';
-  return (key === 'asks' || key === 'expired') && count > 0;
+  return (key === 'asks' || key === 'expired' || key === 'flight') && count > 0;
 }
 
 /** The choices made so far on one kind of screen: a band absent from it has not been toggled. */
-export type BandChoices = Partial<Record<BandKey, boolean>>;
+export type BandChoices = Partial<Record<FoldKey, boolean>>;
 
 export interface BandPrefs {
   wide: BandChoices;
@@ -82,9 +89,9 @@ export const BANDS_STORAGE_KEY = 'vh.now.bands.v1';
 function choices(raw: unknown): BandChoices {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const out: BandChoices = {};
-  for (const band of BANDS) {
-    const value = (raw as Record<string, unknown>)[band.key];
-    if (typeof value === 'boolean') out[band.key] = value;
+  for (const key of FOLD_KEYS) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (typeof value === 'boolean') out[key] = value;
   }
   return out;
 }
@@ -102,13 +109,13 @@ export function parseBandPrefs(raw: string | null | undefined): BandPrefs {
   }
 }
 
-/** Whether a band is open: the person's choice on this kind of screen, else the default. */
-export function isOpen(prefs: BandPrefs, key: BandKey, layout: Layout, count: number): boolean {
+/** Whether a fold is open: the person's choice on this kind of screen, else the default. */
+export function isOpen(prefs: BandPrefs, key: FoldKey, layout: Layout, count: number): boolean {
   return prefs[layout][key] ?? defaultOpen(key, layout, count);
 }
 
 /** The choices after a band is opened or closed on one kind of screen; the other kind is untouched. */
-export function withChoice(prefs: BandPrefs, key: BandKey, layout: Layout, open: boolean): BandPrefs {
+export function withChoice(prefs: BandPrefs, key: FoldKey, layout: Layout, open: boolean): BandPrefs {
   return { ...prefs, [layout]: { ...prefs[layout], [key]: open } };
 }
 
