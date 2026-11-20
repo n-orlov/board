@@ -433,6 +433,10 @@ for (const vp of viewports) {
       await foldChips(page); // a fresh mount folds a phone's filter, so fold it here: the page is then as tall coming back as it was going
       await page.getByTestId('closed-filter').selectOption('90');
       await expect(page).toHaveURL((url) => url.hash.startsWith(`#/timeline?initiative=${slug}`));
+      // The tag chips offered stay offered while the view is mounted (a narrower read takes none away), so the view that began on
+      // the whole board offers every tag of the shared store, and a Back mounts it on the narrow read, with only the tags of the
+      // chosen initiative's rows: a page of another height. Mount it the way Back does before measuring.
+      await page.reload();
       await expect(page.locator('.vis-labelset .vis-label')).toHaveCount(31, FIVE_SECONDS);
       await expect(page.locator('.vis-loading-screen')).toHaveCount(0, FIVE_SECONDS);
 
