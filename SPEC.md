@@ -1,6 +1,6 @@
 # Village Hall — product spec
 
-Village Hall is a shared work board for one operator and the coding agents working for them.
+Village Hall is a shared work board for the operators of a household or team (one by default, several since Phase 5, §3.1) and the coding agents working for them.
 Initiatives, tasks, live leases, asks and notes, in one service with a web UI for
 the human, and an HTTP API plus a CLI for agents.
 
@@ -53,7 +53,7 @@ themselves from what their environment exposes (§9).
 |---|---|
 | **B1** | Human UI and agent API see the same data. Every UI action has an API call. |
 | **B2** | Live work is a **lease** with a TTL. Work that stops renewing **expires** and is shown as such, without anyone cleaning up. |
-| **B3** | The operator's **attention view** answers "what needs me now" in one screen (§5.3). |
+| **B3** | The operator's **Now view** (its Needs me bands, built from the attention items of §5.3; the Attention page of Phases 2 to 4 was replaced by Now in Phase 5) answers "what needs me now" in one screen. |
 | **B4** | Agents can read "what's new since T" cheaply: summaries first, bodies on demand. |
 | **B5** | Conflicts are **warnings**, never locks. The board never blocks an action. |
 | **B6** | Generic SQL: SQLite and Postgres supported from v1, same behaviour, same test suite (§12.2). |
@@ -63,7 +63,7 @@ themselves from what their environment exposes (§9).
 
 ### Non-goals (v1)
 
-- Roles, permissions, teams (§3). One operator, any number of agents; every authenticated principal can do everything.
+- Roles, permissions, teams (§3). Any number of operators and agents (several operator actors may coexist, §3.1, and a key is owned by one, §3.3), yet no role differs from another: every authenticated principal can do everything, and nothing reads an owner or origin to allow or refuse a request.
 - A task queue or automatic pickup (§17).
 - Replacing an external issue tracker. Tasks may link to external tickets; they do not mirror them.
 - Rich text editing, attachments, comments threads. Notes are text (Markdown rendered).
@@ -79,8 +79,8 @@ These names are fixed. Code, API, UI and skill text use exactly these words.
 | **Board** | The service, its CLI (`vh`) and its UI. |
 | **Initiative** | A group of tasks: a bounded effort ("onboard the new phone") or an ongoing area ("vulnerability hygiene"). Flat, never nested. Carries free-form **tags** (`work`, `personal`, `homelab`, …) used for filtering. |
 | **Task** | A unit of work inside exactly one initiative. Status is **open → done → closed** (§4.3). May depend on other tasks ("blocked by"). Kind is `work` (default) or `watch`. |
-| **Watch task** | A task of kind `watch`: an ongoing duty with a check-in **cadence** and a `next_check_at`. Recording a check moves `next_check_at` forward. Overdue checks appear in the attention view. |
-| **Done** | An actor says the task's work is finished. The task stays visible and appears in the attention view until closed. |
+| **Watch task** | A task of kind `watch`: an ongoing duty with a check-in **cadence** and a `next_check_at`. Recording a check moves `next_check_at` forward. Overdue checks appear in the Needs me bands of Now (§5.3). |
+| **Done** | An actor says the task's work is finished. The task stays visible and appears in the Needs me bands of Now (§5.3) until closed. |
 | **Closed** | The task is accepted and finished. Its timeline bar ends, and it moves to the **archive**. Carries a **resolution**: `completed`, `dropped`, `superseded`, `duplicate`. |
 | **Archive** | Closed tasks (and closed initiatives). Hidden by default; the UI and API filter "closed within the last N days". |
 | **Lease** | An actor's live, time-bounded claim that it is working on a task. Started, **renewed**, **ended** by the actor, or **expired** by the server when its TTL passes without renewal. Default TTL 2 h, maximum 12 h. Declares the **resources** it touches. |
@@ -90,7 +90,7 @@ These names are fixed. Code, API, UI and skill text use exactly these words.
 | **Event** | An append-only entry on a task's timeline (§4.6): lease started/renewed/ended/expired, ask raised/answered/withdrawn, check recorded, done, reopened, closed, note, field changes. Some types are drawn as markers on the timeline. |
 | **Ask** | A question from an actor that needs the operator. Open until **answered** (or **withdrawn**). The asking actor picks a **mode**: `stop` (it ends its turn; the operator comes back later) or `poll` (it long-polls for the answer with a timeout, §7.2). The answer can be given in the UI, or by the operator replying to the waiting agent directly, in which case the agent records the answer via the API. May be marked `blocking` (the task cannot proceed without it). |
 | **Note** | A message from an actor: a one-line **summary** and an optional longer **body** (Markdown). Optionally bound to a **task**, an **initiative** and/or a **resource**. A note with no task and no initiative is a **broadcast**. Readers list summaries since a timestamp and fetch bodies when relevant. |
-| **Attention view** | The operator's default view (§5.3): open asks, done-not-closed tasks, expired leases, overdue watches, live conflicts, each with the actors involved. |
+| **Needs me (attention items)** | What the operator's default view, **Now** (`#/now`, §11), shows first (derivation §5.3; it was the Attention page in Phases 2 to 4): open asks, done-not-closed tasks, expired leases, overdue watches, live conflicts, each with the actors involved. |
 
 ---
 
@@ -158,7 +158,7 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   (case-insensitive, exact). Anything else gets 403 and no session. An admitted email acts as
   the **operator** actor of its handle (§3.1): `VH_OIDC_OPERATORS` maps `alice@example.com=alice`
   style, and an email with no entry acts as `VH_OPERATOR_HANDLE`, so a deployment that sets only
-  `VH_OPERATOR_HANDLE` has one operator as before. The handle is read from the setting on every
+  `VH_OPERATOR_HANDLE` keeps its single operator actor, unchanged from before several could coexist. The handle is read from the setting on every
   request, never stored on the session row.
 - Session: random 256-bit ID in an **HttpOnly, Secure, SameSite=Lax** cookie `board_session`, path
   `/`, `Max-Age` = the absolute lifetime; stored server-side as SHA-256 hash (§4.9), so logout and
@@ -207,10 +207,10 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
 - **The UI's login**: the UI has no login form of its own. A navigation without a session never
   reaches the app: it is redirected to `/auth/login`, which starts the flow above and ends on `/`
   with a session. At load the app calls `GET /auth/session` (`web/src/lib/session.ts`): 200 shows
-  the signed-in page (the Attention view) with the session's email, 401 (the session ended while
+  the signed-in page (the Now view) with the session's email, 401 (the session ended while
   the page was open) sends the page to `/auth/login` under the app's mount prefix, and any other
   failure is shown as an error without a redirect, so a down server cannot cause a login loop.
-  `e2e/login.spec.ts` logs in through the mock provider and lands on the Attention view.
+  `e2e/login.spec.ts` logs in through the mock provider and lands on the Now view (`#/now`).
 
 ### 3.3 Agents: API keys
 
@@ -804,7 +804,7 @@ lease's ref `L<n>`, its holder's handle, its task ref, its intent, its expiry, a
 hold (in the order of the lease asked about), the conflicts in lease-number order. The CLI prints them
 prominently. Optional resource prefixes (`host:` vs `repo:`) carry no special meaning to the server.
 
-### 5.3 Attention view
+### 5.3 Attention items (the Needs me bands of Now)
 
 `GET /api/v1/attention` returns, each list newest-relevant first, each item with the
 **actors involved** (`{handle, way_back?}`):
@@ -997,7 +997,7 @@ ref without being one, so they carry no tags of their own; `task_marks` covers t
   `Board-On-Behalf-Of`. The actor is upserted on use, where in Phase 0 a use is a write (§4.1); the way back and
   the meta header are stored on the actor row by that upsert. `Board-On-Behalf-Of` names the actor a write is made for.
   `POST /api/v1/tasks/{ref}/close` records it as the `on_behalf_of` of the `task_closed` event (§6.4); every other
-  operation accepts the header and ignores it. Session requests always act as the operator.
+  operation accepts the header and ignores it. Session requests act as the operator actor of the session's email (§3.1).
 - Idempotency: every `POST` under `/api/v1` accepts `Idempotency-Key`, so agents retry safely (the OpenAPI
   document lists the header on each of them, and a test reads that list from it). The header holds exactly one value of
   1 to 255 printable ASCII characters (`0x20` to `0x7E`); anything else (empty, longer, a control or non-ASCII byte, or
@@ -1846,7 +1846,7 @@ does.
 A poll mark that makes the asker of an open `poll` ask waiting, because the ask was not waiting just before it (no `poll_seen_at`
 yet, or one older than 60 seconds), appends an `ask_polling` event (`ref_id` the ask's ULID, the task and the initiative as they
 apply, `data` `{ref, waiting: true}`, principal `system:poll`, made by the asker) in the same transaction as the mark. That
-is how a change of the displayed `asker_waiting` reaches the change feed (§7.3), so every open view that shows it (Attention,
+is how a change of the displayed `asker_waiting` reaches the change feed (§7.3), so every open view that shows it (Now,
 the task page, the initiative page) refreshes through its stream, on every replica sharing the database, without a reload
 and without polling. A mark that renews a poll already counted as waiting writes no event, nor does a mark on an ask that
 is not open or is not a `poll` ask, nor does the passing of the 60 seconds, which is time and not a write.
@@ -3177,7 +3177,7 @@ wash of the token with a solid edge, markers the token itself), so both themes r
 | `tl-actual tl-closed` (closed) | `--text-muted` |
 | `tl-planned` (dashed outline, no fill) | `--text-muted` |
 | `tl-lease tl-lease-live` | `--success` |
-| `tl-lease tl-lease-expired` (the amber of a stranded task on Attention) | `--warning` |
+| `tl-lease tl-lease-expired` (the amber of a stranded task on Now) | `--warning` |
 | `tl-lease tl-lease-ended` | `--text-muted` |
 | `tl-marker tl-marker-milestone` | `--accent` |
 | `tl-marker tl-marker-ask` | `--warning` |
@@ -3469,7 +3469,7 @@ in raising order (`orderAsks`, `web/src/lib/asks.ts`). An ask prints its ref, a 
 or "stop: the asker stops until answered") and when, its details as safe Markdown, and one line of state (`stateLine`: "asker
 waiting", "asker not waiting" or "asker stopped" for an open ask; "answered by alice in the UI", "... through the API" or
 "... relayed (on behalf of bob)" for an answered one, followed by the answer; "withdrawn: reason" for a withdrawn one). Only
-an open ask has **Answer** and **Withdraw** buttons. Answer opens the same sheet as the Attention view (`AnswerForm`: the
+an open ask has **Answer** and **Withdraw** buttons. Answer opens the same sheet as the Now view (`AnswerForm`: the
 question, details, one button per suggested option that fills the field, and a free-text field; empty or over 20000
 characters is refused in the sheet) and posts `POST /asks/<ref>/answer`; Withdraw opens a sheet with an optional Reason (at
 most 200 characters) and posts `POST /asks/<ref>/withdraw`. A refusal (an ask answered meanwhile is 409) shows in the open
@@ -3529,11 +3529,11 @@ with the Now panel open and a conflict, and the task page with a conflict, and `
 
 **Shell and breakpoints.** One route table (`web/src/lib/routes.ts`) drives both the hash router
 and every navigation surface: an entry (id, fragment, view title, nav label, icon) yields the
-view that fragment selects (anything the table does not name is its first entry, Attention, the default view: `#/` lands on it) and
-its navigation entry, so adding a view is one entry plus its component. The navigation order is Attention, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings; the table's ids are, in order, `attention`, `initiatives`, `initiative`, `tasks`, `task`, `timeline`, `actors`, `archive`, `notes`, `keys`. The Attention entry
-(the route's `badge: 'attention'`) carries a **badge** with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
-`live().onAttention`, `navEntries(current, table, total)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`): hidden at 0, the number up to 99 and `99+` above it, in the
-danger colour on every nav surface, and the link's accessible name is "Attention 3 items need attention" (the whole count, "1 item needs attention" for one; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar keeps the entries the table flags `phone: true` (Attention, Initiatives, Tasks and Notes)
+view that fragment selects (anything the table does not name is its first entry, Now, the default view: `#/` and `#/attention` land on `#/now`, `redirectHash`) and
+its navigation entry, so adding a view is one entry plus its component. The navigation order is Now, Initiatives, Tasks, Timeline, Actors, Archive, Notes, Settings; the table's ids are, in order, `now`, `initiatives`, `initiative`, `tasks`, `task`, `timeline`, `actors`, `archive`, `notes`, `keys`. The Now entry
+(the route's `badge: 'attention'` and `liveBadge: true`) carries **two badges**, never one (details under **The nav badges on Now**, §11): the red one with `counts.total` of the latest `attention` message of the stream (`App.svelte` listens through
+`live().onAttention`, `navEntries(current, table, attentionTotal, liveTasks)`, `badgeText`, `badgeLabel` in `web/src/lib/routes.ts`) and the green one with the number of open tasks that have a live lease (`liveBadgeLabel`). Each is hidden at 0, prints the number up to 99 and `99+` above it, and is in the
+danger or success colour on every nav surface. The link's accessible name is "Now 3 items need attention 2 open tasks have a live lease" (the whole counts, "1 item needs attention" and "1 open task has a live lease" for one; with only one badge shown the name has only its words, with none it is "Now"; the words ride as visually hidden content of the link, not as an `aria-label`, so the name keeps the visible text, which axe's `label-content-name-mismatch` requires). The phone tab bar keeps the entries the table flags `phone: true` (Now, Initiatives, Tasks and Notes)
 and ends with a **More** button (`aria-haspopup="dialog"`) that opens the one `Dialog` (a bottom sheet) listing every other navigation entry, Timeline, Actors, Archive and Settings, in table order (`phoneSplit` in `web/src/lib/routes.ts`, `Nav.svelte`, `MoreMenu.svelte`): each entry a link of at least 44 px, choosing one closes the sheet, Escape closes it and returns focus to More. The five targets of the bar are each at least 44 px wide and tall at 390 px, even with the badge at 99+. While the view on screen is one of the entries under More, the More button carries `aria-current="true"` (so exactly one entry of the bar is current) and the entry's link in the sheet `aria-current="page"`. The tablet rail and the desktop sidebar list all eight entries. Every view that streams declares its live-refresh predicate with `live().subscribe` (Timeline, Actors, `affectsActors`, and Archive, `affectsArchive`), so a change made through the API shows within 5 s without a reload. The shell
 (`web/src/Shell.svelte`) shows exactly one navigation surface per width, the others are
 `display: none`: below 768 px a top bar (product name, the view's title, an account button) and a
@@ -3547,7 +3547,7 @@ every width. The first focusable element of the page is a "Skip to content" link
 to the main region without changing the fragment; the navigation entry of the view on screen has
 `aria-current="page"` (a page inside a view, `#/i/<slug>` or `#/t/<ref>`, marks its parent's entry:
 Initiatives or Tasks). `e2e/shell.spec.ts` lists `#/` and `#/now` (the Now view), `#/initiatives`, `#/tasks`, `#/i/<slug>`, `#/t/<ref>`,
-`#/archive` and `#/settings/keys` as states (and asserts the table order, the default route, the badge at 0, 3 and 120 on a fed stand-in stream, the tab bar's five 44 px targets at 390 px, and the More sheet's contents, links and focus return at 390 px) and, at 390x844, 820x1180 and 1440x900, asserts the nav links are (at 390 px the four tabs, with More)
+`#/archive` and `#/settings/keys` as states (and asserts the table order, the default route, the red badge at 0, 3 and 120 on a fed stand-in stream (`e2e/nav-badges.spec.ts` holds both badges and their joint name), the tab bar's five 44 px targets at 390 px, and the More sheet's contents, links and focus return at 390 px) and, at 390x844, 820x1180 and 1440x900, asserts the nav links are (at 390 px the four tabs, with More)
 exactly the route table's (imported, not copied), the right entry carries `aria-current`, and
 navigating by nav click moves it. The page never scrolls horizontally (the same spec), whatever text the API accepts: both list tables set `overflow-wrap: anywhere`,
 and from 768 px use `table-layout: fixed` with fixed widths for the short columns (status, tags,
@@ -3579,9 +3579,9 @@ header and the attention badge in the navigation; the three dialogs acknowledge 
 force-done confirm; and the sorted Initiatives, Tasks, initiative page Tasks, API keys, Actors and Archive tables (sorted
 through the fragment query, with the sorted header asserted). They are filled with the longest accepted values (a 40-character slug and
 handle, 200-character titles, intents and ways back, 20 resources of 100 characters) and a test names them. The Tasks view, the
-task page, the initiative page and Attention are also held to the bar at 2560x1080 and 3440x1440 (`WIDE_STATE_NAMES`). The
+task page, the initiative page and Now (named Attention when Phase 3 wrote this list) are also held to the bar at 2560x1080 and 3440x1440 (`WIDE_STATE_NAMES`). The
 "Created ... by" line of the task page and of the initiative page wraps anywhere, so a 40-character handle stays inside the column.
-R12 holds the same Phase 3 states to axe in `e2e/a11y.spec.ts` (`PHASE3_STATES`, 20 states, at the phone and the desktop viewport in both themes, the sorted tables opened through the fragment query with the sort asserted: the Sort select at the phone and, on Tasks, Initiatives, the initiative page and Archive, the shared sort control at every width; `aria-sort` on the header from 768 px for the other tables) and the Tasks view, task page, initiative page and Attention at 2560x1080 in both themes (`WIDE_STATES`). A serious or critical finding fails the scan, and no rule is disabled.
+R12 holds the same Phase 3 states to axe in `e2e/a11y.spec.ts` (`PHASE3_STATES`, 20 states, at the phone and the desktop viewport in both themes, the sorted tables opened through the fragment query with the sort asserted: the Sort select at the phone and, on Tasks, Initiatives, the initiative page and Archive, the shared sort control at every width; `aria-sort` on the header from 768 px for the other tables) and the Tasks view, task page, initiative page and Now (Attention in Phase 3) at 2560x1080 in both themes (`WIDE_STATES`). A serious or critical finding fails the scan, and no rule is disabled.
 
 **Wide layout caps (R13).** On a wide screen the views that are one table or one list do not stretch with the window. Initiatives, Notes, API keys (Settings), Actors and Archive keep their content (`<section>`) at most 1280 px wide and centred in the main column (`mx-auto max-w-[1280px]`), so on a 2560 px or 3440 px screen the table has an equal margin on each side; below 1280 px of main column they take the whole column as before. The Timeline takes the full width of the main column, since a chart gains from the room. Long running text is held to a measure of 75 characters a line: a rendered Markdown description (task descriptions, note bodies, ask details; the `.description` class) has `max-width: 75ch`, and so do an ask's question and answer. `e2e/wide.spec.ts` asserts it at 2560x1080 and 3440x1440 by bounding box and computed style: the Initiatives and Archive tables are at most 1280 px wide with left and right margins equal within 2 px (the same for Notes, API keys and Actors), the Timeline frame is as wide as the main column, and a seeded long task description has a computed `max-width` of at most 75 `ch` and is no wider.
 
@@ -3605,11 +3605,11 @@ up, the account menu below it, both showing the signed-in email) posts `POST /au
 session's `X-CSRF-Token`, then shows the **Signed out** view at `#/signed-out`: a card with a **Sign in**
 button, a plain link to `/auth/login`. That view never starts a login redirect by itself: a page opened
 on `#/signed-out` neither loads the session nor follows a 401. Leaving the view with Back loads the
-session again, and a signed-in page that is sent to `#/signed-out` returns to `#/` (the Attention view). A failed logout
+session again, and a signed-in page that is sent to `#/signed-out` returns to `#/` (the Now view). A failed logout
 keeps the app and shows "Sign out failed". A reload of `#/signed-out` is answered by the server (the
 fragment never reaches it), which sends an anonymous navigation to the login page (§3.2)
 (`e2e/session.spec.ts`: sign in, Sign out, no navigation to `/auth/login`, the old cookie gets 401,
-Sign in lands on Attention).
+Sign in lands on Now).
 
 **Dialogs and sheets.** Every modal surface in the UI is the one `Dialog` component
 (`web/src/Dialog.svelte`); its focus rules are pure functions in `web/src/lib/focustrap.ts`.
@@ -3638,7 +3638,7 @@ it with focus back on the opener.
 
 R13 extends the same spec to the six Phase 2 dialogs, a finite, named list: answer ask, withdraw ask, post note,
 close from attention, acknowledge (its confirmation, over an expired lease) and record check from attention, each
-opened by keyboard from its opener on the Attention or Notes view. At both viewports each of the six dialogs gets the
+opened by keyboard from its opener on the Now or Notes view. At both viewports each of the six dialogs gets the
 checks above, and also sits on the viewport's lower edge at the phone (a bottom sheet) and clear of it at the desktop
 (centred).
 
@@ -3700,7 +3700,7 @@ anonymous `GET /api/v1/tasks` to answer 401.
 
 **Same origin.** The UI requests nothing from another origin: no web font, CDN, remote icon or
 script. `e2e/sameorigin.spec.ts` signs in through the mock provider, then records every request the
-page issues while it loads `#/` (Attention), `#/initiatives`, `#/tasks`, `#/settings/keys` and `#/signed-out` (a full page load each) at
+page issues while it loads `#/` (Now), `#/initiatives`, `#/tasks`, `#/settings/keys` and `#/signed-out` (a full page load each) at
 390x844 and 1440x900, and requires every http(s)/ws(s) URL to have the board server's
 origin. R12 extends it to the Phase 1 views as a finite, named list (`PHASE1_STATES`): `#/tasks`,
 `#/i/<slug>` and `#/t/<ref>` (each a full page load over a seeded watch task with a link, a blocker, a
@@ -4220,10 +4220,10 @@ disabled, skipped or warn-only, and `ci/quality.json` at the §15.4 thresholds.
 | phase | scope |
 |---|---|
 | 1 | **Phase 1 is shipped.** Core model: tasks (incl. watch, deps), leases (start/renew/end/expire sweep), events, resources and conflicts, short refs for every object (§8.2); `vh now` (lease/conflict parts), task and lease CLI. |
-| 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page), SSE live feed (§7.1). |
+| 2 | **Phase 2 is shipped.** Asks (stop / poll long-poll, relay answers), notes (task / initiative / resource / broadcast, since-filters, cursors), attention view (API, CLI, UI page; Phase 5 replaced its page with Now), SSE live feed (§7.1). |
 | 3 | **Phase 3 is shipped.** Timeline UI (`vis-timeline` bundled with the app; filters: initiative, tag, actor and closed within, in the fragment; zoom hour to quarter, panning refetch, live refresh), archive window, remaining UI views. |
 | 4 | **Phase 4 is done, except the operator's own deployment.** CLI phase: shortcuts and their composite endpoints (§8.4), the full protocol text built on them and the staleness hint in `vh start` (§8.6), `install.sh`, `INSTALL-AGENT.md` and the CI agreement check, `vh update`, the real `Jenkinsfile.release` (immutable GitHub releases with binaries, checksums, SBOMs, image); the thin skill pointer (`skill/SKILL.md`, §10), identity template, idempotency; performance targets verified (§14); operator's own deployment (not done here: it is the operator's, outside this repository). |
-| 5 | **Phase 5 is Village Hall: Now, the display system, per-task tags and the multi-operator foundation; deploying it is the operator's, outside this repository.** **Now** replaces the Attention page ("Needs me" bands and "In flight" with nested leases and a touched-in window, nav badges for what needs the operator and for tasks live now, draggable and resizable widgets on a desktop, an accordion on a phone); one **display system** on every list page (compact/sparse density, theme switch, collapsible sidebar rail, one chip filter with tags AND and initiatives OR, one sort control, one colour per tag); a Timeline that finds active work (Active first, Only active, a resizable label column); **per-task tags** (own tags added by agents with `vh task add --tag` and by the operator in the UI, and derived actor-kind tags, §4.3, §5.5; protocol v5); a **multi-operator foundation** (several operators, API keys owned by an operator, an origin operator on every agent and every event, shown in the UI, §4.1, §11), with no ACL and no per-person view yet. |
+| 5 | **Phase 5 is Village Hall: Now, the display system, per-task tags and the multi-operator foundation; deploying it is the operator's, outside this repository.** **Now** replaces the Attention page ("Needs me" bands and "In flight" with nested leases and a touched-in window, nav badges for what needs the operator and for tasks live now, draggable and resizable widgets on a desktop, an accordion on a phone); one **display system** on every list page (compact/sparse density, theme switch, collapsible sidebar rail, one chip filter with tags AND and initiatives OR, one sort control, one colour per tag); a Timeline that finds active work (Active first, Only active, a resizable label column); **per-task tags** (own tags added by agents with `vh task add --tag` and by the operator in the UI, and derived actor-kind tags, §4.3, §5.5; protocol v5); a **multi-operator foundation** (several operators, API keys owned by an operator, an origin operator on every agent and every event, shown in the UI, §4.1, §11), with no ACL and no per-person view yet. R14 brought the current-state passages into line with this: the product statement, B3, the glossary and the non-goals describe several operators and the Now view (the Attention page and the single operator remain only as named history, such as the Phase 2 row), and §11's shell passage gives Now as the first route and default (`#/` and `#/attention` land on `#/now`), the navigation order and route ids of the table, and the two badges on the Now entry with their joint accessible name. `ci/repocheck` holds these passages to `web/src/lib/routes.ts`. |
 
 Each phase ends on a green `main` build with all gates still enforced.
 
