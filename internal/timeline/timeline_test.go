@@ -588,3 +588,40 @@ func TestActiveNarrowsTheLeasesAndMarkersWithItsTasksAndAddsToTheOtherFilters(t 
 		t.Errorf("active with an actor nobody is: %v, want none", refs(g))
 	}
 }
+
+func marksOf(task timeline.Task) []string {
+	out := []string{}
+	for _, m := range task.TagMarks {
+		out = append(out, m.Source+":"+m.Tag)
+	}
+	return out
+}
+
+func TestEachTaskCarriesItsOwnTagsAndSourceMarkedOwnInitiativeAndActorTags(t *testing.T) {
+	e := newEnv(t)
+	e.initiative(t, "aa", "web", "team")
+	e.initiative(t, "bb")
+	e.task(t, "aa", "one", from, time.Time{})
+	e.task(t, "aa", "two", from, time.Time{})
+	e.task(t, "bb", "three", from, time.Time{})
+	for _, add := range [][2]string{{"aa-1", "zeta"}, {"aa-1", "web"}, {"aa-1", "alpha"}, {"bb-1", "solo"}} {
+		if _, err := e.tk.AddTag(ctx, who, "key:caller", add[0], add[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.lease(t, "aa-1", "claude:w1", "x", "live", from, to)
+	e.lease(t, "aa-1", "ralph:r1", "x", "ended", from, from.Add(time.Hour))
+	e.lease(t, "aa-1", "foo:nobody", "x", "ended", from, from.Add(time.Hour))
+	e.lease(t, "bb-1", "codex:c1", "x", "expired", from, from.Add(time.Hour))
+
+	got := e.read(t, timeline.Query{})
+	is(t, "tasks", refs(got), []string{"aa-1", "aa-2", "bb-1"})
+	is(t, "own tags of aa-1", got.Tasks[0].Tags, []string{"alpha", "web", "zeta"})
+	is(t, "marks of aa-1", marksOf(got.Tasks[0]), []string{"task:alpha", "task:web", "task:zeta", "initiative:team", "initiative:web", "actor:ralph", "actor:claude"})
+	is(t, "own tags of a task with none", got.Tasks[1].Tags, []string{})
+	is(t, "marks of aa-2", marksOf(got.Tasks[1]), []string{"initiative:team", "initiative:web"})
+	is(t, "own tags of bb-1", got.Tasks[2].Tags, []string{"solo"})
+	is(t, "marks of bb-1: an expired lease still gives its kind", marksOf(got.Tasks[2]), []string{"task:solo", "actor:codex"})
+	// a filter narrows the marks read along with the tasks
+	is(t, "marks of the tasks a filter keeps", marksOf(e.read(t, timeline.Query{Initiatives: []string{"bb"}}).Tasks[0]), []string{"task:solo", "actor:codex"})
+}

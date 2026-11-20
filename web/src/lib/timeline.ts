@@ -22,8 +22,6 @@ export type Timeline = components['schemas']['Timeline'];
  */
 export type TimelineAnswer = Timeline & {
   activeFirst?: readonly string[];
-  /** The tag marks of the answer's tasks by ref, which the timeline read does not carry: a row label draws them as chips. */
-  marks?: Readonly<Record<string, readonly TagMark[]>>;
 };
 type TimelineTask = components['schemas']['TimelineTask'];
 type TimelineLease = components['schemas']['TimelineLease'];
@@ -463,7 +461,7 @@ export function buildTimeline(timeline: TimelineAnswer, now: Date): TimelineMode
   for (const section of sections(timeline)) {
     groups.push(initiativeGroup(section, timeline.initiatives.find((i) => i.slug === section.slug), groups.length));
     for (const task of section.own) {
-      groups.push(taskGroup(task, groups.length, section.id, timeline.marks?.[task.ref] ?? []));
+      groups.push(taskGroup(task, groups.length, section.id, task.tag_marks));
       items.push(...spanItems(task, nowIso));
     }
   }

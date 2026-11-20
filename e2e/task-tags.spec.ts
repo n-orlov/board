@@ -209,6 +209,52 @@ for (const vp of viewports) {
       await expect(own(page.getByTestId('task-tags-block'))).toBeVisible(FIVE_SECONDS);
     });
 
+    test('Now and Timeline draw every chip (own, initiative, actor kind) from their own read, with no lookup of the tasks by ref', async ({ page, playwright, baseURL }) => {
+      const name = `reads-${vp.name}`;
+      const s = await seed(playwright, baseURL, name);
+      const api = await apiAs(playwright, baseURL);
+      expect((await api.put(`/api/v1/tasks/${s.target}/tags/${s.tag}`)).status()).toBe(200);
+      // A second kind of Needs me item: an ask on the task puts it under Open asks as well as In flight.
+      await created(api, '/api/v1/asks', { question: `Which way for ${name}?`, task: s.target, mode: 'poll' });
+      // A recently touched task with no live lease: a lease started and ended by a claude: actor (derived tag `claude`).
+      const ended = (await created(api, '/api/v1/tasks', { initiative: s.slug, title: 'Touched and let go', tags: [`${s.tag}-b`] })).ref;
+      const brief = await actorApi(playwright, baseURL, `claude:ttag-${name}`);
+      const lease = await created(brief, '/api/v1/leases', { task: ended, intent: 'brief' });
+      expect((await brief.post(`/api/v1/leases/${lease.lease.ref}/end`, { data: {} })).status()).toBe(200);
+      await brief.dispose();
+      await api.dispose();
+
+      const lookups: string[] = [];
+      page.on('request', (request) => {
+        const url = new URL(request.url());
+        // The navigation's live-lease badge reads `GET /tasks?active=true`; what must not happen is a read of tasks by ref.
+        if (request.method() === 'GET' && url.pathname === '/api/v1/tasks' && url.searchParams.has('ref')) lookups.push(url.pathname + url.search);
+      });
+      const marked = (scope: Page | Locator, tag: string, source: string) => scope.locator(`[data-testid=task-tag][data-tag="${tag}"][data-source~="${source}"]`);
+
+      await page.goto(`/#/now?initiative=${s.slug}`);
+      await showAllBands(page);
+      const needs = page.locator('[data-testid=attention-item][data-section=open_asks]');
+      await expect(marked(needs, s.tag, 'task')).toBeVisible(FIVE_SECONDS);
+      await expect(marked(needs, s.initiativeTag, 'initiative')).toBeVisible();
+      await expect(marked(needs, 'ralph', 'actor')).toBeVisible();
+      const flightRow = page.locator(`[data-testid=flight-row][data-task="${s.target}"]`);
+      await expect(marked(flightRow, s.tag, 'task')).toBeVisible(FIVE_SECONDS);
+      await expect(marked(flightRow, s.initiativeTag, 'initiative')).toBeVisible();
+      await expect(marked(flightRow, 'ralph', 'actor')).toBeVisible();
+      const recentRow = page.locator(`[data-testid=recent-row][data-task="${ended}"]`);
+      await expect(marked(recentRow, `${s.tag}-b`, 'task')).toBeVisible(FIVE_SECONDS);
+      await expect(marked(recentRow, s.initiativeTag, 'initiative')).toBeVisible();
+      await expect(marked(recentRow, 'claude', 'actor')).toBeVisible();
+
+      await page.goto(`/#/timeline?initiative=${s.slug}`);
+      const label = page.locator('.vis-labelset .vis-label').filter({ hasText: `${s.target} ` });
+      await expect(marked(label, s.tag, 'task').first()).toBeAttached(FIVE_SECONDS);
+      await expect(marked(label, s.initiativeTag, 'initiative').first()).toBeAttached();
+      await expect(marked(label, 'ralph', 'actor').first()).toBeAttached();
+      expect(lookups).toEqual([]);
+    });
+
     for (const theme of ['light', 'dark'] as const) {
       test(`the tag chips and the add field pass axe in the ${theme} theme`, async ({ page, playwright, baseURL }) => {
         const s = await seed(playwright, baseURL, `axe-${theme}-${vp.name}`);

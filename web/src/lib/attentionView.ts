@@ -14,7 +14,7 @@ import {
   type AttentionFilter,
   type SectionKey,
 } from './attention';
-import { mergeChoices, type ChipState, type TagChoice } from './chipFilter';
+import { mergeChoices, type ChipState, type TagChoice, type TagMark } from './chipFilter';
 import { errorText, Fetches } from './fetches';
 import { relativeTime } from './format';
 import { problemText } from './keys';
@@ -198,10 +198,17 @@ export interface AttentionState {
   /** The In flight and Recently touched parts of the same answer; undefined until it lands. */
   flight: InFlight[] | undefined;
   recent: Recent[] | undefined;
+  /** The tag marks of every task the answer names, by ref (its `task_marks`): Now draws all its chips from them. */
+  marks: Record<string, TagMark[]>;
   filter: AttentionFilter;
   window: NowWindow;
   loading: boolean;
   error: string | undefined;
+}
+
+/** The marks of every task a board answer names, by ref, from its `task_marks`. */
+export function marksOfBoard(board: Pick<NowBoard, 'task_marks'>): Record<string, TagMark[]> {
+  return Object.fromEntries(Object.entries(board.task_marks).map(([ref, task]) => [ref, [...task.tag_marks]]));
 }
 
 export class AttentionStore {
@@ -218,7 +225,7 @@ export class AttentionStore {
   ) {
     this.api = api;
     this.onChange = onChange;
-    this.current = { attention: undefined, flight: undefined, recent: undefined, filter, window, loading: true, error: undefined };
+    this.current = { attention: undefined, flight: undefined, recent: undefined, marks: {}, filter, window, loading: true, error: undefined };
   }
 
   private publish(change: Partial<AttentionState>): void {
@@ -234,7 +241,7 @@ export class AttentionStore {
     let outcome: Partial<AttentionState>;
     try {
       const board = await this.api.board(filter, window);
-      outcome = { attention: board.attention, flight: board.in_flight, recent: board.recent, error: undefined };
+      outcome = { attention: board.attention, flight: board.in_flight, recent: board.recent, marks: marksOfBoard(board), error: undefined };
     } catch (e) {
       outcome = { error: errorText(e) };
     }

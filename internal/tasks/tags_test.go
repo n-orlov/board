@@ -192,3 +192,51 @@ func TestTagMarksCarryOwnInitiativeAndActorKindTagsEachWithItsSource(t *testing.
 		t.Fatalf("list marks = %+v, %v", page.Items, err)
 	}
 }
+
+func TestTaggedByRefGivesEachNamedTaskTheTagsAndMarksAReadGives(t *testing.T) {
+	s := newStore(t)
+	ini := initiatives.Store{Store: s.Store, Now: s.Now}
+	for _, in := range []initiatives.New{{Slug: "aa", Title: "A", Tags: []string{"home"}}, {Slug: "b-b", Title: "B"}} {
+		if _, err := ini.Create(ctx, who, "key:c", in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one, err := s.Create(ctx, who, "key:c", New{Initiative: "aa", Title: "one", Tags: []string{"work"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two := mk(t, s, "b-b", "two")
+	plain := mk(t, s, "aa", "plain")
+	startLease(t, leases.Store{Store: s.Store, Now: s.Now}, audit.Actor{Handle: "pi:x"}, one.Ref, "work")
+
+	got, err := s.TaggedByRef(ctx, []string{one.Ref, two.Ref, "zz-9", plain.Ref})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("TaggedByRef = %v, %v, want the three tasks that exist", got, err)
+	}
+	for _, ref := range []string{one.Ref, two.Ref, plain.Ref} {
+		read, err := s.Get(ctx, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got[ref].Tags, read.Tags) || !reflect.DeepEqual(got[ref].TagMarks, read.TagMarks) {
+			t.Errorf("%s: TaggedByRef %+v, a read gives tags %v marks %v", ref, got[ref], read.Tags, read.TagMarks)
+		}
+	}
+	if m := got[two.Ref]; m.Tags == nil || m.TagMarks == nil || len(m.Tags)+len(m.TagMarks) != 0 {
+		t.Errorf("a task with no tags has %#v, want empty lists, never nil", m)
+	}
+	if none, err := s.TaggedByRef(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("no refs gave %v, %v", none, err)
+	}
+}
+
+func TestMarksReducesHoldersToTheirKindsInKindOrder(t *testing.T) {
+	got := Marks([]string{"b"}, []string{"a", "pi"}, []string{"pi:x", "claude:y", "pi:z", "foo:q", "ralph", ""})
+	want := []TagMark{{"b", "task"}, {"a", "initiative"}, {"pi", "initiative"}, {"claude", "actor"}, {"pi", "actor"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Marks = %v, want %v", got, want)
+	}
+	if empty := Marks(nil, nil, nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("Marks of nothing = %#v, want an empty list", empty)
+	}
+}

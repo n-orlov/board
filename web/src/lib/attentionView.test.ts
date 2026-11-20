@@ -10,6 +10,7 @@ import {
   nowQuery,
   nowTagChoices,
   forgetAttention,
+  marksOfBoard,
   openAttention,
   rowsFor,
   saveAttention,
@@ -243,7 +244,7 @@ function browser(respond: (url: string) => Promise<Response>, pathname = '/'): {
 
 describe('AttentionApi', () => {
   it('reads /attention/now with the filter as repeated keys and the session cookie, and gives the whole answer', async () => {
-    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: full, in_flight: [], recent: [] })));
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: full, in_flight: [], recent: [], task_marks: {} })));
     const got = await new AttentionApi(b).board({ tags: ['a', 'b'], initiatives: ['x'] });
     expect(got.attention).toEqual(full);
     expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/attention/now?tag=a&tag=b&initiative=x');
@@ -251,13 +252,13 @@ describe('AttentionApi', () => {
   });
 
   it('asks for no query without a filter and follows the mount prefix', async () => {
-    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: { counts }, in_flight: [], recent: [] })), '/board/');
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '24h', attention: { counts }, in_flight: [], recent: [], task_marks: {} })), '/board/');
     await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER);
     expect(fetchFn.mock.calls[0]![0]).toBe('/board/api/v1/attention/now');
   });
 
   it('sends the window only when it is not the default, after the filter', async () => {
-    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '3d', attention: { counts }, in_flight: [], recent: [] })));
+    const { browser: b, fetchFn } = browser(async () => new Response(JSON.stringify({ window: '3d', attention: { counts }, in_flight: [], recent: [], task_marks: {} })));
     await new AttentionApi(b).board({ tags: ['a'], initiatives: [] }, '3d');
     await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER, '8h');
     await new AttentionApi(b).board(DEFAULT_ATTENTION_FILTER, '24h');
@@ -280,7 +281,7 @@ describe('AttentionApi', () => {
 describe('AttentionStore', () => {
   function rig(get: (f: unknown) => Promise<Attention>) {
     const states: AttentionState[] = [];
-    const board = async (f: unknown) => ({ window: '24h', attention: await get(f), in_flight: [], recent: [] });
+    const board = async (f: unknown) => ({ window: '24h', attention: await get(f), in_flight: [], recent: [], task_marks: {} });
     const store = new AttentionStore({ board } as never, (s) => states.push(s));
     return { store, states, last: () => states[states.length - 1]! };
   }
@@ -355,7 +356,7 @@ describe('AttentionStore flight and window', () => {
     const seen: unknown[] = [];
     const board = vi.fn(async (f: unknown, w: unknown) => {
       seen.push([f, w]);
-      return { window: w, attention: full, in_flight: flight, recent };
+      return { window: w, attention: full, in_flight: flight, recent, task_marks: {} };
     });
     const states: AttentionState[] = [];
     const store = new AttentionStore({ board } as never, (s) => states.push(s), DEFAULT_ATTENTION_FILTER, '8h');
@@ -374,14 +375,61 @@ describe('AttentionStore flight and window', () => {
     const store = new AttentionStore({ board } as never, (s) => states.push(s));
     const first = store.load();
     const second = store.setWindow('8h');
-    waits[1]!({ window: '8h', attention: { counts }, in_flight: [], recent });
+    waits[1]!({ window: '8h', attention: { counts }, in_flight: [], recent, task_marks: {} });
     await second;
-    waits[0]!({ window: '24h', attention: full, in_flight: flight, recent: [] });
+    waits[0]!({ window: '24h', attention: full, in_flight: flight, recent: [], task_marks: {} });
     await first;
     const last = states[states.length - 1]!;
     expect(last.window).toBe('8h');
     expect(last.flight).toEqual([]);
     expect(last.recent).toEqual(recent);
+  });
+});
+
+describe('the marks of a board answer', () => {
+  const task_marks = {
+    'aa-1': { tags: ['mine'], tag_marks: [{ tag: 'mine', source: 'task' }, { tag: 'web', source: 'initiative' }, { tag: 'claude', source: 'actor' }] },
+    'aa-2': { tags: [], tag_marks: [] },
+  };
+
+  it('are the task_marks by ref, each source kept, and an empty list for a task with no tags', () => {
+    expect(marksOfBoard({ task_marks } as never)).toEqual({
+      'aa-1': [{ tag: 'mine', source: 'task' }, { tag: 'web', source: 'initiative' }, { tag: 'claude', source: 'actor' }],
+      'aa-2': [],
+    });
+  });
+
+  it('are empty for an answer that names no task', () => {
+    expect(marksOfBoard({ task_marks: {} })).toEqual({});
+  });
+
+  it('reach the state with the answer, replace the last answer’s, and need no read of the tasks', async () => {
+    const answers = [{ window: '24h', attention: full, in_flight: [], recent: [], task_marks }, { window: '24h', attention: full, in_flight: [], recent: [], task_marks: { 'aa-2': task_marks['aa-2'] } }];
+    const board = vi.fn(async () => answers.shift()!);
+    const states: AttentionState[] = [];
+    const store = new AttentionStore({ board } as never, (s) => states.push(s));
+    expect(states).toEqual([]);
+    await store.load();
+    expect(Object.keys(states[states.length - 1]!.marks)).toEqual(['aa-1', 'aa-2']);
+    await store.load();
+    expect(states[states.length - 1]!.marks).toEqual({ 'aa-2': [] });
+    expect(board).toHaveBeenCalledTimes(2);
+  });
+
+  it('are kept while a refresh is out (the rows keep their chips) and start empty', async () => {
+    const waits: ((b: unknown) => void)[] = [];
+    const board = () => new Promise((resolve) => waits.push(resolve));
+    const states: AttentionState[] = [];
+    const store = new AttentionStore({ board } as never, (s) => states.push(s));
+    const first = store.load();
+    waits[0]!({ window: '24h', attention: full, in_flight: [], recent: [], task_marks });
+    await first;
+    const second = store.load();
+    expect(states[states.length - 1]).toMatchObject({ loading: true });
+    expect(Object.keys(states[states.length - 1]!.marks)).toEqual(['aa-1', 'aa-2']);
+    waits[1]!({ window: '24h', attention: full, in_flight: [], recent: [], task_marks: {} });
+    await second;
+    expect(states[states.length - 1]!.marks).toEqual({});
   });
 });
 

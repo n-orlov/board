@@ -70,10 +70,10 @@
   import { absoluteTime } from './lib/format';
   import { resolveRoute, ROUTES } from './lib/routes';
   import { currentBrowser } from './lib/session';
-  import { TasksApi, type Resolution } from './lib/tasks';
+  import type { Resolution } from './lib/tasks';
   import TagChips from './TagChips.svelte';
   import type { TagMark } from './lib/chipFilter';
-  import { marksOf, nowTaskRefs, taskOfHref } from './lib/nowTags';
+  import { marksOf, taskOfHref } from './lib/nowTags';
   import type { SortState } from './lib/tableSort';
   import { currentViewEnv, FilterTurns } from './lib/viewState';
 
@@ -85,7 +85,7 @@
   const opened = openAttention(viewEnv, window.location.hash);
   const initial = opened.filter;
   const initialWindow = loadWindow(viewEnv.storage);
-  let view: AttentionState = $state({ attention: undefined, flight: undefined, recent: undefined, filter: initial, window: initialWindow, loading: true, error: undefined });
+  let view: AttentionState = $state({ attention: undefined, flight: undefined, recent: undefined, marks: {}, filter: initial, window: initialWindow, loading: true, error: undefined });
   let known: { slug: string; tags: string[] }[] = $state([]);
   // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
   let looked: { slug: string; tags: string[] }[] | undefined;
@@ -249,28 +249,8 @@
     const timer = setInterval(() => (now = new Date()), 30_000);
     return () => clearInterval(timer);
   });
-  // The tags of every task shown: Now's read carries none, so one read of the tasks by ref gives them, again after every answer.
-  const tasksApi = new TasksApi(browser, () => csrf);
-  let marks: Record<string, TagMark[]> = $state({});
-  $effect(() => {
-    const refs = nowTaskRefs(
-      view.attention,
-      (view.flight ?? []).map((f) => f.task.task),
-      (view.recent ?? []).map((r) => r.task.task),
-      untrack(() => now),
-    );
-    if (refs.length === 0) return;
-    let current = true;
-    void tasksApi.marks(refs).then(
-      (read) => {
-        if (current) marks = read;
-      },
-      () => undefined, // the rows show without chips
-    );
-    return () => {
-      current = false;
-    };
-  });
+  // The tags of every task shown come with the board read (`task_marks`): Now makes no read of the tasks for them.
+  const marks = $derived(view.marks);
   const flightList = $derived(sortByOrder(flightRows(view.flight ?? [], now), order, (r) => r));
   const recentList = $derived(sortByOrder(recentRows(view.recent ?? [], now), order, (r) => r));
   function widgetCount(key: WidgetKey, data: Attention): number {

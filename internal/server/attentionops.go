@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (p problemResponse) VisitGetAttentionResponse(w http.ResponseWriter) error { return p.write(w) }
@@ -151,7 +152,8 @@ func (o attentionOps) GetAttention(ctx context.Context, req GetAttentionRequestO
 func (p problemResponse) VisitGetAttentionNowResponse(w http.ResponseWriter) error { return p.write(w) }
 
 func apiNowTask(t attention.FlightTask) NowTask {
-	return NowTask{Task: t.Ref, Title: t.Title, Initiative: t.Initiative, Status: NowTaskStatus(t.Status), Kind: NowTaskKind(t.Kind)}
+	return NowTask{Task: t.Ref, Title: t.Title, Initiative: t.Initiative, Status: NowTaskStatus(t.Status), Kind: NowTaskKind(t.Kind),
+		Tags: nonNil(t.Tags), TagMarks: apiTagMarks(t.TagMarks)}
 }
 
 func apiFlightLease(l attention.FlightLease) NowFlightLease {
@@ -168,9 +170,17 @@ func apiRecent(r attention.Recent) NowRecent {
 	return NowRecent{Task: apiNowTask(r.Task), LastEvent: NowLastEvent{Type: e.Type, Summary: e.Summary, Actor: apiActor(e.Actor), At: e.At}}
 }
 
+func apiTaskMarks(in map[string]tasks.Tagged) map[string]TaskTagMarks {
+	out := make(map[string]TaskTagMarks, len(in))
+	for ref, t := range in {
+		out[ref] = TaskTagMarks{Tags: nonNil(t.Tags), TagMarks: apiTagMarks(t.TagMarks)}
+	}
+	return out
+}
+
 func apiBoard(b attention.Board) AttentionNow {
 	return AttentionNow{Window: NowWindow(b.Window), Attention: apiAttention(b.Attention),
-		InFlight: *mapped(b.InFlight, apiInFlight), Recent: *mapped(b.Recent, apiRecent)}
+		InFlight: *mapped(b.InFlight, apiInFlight), Recent: *mapped(b.Recent, apiRecent), TaskMarks: apiTaskMarks(b.TaskMarks)}
 }
 
 // nowWindow reads the window parameter: absent means the default, anything but

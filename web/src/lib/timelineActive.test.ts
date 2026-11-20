@@ -5,7 +5,7 @@ import { ACTIVE_CHOICES, ACTIVE_COLUMNS, activeFirst, needsActiveSet, refsOf, wi
 type Task = Timeline['tasks'][number];
 
 function task(ref: string, initiative: string): Task {
-  return { ref, initiative, title: ref, status: 'open', kind: 'work', created_at: '2026-03-01T00:00:00Z', attention: [], deps: [] };
+  return { ref, initiative, title: ref, status: 'open', kind: 'work', created_at: '2026-03-01T00:00:00Z', attention: [], deps: [], tags: [], tag_marks: [] };
 }
 
 function board(tasks: Task[], slugs: string[]): Timeline {

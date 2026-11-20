@@ -10,6 +10,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // ErrNoInitiative is an initiative filter that names nothing.
@@ -66,6 +67,11 @@ type Task struct {
 	PlannedStart, PlannedEnd, ClosedAt       *time.Time
 	CreatedAt                                time.Time
 	Deps                                     []string
+	// Tags are the task's own tags, sorted, never nil; TagMarks are its own, its
+	// initiative's and its derived actor-kind tags with their sources (SPEC 5.5),
+	// never nil.
+	Tags     []string
+	TagMarks []tasks.TagMark
 }
 
 // Lease is a lease that overlaps the window. EndedAt is nil while it is live; for

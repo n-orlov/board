@@ -1817,6 +1817,13 @@ export interface components {
             overdue_watches?: components["schemas"]["AttentionWatch"][];
             conflicts?: components["schemas"]["AttentionConflict"][];
         };
+        /** @description A task's tags, as every task read shape gives them. */
+        TaskTagMarks: {
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
+        };
         /**
          * @description How far back the recently touched tasks of the Now read reach.
          * @enum {string}
@@ -1833,6 +1840,10 @@ export interface components {
             status: "open" | "done" | "closed";
             /** @enum {string} */
             kind: "work" | "watch";
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
         };
         /** @description A live lease nested in an in-flight task. */
         NowFlightLease: {
@@ -1872,6 +1883,10 @@ export interface components {
             attention: components["schemas"]["Attention"];
             in_flight: components["schemas"]["NowInFlight"][];
             recent: components["schemas"]["NowRecent"][];
+            /** @description The tags of every task any part names, keyed by the task's ref: the tasks of the attention items (an ask, a done task, an expired lease, a watch, the tasks of a conflict's holders), those in flight and the recent ones. A task the three parts do not name is not a key, and neither is an item on no task. */
+            task_marks: {
+                [key: string]: components["schemas"]["TaskTagMarks"];
+            };
         };
         /** @description A page of leases. */
         LeaseList: {
@@ -2114,6 +2129,10 @@ export interface components {
             status: "open" | "done" | "closed";
             /** @enum {string} */
             kind: "work" | "watch";
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
             /** Format: date-time */
             planned_start?: string;
             /** Format: date-time */

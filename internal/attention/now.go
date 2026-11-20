@@ -7,6 +7,7 @@ import (
 
 	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // Windows a recently touched task may be inside of, and the one used when none is
@@ -42,6 +43,11 @@ type FlightTask struct {
 	Initiative string
 	Status     string
 	Kind       string
+	// Tags are the task's own tags, sorted, never nil; TagMarks are its own,
+	// its initiative's and its derived actor-kind tags with their sources
+	// (SPEC 5.5), never nil. Both are filled in by Board.
+	Tags     []string
+	TagMarks []tasks.TagMark
 }
 
 // FlightLease is one live lease of an in-flight task.
@@ -81,6 +87,10 @@ type Board struct {
 	Attention Result
 	InFlight  []InFlight
 	Recent    []Recent
+	// TaskMarks is the tags and marks of every task any part of the board names:
+	// the items of the five sections, the tasks in flight and the recent ones,
+	// keyed by the task's ref.
+	TaskMarks map[string]tasks.Tagged
 }
 
 // flightCols are the columns that name a task, in the order scanTask reads them.
@@ -119,8 +129,69 @@ func (s Store) Board(ctx context.Context, q Query, window string) (Board, error)
 	if b.InFlight, err = s.inFlight(ctx, sc, now); err != nil {
 		return Board{}, err
 	}
-	b.Recent, err = s.recent(ctx, sc, now, span)
-	return b, err
+	if b.Recent, err = s.recent(ctx, sc, now, span); err != nil {
+		return Board{}, err
+	}
+	return s.tagged(ctx, b)
+}
+
+// tagged gives the tasks of the board their tags and marks, in the statements of one
+// tasks.Store.TaggedByRef whatever the number of tasks.
+func (s Store) tagged(ctx context.Context, b Board) (Board, error) {
+	byRef, err := tasks.Store{Store: s.Store, Now: s.Now}.TaggedByRef(ctx, boardRefs(b))
+	if err != nil {
+		return Board{}, err
+	}
+	b.TaskMarks = byRef
+	fill := func(t *FlightTask) {
+		got := byRef[t.Ref]
+		t.Tags, t.TagMarks = append([]string{}, got.Tags...), append([]tasks.TagMark{}, got.TagMarks...)
+	}
+	for i := range b.InFlight {
+		fill(&b.InFlight[i].Task)
+	}
+	for i := range b.Recent {
+		fill(&b.Recent[i].Task)
+	}
+	return b, nil
+}
+
+// boardRefs is the distinct refs of every task the board names, empty refs (an item on
+// no task) left out.
+func boardRefs(b Board) []string {
+	a := b.Attention
+	var all []string
+	all = append(all, pluck(a.OpenAsks, func(k OpenAsk) string { return k.Task })...)
+	all = append(all, pluck(a.DoneNotClosed, func(d DoneTask) string { return d.Task })...)
+	all = append(all, pluck(a.ExpiredLeases, func(l ExpiredLease) string { return l.Task })...)
+	all = append(all, pluck(a.OverdueWatches, func(w OverdueWatch) string { return w.Task })...)
+	for _, c := range a.Conflicts {
+		all = append(all, c.Tasks...)
+	}
+	all = append(all, pluck(b.InFlight, func(f InFlight) string { return f.Task.Ref })...)
+	all = append(all, pluck(b.Recent, func(r Recent) string { return r.Task.Ref })...)
+	return distinct(all)
+}
+
+func pluck[T any](items []T, ref func(T) string) []string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = ref(it)
+	}
+	return out
+}
+
+// distinct is refs in first-seen order, each once, without the empty ones.
+func distinct(refs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, ref := range refs {
+		if ref != "" && !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 func liveCond(now time.Time) (string, []any) {

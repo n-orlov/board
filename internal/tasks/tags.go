@@ -68,6 +68,74 @@ func (s Store) loadTags(ctx context.Context, q tagQuerier, list []Task) error {
 	return nil
 }
 
+// Marks is the marks of a task's tags from its three sources: its own tags, its
+// initiative's and the handles of the holders of every lease it has had (reduced to
+// their actor kinds, SPEC 5.5). Order and sources are those of a task read.
+func Marks(own, initiative, holders []string) []TagMark {
+	kinds := make([]string, 0, len(holders))
+	for _, h := range holders {
+		if k := domain.ActorKind(h); k != "" {
+			kinds = append(kinds, k)
+		}
+	}
+	return tagMarks(own, initiative, orderedKinds(kinds))
+}
+
+// Tagged is what a task shows of its tags: its own, sorted, and every mark.
+type Tagged struct {
+	Tags     []string
+	TagMarks []TagMark
+}
+
+// TaggedByRef reads the tags and marks of the tasks the refs name, keyed by the
+// canonical ref. A ref that names no task is left out. It makes four statements
+// whatever the number of refs, and none for no refs.
+func (s Store) TaggedByRef(ctx context.Context, refs []string) (map[string]Tagged, error) {
+	out := map[string]Tagged{}
+	if len(refs) == 0 {
+		return out, nil
+	}
+	q := s.Store.ReaderFor(ctx)
+	list, refOf, err := s.tasksByRef(ctx, q, refs)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadTags(ctx, q, list); err != nil {
+		return nil, err
+	}
+	for _, t := range list {
+		out[refOf[t.ID]] = Tagged{Tags: t.Tags, TagMarks: t.TagMarks}
+	}
+	return out, nil
+}
+
+// tasksByRef reads the ids of the tasks the refs name (one statement, a stub Task
+// for each) and the canonical ref of each id.
+func (s Store) tasksByRef(ctx context.Context, q tagQuerier, refs []string) ([]Task, map[string]string, error) {
+	rows, err := q.QueryContext(ctx, s.Store.Dialect().Rebind(
+		`SELECT t.id, i.slug, t.seq FROM tasks t JOIN initiatives i ON i.id = t.initiative_id
+		 WHERE (i.slug || '-' || CAST(t.seq AS TEXT)) IN (`+marks(len(refs))+`)`), anys(refs)...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read tasks by ref: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var list []Task
+	refOf := map[string]string{}
+	for rows.Next() {
+		var id, slug string
+		var seq int
+		if err := rows.Scan(&id, &slug, &seq); err != nil {
+			return nil, nil, fmt.Errorf("read tasks by ref: %w", err)
+		}
+		list = append(list, Task{ID: id})
+		refOf[id] = domain.FormatTaskRef(slug, seq)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("read tasks by ref: %w", err)
+	}
+	return list, refOf, nil
+}
+
 // tagMarks is the task's own, initiative and actor-kind tags as marks, in that
 // order of source, each source's tags sorted. A tag that comes from two sources
 // is marked once for each.

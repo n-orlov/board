@@ -340,3 +340,20 @@ Feature: Timeline over HTTP
     Then the timeline tasks have ref "aa-1,aa-2,aa-3,aa-4,bb-1"
     And the timeline leases have ref "L2,L3,L4"
     And the timeline markers are "aa-1:milestone,aa-2:ask,bb-1:check,aa-4:done"
+
+  Scenario: each task carries its own tags and its own, initiative and actor-kind marks
+    When I add the tag "mine" to the task "aa-3" as actor "claude@laptop"
+    And I start a lease with body "{'task':'aa-3','intent':'tagged'}" as actor "ralph:r1"
+    And I request the timeline for the window from -10 to 5 days with "" as actor "operator@laptop"
+    Then the response status is 200
+    And the response path "tasks.2.ref" is "aa-3"
+    And the response path "tasks.2.tags" is "mine"
+    And the response path "tasks.2.tag_marks" has 4 items
+    And the response path "tasks.2.tag_marks.0.tag" is "mine"
+    And the response path "tasks.2.tag_marks.0.source" is "task"
+    And the response path "tasks.2.tag_marks.1.tag" is "team"
+    And the response path "tasks.2.tag_marks.1.source" is "initiative"
+    And the response path "tasks.2.tag_marks.3.tag" is "ralph"
+    And the response path "tasks.2.tag_marks.3.source" is "actor"
+    And the response path "tasks.3.tags" has 0 items
+    And the response path "tasks.3.tag_marks" has 2 items

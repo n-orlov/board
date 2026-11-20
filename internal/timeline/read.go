@@ -9,6 +9,7 @@ import (
 
 	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // each runs query with args on the reader and calls scan on every row.
@@ -52,7 +53,7 @@ func (s Store) tasks(ctx context.Context, f *filter) ([]Task, error) {
 			return err
 		}
 		t.Ref, t.PlannedStart, t.PlannedEnd, t.CreatedAt, t.ClosedAt = domain.FormatTaskRef(t.Initiative, seq), instantOf(ps), instantOf(pe), store.DecodeTime(created.Int64), instantOf(closed)
-		t.Deps = []string{}
+		t.Deps, t.Tags, t.TagMarks = []string{}, []string{}, []tasks.TagMark{}
 		byID[t.ID] = len(out)
 		out = append(out, t)
 		return nil
@@ -60,7 +61,44 @@ func (s Store) tasks(ctx context.Context, f *filter) ([]Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return out, s.deps(ctx, f, out, byID)
+	if err := s.deps(ctx, f, out, byID); err != nil {
+		return nil, err
+	}
+	return out, s.taskTags(ctx, f, out, byID)
+}
+
+// taskTags fills in the Tags and TagMarks of tasks from the three sources a mark has
+// (SPEC 5.5), one statement each over the same filter, whatever the number of tasks.
+func (s Store) taskTags(ctx context.Context, f *filter, list []Task, byID map[string]int) error {
+	if len(list) == 0 {
+		return nil
+	}
+	from := ` FROM tasks t JOIN initiatives i ON i.id = t.initiative_id`
+	sources := []struct{ what, query string }{
+		{"task tags", `SELECT t.id, tt.tag` + from + ` JOIN task_tags tt ON tt.task_id = t.id` + f.where() + ` ORDER BY t.id, tt.tag`},
+		{"initiative tags", `SELECT t.id, it.tag` + from + ` JOIN initiative_tags it ON it.initiative_id = i.id` + f.where() + ` ORDER BY t.id, it.tag`},
+		{"lease holders", `SELECT DISTINCT t.id, ha.handle` + from + ` JOIN leases hl ON hl.task_id = t.id JOIN actors ha ON ha.id = hl.actor_id` + f.where()},
+	}
+	got := make([]map[string][]string, len(sources))
+	for n, src := range sources {
+		got[n] = map[string][]string{}
+		err := s.each(ctx, src.what, src.query, f.args, func(r *sql.Rows) error {
+			var id, v string
+			if err := r.Scan(&id, &v); err != nil {
+				return err
+			}
+			got[n][id] = append(got[n][id], v)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	for id, at := range byID {
+		list[at].Tags = append([]string{}, got[0][id]...)
+		list[at].TagMarks = tasks.Marks(got[0][id], got[1][id], got[2][id])
+	}
+	return nil
 }
 
 // deps fills in the Deps of tasks, in the order of the blocking tasks'

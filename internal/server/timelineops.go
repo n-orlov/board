@@ -125,6 +125,7 @@ func apiTimelineTask(t timeline.Task) TimelineTask {
 	return TimelineTask{
 		Ref: t.Ref, Initiative: t.Initiative, Title: t.Title, Status: TimelineTaskStatus(t.Status), Kind: TimelineTaskKind(t.Kind),
 		PlannedStart: t.PlannedStart, PlannedEnd: t.PlannedEnd, CreatedAt: t.CreatedAt, ClosedAt: t.ClosedAt, Deps: t.Deps,
+		Tags: nonNil(t.Tags), TagMarks: apiTagMarks(t.TagMarks),
 	}
 }
 

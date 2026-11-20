@@ -1369,6 +1369,9 @@ type AttentionNow struct {
 	InFlight  []NowInFlight `json:"in_flight"`
 	Recent    []NowRecent   `json:"recent"`
 
+	// TaskMarks The tags of every task any part names, keyed by the task's ref: the tasks of the attention items (an ask, a done task, an expired lease, a watch, the tasks of a conflict's holders), those in flight and the recent ones. A task the three parts do not name is not a key, and neither is an item on no task.
+	TaskMarks map[string]TaskTagMarks `json:"task_marks"`
+
 	// Window How far back the recently touched tasks of the Now read reach.
 	Window NowWindow `json:"window"`
 }
@@ -2126,6 +2129,12 @@ type NowTask struct {
 	Kind       NowTaskKind   `json:"kind"`
 	Status     NowTaskStatus `json:"status"`
 
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags []string `json:"tags"`
+
 	// Task The task's ref, such as `aa-1`.
 	Task  string `json:"task"`
 	Title string `json:"title"`
@@ -2656,6 +2665,15 @@ type TaskStrandedLease struct {
 	RenewedAt time.Time `json:"renewed_at"`
 }
 
+// TaskTagMarks A task's tags, as every task read shape gives them.
+type TaskTagMarks struct {
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags []string `json:"tags"`
+}
+
 // Timeline What falls in a window of time.
 type Timeline struct {
 	From        time.Time            `json:"from"`
@@ -2721,7 +2739,13 @@ type TimelineTask struct {
 	PlannedStart *time.Time         `json:"planned_start,omitempty"`
 	Ref          string             `json:"ref"`
 	Status       TimelineTaskStatus `json:"status"`
-	Title        string             `json:"title"`
+
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags  []string `json:"tags"`
+	Title string   `json:"title"`
 }
 
 // TimelineTaskKind defines model for TimelineTask.Kind.

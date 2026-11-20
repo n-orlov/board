@@ -156,3 +156,26 @@ Feature: GET /api/v1/attention/now, the data behind the Now view
     And I check in with "" as actor "claude@laptop"
     Then the response status is 200
     And the response members are exactly "actor,my_leases,others_leases,conflicts,my_asks,notes,notes_more,attention"
+
+  Scenario: every task the board names carries its own, initiative and actor-kind tags, and task_marks gives them by ref
+    When I add the tag "mine" to the task "aa-1" as actor "claude@laptop"
+    And I start a lease with body "{'task':'aa-1','intent':'tagged'}" as actor "claude:w1"
+    And I start a lease with body "{'task':'bb-1','intent':'plain'}" as actor "codex:c1"
+    And I end the lease "L2" without a body as actor "codex:c1"
+    And I request the now board with "" as actor "operator@laptop"
+    Then the response status is 200
+    And the response path "in_flight.0.task.tags" is "mine"
+    And the response path "in_flight.0.task.tag_marks" has 3 items
+    And the response path "in_flight.0.task.tag_marks.0.tag" is "mine"
+    And the response path "in_flight.0.task.tag_marks.0.source" is "task"
+    And the response path "in_flight.0.task.tag_marks.1.tag" is "web"
+    And the response path "in_flight.0.task.tag_marks.1.source" is "initiative"
+    And the response path "in_flight.0.task.tag_marks.2.tag" is "claude"
+    And the response path "in_flight.0.task.tag_marks.2.source" is "actor"
+    And the response path "task_marks.aa-1.tag_marks" has 3 items
+    And the response path "task_marks.aa-1.tags" is "mine"
+    And the response path "recent.0.task.tags" has 0 items
+    And the response path "recent.0.task.tag_marks" has 1 items
+    And the response path "recent.0.task.tag_marks.0.source" is "actor"
+    And the response path "recent.0.task.tag_marks.0.tag" is "codex"
+    And the response path "task_marks.bb-1.tags" has 0 items

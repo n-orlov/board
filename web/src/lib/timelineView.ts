@@ -5,9 +5,7 @@
 import { errorText, Fetches } from './fetches';
 import { RESTORE_WAIT_MS } from './historyEntry';
 import { ThreadApi } from './threads';
-import type { TagMark } from './chipFilter';
 import { labelNode, type LabelElement, type LabelGroup } from './timelineLabel';
-import { readMarks, type MarksPage } from './taskTags';
 import { apiQuery, buildTimeline, filterFromQuery, filterToQuery, taskOfGroup, type Timeline, type TimelineAnswer, type TimelineFilter, type TimelineItem, type TimelineModel } from './timeline';
 import { drawArrows, type ArrowSurface } from './timelineArrows';
 import { activeFirst, needsActiveSet, refsOf } from './timelineActive';
@@ -66,20 +64,7 @@ export class TimelineApi extends ThreadApi {
    * the active set the same way and puts those tasks first, so the server alone decides what active means.
    */
   async read(filter: TimelineFilter, window: TimeWindow, active: NowWindow = DEFAULT_WINDOW): Promise<TimelineAnswer> {
-    const answer = await this.readRows(filter, window, active);
-    return { ...answer, marks: await this.marksOf(answer.tasks.map((t) => t.ref)) };
-  }
-
-  /** The tag marks of the tasks the answer holds, by ref (the timeline carries none); a failed read leaves the rows without chips. */
-  private async marksOf(refs: readonly string[]): Promise<Record<string, TagMark[]>> {
-    try {
-      return await readMarks(async (query) => {
-        const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Reading the tags', { headers: { Accept: 'application/json' } });
-        return (await response.json()) as MarksPage;
-      }, refs);
-    } catch {
-      return {};
-    }
+    return this.readRows(filter, window, active);
   }
 
   private async readRows(filter: TimelineFilter, window: TimeWindow, active: NowWindow): Promise<TimelineAnswer> {

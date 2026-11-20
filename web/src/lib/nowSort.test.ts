@@ -41,7 +41,7 @@ const attention: Attention = {
   overdue_watches: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `w-${h}`, title: 'x', owner: who(h), next_check_at: T[h] })),
   done_not_closed: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `d-${h}`, title: 'x', done_by: who(h), done_at: T[h] })),
 };
-const task = (ref: string) => ({ task: ref, title: 'x', initiative: 'aa', status: 'open' as const, kind: 'work' as const });
+const task = (ref: string) => ({ task: ref, title: 'x', initiative: 'aa', status: 'open' as const, kind: 'work' as const, tags: [], tag_marks: [] });
 const inFlight: InFlight[] = (['zed', 'amy', 'bob'] as const).map((h) => ({
   task: task(`f-${h}`),
   leases: [{ lease: `F-${h}`, holder: who(h), intent: 'i', started_at: T[h], renewed_at: T[h], expires_at: '2026-01-01T13:00:00Z' }],

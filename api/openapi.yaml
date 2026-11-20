@@ -4015,6 +4015,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AttentionConflict"
+    TaskTagMarks:
+      type: object
+      description: A task's tags, as every task read shape gives them.
+      required: [tags, tag_marks]
+      properties:
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     NowWindow:
       type: string
       description: How far back the recently touched tasks of the Now read reach.
@@ -4022,7 +4039,7 @@ components:
     NowTask:
       type: object
       description: The task a Now item is about.
-      required: [task, title, initiative, status, kind]
+      required: [task, title, initiative, status, kind, tags, tag_marks]
       properties:
         task:
           type: string
@@ -4038,6 +4055,18 @@ components:
         kind:
           type: string
           enum: [work, watch]
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     NowFlightLease:
       type: object
       description: A live lease nested in an in-flight task.
@@ -4097,7 +4126,7 @@ components:
     AttentionNow:
       type: object
       description: The three parts of the Now view, all narrowed by the same filters.
-      required: [window, attention, in_flight, recent]
+      required: [window, attention, in_flight, recent, task_marks]
       properties:
         window:
           $ref: "#/components/schemas/NowWindow"
@@ -4111,6 +4140,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NowRecent"
+        task_marks:
+          type: object
+          description: >-
+            The tags of every task any part names, keyed by the task's ref: the tasks of the attention items (an ask, a
+            done task, an expired lease, a watch, the tasks of a conflict's holders), those in flight and the recent
+            ones. A task the three parts do not name is not a key, and neither is an item on no task.
+          additionalProperties:
+            $ref: "#/components/schemas/TaskTagMarks"
     LeaseList:
       type: object
       description: A page of leases.
@@ -4473,7 +4510,7 @@ components:
     TimelineTask:
       type: object
       description: A task of the window.
-      required: [ref, initiative, title, status, kind, created_at, attention, deps]
+      required: [ref, initiative, title, status, kind, created_at, attention, deps, tags, tag_marks]
       properties:
         ref:
           type: string
@@ -4488,6 +4525,18 @@ components:
         kind:
           type: string
           enum: [work, watch]
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
         planned_start:
           type: string
           format: date-time

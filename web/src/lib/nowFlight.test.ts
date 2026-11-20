@@ -56,7 +56,7 @@ describe('the window preference', () => {
   });
 });
 
-const task = (ref: string, title = `Title ${ref}`) => ({ task: ref, title, initiative: 'aa', status: 'open' as const, kind: 'work' as const });
+const task = (ref: string, title = `Title ${ref}`) => ({ task: ref, title, initiative: 'aa', status: 'open' as const, kind: 'work' as const, tags: [], tag_marks: [] });
 
 describe('flightRows', () => {
   const items: InFlight[] = [

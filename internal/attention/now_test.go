@@ -8,6 +8,7 @@ import (
 
 	"github.com/n-orlov/village-hall/internal/asks"
 	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 func (e env) board(t *testing.T, q Query, window string) Board {
@@ -220,5 +221,84 @@ func TestABoardReadRefusesABadTagAndAnUnknownInitiative(t *testing.T) {
 	}
 	if _, err := e.A.Board(ctx, Query{Initiatives: []string{"zz"}}, "24h"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown initiative: %v", err)
+	}
+}
+
+func tagNames(marks []tasks.TagMark) []string {
+	var out []string
+	for _, m := range marks {
+		out = append(out, m.Source+":"+m.Tag)
+	}
+	return out
+}
+
+func TestEveryTaskOfTheBoardCarriesItsOwnInitiativeAndActorTags(t *testing.T) {
+	e := quiet(t)
+	if _, err := e.Tasks.AddTag(ctx, op, "key:x", "aa-1", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	e.lease(t, audit.Actor{Handle: "claude:w1"}, "aa-1")
+	ended := e.lease(t, audit.Actor{Handle: "ralph:r1"}, "aa-2")
+	if _, err := e.Leases.End(ctx, me, "key:x", ended.Ref, "x"); err != nil {
+		t.Fatal(err)
+	}
+	b := e.board(t, Query{}, "24h")
+	flight, recent := b.InFlight[0].Task, b.Recent[0].Task
+	if flight.Ref != "aa-1" || recent.Ref != "aa-2" {
+		t.Fatalf("flight %s recent %s, want aa-1 and aa-2", flight.Ref, recent.Ref)
+	}
+	if !slices.Equal(flight.Tags, []string{"mine"}) || !slices.Equal(tagNames(flight.TagMarks), []string{"task:mine", "initiative:ops", "actor:claude"}) {
+		t.Errorf("in flight task: tags %v marks %v", flight.Tags, tagNames(flight.TagMarks))
+	}
+	if len(recent.Tags) != 0 || recent.Tags == nil || !slices.Equal(tagNames(recent.TagMarks), []string{"initiative:ops", "actor:ralph"}) {
+		t.Errorf("recent task: tags %v marks %v, want no own tags but an initiative and an actor mark", recent.Tags, tagNames(recent.TagMarks))
+	}
+	if got := b.TaskMarks["aa-1"]; !slices.Equal(got.Tags, flight.Tags) || !slices.Equal(tagNames(got.TagMarks), tagNames(flight.TagMarks)) {
+		t.Errorf("task marks of aa-1 = %+v, want the in flight task's", got)
+	}
+}
+
+func TestTheTaskMarksNameEveryTaskAnAttentionItemIsOnAndNoOther(t *testing.T) {
+	e := quiet(t)
+	if _, err := e.Tasks.AddTag(ctx, op, "key:x", "bb-1", "own-b"); err != nil {
+		t.Fatal(err)
+	}
+	e.ask(t, me, asks.New{Task: "aa-2", Question: "which?"})
+	e.ask(t, me, asks.New{Initiative: "bb", Question: "no task here"})
+	e.lease(t, me, "aa-1", "repo:x")
+	e.lease(t, bob, "bb-1", "repo:x")
+	b := e.board(t, Query{}, "24h")
+	if b.Attention.Counts.Conflicts != 1 || b.Attention.Counts.OpenAsks != 2 {
+		t.Fatalf("counts = %+v, want a conflict and two asks", b.Attention.Counts)
+	}
+	var keys []string
+	for ref := range b.TaskMarks {
+		keys = append(keys, ref)
+	}
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{"aa-1", "aa-2", "bb-1"}) {
+		t.Fatalf("task marks name %v, want aa-1 and aa-2 (ask, flight) and bb-1 (conflict) and no empty ref", keys)
+	}
+	if got := tagNames(b.TaskMarks["bb-1"].TagMarks); !slices.Equal(got, []string{"task:own-b"}) {
+		t.Errorf("bb-1 marks = %v", got)
+	}
+	if got := b.TaskMarks["aa-2"]; got.Tags == nil || len(got.Tags) != 0 || !slices.Equal(tagNames(got.TagMarks), []string{"initiative:ops"}) {
+		t.Errorf("aa-2 = %+v, want no own tags (an empty list) and the initiative's", got)
+	}
+}
+
+func TestAnExpiredLeaseAndADoneTaskKeepTheirTagsOnTheBoard(t *testing.T) {
+	e := quiet(t)
+	if _, err := e.Tasks.AddTag(ctx, op, "key:x", "aa-1", "stranded-own"); err != nil {
+		t.Fatal(err)
+	}
+	e.lease(t, audit.Actor{Handle: "pi:p1"}, "aa-1")
+	e.tick(5 * time.Minute)
+	b := e.board(t, Query{}, "8h")
+	if b.Attention.Counts.ExpiredLeases != 1 {
+		t.Fatalf("counts = %+v, want the expired lease", b.Attention.Counts)
+	}
+	if got := tagNames(b.TaskMarks["aa-1"].TagMarks); !slices.Equal(got, []string{"task:stranded-own", "initiative:ops", "actor:pi"}) {
+		t.Errorf("an expired lease's task has marks %v", got)
 	}
 }

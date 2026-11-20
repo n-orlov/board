@@ -79,6 +79,8 @@ function answer(over: Partial<Timeline> = {}): Timeline {
         created_at: '2026-02-28T09:00:00Z',
         attention: [],
         deps: [],
+        tags: [],
+        tag_marks: [],
       },
     ],
     leases: [],
@@ -156,29 +158,17 @@ describe('TimelineApi', () => {
     expect(rows.map((g) => g.ref)).toEqual(['T3', 'T1', 'T2']);
   });
 
-  it('reads the tag marks of the tasks it holds in one GET /tasks by ref and hands them to the rows', async () => {
+  it('reads the tag marks of its tasks from the timeline answer alone: no GET /tasks, whatever the number of tasks', async () => {
     const base = answer().tasks[0]!;
-    const tasks = ['T1', 'T2'].map((ref) => ({ ...base, ref }));
-    const fetchFn = vi.fn(async (input: string, _init?: RequestInit) =>
-      json(input.includes('/api/v1/tasks?') ? { items: [{ ref: 'T1', tag_marks: [{ tag: 'urgent', source: 'task' }] }, { ref: 'T2', tag_marks: [] }] } : answer({ tasks })),
-    );
+    const tasks = Array.from({ length: 250 }, (_, i) => ({ ...base, ref: `T${i + 1}`, tag_marks: i === 0 ? [{ tag: 'urgent', source: 'task' as const }] : [] }));
+    const fetchFn = vi.fn(async (_input: string, _init?: RequestInit) => json(answer({ tasks })));
     const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/board/', setHash: vi.fn() };
     const got = await new TimelineApi(browser, () => 't').read(DEFAULT_TIMELINE_FILTER, initialWindow(NOW));
-    const marksRead = fetchFn.mock.calls.filter(([url]) => url.includes('/api/v1/tasks?'));
-    expect(marksRead).toHaveLength(1);
-    expect(marksRead[0]![0]).toBe('/board/api/v1/tasks?status=all&limit=100&ref=T1&ref=T2');
-    expect(got.marks).toEqual({ T1: [{ tag: 'urgent', source: 'task' }], T2: [] });
+    expect(fetchFn.mock.calls.filter(([url]) => url.includes('/api/v1/tasks'))).toHaveLength(0);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
     const labels = buildTimeline(got, NOW).groups.filter((g) => g.ref === 'T1' || g.ref === 'T2');
     expect(labels[0]!.tags).toEqual([{ tag: 'urgent', sources: ['task'] }]);
     expect(labels[1]!.tags).toEqual([]);
-  });
-
-  it('draws the rows without chips when the tag read fails, and still answers', async () => {
-    const fetchFn = vi.fn(async (input: string, _init?: RequestInit) => (input.includes('/api/v1/tasks?') ? new Response('', { status: 500 }) : json(answer())));
-    const browser: Browser = { fetch: fetchFn, assign: vi.fn(), pathname: '/', setHash: vi.fn() };
-    const got = await new TimelineApi(browser, () => 't').read(DEFAULT_TIMELINE_FILTER, initialWindow(NOW));
-    expect(got.tasks.map((t) => t.ref)).toEqual(['T1']);
-    expect(got.marks).toEqual({});
   });
 
   it('turns a refusal into its problem text', async () => {
