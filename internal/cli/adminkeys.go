@@ -169,8 +169,10 @@ func withKeys(env Env, stderr io.Writer, f keysAction) int {
 
 // makeKey creates the key. An --owner that names no operator is refused and
 // changes nothing. Without --owner the owner is the operator VH_OPERATOR_HANDLE
-// names (default "operator"); when no such operator exists yet (a database
-// bootstrapped before anyone signed in) the key has no owner.
+// names (default "operator"); when the board has no operator at all yet (a
+// database bootstrapped before anyone signed in) the key has no owner, but once
+// any operator exists a default that is not one is refused, never an ownerless
+// key.
 func makeKey(ctx context.Context, k auth.Keys, o createOpts) (string, auth.Key, error) {
 	if o.owner != "" {
 		return k.CreateOwned(ctx, o.name, adminCreatedBy, o.owner, o.ttl)
@@ -179,11 +181,7 @@ func makeKey(ctx context.Context, k auth.Keys, o createOpts) (string, auth.Key, 
 	if owner == "" {
 		owner = DefaultOperatorHandle
 	}
-	plain, row, err := k.CreateOwned(ctx, o.name, adminCreatedBy, owner, o.ttl)
-	if errors.Is(err, auth.ErrOwnerNotOperator) {
-		return k.Create(ctx, o.name, adminCreatedBy, o.ttl)
-	}
-	return plain, row, err
+	return k.CreateDefaultOwned(ctx, o.name, adminCreatedBy, owner, o.ttl)
 }
 
 func createKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, o createOpts) int {
@@ -191,8 +189,7 @@ func createKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, o cre
 	plain, row, err := makeKey(ctx, k, o)
 	switch {
 	case errors.Is(err, auth.ErrOwnerNotOperator):
-		_, _ = fmt.Fprintf(stderr, "vh: --owner %q is not an operator (an operator exists once its browser session has signed in)\n", o.owner)
-		return ExitUsage
+		return ownerRefused(stderr, o)
 	case errors.Is(err, auth.ErrInvalidName):
 		return keysArgError(stderr, err)
 	case errors.Is(err, auth.ErrKeyExists):
@@ -251,4 +248,19 @@ func revokeKey(ctx context.Context, k auth.Keys, stdout, stderr io.Writer, name 
 		_, _ = fmt.Fprintf(stdout, "ok key %s revoked\n", name)
 	}
 	return ExitOK
+}
+
+// ownerRefused prints the one stderr line for an owner that is no operator: the
+// --owner given, or the VH_OPERATOR_HANDLE default when none was.
+func ownerRefused(stderr io.Writer, o createOpts) int {
+	if o.owner != "" {
+		_, _ = fmt.Fprintf(stderr, "vh: --owner %q is not an operator (an operator exists once its browser session has signed in)\n", o.owner)
+		return ExitUsage
+	}
+	owner := o.defaultOwner
+	if owner == "" {
+		owner = DefaultOperatorHandle
+	}
+	_, _ = fmt.Fprintf(stderr, "vh: the default owner %q (VH_OPERATOR_HANDLE) is not an operator: name one with --owner or set VH_OPERATOR_HANDLE\n", owner)
+	return ExitUsage
 }

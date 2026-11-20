@@ -67,10 +67,10 @@ Feature: Key ownership and origin
   Scenario: a write through a key with no owner clears the agent's origin and keeps the earlier event's
     Given a new database for the board commands
     When I run "vh admin migrate"
-    And the operators "alice-op" exist
-    And I create the admin key "alice-key" owned by "alice-op"
     And I create the admin key "loose-key" with no owner
     And the api_keys row "loose-key" has no owner
+    And the operators "alice-op" exist
+    And I create the admin key "alice-key" owned by "alice-op"
     And the board server is running on a free port
     And the key "alice-key" as actor "claude@laptop" creates the initiative "by-alice"
     And the key "alice-key" reads the actor "claude@laptop" with origin "alice-op"
@@ -102,6 +102,22 @@ Feature: Key ownership and origin
     When I run "vh admin keys create default"
     Then the exit code is 0
     And the api_keys row "default" has owner "operator"
+
+  Scenario Outline: a default owner that is no operator is refused on a board that has one, and nothing is written
+    Given a new database for the board commands
+    When I run "vh admin migrate"
+    And the operators "boss" exist
+    And the agent "worker" exists
+    And I run "vh admin keys create refused" with BOARD_OPERATOR_HANDLE=<handle>
+    Then the exit code is 2
+    And stdout is empty
+    And stderr is exactly one line containing "--owner"
+    And the api_keys table holds 0 rows
+
+    Examples:
+      | handle |
+      | worker |
+      | ghost  |
 
   Scenario Outline: --owner naming no operator is refused and changes nothing
     Given a new database for the board commands

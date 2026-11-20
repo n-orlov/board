@@ -144,6 +144,50 @@ func (k Keys) CreateOwned(ctx context.Context, name, createdBy, owner string, tt
 	return plain, row, nil
 }
 
+// CreateDefaultOwned is CreateOwned for the default owner of a key made without
+// --owner. When owner names no operator it makes the key with no owner only if
+// the board has no operator at all (a database bootstrapped before anyone
+// signed in); once any operator exists, an owner that is not one is
+// ErrOwnerNotOperator and nothing is written. The check and the insert share
+// one transaction.
+func (k Keys) CreateDefaultOwned(ctx context.Context, name, createdBy, owner string, ttl time.Duration) (string, Key, error) {
+	plain, row, err := k.newRow(name, createdBy, ttl)
+	if err != nil {
+		return "", Key{}, err
+	}
+	err = k.inTx(ctx, func(tx *sql.Tx) error {
+		var id any
+		found, err := audit.OperatorID(ctx, tx, k.Store.Dialect(), owner)
+		if err != nil {
+			return fmt.Errorf("create key: %w", err)
+		}
+		if found != "" {
+			id, row.Owner = found, owner
+		} else if err := k.requireNoOperator(ctx, tx, owner); err != nil {
+			return err
+		}
+		return k.insert(ctx, tx, row, HashKey(plain), id)
+	})
+	if err != nil {
+		return "", Key{}, err
+	}
+	return plain, row, nil
+}
+
+// requireNoOperator is nil when the board has no operator actor, else
+// ErrOwnerNotOperator naming owner.
+func (k Keys) requireNoOperator(ctx context.Context, tx *sql.Tx, owner string) error {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM actors WHERE kind = 'operator'`).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("create key: %w", err)
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: %s", ErrOwnerNotOperator, owner)
+	}
+	return nil
+}
+
 // CreateAs is Create for a request: created_by is who's principal, and the
 // creation is appended to the events with that principal and who's actor, in
 // the same transaction as the row. The key is owned by the operator behind the

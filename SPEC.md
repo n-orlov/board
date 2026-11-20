@@ -232,9 +232,11 @@ Generic OpenID Connect; the app is provider-neutral (any issuer with discovery).
   - a key made by `vh admin keys create` is owned by the operator `--owner <handle>` names, or, with no
     `--owner`, by the operator actor `VH_OPERATOR_HANDLE` names (default `operator`, §13). An `--owner`
     that is not the handle of an existing operator actor row (unknown, or the handle of an agent) is
-    refused and nothing is written (§8.3). When no `--owner` is given and the default handle has no
-    operator row yet (a database bootstrapped before anyone signed in), the key is made with a null owner
-    rather than refused, so the bootstrap still works; its origin stays null.
+    refused and nothing is written (§8.3). When no `--owner` is given and the board has no operator row at
+    all yet (a database bootstrapped before anyone signed in), the key is made with a null owner rather
+    than refused, so the bootstrap still works; its origin stays null. Once any operator exists, a default
+    handle that is not one (unknown, or the handle of an agent) is refused like a bad `--owner` and
+    nothing is written: an ownerless key is never made for it.
   - The migration (00013) gave every key that existed the operator row as its owner, and leaves the owner
     null on a database with no operator row. Nothing reads the owner to allow or refuse a request.
 - A revoked or expired key gets 401 (`key revoked` / `key expired` in the problem detail); a key
@@ -1926,8 +1928,9 @@ refuses a database that is not migrated (one stderr line ending `→ vh admin mi
   <YYYY-MM-DD> brd_…` with `--expires`. The key is printed this once and never stored. `--expires` takes a
   positive count of days (`90d`) or hours (`12h`), at most 36500 days in either unit (`36500d`, `876000h`), and the flag may come before or
   after the name; without it the key never expires. `created_by` is `admin-cli`. `--owner` names the operator that
-  owns the key (§3.3); without it the owner is the operator `VH_OPERATOR_HANDLE` names, and a database that has no such
-  operator row yet gets an ownerless key. An `--owner` that is no existing operator exits 2 with one `vh: …` stderr line
+  owns the key (§3.3); without it the owner is the operator `VH_OPERATOR_HANDLE` names, and a database that has no operator
+  row at all yet gets an ownerless key. An `--owner` that is no existing operator, or, with no `--owner`, a
+  default handle that is no operator on a board that has one, exits 2 with one `vh: …` stderr line
   naming `--owner`, and stores nothing. A name that already exists
   exits 1 with the single stderr line `vh: key "<name>" already exists → vh admin keys list`, and
   stores nothing.

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 // Origin and owner in the UI over the whole set (PRD R13, SPEC 11). origin.spec.ts follows one seeded example through the
@@ -31,19 +32,27 @@ async function list<T>(page: Page, path: string): Promise<T[]> {
   return ((await response.json()) as { items: T[] }).items;
 }
 
-// A key with no owner, made the way global-setup.ts makes the run's key, with `vh admin keys create`: its default owner is
-// the operator VH_OPERATOR_HANDLE names, and a handle no operator holds leaves the key without one.
-function mintOwnerless(name: string): string {
+// A key with no owner, the state a key made before any operator existed is left in (SPEC 3.3). `vh admin keys create` no
+// longer makes one on a board that has an operator (a default owner that is no operator is refused), so the key is made
+// for `operator` and its owner column is then cleared in the run's own store, as the migration leaves a pre-operator key.
+function mintOwnerless(name: string, operator: string): string {
   const work = process.env.E2E_WORK;
   if (!work) throw new Error('E2E_WORK is not set (playwright.config.ts sets it)');
   const env: NodeJS.ProcessEnv = {};
   for (const [variable, value] of Object.entries(process.env)) {
     if (!variable.startsWith('BOARD_') && !variable.startsWith('VH_')) env[variable] = value;
   }
-  env.BOARD_DB_URL = `sqlite://${join(work, 'board.db')}`;
-  env.VH_OPERATOR_HANDLE = `${name}-nobody`;
-  const key = execFileSync(join(work, 'vh'), ['admin', 'keys', 'create', name], { env, encoding: 'utf8' }).trim().split(/\s+/).pop() ?? '';
+  const dbPath = join(work, 'board.db');
+  env.BOARD_DB_URL = `sqlite://${dbPath}`;
+  const key = execFileSync(join(work, 'vh'), ['admin', 'keys', 'create', name, '--owner', operator], { env, encoding: 'utf8' }).trim().split(/\s+/).pop() ?? '';
   expect(key).toMatch(/^brd_[0-9a-z]{52}$/);
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA busy_timeout = 10000');
+    expect(db.prepare('UPDATE api_keys SET owner = NULL WHERE name = ?').run(name).changes).toBe(1);
+  } finally {
+    db.close();
+  }
   return key;
 }
 
@@ -72,7 +81,7 @@ for (const vp of viewports) {
       expect(ownedKey).toMatch(/^brd_/);
 
       // One agent writes through the owned key, another through a key with no owner.
-      const plainKey = mintOwnerless(`e2e-originall-${vp.name}-plain-key`);
+      const plainKey = mintOwnerless(`e2e-originall-${vp.name}-plain-key`, operator);
       const viaOwned = await playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${ownedKey}`, 'Board-Actor': owned } });
       const viaPlain = await playwright.request.newContext({ baseURL, extraHTTPHeaders: { Authorization: `Bearer ${plainKey}`, 'Board-Actor': plain } });
       await post(viaOwned, '/api/v1/initiatives', { slug, title: `Origin over all ${vp.name}` }, 201);

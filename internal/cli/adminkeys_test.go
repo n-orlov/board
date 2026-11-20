@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,18 @@ func runKeysEnv(t *testing.T, url string, extra map[string]string, args ...strin
 	return code, errb.String()
 }
 
+// runKeysEnvOut is runKeysEnv that also returns stdout.
+func runKeysEnvOut(t *testing.T, url string, extra map[string]string, args ...string) (int, string, string) {
+	t.Helper()
+	env := map[string]string{"BOARD_DB_URL": url}
+	for k, v := range extra {
+		env[k] = v
+	}
+	var out, errb bytes.Buffer
+	code := Run(append([]string{"admin", "keys"}, args...), &out, &errb, envWith(env))
+	return code, out.String(), errb.String()
+}
+
 // seedActor inserts an actors row of the kind.
 func seedActor(t *testing.T, url, id, handle, kind string) {
 	t.Helper()
@@ -230,6 +243,50 @@ func TestAdminKeysCreateWithoutAnOperatorLeavesTheOwnerNull(t *testing.T) {
 	}
 	if got := keyOwner(t, url, "first"); got != "" {
 		t.Errorf("owner with no operator row = %q, want none", got)
+	}
+}
+
+func TestAdminKeysCreateRefusesADefaultOwnerThatIsNoOperatorOnAnEstablishedBoard(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		ops  []string
+	}{
+		{"variable names an agent", map[string]string{"VH_OPERATOR_HANDLE": "worker"}, []string{"boss"}},
+		{"variable names nobody", map[string]string{"VH_OPERATOR_HANDLE": "ghost"}, []string{"boss"}},
+		{"built-in default is no operator", nil, []string{"boss"}},
+		{"several operators, none the default", map[string]string{"VH_OPERATOR_HANDLE": "ghost"}, []string{"alice-op", "bob-op"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			url := migrated(t)
+			for i, op := range c.ops {
+				seedActor(t, url, fmt.Sprintf("OP%d", i), op, "operator")
+			}
+			seedActor(t, url, "AG1", "worker", "agent")
+			code, out, errs := runKeysEnvOut(t, url, c.env, "create", "refused")
+			if code != ExitUsage || out != "" || strings.Count(errs, "\n") != 1 || !strings.Contains(errs, "--owner") {
+				t.Errorf("code=%d out=%q err=%q", code, out, errs)
+			}
+			if _, list, _ := runKeys(t, url, "list"); list != "" {
+				t.Errorf("the refusal left a key behind: %q", list)
+			}
+			if code, _, errs := runKeysEnvOut(t, url, c.env, "create", "refused", "--owner", c.ops[0]); code != ExitOK || errs != "" {
+				t.Errorf("the name is not free after the refusal: code=%d err=%q", code, errs)
+			}
+		})
+	}
+}
+
+func TestAdminKeysCreateWithAnAgentButNoOperatorLeavesTheOwnerNull(t *testing.T) {
+	url := migrated(t)
+	seedActor(t, url, "AG1", "worker", "agent")
+	code, _, errs := runKeysEnvOut(t, url, map[string]string{"VH_OPERATOR_HANDLE": "worker"}, "create", "first")
+	if code != ExitOK || errs != "" {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+	if got := keyOwner(t, url, "first"); got != "" {
+		t.Errorf("owner = %q, want none", got)
 	}
 }
 

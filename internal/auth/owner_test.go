@@ -122,3 +122,28 @@ func TestVerifyHandsTheKeysOwnerToTheRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateDefaultOwnedFallsBackToNoOwnerOnlyOnABoardWithNoOperator(t *testing.T) {
+	k := newKeys(t, t0)
+	ctx := context.Background()
+	seedActors(t, k, [2]string{"claude", "agent"})
+	_, row, err := k.CreateDefaultOwned(ctx, "first", "admin-cli", "operator", 0)
+	if err != nil || row.Owner != "" {
+		t.Fatalf("no operator on the board = %+v, %v, want an ownerless key", row, err)
+	}
+	seedActors(t, k, [2]string{"alice-op", "operator"})
+	for _, owner := range []string{"operator", "claude"} {
+		if _, _, err := k.CreateDefaultOwned(ctx, "second", "admin-cli", owner, 0); !errors.Is(err, ErrOwnerNotOperator) {
+			t.Fatalf("default %q on an established board = %v, want ErrOwnerNotOperator", owner, err)
+		}
+	}
+	if keys, err := k.List(ctx); err != nil || len(keys) != 1 {
+		t.Fatalf("a refused create left keys %v (%v)", keys, err)
+	}
+	if _, row, err := k.CreateDefaultOwned(ctx, "third", "admin-cli", "alice-op", 0); err != nil || row.Owner != "alice-op" {
+		t.Errorf("default naming an operator = %+v, %v", row, err)
+	}
+	if _, _, err := k.CreateDefaultOwned(ctx, "bad name", "admin-cli", "alice-op", 0); !errors.Is(err, ErrInvalidName) {
+		t.Errorf("bad name = %v", err)
+	}
+}
