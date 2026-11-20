@@ -140,23 +140,34 @@ export type Drop = { kind: 'col'; col: number; index: number } | { kind: 'new'; 
 export function moveWidget(layout: NowLayout, key: WidgetKey, drop: Drop): NowLayout {
   const from = locate(layout, key);
   if (from === undefined) return layout;
+  return drop.kind === 'new' ? moveToNewColumn(layout, key, from, drop.side) : moveIntoColumn(layout, key, from, drop);
+}
+
+function moveToNewColumn(layout: NowLayout, key: WidgetKey, from: { col: number; index: number }, side: 'left' | 'right'): NowLayout {
   const columns = cloneColumns(layout);
+  if (columns.length >= MAX_COLUMNS) return layout;
   const source = columns[from.col]!;
-  if (drop.kind === 'new') {
-    if (columns.length >= MAX_COLUMNS) return layout;
-    const atEdge = drop.side === 'left' ? from.col === 0 : from.col === columns.length - 1;
-    if (source.widgets.length === 1 && atEdge) return layout;
-    source.widgets.splice(from.index, 1);
-    const fresh: DockColumn = { width: 1 / (columns.length + 1), widgets: [key] };
-    const scaled = columns.map((col) => ({ ...col, width: (col.width * columns.length) / (columns.length + 1) }));
-    const all = drop.side === 'left' ? [fresh, ...scaled] : [...scaled, fresh];
-    return { ...layout, columns: withWidths(all, fitWidths(all.map((c) => c.width))) };
-  }
+  const atEdge = side === 'left' ? from.col === 0 : from.col === columns.length - 1;
+  if (source.widgets.length === 1 && atEdge) return layout;
+  source.widgets.splice(from.index, 1);
+  const fresh: DockColumn = { width: 1 / (columns.length + 1), widgets: [key] };
+  const scaled = columns.map((col) => ({ ...col, width: (col.width * columns.length) / (columns.length + 1) }));
+  const all = side === 'left' ? [fresh, ...scaled] : [...scaled, fresh];
+  return { ...layout, columns: withWidths(all, fitWidths(all.map((c) => c.width))) };
+}
+
+function moveIntoColumn(
+  layout: NowLayout,
+  key: WidgetKey,
+  from: { col: number; index: number },
+  drop: { col: number; index: number },
+): NowLayout {
+  const columns = cloneColumns(layout);
   const target = columns[drop.col];
   if (target === undefined) return layout;
   let index = Math.max(0, Math.min(Math.trunc(drop.index), target.widgets.length));
   if (drop.col === from.col && from.index < index) index--;
-  source.widgets.splice(from.index, 1);
+  columns[from.col]!.widgets.splice(from.index, 1);
   target.widgets.splice(index, 0, key);
   return { ...layout, columns };
 }
@@ -171,9 +182,16 @@ export type Direction = 'up' | 'down' | 'left' | 'right';
 export function nudgeWidget(layout: NowLayout, key: WidgetKey, dir: Direction): NowLayout {
   const at = locate(layout, key);
   if (at === undefined) return layout;
+  return dir === 'up' || dir === 'down' ? nudgeVertically(layout, key, at, dir) : nudgeSideways(layout, key, at, dir);
+}
+
+function nudgeVertically(layout: NowLayout, key: WidgetKey, at: { col: number; index: number }, dir: 'up' | 'down'): NowLayout {
   const size = layout.columns[at.col]!.widgets.length;
   if (dir === 'up') return at.index === 0 ? layout : moveWidget(layout, key, { kind: 'col', col: at.col, index: at.index - 1 });
-  if (dir === 'down') return at.index >= size - 1 ? layout : moveWidget(layout, key, { kind: 'col', col: at.col, index: at.index + 2 });
+  return at.index >= size - 1 ? layout : moveWidget(layout, key, { kind: 'col', col: at.col, index: at.index + 2 });
+}
+
+function nudgeSideways(layout: NowLayout, key: WidgetKey, at: { col: number; index: number }, dir: 'left' | 'right'): NowLayout {
   const col = at.col + (dir === 'left' ? -1 : 1);
   if (col < 0 || col >= layout.columns.length) return moveWidget(layout, key, { kind: 'new', side: dir });
   return moveWidget(layout, key, { kind: 'col', col, index: Math.min(at.index, layout.columns[col]!.widgets.length) });
@@ -248,24 +266,33 @@ export function setOpen(layout: NowLayout, key: WidgetKey, open: boolean): NowLa
 const isWidget = (value: unknown): value is WidgetKey => typeof value === 'string' && (WIDGETS as readonly string[]).includes(value);
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+function validColumn(item: unknown, seen: Set<WidgetKey>): DockColumn | undefined {
+  if (!isRecord(item) || !Array.isArray(item.widgets) || typeof item.width !== 'number' || !Number.isFinite(item.width)) return undefined;
+  const widgets: WidgetKey[] = [];
+  for (const key of item.widgets) {
+    if (!isWidget(key) || seen.has(key)) return undefined;
+    seen.add(key);
+    widgets.push(key);
+  }
+  return { width: item.width, widgets };
+}
+
 function validColumns(raw: unknown): DockColumn[] | undefined {
   if (!Array.isArray(raw) || raw.length < MIN_COLUMNS || raw.length > MAX_COLUMNS) return undefined;
   const seen = new Set<WidgetKey>();
   const columns: DockColumn[] = [];
   for (const item of raw) {
-    if (!isRecord(item) || !Array.isArray(item.widgets) || typeof item.width !== 'number' || !Number.isFinite(item.width)) return undefined;
-    const widgets: WidgetKey[] = [];
-    for (const key of item.widgets) {
-      if (!isWidget(key) || seen.has(key)) return undefined;
-      seen.add(key);
-      widgets.push(key);
-    }
-    columns.push({ width: item.width, widgets });
+    const column = validColumn(item, seen);
+    if (column === undefined) return undefined;
+    columns.push(column);
   }
-  if (seen.size !== WIDGETS.length) return undefined;
+  return seen.size === WIDGETS.length && widthsHold(columns) ? columns : undefined;
+}
+
+/** Stored widths add up to 1 (floating-point noise aside) and none is under MIN_WIDTH. */
+function widthsHold(columns: readonly DockColumn[]): boolean {
   const sum = columns.reduce((a, c) => a + c.width, 0);
-  if (Math.abs(sum - 1) > STORED_TOLERANCE || columns.some((c) => c.width < MIN_WIDTH - STORED_TOLERANCE)) return undefined;
-  return columns;
+  return Math.abs(sum - 1) <= STORED_TOLERANCE && columns.every((c) => c.width >= MIN_WIDTH - STORED_TOLERANCE);
 }
 
 function validRecord<T>(raw: unknown, ok: (value: unknown) => value is T): Partial<Record<WidgetKey, T>> | undefined {
