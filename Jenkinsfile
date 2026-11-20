@@ -10,10 +10,14 @@
 //
 // Retry policy, per unit (on the same node: there is only one):
 //   - infrastructure failure (agent lost, Docker unavailable, checkout or CI
-//     image build failed, the attempt timed out or went silent, no executor
-//     free): another attempt, up to 3 infrastructure failures;
+//     image build failed, the attempt went silent, no executor free for the
+//     whole wait): another attempt, up to 3 infrastructure failures;
 //   - the unit's command fails: one rerun; a pass there marks the build
-//     UNSTABLE ("flaky"), a second failure fails it.
+//     UNSTABLE ("flaky"), a second failure fails it;
+//   - the unit runs out its own time bound on a node (its minutes below): a
+//     failure, not an infrastructure failure, and never retried (operator
+//     ruling 001-WAVE: three 45-minute attempts of a Suite that cannot fit
+//     cost a push build 2 h 15 min). Only a wait with no node stays infra.
 // A unit may cap its attempts (maxAttempts: each full mutation unit has one).
 // Each attempt reports node, queue wait and run time; the build page gets a
 // per-unit timing table (ci-results/distributed/timing.md).
@@ -21,13 +25,18 @@
 // Each unit checks out the build's commit in its own workspace, builds
 // board-ci:local (ci/jenkins-image.sh; cached by the Docker daemon), runs,
 // removes the sibling containers it labelled (ralphd.run=<attempt id>, by
-// exact ID) and stashes its ci-results. Quality waits for Suite (coverage)
-// and Image (the image tar). The report runs once at the end over every
-// unit's stash.
+// exact ID) and stashes its ci-results. Quality waits for Suite (coverage),
+// E2E (Playwright's results) and Image (the image tar). The report runs once
+// at the end over every unit's stash.
 //
 // Phases; each phase's units run in parallel:
-//   1. Core (every build): Lint, Suite, Image, Allure smoke, then Quality
-//      (4 executors: Quality waits for Suite and Image without holding one).
+//   1. Core (every build): Lint, Suite, E2E, Image, Allure smoke, then
+//      Quality (4 executors: Quality waits for Suite, E2E and Image without
+//      holding one). Suite is ci/suite.sh with BOARD_CI_PLAYWRIGHT=skip (45
+//      minutes, 120 EXTENDED) and E2E is the same script with
+//      BOARD_CI_PLAYWRIGHT=only: the Playwright suite, one worker, with the
+//      script's one repeat of a failed run (120 minutes), in parallel with
+//      Suite, which no longer waits for it.
 //   2. Stability and Mutation, side by side, once Core passed:
 //      - Stability (EXTENDED=true, or nightly on main): one unit (one
 //        executor) running the three stability runs side by side, each in its
@@ -100,7 +109,8 @@ import groovy.transform.Field
 // Units' results and attempts, shared by the parallel branches.
 @Field def results = [:]        // unit -> 'pass' | 'flaky' | 'fail'
 @Field def attemptLog = [:]     // unit -> [attempt maps]
-@Field def signals = [:]        // 'Suite' / 'Image' -> true once stashed (pass or fail)
+@Field def signals = [:]        // 'Suite' / 'E2E' / 'Image' -> true once the unit ended (pass or fail)
+@Field def stashedUnits = [:]   // unit -> true once an attempt stashed its results
 @Field String commitSha = ''
 @Field String imageVersion = ''
 @Field String mutationBase = ''  // diff mode: the commit the mutation diff starts from
@@ -140,10 +150,12 @@ import groovy.transform.Field
 
 long nowMs() { System.currentTimeMillis() }
 
+@NonCPS
 String slug(String s) { s.toLowerCase().replaceAll('[^a-z0-9]+', '-') }
 
 // What ended an attempt that threw. Returns null for an abort of the whole
-// build, which must propagate; otherwise an 'infra:<why>' outcome.
+// build, which must propagate; otherwise an 'infra:<why>' outcome, or
+// 'fail:timeout' for a unit that ran out its own time bound on a node.
 String classify(Throwable e, Map a) {
   if (e instanceof org.jenkinsci.plugins.workflow.steps.FlowInterruptedException) {
     // getCauses needs a script approval; without it, treat as an abort.
@@ -154,7 +166,9 @@ String classify(Throwable e, Map a) {
       causes = 'unknown'
     }
     if (causes.contains('ExceededTimeout') || causes.contains('Timeout')) {
-      return a.node ? 'infra:timeout' : 'infra:no-node'
+      // On a node, the unit ran out its own bound: a failure that is not
+      // retried. No node yet is only a queue wait (infrastructure).
+      return a.node ? 'fail:timeout' : 'infra:no-node'
     }
     if (causes.contains('RemovedNode') || causes.contains('Offline') || causes.contains('QueueTaskCancelled')) {
       return 'infra:agent-lost'
@@ -227,6 +241,7 @@ def runUnit(Map u) {
               }
               stash name: 'res-' + slug(u.name), includes: 'ci-results/**',
                     excludes: 'ci-results/board-image.tar,ci-results/board-image-oci.tar', allowEmpty: true
+              stashedUnits[u.name] = true
               if (u.extraStash) {
                 u.extraStash()
               }
@@ -267,6 +282,11 @@ def runUnit(Map u) {
       }
       return
     }
+    if (a.outcome == 'fail:timeout') {
+      // Its own bound: failing again would take the same time, so no rerun.
+      results[u.name] = 'fail'
+      error("${u.name}: timed out after ${u.minutes} minutes on ${a.node}, not retried (" + attemptSummary(attempts) + ')')
+    }
     if (a.outcome.startsWith('fail')) {
       if (!rerun && attempts.size() < maxAttempts) {
         rerun = true
@@ -285,7 +305,7 @@ def runUnit(Map u) {
   }
 }
 
-// "3 infrastructure failures, 1 test failure: int21h-ws infra:timeout, ..."
+// "3 infrastructure failures, 1 test failure: int21h-ws infra:no-node, ..."
 @NonCPS
 String attemptSummary(List attempts) {
   int fails = attempts.count { it.outcome?.startsWith('fail') }
@@ -457,7 +477,7 @@ pipeline {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '30'))
     disableConcurrentBuilds()
-    // A backstop only: every unit has its own bound. Core (Suite's 120
+    // A backstop only: every unit has its own bound. Core (Suite's or E2E's 120
     // minutes at worst, then Quality), the mutation plan, a 110-minute
     // mutation unit after a stability wait, the gate, and Perf; a nightly
     // takes about an hour (incremental) to 130 minutes (full).
@@ -514,8 +534,15 @@ pipeline {
           def units = []
           // gofmt, go vet, tidy drift, golangci-lint.
           units << [name: 'Lint', minutes: 30, body: { sh(returnStatus: true, script: 'ci/run.sh ci/lint.sh') }]
+          // Everything but Playwright: the web build and Vitest, the Go passes
+          // and the merged files (BOARD_CI_PLAYWRIGHT=skip, ci/suite.sh header).
           units << [name: 'Suite', minutes: nightly ? 120 : 45, signal: 'Suite',
-                    body: { sh(returnStatus: true, script: 'ci/run.sh ci/suite.sh') }]
+                    body: { sh(returnStatus: true, script: 'BOARD_CI_PLAYWRIGHT=skip ci/run.sh ci/suite.sh') }]
+          // Playwright alone (BOARD_CI_PLAYWRIGHT=only): every spec, one worker,
+          // the script's one repeat of a failed run. 120 minutes on every build:
+          // the repeat repeats the whole run, so the bound holds two of them.
+          units << [name: 'E2E', minutes: 120, signal: 'E2E',
+                    body: { sh(returnStatus: true, script: 'BOARD_CI_PLAYWRIGHT=only ci/run.sh ci/suite.sh') }]
           // Both platforms cross-built and never pushed; the amd64 image is run
           // and probed.
           units << [name: 'Image', minutes: 30, signal: 'Image',
@@ -541,13 +568,21 @@ pipeline {
                     }]
           def branches = [:]
           units.each { u -> branches[u.name] = unitBranch(u) }
-          // The quality gates read Suite's coverage and Image's tar: wait for both.
+          // The quality gates read Suite's coverage, E2E's results and Image's tar: wait for all three.
           branches['Quality'] = {
             stage('Quality') {
-              waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['Image'] == true }
+              waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['E2E'] == true && signals['Image'] == true }
               catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 env.QUALITY_RESULT = 'failing'
-                runUnit([name: 'Quality', minutes: 30, needs: ['res-suite', 'res-image', 'image'],
+                // A unit that left no stash (it timed out, or never got a node)
+                // is named here, instead of Quality failing on its missing stash.
+                def lost = ['Suite', 'E2E', 'Image'].findAll { !stashedUnits[it] }
+                if (lost) {
+                  results['Quality'] = 'fail'
+                  error('Quality: no results to read from ' + lost.join(', ') + ' (' +
+                        lost.collect { it + ': ' + (results[it] ?: 'no result') + ', ' + (attemptLog[it] ? attemptSummary(attemptLog[it]) : 'no attempt') }.join('; ') + ')')
+                }
+                runUnit([name: 'Quality', minutes: 30, needs: ['res-suite', 'res-e2e', 'res-image', 'image'],
                          body: {
                            if (env.CI_NIGHTLY == 'true') {
                              sh "ci/run.sh sh -c 'rm -rf /go-cache/trivy/db /go-cache/trivy/java-db /go-cache/xdg-cache/govulncheck'"

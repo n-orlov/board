@@ -124,7 +124,7 @@ func expectProblems(t *testing.T, good string, check func(string) []string, doct
 
 // phaseProblems: the phases Core, Stability and Mutation (side by side, the
 // two parallel stages of one phase), Perf, in that order; Core's units are
-// Lint, Suite, Image and Allure smoke with Quality after Suite and Image;
+// Lint, Suite, E2E, Image and Allure smoke with Quality after Suite, E2E and Image;
 // Stability needs EXTENDED or the nightly timer; Mutation is gated on
 // CI_MUTATION alone (EXTENDED on its own runs no mutation); a phase runs only
 // while the build has not failed; each unit runs its command.
@@ -139,18 +139,19 @@ func phaseProblems(jf string) []string {
 		problems = append(problems, "Stability and Mutation are not the two parallel stages of one phase (stages "+got+")")
 	}
 	core, _ := jenkinsStage(jf, "Core")
-	if got := strings.Join(coreUnits(core), ","); got != "Lint,Suite,Image,Allure smoke" {
-		problems = append(problems, "Core units are "+got+", want Lint,Suite,Image,Allure smoke")
+	if got := strings.Join(coreUnits(core), ","); got != "Lint,Suite,E2E,Image,Allure smoke" {
+		problems = append(problems, "Core units are "+got+", want Lint,Suite,E2E,Image,Allure smoke")
 	}
 	if !strings.Contains(core, "branches['Quality'] = {") || !strings.Contains(core, "stage('Quality') {") {
 		problems = append(problems, "Core does not run Quality as a branch of its own")
 	}
-	if !strings.Contains(core, "waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['Image'] == true }") {
-		problems = append(problems, "Quality does not wait for Suite and Image")
+	if !strings.Contains(core, "waitUntil(initialRecurrencePeriod: 15000) { signals['Suite'] == true && signals['E2E'] == true && signals['Image'] == true }") {
+		problems = append(problems, "Quality does not wait for Suite, E2E and Image")
 	}
 	for _, want := range []string{
 		"ci/run.sh ci/lint.sh",
-		"ci/run.sh ci/suite.sh",
+		"BOARD_CI_PLAYWRIGHT=skip ci/run.sh ci/suite.sh",
+		"BOARD_CI_PLAYWRIGHT=only ci/run.sh ci/suite.sh",
 		`ci/image-build.sh "$BOARD_CI_OUT/board-image.tar" && ci/image-check.sh "$BOARD_CI_OUT"`,
 		"-run '^TestAllureFormatterWritesResultsForAFixtureRun$' ./features/",
 		"ci/allure-smoke.sh allure-smoke/fixture allure-smoke/report",
@@ -203,8 +204,11 @@ func TestJenkinsfileStagesRunInOrder(t *testing.T) {
 		"no Image unit":                    replaceOnce(t, jf, "units << [name: 'Image'", "units << [name: 'Picture'"),
 		"Quality not waiting for Image":    replaceOnce(t, jf, " && signals['Image'] == true", ""),
 		"Quality not waiting for Suite":    replaceOnce(t, jf, "signals['Suite'] == true && ", ""),
+		"Quality not waiting for E2E":      replaceOnce(t, jf, " && signals['E2E'] == true", ""),
+		"no E2E unit":                      replaceOnce(t, jf, "units << [name: 'E2E'", "units << [name: 'Browser'"),
 		"Lint not running ci/lint.sh":      replaceOnce(t, jf, "ci/run.sh ci/lint.sh", "ci/run.sh true"),
-		"Suite not running ci/suite.sh":    replaceOnce(t, jf, "ci/run.sh ci/suite.sh", "ci/run.sh true"),
+		"Suite not running ci/suite.sh":    replaceOnce(t, jf, "BOARD_CI_PLAYWRIGHT=skip ci/run.sh ci/suite.sh", "ci/run.sh true"),
+		"E2E not running ci/suite.sh":      replaceOnce(t, jf, "BOARD_CI_PLAYWRIGHT=only ci/run.sh ci/suite.sh", "ci/run.sh true"),
 		"Image not checked":                replaceOnce(t, jf, ` && ci/image-check.sh "$BOARD_CI_OUT"`, ""),
 		"smoke not running the fixture":    replaceOnce(t, jf, "TestAllureFormatterWritesResultsForAFixtureRun", "TestNothing"),
 		"Stability on every build":         replaceOnce(t, jf, "expression { env.CI_NIGHTLY == 'true' && currentBuild", "expression { currentBuild"),
@@ -370,8 +374,8 @@ func TestJenkinsfileNightlyLane(t *testing.T) {
 }
 
 // qualityProblems: the Quality unit runs ci/quality.sh over the results with
-// the mutation rows deferred to the Mutation phase, needs Suite's and Image's
-// stashes, and lets a red gate fail the build.
+// the mutation rows deferred to the Mutation phase, needs Suite's, E2E's and
+// Image's stashes, and lets a red gate fail the build.
 func qualityProblems(jf string) []string {
 	var problems []string
 	core, _ := jenkinsStage(jf, "Core")
@@ -382,7 +386,7 @@ func qualityProblems(jf string) []string {
 	quality := core[i:]
 	for _, want := range []string{
 		`ci/run.sh ci/quality.sh "$BOARD_CI_OUT" ci/quality.json --mutation-deferred`,
-		"needs: ['res-suite', 'res-image', 'image']",
+		"needs: ['res-suite', 'res-e2e', 'res-image', 'image']",
 		"catchError(buildResult: 'FAILURE', stageResult: 'FAILURE')",
 		"env.QUALITY_RESULT = results['Quality'] == 'fail' ? 'failing' : 'passing'",
 	} {
@@ -401,7 +405,8 @@ func TestJenkinsfileRunsTheQualityGates(t *testing.T) {
 	jf := readRepoFile(t, "Jenkinsfile")
 	expectProblems(t, jf, qualityProblems, map[string]string{
 		"gates that read missing mutation reports": replaceOnce(t, jf, " --mutation-deferred", ""),
-		"a Quality unit without the image":         replaceOnce(t, jf, "needs: ['res-suite', 'res-image', 'image']", "needs: ['res-suite']"),
+		"a Quality unit without the image":         replaceOnce(t, jf, "needs: ['res-suite', 'res-e2e', 'res-image', 'image']", "needs: ['res-suite', 'res-e2e']"),
+		"a Quality unit without E2E's results":     replaceOnce(t, jf, "needs: ['res-suite', 'res-e2e', 'res-image', 'image']", "needs: ['res-suite', 'res-image', 'image']"),
 		"a red gate that cannot fail the build":    replaceOnce(t, jf, "      catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {\n                env.QUALITY_RESULT", "      catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {\n                env.QUALITY_RESULT"),
 		"no quality badge result":                  replaceOnce(t, jf, "env.QUALITY_RESULT = results['Quality'] == 'fail' ? 'failing' : 'passing'", ""),
 	})

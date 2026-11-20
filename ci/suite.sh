@@ -16,6 +16,19 @@
 #   ci/suite.sh                            # on a runner with Go on PATH already
 #   BOARD_CI_OUT=/path/to/artifacts ci/suite.sh   # keep the JUnit/flaky files
 #   ci/suite.sh /path/to/artifacts               # same, as a positional argument
+#   BOARD_CI_PLAYWRIGHT=skip ci/suite.sh         # everything but the Playwright step
+#   BOARD_CI_PLAYWRIGHT=only ci/suite.sh         # only the web build and Playwright
+#
+# BOARD_CI_PLAYWRIGHT (operator ruling 001-WAVE, task 035): which parts of the
+# run happen. Unset, or `with`, is the whole run, Playwright and its one repeat
+# included (what a local Sweep runs). The Jenkinsfile runs two units from this
+# one script, in parallel: Suite with `skip` (the web build and Vitest, the Go
+# passes, the merged files; no Playwright, and no junit-playwright*.xml or
+# flaky-playwright.txt) and E2E with `only` (`npm ci` and the web build in e2e's
+# checkout, then the Playwright step with its repeat, writing only the
+# Playwright files; no Vitest, no Go pass). Any other value is refused. The
+# step itself is the same in `with` and `only`: every spec, one worker, the one
+# repeat of a failed run.
 #
 # Coverage: the unit pass runs with -coverpkg=./... (every package in the
 # module, not just the ones a given test imports), and the per-pass
@@ -74,6 +87,15 @@ if [ -z "$outdir" ]; then
     outdir=$(mktemp -d "${TMPDIR:-/tmp}/board-ci-suite.XXXXXX")
 fi
 mkdir -p "$outdir"
+# BOARD_CI_PLAYWRIGHT (see the header): read here, before the BOARD_* scrub.
+playwright_mode=${BOARD_CI_PLAYWRIGHT:-with}
+case "$playwright_mode" in
+    with|skip|only) ;;
+    *)
+        echo "ci/suite.sh: BOARD_CI_PLAYWRIGHT must be with, skip or only (got '$playwright_mode')" >&2
+        exit 2
+        ;;
+esac
 # Canonicalize to an absolute path now, once. features/TestFeatures's own
 # test binary runs with its CWD set to the features/ package directory (an
 # ordinary `go test` behaviour, not something this script controls), which
@@ -102,30 +124,40 @@ overall_status=0
 # with no web/ (the suitecheck fixtures) skips this step.
 vitest_junit="$outdir/junit-vitest.xml"
 vitest_flaky="$outdir/flaky-vitest.txt"
-: > "$vitest_flaky"
+# The E2E unit (BOARD_CI_PLAYWRIGHT=only) builds the web UI for Playwright and
+# writes none of Vitest's files.
+if [ "$playwright_mode" != only ]; then
+    : > "$vitest_flaky"
+fi
 if [ -f web/package.json ]; then
     vitest_log="$outdir/vitest.log"
-    if ! (cd web && npm ci --no-audit --no-fund && npm run build) > "$outdir/web-build.log" 2>&1; then
-        echo "ci/suite.sh: web build failed (see $outdir/web-build.log)" >&2
+    web_build_log="$outdir/web-build.log"
+    if [ "$playwright_mode" = only ]; then
+        web_build_log="$outdir/web-build-e2e.log"
+    fi
+    if ! (cd web && npm ci --no-audit --no-fund && npm run build) > "$web_build_log" 2>&1; then
+        echo "ci/suite.sh: web build failed (see $web_build_log)" >&2
         overall_status=1
     fi
-    run_vitest() {
-        (cd web && WEB_JUNIT_FILE="$vitest_junit" WEB_COVERAGE_DIR="$outdir/web-coverage" npm run test) > "$vitest_log" 2>&1
-    }
-    if ! run_vitest; then
-        echo "ci/suite.sh: Vitest failed; repeating it once (see $vitest_log)" >&2
-        [ -f "$vitest_junit" ] && cp "$vitest_junit" "$outdir/junit-vitest-run1.xml"
-        cp "$vitest_log" "$outdir/vitest-run1.log"
-        if run_vitest; then
-            echo "vitest: failed once, then passed on the repeat (see vitest-run1.log)" >> "$vitest_flaky"
-        else
-            echo "ci/suite.sh: Vitest failed twice (see $vitest_log)" >&2
+    if [ "$playwright_mode" != only ]; then
+        run_vitest() {
+            (cd web && WEB_JUNIT_FILE="$vitest_junit" WEB_COVERAGE_DIR="$outdir/web-coverage" npm run test) > "$vitest_log" 2>&1
+        }
+        if ! run_vitest; then
+            echo "ci/suite.sh: Vitest failed; repeating it once (see $vitest_log)" >&2
+            [ -f "$vitest_junit" ] && cp "$vitest_junit" "$outdir/junit-vitest-run1.xml"
+            cp "$vitest_log" "$outdir/vitest-run1.log"
+            if run_vitest; then
+                echo "vitest: failed once, then passed on the repeat (see vitest-run1.log)" >> "$vitest_flaky"
+            else
+                echo "ci/suite.sh: Vitest failed twice (see $vitest_log)" >&2
+                overall_status=1
+            fi
+        fi
+        if [ ! -s "$vitest_junit" ]; then
+            echo "ci/suite.sh: Vitest wrote no JUnit file at $vitest_junit" >&2
             overall_status=1
         fi
-    fi
-    if [ ! -s "$vitest_junit" ]; then
-        echo "ci/suite.sh: Vitest wrote no JUnit file at $vitest_junit" >&2
-        overall_status=1
     fi
 fi
 
@@ -150,7 +182,9 @@ fi
 # budget, which stays as it is.
 playwright_junit="$outdir/junit-playwright.xml"
 playwright_flaky="$outdir/flaky-playwright.txt"
-: > "$playwright_flaky"
+if [ "$playwright_mode" != skip ]; then
+    : > "$playwright_flaky"
+fi
 playwright_messages="$outdir/playwright-messages.log"
 playwright_pid=""
 # playwright_step is the whole step; it returns 1 when the suite must fail.
@@ -189,7 +223,21 @@ playwright_step() {
     fi
     return "$playwright_failed"
 }
-if [ -f e2e/package.json ]; then
+if [ "$playwright_mode" = only ]; then
+    # The E2E unit: the step in the foreground, then its verdict. Nothing else
+    # runs (no Vitest, no Go pass), so the unit's result files are Playwright's.
+    if [ ! -f e2e/package.json ]; then
+        echo "ci/suite.sh: BOARD_CI_PLAYWRIGHT=only but there is no e2e/package.json" >&2
+        exit 1
+    fi
+    playwright_rc=0
+    playwright_step || playwright_rc=$?
+    if [ "$playwright_rc" -ne 0 ]; then
+        overall_status=1
+    fi
+    exit "$overall_status"
+fi
+if [ "$playwright_mode" = with ] && [ -f e2e/package.json ]; then
     : > "$playwright_messages"
     playwright_step 2> "$playwright_messages" &
     playwright_pid=$!

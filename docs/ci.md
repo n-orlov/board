@@ -111,10 +111,16 @@ exact ID). The Mutation units are no exception (each parallel unit has its own a
 variable but hands `BOARD_CI_RUN_ID` (the attempt id `ci/run.sh` forwards from
 `RALPHD_RUN_ID`) to gremlins, so the Postgres testcontainers of every mutant's
 test run carry the attempt label and the cleanup reaps the ones a killed mutant
-run leaves. An infrastructure failure (agent lost, Docker unavailable, a timeout)
-gets another attempt, up to three; a failing command is rerun once, and a pass
-there marks the build UNSTABLE ("flaky"). The build page carries a per-unit
-timing table (`ci-results/distributed/timing.md`).
+run leaves. An infrastructure failure (agent lost, Docker unavailable, a wait
+with no free node) gets another attempt, up to three; a failing command is rerun
+once, and a pass there marks the build UNSTABLE ("flaky"). A unit that runs on a
+node and hits its own time bound (`timeout(time: u.minutes)`) is a failure, not
+an infrastructure failure, and is not retried: the attempt's outcome is
+`fail:timeout` and the unit fails at once (three 45-minute attempts of a Suite
+that cannot fit used to cost a push build over two hours). Only queue wait with no
+node (`infra:no-node`, capped at 45 minutes beyond the unit's bound) keeps its
+retries. The build page carries a per-unit timing table
+(`ci-results/distributed/timing.md`).
 
 The pipeline runs Core, then Stability and Mutation side by side, then Perf; the
 units of a phase run in parallel, and a phase runs only if every earlier one
@@ -124,7 +130,7 @@ minutes with full mutation, Core about 33 of them:
 
 | phase | units | runs |
 |---|---|---|
-| Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`ci/run.sh ci/suite.sh`), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage) and Image (the tar) without holding an executor | every build |
+| Core | Lint (`ci/run.sh ci/lint.sh`), Suite (`BOARD_CI_PLAYWRIGHT=skip ci/run.sh ci/suite.sh`: everything but Playwright), E2E (`BOARD_CI_PLAYWRIGHT=only ci/run.sh ci/suite.sh`: Playwright alone), Image (`ci/image-build.sh` then `ci/image-check.sh`, then the release dry run `ci/release-check.sh`), Allure smoke (the Godog formatter fixture, then `ci/allure-smoke.sh`), and Quality (`ci/run.sh ci/quality.sh ci-results ci/quality.json --mutation-deferred`), which waits for Suite (its coverage), E2E (Playwright's results) and Image (the tar) without holding an executor | every build |
 | Stability | one unit (one executor) running `ci/stability.sh 1` three times side by side, each run in its own clone of the checkout and its own stage (`Stability 1` to `3`), beside Mutation | `EXTENDED=true` or the nightly timer |
 | Mutation | one unit (diff), three units and a gate (full), or a plan, the units it gives work and a gate (incremental), beside Stability (below) | `MUTATION=true` or `MUTATION_FULL=true` or the nightly of `main` |
 | Perf | the Perf unit (`ci/run.sh ci/perf.sh ci-results`, 30 minutes), alone, when the Stability unit passed | `EXTENDED=true` or the nightly timer |
@@ -135,9 +141,24 @@ Three booleanParams select what runs: `EXTENDED`, `MUTATION` and
 `main` only; every other branch has no timer) counts as `EXTENDED` plus the
 nightly's mutation, and so does `EXTENDED=true` on `main`.
 
-- **Core** runs on every build, a push build of `main` included (about 20-35
-  minutes). `EXTENDED=true` and the nightly timer also add `-race` (the Suite's
-  limit goes from 45 to 120 minutes) and fresh vulnerability databases to Core.
+- **Core** runs on every build, a push build of `main` included. `EXTENDED=true`
+  and the nightly timer also add `-race` (the Suite's limit goes from 45 to 120
+  minutes) and fresh vulnerability databases to Core.
+- **E2E** is the Playwright suite in a unit of its own, in parallel with Suite,
+  Lint, Image and Allure smoke on `int21h-ws` (operator ruling 001-WAVE): the
+  Suite unit asks `ci/suite.sh` to skip the step (`BOARD_CI_PLAYWRIGHT=skip`) and
+  E2E asks it for only that step (`BOARD_CI_PLAYWRIGHT=only`: `npm ci` and the web
+  build, then Playwright with the script's one repeat of a failed run; no Vitest,
+  no Go pass). E2E's bound is 120 minutes on push and `EXTENDED` builds alike
+  (the repeat runs the whole suite again, so the bound holds two runs); Suite's
+  stays 45 minutes (120 `EXTENDED`). Nothing else about Playwright changed: one
+  worker, no `fullyParallel`, no shards, no added retry, no raised per-test
+  timeout, no raised thread budget, and every test runs on every push build.
+  E2E stashes `res-e2e` (`junit-playwright*.xml`, `flaky-playwright.txt`, the
+  `playwright/` output, `playwright-run1.log`), which Quality unstashes beside
+  `res-suite` and the report reads with the others. A unit that left no stash (it
+  timed out, or never got a node) is named by Quality, with its result and
+  attempts, instead of Quality failing on `No such saved stash`.
 - **Stability** is the extended lane: `EXTENDED=true` or the nightly timer.
   Its one unit holds a single executor and runs the three `ci/stability.sh 1`
   runs side by side (about 11 minutes), each in a local clone of the checkout
@@ -235,7 +256,7 @@ nightly's mutation, and so does `EXTENDED=true` on `main`.
     `mutation(incremental: N run, M reused from #K)`, or `mutation(full)
     [<reason>]` when it fell back.
 
-A red Lint, Suite, Image, Allure smoke, Quality, Stability, Perf or Mutation unit
+A red Lint, Suite, E2E, Image, Allure smoke, Quality, Stability, Perf or Mutation unit
 fails the build. Within a phase the other units still finish, and a later phase
 does not start after a failure.
 
@@ -336,7 +357,7 @@ last, in `post { cleanup }`.
 
 `ci/repocheck/jenkinsfile_test.go` pins all of it: Core, then Stability and
 Mutation side by side, then Perf, with the Core units and Quality's wait for
-Suite and Image; the Perf unit (30 minutes, after the stability and mutation units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
+Suite, E2E and Image (E2E: Playwright alone, 120 minutes; Suite: 45, 120 `EXTENDED`; a unit's own timeout is a failure, not retried, a wait with no node stays infra); the Perf unit (30 minutes, after the stability and mutation units, `perf.json` archived); the job shape (the one `AMD` label for every `node()`, the three
 booleanParams, `disableConcurrentBuilds`, the 300-minute timeout, the
 per-attempt container cleanup by exact ID); the nightly lane (cron `17 0 * * *`
 on `main` only); the Quality unit; the three Mutation modes (diff: one 45-minute
@@ -561,7 +582,11 @@ The Go tools under `ci/` have their own tests, and `ci/run.sh go test -count=1
 
 Scripts, each run through `ci/run.sh` unless noted:
 
-- `ci/suite.sh`: `go test -p=1 -count=1 ./...` through gotestsum in two passes
+- `ci/suite.sh`: `BOARD_CI_PLAYWRIGHT` selects the parts that run (`with`, the
+  default: everything; `skip`: all but Playwright, the Jenkins Suite unit; `only`:
+  the web build and Playwright, the Jenkins E2E unit; anything else is refused);
+  `ci/suitecheck/playwrightmode_test.go` runs the real script in each mode.
+  `go test -p=1 -count=1 ./...` through gotestsum in two passes
   (every package but `features/TestFeatures`, then `TestFeatures`), with
   fail-once-retry-once and a `flaky-*.txt` record. It unsets every `BOARD_*`
   variable after reading its own `BOARD_CI_*` settings. It empties the unit and
@@ -588,9 +613,11 @@ Scripts, each run through `ci/run.sh` unless noted:
   It then starts Playwright (`e2e/`, after `npm ci` there) in the background, beside
   the Go passes and the Godog passes, which share nothing with it (one worker, a free
   port and a SQLite store of its own); the script waits for it before it merges the
-  JUnit files, replays its messages to stderr and fails the suite on its failure. The
-  overlap keeps the Suite stage inside its 45-minute budget, which is unchanged, and
-  shortens no spec or bound. The config starts the
+  JUnit files, replays its messages to stderr and fails the suite on its failure. On
+  Jenkins that is not how it runs: the Suite unit sets `BOARD_CI_PLAYWRIGHT=skip` and
+  the E2E unit `BOARD_CI_PLAYWRIGHT=only` (the step in the foreground, after the web
+  build, and nothing else), so the two run in parallel. Nothing is shortened: the same
+  specs run with the same bounds. The config starts the
   real binary on a free port against a freshly migrated SQLite store
   (`e2e/serve.sh`) and never retries (`retries: 0`). It has two projects over
   that one store, `chromium-early` first: `dialogs.spec.ts` (it Tabs to a button below the

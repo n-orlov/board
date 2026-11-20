@@ -4055,12 +4055,13 @@ clean workspace), with every test stage a parallel **unit** on one agent label (
 in the `Jenkinsfile`, which resolves to the agent `int21h-ws`; no arm64 or other label), run in
 phases, each only if the earlier ones passed (UNSTABLE counts as passed), under a 300-minute
 pipeline timeout that is only a backstop (every unit has its own bound). **Core** runs on every build
-(Lint, Suite, Image, Allure smoke, then Quality). Then **Stability** (with `EXTENDED=true` or the
+(Lint, Suite, E2E, Image, Allure smoke, then Quality; Suite is `ci/suite.sh` without its Playwright step
+and E2E is that step alone, in parallel, with its own 120-minute bound). Then **Stability** (with `EXTENDED=true` or the
 nightly timer) and **Mutation** (only with `MUTATION=true`, `MUTATION_FULL=true` or the nightly of `main`)
 run side by side; **Perf** follows them, alone, when the Stability unit passed. A nightly build with
 full mutation takes about 130 minutes, an incremental one about an hour, Core about 33 of them. Each unit attempt removes
 the sibling containers it labelled, by exact ID (a Mutation unit's Postgres testcontainers carry the attempt label too: `ci/mutation.sh` hands `BOARD_CI_RUN_ID` to gremlins, so they are reaped; each parallel unit has its own attempt id, so none removes another's); a unit that fails its command is rerun once (a pass
-there marks the build UNSTABLE), and an infrastructure failure gets another attempt. The
+there marks the build UNSTABLE), an infrastructure failure gets another attempt, and a unit that runs out its own time bound on a node fails without a retry. The
 `Jenkinsfile`'s header comment is the authoritative description:
 
 | unit | as in deck | board specifics |
