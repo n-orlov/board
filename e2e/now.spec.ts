@@ -582,7 +582,9 @@ async function dragTo(page: Page, grip: ReturnType<Page['locator']>, x: number, 
 }
 
 async function openDock(page: Page, playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string) {
-  const s = await seedFlight(playwright, baseURL, `dock-${name}`);
+  // A repeated run (--repeat-each) of the same test seeds its own initiative: the slug is unique on the store.
+  const again = test.info().repeatEachIndex;
+  const s = await seedFlight(playwright, baseURL, again === 0 ? `dock-${name}` : `dock-${name}-${again}`);
   await page.goto(`/#/now?initiative=${s.slug}`);
   await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
   // On a long run the shared board's filter chips push the dock below the fold, and a pointer drag only reaches what is on
@@ -700,6 +702,14 @@ test.describe('the dock on the desktop', () => {
     await dragTo(page, heightBar, (await centre(heightBar)).x, (await centre(heightBar)).y + 90);
     await band(page, 'watches').getByTestId('band-toggle').click();
     await expect(resetLayout(page)).toBeEnabled();
+    // The layout is written when the page has handled each pointer-up, which on a large store can trail the drag: read it
+    // only once the stored layout shows the resized height (and the closed band), never after a fixed wait.
+    await expect
+      .poll(async () => {
+        const stored = await layoutOf(page);
+        return stored !== null && (stored.heights.asks ?? 0) > 0 && stored.open.watches === false;
+      }, FIVE_SECONDS)
+      .toBe(true);
     const arranged = (await layoutOf(page))!;
     expect(arranged.columns.map((c) => c.widgets.join(','))).not.toEqual(DEFAULT_COLUMNS);
     expect(Object.keys(arranged.heights)).toEqual(['asks']);
