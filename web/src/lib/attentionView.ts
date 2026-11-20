@@ -137,12 +137,15 @@ export function rowsFor(key: SectionKey, attention: Attention, now: Date): ItemR
   return BUILDERS[key](attention, now);
 }
 
-/** Whether a live event can change what needs attention: everything but notes and API keys. */
-export function affectsAttention(event: Pick<BoardEvent, 'type'>): boolean {
-  return !event.type.startsWith('note_') && !event.type.startsWith('key_');
+/**
+ * Whether a live event can change anything Now shows: everything but API keys and notes bound to no task. A note
+ * bound to a task is that task's latest touch, so it moves the task's "last event" row and its window membership.
+ */
+export function affectsAttention(event: Pick<BoardEvent, 'type' | 'task'>): boolean {
+  if (event.type.startsWith('key_')) return false;
+  return !event.type.startsWith('note_') || !!event.task;
 }
 
-/** The accessible name of the copy button of an actor (shown only when the board has a way back for them). */
 export function copyLabel(a: ItemActor): string {
   return `Copy way back of ${a.handle}`;
 }

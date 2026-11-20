@@ -199,8 +199,16 @@ describe('affectsAttention', () => {
   it.each([['ask_raised'], ['ask_polling'], ['task_done'], ['lease_expired'], ['check_recorded'], ['initiative_updated']])('keeps %s', (type) => {
     expect(affectsAttention({ type })).toBe(true);
   });
-  it.each([['note_posted'], ['key_created'], ['key_revoked']])('ignores %s', (type) => {
+  it.each([['note_posted'], ['note_edited'], ['note_anything']])('keeps %s when it names a task (its last touch)', (type) => {
+    expect(affectsAttention({ type, task: 'aa-1' })).toBe(true);
+  });
+  it('ignores a note that names no task', () => {
+    expect(affectsAttention({ type: 'note_posted' })).toBe(false);
+    expect(affectsAttention({ type: 'note_posted', task: '' })).toBe(false);
+  });
+  it.each([['key_created'], ['key_revoked']])('ignores %s, even when a task is named', (type) => {
     expect(affectsAttention({ type })).toBe(false);
+    expect(affectsAttention({ type, task: 'aa-1' })).toBe(false);
   });
 });
 
