@@ -239,7 +239,11 @@ test.describe('the right column on the desktop', () => {
     const s = await seedFlight(playwright, baseURL, 'noevents');
     const paths: string[] = [];
     page.on('request', (request) => paths.push(new URL(request.url()).pathname));
+    // The filter chips drop in below the page when the last page of the initiatives list is in and move the window switch:
+    // wait for that page, so the forced click lands where the switch will stay.
+    const listed = lastInitiativesPage(page);
     await page.goto(`/#/now?initiative=${s.slug}`);
+    await listed;
     await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
     await expect(recentRow(page, s.ended)).toBeVisible();
     await windowChoice(page, '3d').check({ force: true });
@@ -581,14 +585,26 @@ async function dragTo(page: Page, grip: ReturnType<Page['locator']>, x: number, 
   await page.mouse.up();
 }
 
+// Resolves when the last page of the initiatives list has been read (`next_after` absent). Call it before the navigation.
+function lastInitiativesPage(page: Page) {
+  return page.waitForResponse(async (r) => {
+    const url = new URL(r.url());
+    return r.request().method() === 'GET' && url.pathname === '/api/v1/initiatives' && (await r.json()).next_after === undefined;
+  });
+}
+
 async function openDock(page: Page, playwright: PlaywrightTestArgs['playwright'], baseURL: string | undefined, name: string) {
   // A repeated run (--repeat-each) of the same test seeds its own initiative: the slug is unique on the store.
   const again = test.info().repeatEachIndex;
   const s = await seedFlight(playwright, baseURL, again === 0 ? `dock-${name}` : `dock-${name}-${again}`);
-  await page.goto(`/#/now?initiative=${s.slug}`);
-  await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
   // On a long run the shared board's filter chips push the dock below the fold, and a pointer drag only reaches what is on
-  // screen. The chips are still arriving at first, so wait for the dock to stop moving, then scroll it into view.
+  // screen. The chips are drawn from the initiatives list, which the view reads page by page and which holds no chip until its
+  // last page is in, so the dock does not move while the pages arrive and then drops by the height of every chip at once.
+  // Wait for that last page, then for the dock to stop moving, and only then scroll it into view.
+  const listed = lastInitiativesPage(page);
+  await page.goto(`/#/now?initiative=${s.slug}`);
+  await listed;
+  await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
   const dock = page.getByTestId('now-dock');
   let last = -1;
   await expect
