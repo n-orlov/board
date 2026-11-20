@@ -114,7 +114,7 @@ func (s Store) TaggedByRef(ctx context.Context, refs []string) (map[string]Tagge
 func (s Store) tasksByRef(ctx context.Context, q tagQuerier, refs []string) ([]Task, map[string]string, error) {
 	rows, err := q.QueryContext(ctx, s.Store.Dialect().Rebind(
 		`SELECT t.id, i.slug, t.seq FROM tasks t JOIN initiatives i ON i.id = t.initiative_id
-		 WHERE (i.slug || '-' || CAST(t.seq AS TEXT)) IN (`+marks(len(refs))+`)`), anys(refs)...)
+		 WHERE (i.slug || '-' || CAST(t.seq AS TEXT)) IN (`+s.Store.Dialect().InSet()+`)`), store.TextSet(refs))
 	if err != nil {
 		return nil, nil, fmt.Errorf("read tasks by ref: %w", err)
 	}
@@ -156,7 +156,7 @@ func tagMarks(own, initiative, actor []string) []TagMark {
 // these ids.
 func (s Store) initiativeTagsByTask(ctx context.Context, q tagQuerier, ids []string) (map[string][]string, error) {
 	return s.pairs(ctx, q, "initiative tags",
-		`SELECT t.id, it.tag FROM tasks t JOIN initiative_tags it ON it.initiative_id = t.initiative_id WHERE t.id IN (`+marks(len(ids))+`) ORDER BY t.id, it.tag`, ids, nil)
+		`SELECT t.id, it.tag FROM tasks t JOIN initiative_tags it ON it.initiative_id = t.initiative_id WHERE t.id IN (`+s.Store.Dialect().InSet()+`) ORDER BY t.id, it.tag`, ids, nil)
 }
 
 // actorKindsByTask reads, for each task with these ids, the actor kinds of the
@@ -164,7 +164,7 @@ func (s Store) initiativeTagsByTask(ctx context.Context, q tagQuerier, ids []str
 // domain.ActorKinds order (SPEC 5.5).
 func (s Store) actorKindsByTask(ctx context.Context, q tagQuerier, ids []string) (map[string][]string, error) {
 	held, err := s.pairs(ctx, q, "lease holders",
-		`SELECT DISTINCT l.task_id, a.handle FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id IN (`+marks(len(ids))+`)`, ids, domain.ActorKind)
+		`SELECT DISTINCT l.task_id, a.handle FROM leases l JOIN actors a ON a.id = l.actor_id WHERE l.task_id IN (`+s.Store.Dialect().InSet()+`)`, ids, domain.ActorKind)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func orderedKinds(kinds []string) []string {
 // by task, in row order. When conv is set each value goes through it and one it
 // turns into "" is dropped.
 func (s Store) pairs(ctx context.Context, q tagQuerier, what, query string, ids []string, conv func(string) string) (map[string][]string, error) {
-	rows, err := q.QueryContext(ctx, s.Store.Dialect().Rebind(query), anys(ids)...)
+	rows, err := q.QueryContext(ctx, s.Store.Dialect().Rebind(query), store.TextSet(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", what, err)
 	}
@@ -220,7 +220,7 @@ func (s Store) pairs(ctx context.Context, q tagQuerier, what, query string, ids 
 // tagsByTask reads the sorted tags of the tasks with these ids.
 func (s Store) tagsByTask(ctx context.Context, q tagQuerier, ids []string) (map[string][]string, error) {
 	rows, err := q.QueryContext(ctx, s.Store.Dialect().Rebind(
-		`SELECT task_id, tag FROM task_tags WHERE task_id IN (`+marks(len(ids))+`) ORDER BY task_id, tag`), anys(ids)...)
+		`SELECT task_id, tag FROM task_tags WHERE task_id IN (`+s.Store.Dialect().InSet()+`) ORDER BY task_id, tag`), store.TextSet(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read task tags: %w", err)
 	}

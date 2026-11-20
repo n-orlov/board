@@ -417,6 +417,76 @@ func TestMigration00014TaskTags(t *testing.T) {
 	}
 }
 
+// TestMigration00015LeaseTaskStateIndex: at version 14 leases has no index
+// leading with (task_id, state, expires_at); migrating creates it, the live-lease
+// look-up of one task uses it, and rolling back drops it.
+func TestMigration00015LeaseTaskStateIndex(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	if err := s.MigrateTo(ctx, 14); err != nil {
+		t.Fatal(err)
+	}
+	indexed := func() int {
+		var n int
+		if err := s.Reader().QueryRow(`SELECT COUNT(*) FROM pragma_index_list('leases') WHERE name = 'leases_task_state_expires_at'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if indexed() != 0 {
+		t.Fatal("the index exists at version 14")
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if indexed() != 1 {
+		t.Fatal("migrating did not create leases_task_state_expires_at")
+	}
+	var cols []string
+	rows, err := s.Reader().Query(`SELECT name FROM pragma_index_info('leases_task_state_expires_at') ORDER BY seqno`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, c)
+	}
+	_ = rows.Close()
+	if strings.Join(cols, ",") != "task_id,state,expires_at" {
+		t.Errorf("index columns = %v", cols)
+	}
+	plan := ""
+	steps, err := s.Reader().Query(`EXPLAIN QUERY PLAN SELECT 1 FROM leases l WHERE l.task_id = 'T' AND l.state = 'live' AND l.expires_at >= 5`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for steps.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := steps.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "; "
+	}
+	_ = steps.Close()
+	if !strings.Contains(plan, "leases_task_state_expires_at") {
+		t.Errorf("one task's live-lease look-up plans %q, not the new index", plan)
+	}
+	p, err := s.provider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 14); err != nil {
+		t.Fatalf("rolling back to 14: %v", err)
+	}
+	if indexed() != 0 {
+		t.Error("the index still exists after the roll back")
+	}
+}
+
 func setVersion(t *testing.T, s *Store, v int) {
 	t.Helper()
 	if _, err := s.Writer().Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v); err != nil {
@@ -469,7 +539,7 @@ func TestEmbeddedMigrationsCoverBothDialects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 14 || files[13] != "00014_task_tags.sql" || files[12] != "00013_key_owner_and_origin.sql" || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
+		if len(files) != 15 || files[14] != "00015_lease_task_state_index.sql" || files[13] != "00014_task_tags.sql" || files[12] != "00013_key_owner_and_origin.sql" || files[11] != "00012_many_operators.sql" || files[10] != "00011_notes_concern_indexes.sql" || files[9] != "00010_idempotency.sql" || files[8] != "00009_notifications.sql" || files[7] != "00008_ask_end_commit.sql" || files[6] != "00007_ask_ended_at.sql" || files[5] != "00006_notes.sql" || files[4] != "00005_asks.sql" || files[3] != "00004_leases.sql" || files[0] != "00001_core_tables.sql" || files[1] != "00002_join_tables_sessions_indexes.sql" || files[2] != "00003_tasks.sql" {
 			t.Errorf("%s migrations = %v", name, files)
 		}
 		if _, err := fs.ReadFile(mig, files[1]); err != nil {

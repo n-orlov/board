@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -28,6 +29,15 @@ type Dialect interface {
 	Insert(table string, cols []string) string
 	// InsertReturning is Insert followed by RETURNING returning.
 	InsertReturning(table string, cols []string, returning ...string) string
+	// InsertSet builds INSERT INTO table (cols) from a single `?` parameter:
+	// a JSON array of one object per row, keyed by column name, whose rows are
+	// inserted in array order. It is one statement and one parameter however
+	// many rows the array holds.
+	InsertSet(table string, cols []string) string
+	// InSet is a subquery of the strings of a single `?` parameter, a JSON
+	// array of strings (TextSet), for `col IN (InSet())`: one parameter however
+	// many values the array holds.
+	InSet() string
 	// Upsert builds an insert that, on a conflict over the conflict columns,
 	// updates the named columns from the proposed row.
 	Upsert(table string, cols, conflict, update []string) string
@@ -127,12 +137,39 @@ func (p Postgres) Rebind(q string) string {
 	return b.String()
 }
 
-// InsertRows is one INSERT of rows rows of cols, with the ? marks of every row in order,
-// for a write that puts many rows in one statement. rows is at least 1.
-func InsertRows(table string, cols []string, rows int) string {
-	one := "(" + strings.TrimSuffix(strings.Repeat("?, ", len(cols)), ", ") + ")"
-	return fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, strings.Join(cols, ", "),
-		strings.TrimSuffix(strings.Repeat(one+", ", rows), ", "))
+// InSet implements Dialect.
+func (SQLite) InSet() string { return "SELECT value FROM json_each(?)" }
+
+// InSet implements Dialect.
+func (Postgres) InSet() string { return "SELECT jsonb_array_elements_text(?::jsonb)" }
+
+// TextSet is the parameter of Dialect.InSet: values as a JSON array, [] for none.
+func TextSet(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(values) // a []string always marshals
+	return string(b)
+}
+
+// InsertSet implements Dialect: json_each walks the array, key is the index.
+func (SQLite) InsertSet(table string, cols []string) string {
+	vals := make([]string, len(cols))
+	for i, c := range cols {
+		vals[i] = fmt.Sprintf(`json_extract(value, '$."%s"')`, c)
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM json_each(?) ORDER BY key", table, strings.Join(cols, ", "), strings.Join(vals, ", "))
+}
+
+// InsertSet implements Dialect: jsonb_populate_recordset types each value by
+// the table's own column.
+func (Postgres) InsertSet(table string, cols []string) string {
+	vals := make([]string, len(cols))
+	for i, c := range cols {
+		vals[i] = "r." + c
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM jsonb_populate_recordset(NULL::%s, ?::jsonb) WITH ORDINALITY AS r ORDER BY r.ordinality",
+		table, strings.Join(cols, ", "), strings.Join(vals, ", "), table)
 }
 
 func insert(table string, cols []string) string {

@@ -119,7 +119,7 @@ func TestABatchOfEventsWritesEveryColumnAndReturnsTheIDsInOrder(t *testing.T) {
 
 func TestABatchOfEventsWritesMoreThanOneStatementsWorth(t *testing.T) {
 	a, write, _, _ := batchWorld(t)
-	events := make([]Written, 2*store.InsertManyRows+1)
+	events := make([]Written, 2001)
 	for i := range events {
 		events[i] = Written{ActorID: a.agent, Event: Event{Principal: "system:expiry", Type: "t", Summary: "e" + strconv.Itoa(i)}}
 	}

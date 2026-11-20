@@ -69,7 +69,7 @@ func StrandedPayload(s Stranded, publicURL string) ([]byte, error) {
 // EnqueueStrandedBatch enqueues the stranded notification of each lease_expired
 // event in list whose lease is the newest on its task, when alerts are on and
 // VH_NOTIFY_ON names stranded. It runs a number of statements that does not
-// depend on how many events there are (one INSERT per store.InsertManyRows rows).
+// depend on how many events there are (one INSERT, store.InsertMany, at most).
 func EnqueueStrandedBatch(ctx context.Context, tx *sql.Tx, st *store.Store, list []Stranded, now time.Time) error {
 	if !st.Notifies(store.NotifyStranded) {
 		return nil

@@ -471,7 +471,9 @@ one is `ErrNotFound` with nothing written. `Store.Links` reads a task's `Deps` a
 
 Both tables exist (migration `00004_leases`, in both dialects) with `n` (the short ref `L<n>`,
 `domain.FormatLeaseRef`), the indexes `leases(state, expires_at)` and `lease_resources(resource)` (§4.10), and extra indexes
-on `leases(task_id)` and `leases(actor_id)`. The database holds the ttl within [60, 43200] and the state to the three values.
+on `leases(task_id)` and `leases(actor_id)`; migration `00015_lease_task_state_index` (one common form, a Down that drops
+it) adds `leases(task_id, state, expires_at)`, so whether one task holds a live lease is a look-up of that task's leases
+on SQLite too, not a walk of every live lease per task. The database holds the ttl within [60, 43200] and the state to the three values.
 
 A lease is started only on an `open` task: a `done` or a `closed` task is `ErrConflict` (`cannot start a lease on task aa-1: it is
 done`, next `Run vh task reopen aa-1 first, or start the lease on an open task.`) and nothing is written. A task never
@@ -495,7 +497,7 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
 - **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
   event. A lease that has not expired is `ErrConflict`.
 - **Expiry** (`ExpireDue`) reads the live leases with `expires_at < now` (locking them on a database that can: Postgres `FOR UPDATE`), marks them all expired with one conditional update (§5.1) and writes one
-  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`, origin the holder's own) per lease, with the stranded alert of §4.11 for each that is the newest on its task. It runs a constant number of statements however many leases are due: the read, the update, one multi-row INSERT of the events and one of the alerts (a further INSERT only per 1000 rows). The update must touch exactly the leases the read listed; when another writer changed one in between, the transaction rolls back and a later call expires them. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, the authenticating key's `last_used_at`, and the authenticating session's row, §3.2), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
+  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`, origin the holder's own) per lease, with the stranded alert of §4.11 for each that is the newest on its task. It runs a constant number of statements however many leases are due: the read, the update, one INSERT of the events and one of the alerts, each binding all its rows as a single JSON parameter (`store.InsertMany`), so no statement is added and no bound-parameter limit is reached however many rows there are. The update must touch exactly the leases the read listed; when another writer changed one in between, the transaction rolls back and a later call expires them. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, the authenticating key's `last_used_at`, and the authenticating session's row, §3.2), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
 - **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It first runs `ExpireDue` (§5.1), so a lease past its expiry is marked expired and left out.
 
@@ -706,7 +708,7 @@ and is indexed on `expires_at` for that sweep.
 Phase 0 creates `actors`, `initiatives`, `initiative_tags`, `events`, `api_keys` and `sessions`; Phase 1 adds
 `tasks` and `task_deps` (migration `00003_tasks`, which also adds `initiatives.next_task_seq`) and `leases` and
 `lease_resources` (migration `00004_leases`, §4.4); Phase 2 adds `asks` (`00005_asks`, §4.5) and `notes` and
-`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10); Phase 5 drops the one-operator index (`00012_many_operators`, §4.1) and adds key owner and origin (`00013_key_owner_and_origin`, above) and a task's own tags (`00014_task_tags`, §4.3). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
+`cursors` (`00006_notes`, §4.7, §4.8), `00007_ask_ended_at` adds `asks.ended_at` and `00008_ask_end_commit` adds `asks.end_commit_ns`; Phase 3 adds `notifications` (`00009_notifications`, §4.11); Phase 4 adds `idempotency_keys` (`00010_idempotency`, §4.12) and `00011_notes_concern_indexes` (indexes only, §4.10); Phase 5 drops the one-operator index (`00012_many_operators`, §4.1) and adds key owner and origin (`00013_key_owner_and_origin`, above) and a task's own tags (`00014_task_tags`, §4.3), and an index of a task's leases by state (`00015_lease_task_state_index`, §4.4). The other tables of this section arrive with the phases that use them. Migrations are additive and forward-only, and rows written before
 an upgrade survive it. `events.task_id` is a plain nullable column with no foreign key. The indexes `events(task_id, id)` and `events(initiative_id, id)` exist, as does
 `initiative_tags(tag)`.
 
@@ -1613,7 +1615,7 @@ without a store answers **503**. Like §6.8 it first expires the leases that ran
 - **Cost.** The read runs a constant number of SQL statements whatever the number of tasks, leases or events: one for the
   in-flight tasks with their leases, one for the recent tasks with their last events, four for the tags and marks of every task the answer names (none when it
   names none; they also give the attention items theirs, so §6.8's four are not run again), and the fixed statements of
-  §6.8. That holds when the read meets leases that have run out: their expiry (§4.3) is a constant number of statements too, not a few per lease. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
+  §6.8. That holds when the read meets leases that have run out: their expiry (§4.3) is a constant number of statements too, not a few per lease. No statement grows with the store either: a list of tasks, leases or actors the read looks up (the tags and marks, the resources and holders of the live leases) is one JSON-array parameter (`Dialect.InSet`), never one bound parameter per item, so neither database's parameter limit caps the board, and no list is split into chunks. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
 
 ### 6.9 Notifications
 

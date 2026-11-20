@@ -171,16 +171,51 @@ func TestOnlyPostgresLocksTheRowsOfATableAlias(t *testing.T) {
 	}
 }
 
-func TestInsertRowsHasTheMarksOfEveryRowInOrder(t *testing.T) {
-	got := InsertRows("actors", cols, 2)
-	want := "INSERT INTO actors (id, handle, kind) VALUES (?, ?, ?), (?, ?, ?)"
-	if got != want {
-		t.Errorf("InsertRows = %q, want %q", got, want)
+func TestInsertSetIsOneStatementWithOneParameterOnBothDatabases(t *testing.T) {
+	lite := (SQLite{}).InsertSet("actors", cols)
+	want := `INSERT INTO actors (id, handle, kind) SELECT json_extract(value, '$."id"'), json_extract(value, '$."handle"'), ` +
+		`json_extract(value, '$."kind"') FROM json_each(?) ORDER BY key`
+	if lite != want {
+		t.Errorf("SQLite InsertSet = %q, want %q", lite, want)
 	}
-	if got := (Postgres{}).Rebind(InsertRows("actors", cols, 2)); !strings.HasSuffix(got, "($1, $2, $3), ($4, $5, $6)") {
-		t.Errorf("rebound = %q", got)
+	pg := (Postgres{}).Rebind((Postgres{}).InsertSet("actors", cols))
+	want = "INSERT INTO actors (id, handle, kind) SELECT r.id, r.handle, r.kind FROM jsonb_populate_recordset(NULL::actors, $1::jsonb) " +
+		"WITH ORDINALITY AS r ORDER BY r.ordinality"
+	if pg != want {
+		t.Errorf("Postgres InsertSet = %q, want %q", pg, want)
 	}
-	if one := InsertRows("actors", cols, 1); one != (SQLite{}).Insert("actors", cols) {
-		t.Errorf("one row = %q, want the single-row INSERT", one)
+	if strings.Contains(pg, "$2") || strings.Count(lite, "?") != 1 {
+		t.Errorf("InsertSet binds more than one parameter: %q / %q", lite, pg)
+	}
+}
+
+func TestInSetIsOneParameterOfAJSONArrayOfStrings(t *testing.T) {
+	if got := (SQLite{}).InSet(); got != "SELECT value FROM json_each(?)" {
+		t.Errorf("SQLite InSet = %q", got)
+	}
+	if got := (Postgres{}).Rebind((Postgres{}).InSet()); got != "SELECT jsonb_array_elements_text($1::jsonb)" {
+		t.Errorf("Postgres InSet = %q", got)
+	}
+	for _, c := range []struct {
+		in   []string
+		want string
+	}{{nil, "[]"}, {[]string{}, "[]"}, {[]string{"a", `b"c`, "d'e"}, `["a","b\"c","d'e"]`}} {
+		if got := TextSet(c.in); got != c.want {
+			t.Errorf("TextSet(%q) = %s, want %s", c.in, got, c.want)
+		}
+	}
+	s := open(t)
+	for _, c := range []struct {
+		in   []string
+		want int
+	}{{nil, 0}, {[]string{"x"}, 0}, {[]string{"a1", "x", `quo"te`}, 2}} {
+		var n int
+		if err := s.Reader().QueryRow(`SELECT COUNT(*) FROM (SELECT 'a1' AS id UNION ALL SELECT 'b2' UNION ALL SELECT 'quo"te') v WHERE v.id IN (`+
+			(SQLite{}).InSet()+`)`, TextSet(c.in)).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != c.want {
+			t.Errorf("IN %q matched %d rows, want %d", c.in, n, c.want)
+		}
 	}
 }

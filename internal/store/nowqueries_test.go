@@ -130,3 +130,143 @@ func TestTheNowReadRunsTheSameNumberOfQueriesWhenItMeetsDueLeases(t *testing.T) 
 		}
 	}
 }
+
+// leaseMix is what seedLeases put on the board.
+type leaseMix struct{ due, newestDue, liveNotDue, ended int }
+
+// seedLeases adds tasks to initiative aa straight through SQL, each with the
+// leases of every state the Now read meets, all an hour or more old: one live
+// lease that falls due an hour after the board's latest start; on every fourth
+// task an older live lease due before it (not the newest on its task, so no
+// stranded alert); on every fifth an ended lease; on every second a later live
+// lease not due for days, which leaves the due one not the newest either.
+func seedLeases(t *testing.T, st *store.Store, tasks int) leaseMix {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := st.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var ini, actor string
+	var base int64
+	if err := tx.QueryRowContext(ctx, `SELECT t.initiative_id, l.actor_id, (SELECT MAX(started_at) FROM leases) FROM leases l
+		JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id WHERE i.slug = 'aa' LIMIT 1`).Scan(&ini, &actor, &base); err != nil {
+		t.Fatal(err)
+	}
+	const hour = int64(time.Hour / time.Millisecond)
+	var mix leaseMix
+	lease := func(task string, n int, state string, started, expires int64) {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO leases (id, task_id, actor_id, intent, ttl_seconds, started_at, renewed_at, expires_at, state, ended_at)
+			VALUES (?, ?, ?, 'bulk', 3600, ?, ?, ?, ?, CASE WHEN ? = 'ended' THEN ? END)`,
+			fmt.Sprintf("%s-l%d", task, n), task, actor, started, started, expires, state, state, expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i <= tasks; i++ {
+		task := fmt.Sprintf("seeded-%d", i)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tasks (id, initiative_id, seq, title, created_by, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, task, ini, 1000+i, "seeded "+task, actor, base-4*hour, base-4*hour); err != nil {
+			t.Fatal(err)
+		}
+		if i%5 == 0 {
+			lease(task, 0, "ended", base-3*hour, base-2*hour)
+			mix.ended++
+		}
+		if i%4 == 0 {
+			lease(task, 1, "live", base-2*hour, base-hour)
+			mix.due++
+		}
+		lease(task, 2, "live", base-hour, base+hour)
+		mix.due++
+		if i%2 == 0 {
+			lease(task, 3, "live", base+hour, base+100*hour)
+			mix.liveNotDue++
+		} else {
+			mix.newestDue++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return mix
+}
+
+// dueRead is one Now read, 48 hours on, of a board of five tasks per initiative
+// plus seeded tasks with their leases: how many statements it ran, what the
+// seed held, and what the read left behind.
+type dueRead struct {
+	statements                                       int64
+	mix                                              leaseMix
+	expiredEvents, alerts, stillLive, ended, expired int
+}
+
+func readWithSeededLeases(t *testing.T, seeded int, alerts ...string) dueRead {
+	t.Helper()
+	a, count, advance := boardOfSize(t, 5, alerts...)
+	var r dueRead
+	r.mix = seedLeases(t, a.Store, seeded)
+	advance(48 * time.Hour)
+	before := count.Load()
+	if _, err := a.Board(context.Background(), attention.Query{}, attention.Window24h); err != nil {
+		t.Fatal(err)
+	}
+	r.statements = count.Load() - before
+	if err := a.Store.Reader().QueryRowContext(context.Background(), `SELECT
+		(SELECT COUNT(*) FROM events WHERE type = 'lease_expired'), (SELECT COUNT(*) FROM notifications WHERE kind = 'stranded'),
+		(SELECT COUNT(*) FROM leases WHERE id LIKE 'seeded-%' AND state = 'live'), (SELECT COUNT(*) FROM leases WHERE id LIKE 'seeded-%' AND state = 'ended'),
+		(SELECT COUNT(*) FROM leases WHERE id LIKE 'seeded-%' AND state = 'expired')`).
+		Scan(&r.expiredEvents, &r.alerts, &r.stillLive, &r.ended, &r.expired); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestTheNowReadRunsTheSameNumberOfStatementsPastAThousandDueLeases(t *testing.T) {
+	for name, alerts := range map[string][]string{"alerts off": nil, "stranded alerts on": {store.NotifyStranded}} {
+		// every kind of lease, live and due, ended, live and not yet due, is
+		// on both boards
+		small := readWithSeededLeases(t, 20, alerts...)
+		// 2100 seeded tasks hold 2625 due leases, 1050 of them the newest on
+		// their task, and 1050 live leases not due: past a thousand rows of
+		// events, of alerts and of live leases in flight (and their old chunks
+		// of 1000 rows and 500 leases)
+		large := readWithSeededLeases(t, 2100, alerts...)
+		if large.mix.due <= 2000 || large.mix.newestDue <= 1000 || large.mix.liveNotDue <= 1000 {
+			t.Fatalf("%s: the large seed holds %+v: it crosses no thousand", name, large.mix)
+		}
+		if small.statements != large.statements {
+			t.Errorf("%s: %d statements with %d due leases but %d with %d: the read is not constant",
+				name, small.statements, small.mix.due, large.statements, large.mix.due)
+		}
+		for _, r := range []dueRead{small, large} {
+			// the board of five tasks per initiative adds its own due leases:
+			// two thirds of ten tasks were leased and half of those ended
+			const boardDue = 4
+			wantAlerts := 0
+			if alerts != nil {
+				wantAlerts = r.mix.newestDue + boardDue
+			}
+			if r.expired != r.mix.due || r.expiredEvents != r.mix.due+boardDue || r.alerts != wantAlerts ||
+				r.stillLive != r.mix.liveNotDue || r.ended != r.mix.ended {
+				t.Errorf("%s: seeded %+v; read left %d expired with %d events and %d alerts, %d still live, %d ended",
+					name, r.mix, r.expired, r.expiredEvents, r.alerts, r.stillLive, r.ended)
+			}
+		}
+	}
+}
+
+func TestTheNowReadAnswersABoardPastEveryBoundParameterLimit(t *testing.T) {
+	// 33000 seeded tasks are all on the board, past SQLite's 32766 bound
+	// parameters per statement, which a list of one parameter per task cannot
+	// pass
+	small := readWithSeededLeases(t, 20)
+	large := readWithSeededLeases(t, 33000)
+	if small.statements != large.statements {
+		t.Errorf("%d statements with %d due leases but %d with %d: the read is not constant",
+			small.statements, small.mix.due, large.statements, large.mix.due)
+	}
+	if large.expired != large.mix.due || large.stillLive != large.mix.liveNotDue {
+		t.Errorf("seeded %+v; the read left %d expired and %d live", large.mix, large.expired, large.stillLive)
+	}
+}

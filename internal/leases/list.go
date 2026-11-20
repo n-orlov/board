@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/n-orlov/village-hall/internal/domain"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // State filters of a list. The empty state is StateLive.
@@ -173,23 +174,20 @@ func (s Store) readLeases(ctx context.Context, query string, args []any) ([]Leas
 	return out, nil
 }
 
-// resourceChunk is how many leases one resource query names.
-const resourceChunk = 500
-
 // attachResources sets the Resources of every lease in list, each sorted, in one
-// query per resourceChunk leases instead of one per lease.
+// query however many leases there are.
 func (s Store) attachResources(ctx context.Context, list []Lease) error {
-	for from := 0; from < len(list); from += resourceChunk {
-		chunk := list[from:min(from+resourceChunk, len(list))]
-		by, err := s.resourcesOfAll(ctx, chunk)
-		if err != nil {
-			return err
-		}
-		for i := range chunk {
-			chunk[i].Resources = by[chunk[i].ID]
-			if chunk[i].Resources == nil {
-				chunk[i].Resources = []string{}
-			}
+	if len(list) == 0 {
+		return nil
+	}
+	by, err := s.resourcesOfAll(ctx, list)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		list[i].Resources = by[list[i].ID]
+		if list[i].Resources == nil {
+			list[i].Resources = []string{}
 		}
 	}
 	return nil
@@ -197,13 +195,12 @@ func (s Store) attachResources(ctx context.Context, list []Lease) error {
 
 // resourcesOfAll reads the resources of the leases in one query, by lease id.
 func (s Store) resourcesOfAll(ctx context.Context, list []Lease) (map[string][]string, error) {
-	marks := strings.TrimSuffix(strings.Repeat("?, ", len(list)), ", ")
-	args := make([]any, len(list))
+	ids := make([]string, len(list))
 	for i, l := range list {
-		args[i] = l.ID
+		ids[i] = l.ID
 	}
 	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
-		`SELECT lease_id, resource FROM lease_resources WHERE lease_id IN (`+marks+`) ORDER BY lease_id, resource`), args...)
+		`SELECT lease_id, resource FROM lease_resources WHERE lease_id IN (`+s.Store.Dialect().InSet()+`) ORDER BY lease_id, resource`), store.TextSet(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read lease resources: %w", err)
 	}

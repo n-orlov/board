@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/n-orlov/village-hall/internal/leases"
+	"github.com/n-orlov/village-hall/internal/store"
 )
 
 // conflicts lists the resources that two or more live leases hold, the one with
@@ -136,7 +137,7 @@ func (s Store) wayBacks(ctx context.Context, live []leases.Lease) (map[string]st
 		ids = append(ids, l.ActorID)
 	}
 	rows, err := s.Store.ReaderFor(ctx).QueryContext(ctx, s.Store.Dialect().Rebind(
-		`SELECT handle, COALESCE(way_back, '') FROM actors WHERE id IN (`+marks(len(ids))+`)`), anys(ids)...)
+		`SELECT handle, COALESCE(way_back, '') FROM actors WHERE id IN (`+s.Store.Dialect().InSet()+`)`), store.TextSet(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read attention actors: %w", err)
 	}
