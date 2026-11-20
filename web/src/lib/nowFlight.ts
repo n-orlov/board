@@ -4,6 +4,7 @@
 import type { components } from './api/schema';
 import { expiresIn } from './durations';
 import { relativeTime } from './format';
+import { viaOrigin } from './origin';
 
 type NowBoard = components['schemas']['AttentionNow'];
 export type NowWindow = components['schemas']['NowWindow'];
@@ -97,8 +98,10 @@ export interface RecentRow {
   title: string;
   initiative: string;
   href: string;
-  /** "lease_ended by bob 12 minutes ago". */
+  /** "lease_ended by bob 12 minutes ago", or "lease_ended by bob via alice 12 minutes ago" for a write made on an operator's behalf. */
   last: string;
+  /** "via alice" when the event's own origin is set and is not its actor, else "". */
+  via: string;
   /** The event's own summary. */
   summary: string;
   at: string;
@@ -108,14 +111,19 @@ export interface RecentRow {
 
 /** The Recently touched rows in the server's order (latest event first). */
 export function recentRows(items: readonly Recent[], now: Date): RecentRow[] {
-  return items.map((item) => ({
-    task: item.task.task,
-    title: item.task.title,
-    initiative: item.task.initiative,
-    href: taskHref(item.task.task),
-    last: `${item.last_event.type} by ${item.last_event.actor.handle} ${relativeTime(item.last_event.at, now)}`,
-    summary: item.last_event.summary,
-    at: item.last_event.at,
-    by: item.last_event.actor.handle,
-  }));
+  return items.map((item) => {
+    const e = item.last_event;
+    const via = viaOrigin(e.actor.handle, e.origin);
+    return {
+      task: item.task.task,
+      title: item.task.title,
+      initiative: item.task.initiative,
+      href: taskHref(item.task.task),
+      last: `${e.type} by ${e.actor.handle}${via === '' ? '' : ` ${via}`} ${relativeTime(e.at, now)}`,
+      via,
+      summary: e.summary,
+      at: e.at,
+      by: e.actor.handle,
+    };
+  });
 }

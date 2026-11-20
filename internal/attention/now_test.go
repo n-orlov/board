@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -348,5 +349,76 @@ func TestEveryAttentionItemThatIsATaskCarriesItsOwnInitiativeAndActorTags(t *tes
 	}
 	if got := itemMarks(e.board(t, Query{}, "24h").Attention); !reflect.DeepEqual(got, want) {
 		t.Errorf("board attention items = %v, want %v", got, want)
+	}
+}
+
+// lastEventOrigins ends one lease per (task, ctx) pair, spaced a second apart, and returns the Recently touched
+// rows' last-event actor and origin keyed by task ref.
+func lastEventOrigins(t *testing.T, e env, endings []struct {
+	task string
+	as   audit.Actor
+	ctx  func() context.Context
+}) map[string][2]string {
+	t.Helper()
+	for _, n := range endings {
+		l := e.lease(t, n.as, n.task)
+		e.tick(time.Second)
+		if _, err := e.Leases.End(n.ctx(), n.as, "key:x", l.Ref, "done"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := map[string][2]string{}
+	for _, r := range e.board(t, Query{}, "8h").Recent {
+		out[r.Task.Ref] = [2]string{r.LastEvent.Actor.Handle, r.LastEvent.Origin}
+	}
+	return out
+}
+
+func TestTheRecentLastEventCarriesTheOriginTheEventRecordedWhateverTheActorIsNow(t *testing.T) {
+	e := quiet(t)
+	// Both agents act through an operator who is no actor row until something of theirs is written.
+	e.tick(time.Second)
+	if _, err := e.Tasks.Create(ctx, op, "key:x", tasks.New{Initiative: "bb", Title: "operator row exists"}); err != nil {
+		t.Fatal(err)
+	}
+	via := func(h string) func() context.Context {
+		return func() context.Context { return audit.WithOrigin(ctx, h) }
+	}
+	got := lastEventOrigins(t, e, []struct {
+		task string
+		as   audit.Actor
+		ctx  func() context.Context
+	}{
+		{"aa-1", me, via(op.Handle)},                        // differing: an agent writing for an operator
+		{"aa-2", op, func() context.Context { return ctx }}, // equal: an operator's own write, origin is itself
+		{"bb-1", bob, via("")},                              // null: a key without an owner
+	})
+	if got["aa-1"] != [2]string{me.Handle, op.Handle} {
+		t.Errorf("aa-1 (agent for an operator) = %v, want actor %s origin %s", got["aa-1"], me.Handle, op.Handle)
+	}
+	if got["aa-2"] != [2]string{op.Handle, op.Handle} {
+		t.Errorf("aa-2 (operator's own write) = %v, want actor and origin both %s", got["aa-2"], op.Handle)
+	}
+	if got["bb-1"] != [2]string{bob.Handle, ""} {
+		t.Errorf("bb-1 (no known operator) = %v, want actor %s and no origin", got["bb-1"], bob.Handle)
+	}
+	// The agent's origin is overwritten by a later ownerless write; the event written earlier keeps its own.
+	l := e.lease(t, me, "bb-2")
+	e.tick(time.Second)
+	if _, err := e.Leases.End(audit.WithOrigin(ctx, ""), me, "key:x", l.Ref, "later"); err != nil {
+		t.Fatal(err)
+	}
+	b := e.board(t, Query{}, "8h")
+	for _, r := range b.Recent {
+		switch r.Task.Ref {
+		case "aa-1":
+			if r.LastEvent.Origin != op.Handle {
+				t.Errorf("aa-1 origin after the actor's origin was cleared = %q, want %s", r.LastEvent.Origin, op.Handle)
+			}
+		case "bb-2":
+			if r.LastEvent.Origin != "" {
+				t.Errorf("bb-2 origin = %q, want none", r.LastEvent.Origin)
+			}
+		}
 	}
 }

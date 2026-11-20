@@ -1885,6 +1885,12 @@ export interface components {
             type: string;
             summary: string;
             actor: components["schemas"]["AttentionActor"];
+            /**
+             * @description The handle of the operator actor behind the write, as the event recorded it (the `origin` of
+             *     `GET /events`). Fixed when the event is written, whatever the actor's origin becomes later. Absent when
+             *     no operator was known.
+             */
+            origin?: string;
             /** Format: date-time */
             at: string;
         };

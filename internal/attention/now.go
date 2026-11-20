@@ -71,7 +71,9 @@ type LastEvent struct {
 	Type    string
 	Summary string
 	Actor   Actor
-	At      time.Time
+	// Origin is the handle of the operator behind the write, as the event recorded it ("" when none was known).
+	Origin string
+	At     time.Time
 }
 
 // Recent is a task with no live lease whose last event is inside the window.
@@ -286,21 +288,21 @@ func (s Store) recent(ctx context.Context, sc scope, now time.Time, span time.Du
 	cond, more := sc.and(`t.initiative_id`)
 	args = append([]any{store.EncodeBound(now.Add(-span))}, args...)
 	sec := section{
-		cols: flightCols + `, e.type, e.summary, e.at, a.handle, a.way_back`,
+		cols: flightCols + `, e.type, e.summary, e.at, a.handle, a.way_back, og.handle`,
 		from: `tasks t JOIN initiatives i ON i.id = t.initiative_id
 		 JOIN events e ON e.n = (SELECT MAX(c.n) FROM events c WHERE c.task_id = t.id)
-		 JOIN actors a ON a.id = e.actor_id
+		 JOIN actors a ON a.id = e.actor_id LEFT JOIN actors og ON og.id = e.origin
 		 WHERE e.at >= ? AND NOT EXISTS (SELECT 1 FROM leases l WHERE l.task_id = t.id AND ` + live + `)` + cond,
 		order: `e.at DESC, e.n DESC`, args: append(args, more...),
 	}
 	return collect(ctx, s, sec, func(r rowScanner) (Recent, error) {
 		var (
-			ev LastEvent
-			at int64
-			wb sql.NullString
+			ev     LastEvent
+			at     int64
+			wb, og sql.NullString
 		)
-		t, err := scanTask(r, &ev.Type, &ev.Summary, &at, &ev.Actor.Handle, &wb)
-		ev.Actor.WayBack, ev.At = wb.String, store.DecodeTime(at)
+		t, err := scanTask(r, &ev.Type, &ev.Summary, &at, &ev.Actor.Handle, &wb, &og)
+		ev.Actor.WayBack, ev.Origin, ev.At = wb.String, og.String, store.DecodeTime(at)
 		return Recent{Task: t, LastEvent: ev}, err
 	})
 }

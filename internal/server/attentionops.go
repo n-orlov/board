@@ -169,7 +169,11 @@ func apiInFlight(f attention.InFlight) NowInFlight {
 
 func apiRecent(r attention.Recent) NowRecent {
 	e := r.LastEvent
-	return NowRecent{Task: apiNowTask(r.Task), LastEvent: NowLastEvent{Type: e.Type, Summary: e.Summary, Actor: apiActor(e.Actor), At: e.At}}
+	last := NowLastEvent{Type: e.Type, Summary: e.Summary, Actor: apiActor(e.Actor), At: e.At}
+	if e.Origin != "" {
+		last.Origin = &e.Origin
+	}
+	return NowRecent{Task: apiNowTask(r.Task), LastEvent: last}
 }
 
 func apiTaskMarks(in map[string]tasks.Tagged) map[string]TaskTagMarks {

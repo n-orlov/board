@@ -99,7 +99,36 @@ describe('recentRows', () => {
   it('shows the last event with its type, actor and age, in the server order', () => {
     const rows = recentRows(items, NOW);
     expect(rows).toEqual([
-      { task: 'aa-4', title: 'Title aa-4', initiative: 'aa', href: '#/t/aa-4', last: 'lease_ended by bob 12 minutes ago', summary: 'L3 ended: done', at: '2026-01-01T11:48:00Z', by: 'bob' },
+      { task: 'aa-4', title: 'Title aa-4', initiative: 'aa', href: '#/t/aa-4', last: 'lease_ended by bob 12 minutes ago', via: '', summary: 'L3 ended: done', at: '2026-01-01T11:48:00Z', by: 'bob' },
     ]);
+  });
+
+  describe('via <origin>, read from the event itself', () => {
+    const ev = (actor: string, origin?: string | null): Recent => ({
+      task: task('aa-5'),
+      last_event: { type: 'task_created', summary: 's', actor: { handle: actor }, at: '2026-01-01T11:48:00Z', ...(origin === undefined ? {} : { origin }) } as Recent['last_event'],
+    });
+
+    it('says "via X" when the event\'s origin is set and is not its actor', () => {
+      const [row] = recentRows([ev('pi:review', 'operator')], NOW);
+      expect(row.via).toBe('via operator');
+      expect(row.last).toBe('task_created by pi:review via operator 12 minutes ago');
+    });
+    it('says nothing when the origin is the actor', () => {
+      const [row] = recentRows([ev('alice', 'alice')], NOW);
+      expect(row.via).toBe('');
+      expect(row.last).toBe('task_created by alice 12 minutes ago');
+    });
+    it('says nothing when the origin is absent, null or empty', () => {
+      for (const origin of [undefined, null, '']) {
+        const [row] = recentRows([ev('pi:review', origin)], NOW);
+        expect(row.via).toBe('');
+        expect(row.last).toBe('task_created by pi:review 12 minutes ago');
+      }
+    });
+    it('reads each row\'s own origin, so two events by one actor differ', () => {
+      const rows = recentRows([ev('bot', 'alice'), ev('bot', 'bob'), ev('bot', 'bot')], NOW);
+      expect(rows.map((r) => r.via)).toEqual(['via alice', 'via bob', '']);
+    });
   });
 });

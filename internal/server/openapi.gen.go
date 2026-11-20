@@ -2085,9 +2085,14 @@ type NowInFlight struct {
 // NowLastEvent The last event written on a task.
 type NowLastEvent struct {
 	// Actor An actor involved in an item, with the way back the board has on record for it.
-	Actor   AttentionActor `json:"actor"`
-	At      time.Time      `json:"at"`
-	Summary string         `json:"summary"`
+	Actor AttentionActor `json:"actor"`
+	At    time.Time      `json:"at"`
+
+	// Origin The handle of the operator actor behind the write, as the event recorded it (the `origin` of
+	// `GET /events`). Fixed when the event is written, whatever the actor's origin becomes later. Absent when
+	// no operator was known.
+	Origin  *string `json:"origin,omitempty"`
+	Summary string  `json:"summary"`
 
 	// Type The event type, such as `lease_ended`.
 	Type string `json:"type"`
