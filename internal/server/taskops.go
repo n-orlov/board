@@ -121,7 +121,7 @@ func apiLease(l leases.Lease) Lease {
 func apiLinks(list []tasks.Link) []TaskLink {
 	out := make([]TaskLink, len(list))
 	for i, l := range list {
-		out[i] = TaskLink{Ref: l.Ref, Title: l.Title, Status: TaskLinkStatus(l.Status)}
+		out[i] = TaskLink{Ref: l.Ref, Title: l.Title, Status: TaskLinkStatus(l.Status), Tags: nonNil(l.Tags), TagMarks: apiTagMarks(l.TagMarks)}
 	}
 	return out
 }

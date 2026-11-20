@@ -2,6 +2,7 @@ package attention
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -300,5 +301,52 @@ func TestAnExpiredLeaseAndADoneTaskKeepTheirTagsOnTheBoard(t *testing.T) {
 	}
 	if got := tagNames(b.TaskMarks["aa-1"].TagMarks); !slices.Equal(got, []string{"task:stranded-own", "initiative:ops", "actor:pi"}) {
 		t.Errorf("an expired lease's task has marks %v", got)
+	}
+}
+
+// itemMarks is the tags and marks of the attention items that are tasks, keyed by
+// "<section> <ref>".
+func itemMarks(r Result) map[string][]string {
+	out := map[string][]string{}
+	put := func(key string, tags []string, marks []tasks.TagMark) {
+		if tags == nil {
+			out[key] = []string{"nil tags"}
+			return
+		}
+		out[key] = append(append([]string{}, tags...), tagNames(marks)...)
+	}
+	for _, d := range r.DoneNotClosed {
+		put("done "+d.Task, d.Tags, d.TagMarks)
+	}
+	for _, l := range r.ExpiredLeases {
+		put("expired "+l.Task, l.Tags, l.TagMarks)
+	}
+	for _, w := range r.OverdueWatches {
+		put("watch "+w.Task, w.Tags, w.TagMarks)
+	}
+	return out
+}
+
+func TestEveryAttentionItemThatIsATaskCarriesItsOwnInitiativeAndActorTags(t *testing.T) {
+	e := newEnv(t)
+	cadence := int64(3600)
+	w := must(e.Tasks.Create(ctx, bob, "key:x", tasks.New{Initiative: "aa", Title: "watch", Kind: "watch", CadenceSeconds: &cadence, Tags: []string{"w-own"}}))
+	must(e.Tasks.AddTag(ctx, op, "key:x", "aa-1", "mine"))
+	e.lease(t, audit.Actor{Handle: "ralph:r1"}, "bb-1")
+	done := e.lease(t, audit.Actor{Handle: "claude:w1"}, "aa-1")
+	must(e.Leases.End(ctx, me, "key:x", done.Ref, "x"))
+	must(e.Tasks.Done(ctx, me, "key:x", "aa-1", tasks.DoneOptions{}))
+	e.tick(90 * time.Minute)
+
+	want := map[string][]string{
+		"done aa-1":      {"mine", "task:mine", "initiative:ops", "actor:claude"},
+		"expired bb-1":   {"actor:ralph"},
+		"watch " + w.Ref: {"w-own", "task:w-own", "initiative:ops"},
+	}
+	if got := itemMarks(e.get(t, Query{})); !reflect.DeepEqual(got, want) {
+		t.Errorf("GET attention items = %v, want %v", got, want)
+	}
+	if got := itemMarks(e.board(t, Query{}, "24h").Attention); !reflect.DeepEqual(got, want) {
+		t.Errorf("board attention items = %v, want %v", got, want)
 	}
 }

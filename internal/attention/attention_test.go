@@ -11,6 +11,7 @@ import (
 
 	"github.com/n-orlov/village-hall/internal/asks"
 	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/leases"
 	"github.com/n-orlov/village-hall/internal/store"
@@ -252,8 +253,9 @@ func TestAnExpiredLeaseIsListedAndClearedByAckOrByALaterLeaseOnItsTask(t *testin
 	}
 	got := r.ExpiredLeases[1]
 	want := ExpiredLease{Lease: old.Ref, Holder: Actor{Handle: "claude@host", WayBack: "tmux 3"}, Task: "aa-1", Title: "task in aa",
-		Intent: "work on aa-1", RenewedAt: old.RenewedAt, ExpiredAt: old.ExpiresAt}
-	if got != want {
+		Intent: "work on aa-1", RenewedAt: old.RenewedAt, ExpiredAt: old.ExpiresAt,
+		Tags: []string{}, TagMarks: []tasks.TagMark{{Tag: "ops", Source: domain.TagSourceInitiative}}}
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("expired lease = %+v, want %+v", got, want)
 	}
 	if r.ExpiredLeases[0].Lease != other.Ref {

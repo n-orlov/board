@@ -83,12 +83,13 @@ func apiLastLease(l *attention.LastLease) *AttentionLastLease {
 }
 
 func apiDoneTask(d attention.DoneTask) AttentionDoneTask {
-	return AttentionDoneTask{Task: d.Task, Title: d.Title, DoneBy: apiActor(d.DoneBy), DoneAt: d.DoneAt, LastLease: apiLastLease(d.LastLease)}
+	return AttentionDoneTask{Task: d.Task, Title: d.Title, DoneBy: apiActor(d.DoneBy), DoneAt: d.DoneAt, LastLease: apiLastLease(d.LastLease),
+		Tags: nonNil(d.Tags), TagMarks: apiTagMarks(d.TagMarks)}
 }
 
 func apiExpiredLease(l attention.ExpiredLease) AttentionExpiredLease {
 	return AttentionExpiredLease{Lease: l.Lease, Holder: apiActor(l.Holder), Task: l.Task, Title: l.Title, Intent: l.Intent,
-		RenewedAt: l.RenewedAt, ExpiredAt: l.ExpiredAt}
+		RenewedAt: l.RenewedAt, ExpiredAt: l.ExpiredAt, Tags: nonNil(l.Tags), TagMarks: apiTagMarks(l.TagMarks)}
 }
 
 func apiLastCheck(c *attention.LastCheck) *AttentionLastCheck {
@@ -99,7 +100,8 @@ func apiLastCheck(c *attention.LastCheck) *AttentionLastCheck {
 }
 
 func apiWatch(w attention.OverdueWatch) AttentionWatch {
-	return AttentionWatch{Task: w.Task, Title: w.Title, Owner: apiActor(w.Owner), NextCheckAt: w.NextCheckAt, LastCheck: apiLastCheck(w.LastCheck)}
+	return AttentionWatch{Task: w.Task, Title: w.Title, Owner: apiActor(w.Owner), NextCheckAt: w.NextCheckAt, LastCheck: apiLastCheck(w.LastCheck),
+		Tags: nonNil(w.Tags), TagMarks: apiTagMarks(w.TagMarks)}
 }
 
 func apiHolder(h attention.Holder) AttentionHolder {

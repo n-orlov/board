@@ -1281,12 +1281,16 @@ export interface components {
             /** @description An `http` or `https` URL. */
             url: string;
         };
-        /** @description A task on the other end of a dependency. */
+        /** @description A task on the other end of a dependency, with its tags as every task read shape gives them. */
         TaskLink: {
             ref: string;
             title: string;
             /** @enum {string} */
             status: "open" | "done" | "closed";
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
         };
         /** @description A lease on a task, with its resources. */
         Lease: {
@@ -1758,6 +1762,10 @@ export interface components {
             /** Format: date-time */
             done_at: string;
             last_lease?: components["schemas"]["AttentionLastLease"];
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
         };
         /** @description A lease that ran out, was not acknowledged and has no later lease on its task. */
         AttentionExpiredLease: {
@@ -1774,6 +1782,10 @@ export interface components {
             renewed_at: string;
             /** Format: date-time */
             expired_at: string;
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
         };
         /** @description The latest check recorded on a watch. */
         AttentionLastCheck: {
@@ -1790,6 +1802,10 @@ export interface components {
             /** Format: date-time */
             next_check_at: string;
             last_check?: components["schemas"]["AttentionLastCheck"];
+            /** @description The task's own tags, sorted. Empty when it has none. */
+            tags: string[];
+            /** @description Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags. */
+            tag_marks: components["schemas"]["TagMark"][];
         };
         /** @description One live lease on a contested resource. */
         AttentionHolder: {

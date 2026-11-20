@@ -136,3 +136,71 @@ func TestTheTimelineTasksCarryTheirOwnTagsAndSourceMarks(t *testing.T) {
 		}
 	}
 }
+
+func TestTheAttentionReadsDoneTaskCarriesItsOwnTagsAndSourceMarks(t *testing.T) {
+	t.Parallel()
+	s := tagBoard(t)
+	rec := s.send(http.MethodPost, "/api/v1/leases", `{"task":"bb-1","intent":"finish"}`, "ralph:r1")
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("start lease = %d %s", rec.Code, rec.Body)
+	}
+	lease := decode(t, rec)["lease"]
+	if l, ok := lease.(map[string]any); ok {
+		lease = l["ref"]
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/leases/"+lease.(string)+"/end", `{"outcome":"x"}`, "ralph:r1"); rec.Code != http.StatusOK {
+		t.Fatalf("end lease = %d %s", rec.Code, rec.Body)
+	}
+	if rec := s.send(http.MethodPost, "/api/v1/tasks/bb-1/done", "", "ralph:r1"); rec.Code != http.StatusOK {
+		t.Fatalf("done = %d %s", rec.Code, rec.Body)
+	}
+	for _, path := range []string{"/api/v1/attention", "/api/v1/attention/now"} {
+		rec := s.send(http.MethodGet, path, "", "claude:w1")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, rec.Code, rec.Body)
+		}
+		doc := decode(t, rec)
+		if path != "/api/v1/attention" {
+			doc = doc["attention"].(map[string]any)
+		}
+		done := doc["done_not_closed"].([]any)
+		if len(done) != 1 {
+			t.Fatalf("%s done_not_closed = %v, want bb-1", path, done)
+		}
+		item := done[0].(map[string]any)
+		if got := stringsOf(t, item["tags"]); !reflect.DeepEqual(got, []string{"solo"}) {
+			t.Errorf("%s done task tags = %v, want its own tag", path, got)
+		}
+		if got := marksOfJSON(t, item["tag_marks"]); !reflect.DeepEqual(got, []string{"task:solo", "actor:ralph"}) {
+			t.Errorf("%s done task marks = %v, want its own tag and its holder's kind", path, got)
+		}
+	}
+}
+
+func TestATaskReadsDependencyLinksCarryTheirTasksTagsAndSourceMarks(t *testing.T) {
+	t.Parallel()
+	s := tagBoard(t)
+	s.task(`{"initiative":"bb","title":"waits","blocked_by":["aa-1","bb-1"]}`)
+	rec := s.send(http.MethodGet, "/api/v1/tasks/bb-2", "", "claude:w1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("task read = %d %s", rec.Code, rec.Body)
+	}
+	deps := decode(t, rec)["deps"].([]any)
+	if len(deps) != 2 {
+		t.Fatalf("deps = %v, want aa-1 and bb-1", deps)
+	}
+	want := [][2][]string{{{"mine"}, {"task:mine", "initiative:web", "actor:claude"}}, {{"solo"}, {"task:solo"}}}
+	for i, w := range want {
+		link := deps[i].(map[string]any)
+		if got := stringsOf(t, link["tags"]); !reflect.DeepEqual(got, w[0]) {
+			t.Errorf("%v tags = %v, want %v", link["ref"], got, w[0])
+		}
+		if got := marksOfJSON(t, link["tag_marks"]); !reflect.DeepEqual(got, w[1]) {
+			t.Errorf("%v marks = %v, want %v", link["ref"], got, w[1])
+		}
+	}
+	blocking := decode(t, s.send(http.MethodGet, "/api/v1/tasks/aa-1", "", "claude:w1"))["blocking"].([]any)
+	if len(blocking) != 1 || len(stringsOf(t, blocking[0].(map[string]any)["tags"])) != 0 {
+		t.Errorf("aa-1 blocking = %v, want bb-2 with no tags of its own", blocking)
+	}
+}

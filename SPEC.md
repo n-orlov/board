@@ -937,10 +937,13 @@ task document and the answers that carry it) add `tag_marks`: every tag the task
 first (`source` `task`), then its initiative's (`initiative`), then the derived kinds (`actor`, in the order above), each
 source's tags sorted. A tag with two sources appears once for each. `tags` stays the task's own tags alone.
 
-Every read shape that names a task a view draws chips for carries its tags the same way, so no view reads the tasks again for
-them: the timeline's `Task` (§6.10) and the `task` of an In flight or Recently touched item of the Now read (§6.8.1) each add
-`tags` (the task's own, sorted, `[]` when none) and `tag_marks` (as above), and the Now read's `task_marks` (§6.8.1) gives the
-same two members, keyed by ref, for every task any part of its answer names, the tasks of the Needs me items included.
+Every other read shape that is a task carries its tags the same way, so no view or client reads the tasks again for
+them: the timeline's `Task` (§6.10), the `task` of an In flight or Recently touched item of the Now read (§6.8.1), the done
+task, the expired lease and the overdue watch of `GET /api/v1/attention` (§6.8, and the same items inside the Now read) and
+each `deps` and `blocking` link of the task document (§6.4) add `tags` (the task's own, sorted, `[]` when none) and
+`tag_marks` (as above), and the Now read's `task_marks` (§6.8.1) gives the same two members, keyed by ref, for every task any
+part of its answer names, the tasks of the Needs me items included. An open ask and a conflict's holder name a task by its
+ref without being one, so they carry no tags of their own; `task_marks` covers them on the Now read.
 
 ---
 
@@ -1311,7 +1314,7 @@ principal may use them. The server answers 503 problem documents when it runs wi
   live_leases, open_asks, attention, stranded_lease?}`. `initiative` is the slug, `ref` is `<slug>-<seq>` and the people are actor handles. Absent optional
   fields are omitted, and a task with none of its own has `external_refs`, `tags`, `deps`, `blocking`, `live_leases` and `open_asks` as `[]`, and a task that needs nothing has `attention` as `[]`.
   `deps` are the tasks it is blocked by and `blocking` the tasks that name it as a blocker, each `{ref, title,
-  status}` in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
+  status, tags, tag_marks}` (the linked task's own tags and marks, §5.5) in creation order, whatever their status. `live_leases` are its leases in state `live` whose `expires_at`
   is not before now, oldest first, each a `Lease` (`{id, ref, task, actor, intent, ttl_seconds, started_at, renewed_at,
   expires_at, state, resources}`, resources sorted); the read first expires the due leases (§5.1), so a lease past its expiry is not listed. The derived `active` is a non-empty
   `live_leases`, `open_asks` are the task's asks in state `open`, blocking or not, oldest first, each an `Ask` (§6.6); `blocked` is an open dependency or an open blocking ask (§4.3) and `overdue` is §4.6's rule at the time of the read.
@@ -1569,11 +1572,14 @@ writes their `lease_expired` events, and judges all five sections at that one in
   initiative, its task's or the one it was raised on directly, and absent only for a global ask (the view links the
   initiative from it, and the task only when there is one); `asker_waiting` is false for a `stop`
   ask.
-- **Done task**: `{task, title, done_by, done_at, last_lease?}` with `last_lease` `{lease, holder, outcome?, ended_at}`,
+- **Done task**: `{task, title, done_by, done_at, last_lease?, tags, tag_marks}` with `last_lease` `{lease, holder, outcome?, ended_at}`,
   absent when no lease on the task ended and without `outcome` when the holder wrote none.
-- **Expired lease**: `{lease, holder, task, title, intent, renewed_at, expired_at}`.
-- **Overdue watch**: `{task, title, owner, next_check_at, last_check?}` with `last_check` `{summary, by, at}`, absent
+- **Expired lease**: `{lease, holder, task, title, intent, renewed_at, expired_at, tags, tag_marks}`.
+- **Overdue watch**: `{task, title, owner, next_check_at, last_check?, tags, tag_marks}` with `last_check` `{summary, by, at}`, absent
   when no check was ever recorded; `owner` is the actor that created the watch.
+- **Task tags on an item**: the done task, the expired lease and the overdue watch each carry their task's `tags` (its own,
+  sorted, `[]` when none) and `tag_marks` (own, initiative and derived actor-kind tags with their sources, §5.5), read with
+  four statements whatever the number of items (none when no item is a task).
 - **Conflict**: `{resource, holders, tasks}`, each holder `{lease, actor, task, intent, expires_at}` in lease-number
   order and `tasks` the distinct tasks of the holders in that order.
 - **Clearing.** Each section empties by the action that deals with it: an ask by answering or withdrawing it, a done task
@@ -1606,7 +1612,8 @@ without a store answers **503**. Like §6.8 it first expires the leases that ran
   lease that has ended or run out stops counting as live, so its task moves from `in_flight` to `recent`.
 - **Cost.** The read runs a constant number of SQL statements whatever the number of tasks, leases or events: one for the
   in-flight tasks with their leases, one for the recent tasks with their last events, four for the tags and marks of every task the answer names (none when it
-  names none), and the fixed statements of §6.8. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
+  names none; they also give the attention items theirs, so §6.8's four are not run again), and the fixed statements of
+  §6.8. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
 
 ### 6.9 Notifications
 

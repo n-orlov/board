@@ -267,16 +267,16 @@ func TestLinksListTheDependenciesAndTheBlockedTasksWithRefTitleAndStatus(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDeps := []Link{{"aa-2", "second", "closed"}, {"bb-1", "third", "open"}}
-	if !reflect.DeepEqual(got.Deps, wantDeps) || got.Blocking == nil || len(got.Blocking) != 0 {
+	wantDeps := []Link{{"aa-2", "second", "closed", nil, nil}, {"bb-1", "third", "open", nil, nil}}
+	if !reflect.DeepEqual(bareLinks(got.Deps), wantDeps) || got.Blocking == nil || len(got.Blocking) != 0 {
 		t.Errorf("a: %#v", got)
 	}
 	got, err = s.Links(ctx, b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantBlocking := []Link{{"aa-1", "first", "open"}, {"bb-1", "third", "open"}}
-	if !reflect.DeepEqual(got.Blocking, wantBlocking) || got.Deps == nil || len(got.Deps) != 0 {
+	wantBlocking := []Link{{"aa-1", "first", "open", nil, nil}, {"bb-1", "third", "open", nil, nil}}
+	if !reflect.DeepEqual(bareLinks(got.Blocking), wantBlocking) || got.Deps == nil || len(got.Deps) != 0 {
 		t.Errorf("b: %#v", got)
 	}
 }
@@ -317,4 +317,14 @@ func TestCreateWithAnUnknownBlockerLeavesNothingBehind(t *testing.T) {
 	if again.Seq != 2 {
 		t.Errorf("a refused create used up a number: seq = %d", again.Seq)
 	}
+}
+
+// bareLinks is the links without their tags (deps_test checks the tags of a link
+// in its own test).
+func bareLinks(list []Link) []Link {
+	out := make([]Link, len(list))
+	for i, l := range list {
+		out[i] = Link{Ref: l.Ref, Title: l.Title, Status: l.Status}
+	}
+	return out
 }

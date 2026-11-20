@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/domain"
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/leases"
 )
@@ -238,5 +239,41 @@ func TestMarksReducesHoldersToTheirKindsInKindOrder(t *testing.T) {
 	}
 	if empty := Marks(nil, nil, nil); empty == nil || len(empty) != 0 {
 		t.Fatalf("Marks of nothing = %#v, want an empty list", empty)
+	}
+}
+
+func TestALinkCarriesTheTagsAndMarksOfItsTaskAsAReadGivesThem(t *testing.T) {
+	s := newStore(t)
+	ini := initiatives.Store{Store: s.Store, Now: s.Now}
+	for _, in := range []initiatives.New{{Slug: "aa", Title: "A", Tags: []string{"home"}}, {Slug: "b-b", Title: "B"}} {
+		if _, err := ini.Create(ctx, who, "key:c", in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blocker, err := s.Create(ctx, who, "key:c", New{Initiative: "aa", Title: "blocker", Tags: []string{"db"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, blocked := mk(t, s, "b-b", "plain"), mk(t, s, "b-b", "blocked")
+	startLease(t, leases.Store{Store: s.Store, Now: s.Now}, audit.Actor{Handle: "codex:x"}, blocker.Ref, "work")
+	for _, by := range []string{blocker.Ref, plain.Ref} {
+		if _, err := s.AddDep(ctx, who, "key:dep", blocked.Ref, by); err != nil {
+			t.Fatal(err)
+		}
+	}
+	links, err := s.Links(ctx, blocked)
+	if err != nil || len(links.Deps) != 2 {
+		t.Fatalf("links = %+v, %v, want two deps", links, err)
+	}
+	wantMarks := []TagMark{{"db", domain.TagSourceTask}, {"home", domain.TagSourceInitiative}, {"codex", domain.TagSourceActor}}
+	if d := links.Deps[0]; !reflect.DeepEqual(d.Tags, []string{"db"}) || !reflect.DeepEqual(d.TagMarks, wantMarks) {
+		t.Errorf("blocker link: tags %v marks %v, want [db] and %v", d.Tags, d.TagMarks, wantMarks)
+	}
+	if d := links.Deps[1]; d.Tags == nil || d.TagMarks == nil || len(d.Tags)+len(d.TagMarks) != 0 {
+		t.Errorf("a link to a task with no tags has %#v, want empty lists, never nil", d)
+	}
+	back, err := s.Links(ctx, blocker)
+	if err != nil || len(back.Blocking) != 1 || !reflect.DeepEqual(back.Blocking[0].TagMarks, []TagMark{}) {
+		t.Errorf("blocking link of the blocker = %+v, %v, want b-b's task with no marks", back.Blocking, err)
 	}
 }

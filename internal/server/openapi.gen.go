@@ -1307,6 +1307,12 @@ type AttentionDoneTask struct {
 	// LastLease The last ended lease of a task.
 	LastLease *AttentionLastLease `json:"last_lease,omitempty"`
 
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags []string `json:"tags"`
+
 	// Task The task's ref.
 	Task  string `json:"task"`
 	Title string `json:"title"`
@@ -1325,8 +1331,14 @@ type AttentionExpiredLease struct {
 
 	// RenewedAt The last renewal of the lease.
 	RenewedAt time.Time `json:"renewed_at"`
-	Task      string    `json:"task"`
-	Title     string    `json:"title"`
+
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags  []string `json:"tags"`
+	Task  string   `json:"task"`
+	Title string   `json:"title"`
 }
 
 // AttentionHolder One live lease on a contested resource.
@@ -1384,8 +1396,14 @@ type AttentionWatch struct {
 
 	// Owner An actor involved in an item, with the way back the board has on record for it.
 	Owner AttentionActor `json:"owner"`
-	Task  string         `json:"task"`
-	Title string         `json:"title"`
+
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags  []string `json:"tags"`
+	Task  string   `json:"task"`
+	Title string   `json:"title"`
 }
 
 // CatchupResult What a catch-up read, the notes it acknowledged and the answers it delivered.
@@ -2521,11 +2539,17 @@ type TaskDone struct {
 	Outcome *string `json:"outcome,omitempty"`
 }
 
-// TaskLink A task on the other end of a dependency.
+// TaskLink A task on the other end of a dependency, with its tags as every task read shape gives them.
 type TaskLink struct {
 	Ref    string         `json:"ref"`
 	Status TaskLinkStatus `json:"status"`
-	Title  string         `json:"title"`
+
+	// TagMarks Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived actor-kind tags.
+	TagMarks []TagMark `json:"tag_marks"`
+
+	// Tags The task's own tags, sorted. Empty when it has none.
+	Tags  []string `json:"tags"`
+	Title string   `json:"title"`
 }
 
 // TaskLinkStatus defines model for TaskLink.Status.

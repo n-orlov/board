@@ -138,33 +138,66 @@ func (s Store) Board(ctx context.Context, q Query, window string) (Board, error)
 // tagged gives the tasks of the board their tags and marks, in the statements of one
 // tasks.Store.TaggedByRef whatever the number of tasks.
 func (s Store) tagged(ctx context.Context, b Board) (Board, error) {
-	byRef, err := tasks.Store{Store: s.Store, Now: s.Now}.TaggedByRef(ctx, boardRefs(b))
+	byRef, err := s.taggedByRef(ctx, boardRefs(b))
 	if err != nil {
 		return Board{}, err
 	}
 	b.TaskMarks = byRef
-	fill := func(t *FlightTask) {
-		got := byRef[t.Ref]
-		t.Tags, t.TagMarks = append([]string{}, got.Tags...), append([]tasks.TagMark{}, got.TagMarks...)
-	}
+	fillResult(&b.Attention, byRef)
 	for i := range b.InFlight {
-		fill(&b.InFlight[i].Task)
+		t := &b.InFlight[i].Task
+		t.Tags, t.TagMarks = marksOf(byRef, t.Ref)
 	}
 	for i := range b.Recent {
-		fill(&b.Recent[i].Task)
+		t := &b.Recent[i].Task
+		t.Tags, t.TagMarks = marksOf(byRef, t.Ref)
 	}
 	return b, nil
+}
+
+func (s Store) taggedByRef(ctx context.Context, refs []string) (map[string]tasks.Tagged, error) {
+	return tasks.Store{Store: s.Store, Now: s.Now}.TaggedByRef(ctx, refs)
+}
+
+// marksOf is a copy of the tags and marks of the task ref names, both empty (never
+// nil) when byRef lacks it.
+func marksOf(byRef map[string]tasks.Tagged, ref string) ([]string, []tasks.TagMark) {
+	got := byRef[ref]
+	return append([]string{}, got.Tags...), append([]tasks.TagMark{}, got.TagMarks...)
+}
+
+// fillResult gives each attention item that is a task (a done task, an expired
+// lease's, a watch) its task's tags and marks.
+func fillResult(r *Result, byRef map[string]tasks.Tagged) {
+	for i := range r.DoneNotClosed {
+		d := &r.DoneNotClosed[i]
+		d.Tags, d.TagMarks = marksOf(byRef, d.Task)
+	}
+	for i := range r.ExpiredLeases {
+		l := &r.ExpiredLeases[i]
+		l.Tags, l.TagMarks = marksOf(byRef, l.Task)
+	}
+	for i := range r.OverdueWatches {
+		w := &r.OverdueWatches[i]
+		w.Tags, w.TagMarks = marksOf(byRef, w.Task)
+	}
+}
+
+// attentionRefs is the distinct refs of the attention items that are tasks.
+func attentionRefs(a Result) []string {
+	var all []string
+	all = append(all, pluck(a.DoneNotClosed, func(d DoneTask) string { return d.Task })...)
+	all = append(all, pluck(a.ExpiredLeases, func(l ExpiredLease) string { return l.Task })...)
+	all = append(all, pluck(a.OverdueWatches, func(w OverdueWatch) string { return w.Task })...)
+	return distinct(all)
 }
 
 // boardRefs is the distinct refs of every task the board names, empty refs (an item on
 // no task) left out.
 func boardRefs(b Board) []string {
 	a := b.Attention
-	var all []string
-	all = append(all, pluck(a.OpenAsks, func(k OpenAsk) string { return k.Task })...)
-	all = append(all, pluck(a.DoneNotClosed, func(d DoneTask) string { return d.Task })...)
-	all = append(all, pluck(a.ExpiredLeases, func(l ExpiredLease) string { return l.Task })...)
-	all = append(all, pluck(a.OverdueWatches, func(w OverdueWatch) string { return w.Task })...)
+	all := pluck(a.OpenAsks, func(k OpenAsk) string { return k.Task })
+	all = append(all, attentionRefs(a)...)
 	for _, c := range a.Conflicts {
 		all = append(all, c.Tasks...)
 	}

@@ -37,9 +37,9 @@ const attention: Attention = {
     created_at: T[h],
     age_seconds: 1,
   })),
-  expired_leases: (['zed', 'amy', 'bob'] as const).map((h) => ({ lease: `L-${h}`, holder: who(h), task: 't-1', title: 'x', intent: 'i', renewed_at: T[h], expired_at: T[h] })),
-  overdue_watches: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `w-${h}`, title: 'x', owner: who(h), next_check_at: T[h] })),
-  done_not_closed: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `d-${h}`, title: 'x', done_by: who(h), done_at: T[h] })),
+  expired_leases: (['zed', 'amy', 'bob'] as const).map((h) => ({ lease: `L-${h}`, holder: who(h), task: 't-1', title: 'x', intent: 'i', renewed_at: T[h], expired_at: T[h], tags: [], tag_marks: [] })),
+  overdue_watches: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `w-${h}`, title: 'x', owner: who(h), next_check_at: T[h], tags: [], tag_marks: [] })),
+  done_not_closed: (['zed', 'amy', 'bob'] as const).map((h) => ({ task: `d-${h}`, title: 'x', done_by: who(h), done_at: T[h], tags: [], tag_marks: [] })),
 };
 const task = (ref: string) => ({ task: ref, title: 'x', initiative: 'aa', status: 'open' as const, kind: 'work' as const, tags: [], tag_marks: [] });
 const inFlight: InFlight[] = (['zed', 'amy', 'bob'] as const).map((h) => ({

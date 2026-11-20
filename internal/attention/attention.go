@@ -12,6 +12,7 @@ import (
 	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/leases"
 	"github.com/n-orlov/village-hall/internal/store"
+	"github.com/n-orlov/village-hall/internal/tasks"
 )
 
 // Errors a caller tells apart.
@@ -65,17 +66,20 @@ type LastLease struct {
 }
 
 // DoneTask is a task marked done and not yet closed. LastLease is nil when no
-// lease on the task ended.
+// lease on the task ended. Tags and TagMarks are the task's own tags and every
+// mark, as a task read gives them.
 type DoneTask struct {
 	Task      string
 	Title     string
 	DoneBy    Actor
 	DoneAt    time.Time
 	LastLease *LastLease
+	Tags      []string
+	TagMarks  []tasks.TagMark
 }
 
 // ExpiredLease is a lease that ran out, was not acknowledged and has no later
-// lease on its task.
+// lease on its task. Tags and TagMarks are its task's, as for DoneTask.
 type ExpiredLease struct {
 	Lease     string
 	Holder    Actor
@@ -84,6 +88,8 @@ type ExpiredLease struct {
 	Intent    string
 	RenewedAt time.Time
 	ExpiredAt time.Time
+	Tags      []string
+	TagMarks  []tasks.TagMark
 }
 
 // LastCheck is the last check_recorded event of a watch.
@@ -94,13 +100,16 @@ type LastCheck struct {
 }
 
 // OverdueWatch is a watch whose next check is due. Owner is who created it.
-// LastCheck is nil when no check was ever recorded.
+// LastCheck is nil when no check was ever recorded. Tags and TagMarks are the
+// task's, as for DoneTask.
 type OverdueWatch struct {
 	Task        string
 	Title       string
 	Owner       Actor
 	NextCheckAt time.Time
 	LastCheck   *LastCheck
+	Tags        []string
+	TagMarks    []tasks.TagMark
 }
 
 // Holder is one live lease on a contested resource.
@@ -177,12 +186,23 @@ func (s Store) begin(ctx context.Context, q Query) (scope, time.Time, error) {
 // Get returns the five sections and their counts. It returns ErrInvalid for a tag
 // that is malformed and ErrNotFound for an initiative that names nothing. It
 // first expires the leases that ran out, so none counts as live past its expiry.
+// Each item that is a task (a done task, an expired lease's, a watch) carries the
+// task's tags and marks, read in the statements of one tasks.Store.TaggedByRef.
 func (s Store) Get(ctx context.Context, q Query) (Result, error) {
 	sc, now, err := s.begin(ctx, q)
 	if err != nil {
 		return Result{}, err
 	}
-	return s.get(ctx, sc, now)
+	r, err := s.get(ctx, sc, now)
+	if err != nil {
+		return Result{}, err
+	}
+	byRef, err := s.taggedByRef(ctx, attentionRefs(r))
+	if err != nil {
+		return Result{}, err
+	}
+	fillResult(&r, byRef)
+	return r, nil
 }
 
 // get reads the five sections of a scope at the instant now.

@@ -250,3 +250,35 @@ Feature: Attention over HTTP
       | fields=nothing   | 400    | is not full or counts      |
       | tag=bad%20tag    | 400    | must match                 |
       | initiative=zzz   | 404    | there is no initiative zzz |
+
+  Scenario: every attention item that is a task carries its own, initiative and actor-kind tags with their sources
+    Given I add the tag "mine" to the task "aa-1" as actor "claude@laptop"
+    And I start a lease with body "{'task':'aa-1','intent':'build it'}" as actor "ralph:r1"
+    And I end the lease "L1" with body "{'outcome':'shipped'}" as actor "ralph:r1"
+    And I mark the task "aa-1" done as actor "codex@laptop"
+    And I start a lease with body "{'task':'bb-1','intent':'migrate'}" as actor "pi:p1"
+    And the lease "L2" ran out 30 seconds ago
+    And I add the tag "nightly" to the task "aa-3" as actor "claude@laptop"
+    And I record a check on the task "aa-3" with body "{'summary':'build is red','next_check_at':'2020-01-01T00:00:00Z'}" as actor "codex@laptop"
+    When I request the attention with "" as actor "operator@laptop"
+    Then the response status is 200
+    And the attention counts are "0,1,1,1,0,3"
+    And the response path "done_not_closed.0.tags" is "mine"
+    And the response path "done_not_closed.0.tag_marks" has 4 items
+    And the response path "done_not_closed.0.tag_marks.0.tag" is "mine"
+    And the response path "done_not_closed.0.tag_marks.0.source" is "task"
+    And the response path "done_not_closed.0.tag_marks.1.tag" is "team"
+    And the response path "done_not_closed.0.tag_marks.1.source" is "initiative"
+    And the response path "done_not_closed.0.tag_marks.2.tag" is "web"
+    And the response path "done_not_closed.0.tag_marks.3.tag" is "ralph"
+    And the response path "done_not_closed.0.tag_marks.3.source" is "actor"
+    And the response path "expired_leases.0.tags" has 0 items
+    And the response path "expired_leases.0.tag_marks" has 2 items
+    And the response path "expired_leases.0.tag_marks.0.tag" is "web"
+    And the response path "expired_leases.0.tag_marks.0.source" is "initiative"
+    And the response path "expired_leases.0.tag_marks.1.tag" is "pi"
+    And the response path "expired_leases.0.tag_marks.1.source" is "actor"
+    And the response path "overdue_watches.0.tags" is "nightly"
+    And the response path "overdue_watches.0.tag_marks" has 3 items
+    And the response path "overdue_watches.0.tag_marks.0.source" is "task"
+    And the response path "overdue_watches.0.tag_marks.1.tag" is "team"

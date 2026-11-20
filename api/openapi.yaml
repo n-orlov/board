@@ -3123,8 +3123,8 @@ components:
           description: An `http` or `https` URL.
     TaskLink:
       type: object
-      description: A task on the other end of a dependency.
-      required: [ref, title, status]
+      description: A task on the other end of a dependency, with its tags as every task read shape gives them.
+      required: [ref, title, status, tags, tag_marks]
       properties:
         ref:
           type: string
@@ -3133,6 +3133,18 @@ components:
         status:
           type: string
           enum: [open, done, closed]
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     Lease:
       type: object
       description: A lease on a task, with its resources.
@@ -3888,7 +3900,7 @@ components:
     AttentionDoneTask:
       type: object
       description: A task marked done and not yet closed.
-      required: [task, title, done_by, done_at]
+      required: [task, title, done_by, done_at, tags, tag_marks]
       properties:
         task:
           type: string
@@ -3902,10 +3914,22 @@ components:
           format: date-time
         last_lease:
           $ref: "#/components/schemas/AttentionLastLease"
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     AttentionExpiredLease:
       type: object
       description: A lease that ran out, was not acknowledged and has no later lease on its task.
-      required: [lease, holder, task, title, intent, renewed_at, expired_at]
+      required: [lease, holder, task, title, intent, renewed_at, expired_at, tags, tag_marks]
       properties:
         lease:
           type: string
@@ -3925,6 +3949,18 @@ components:
         expired_at:
           type: string
           format: date-time
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     AttentionLastCheck:
       type: object
       description: The latest check recorded on a watch.
@@ -3940,7 +3976,7 @@ components:
     AttentionWatch:
       type: object
       description: An open watch whose next check is due.
-      required: [task, title, owner, next_check_at]
+      required: [task, title, owner, next_check_at, tags, tag_marks]
       properties:
         task:
           type: string
@@ -3953,6 +3989,18 @@ components:
           format: date-time
         last_check:
           $ref: "#/components/schemas/AttentionLastCheck"
+        tags:
+          type: array
+          description: The task's own tags, sorted. Empty when it has none.
+          items:
+            type: string
+        tag_marks:
+          type: array
+          description: >-
+            Every tag the task shows with its source, as for `Task`: its own, then its initiative's, then the derived
+            actor-kind tags.
+          items:
+            $ref: "#/components/schemas/TagMark"
     AttentionHolder:
       type: object
       description: One live lease on a contested resource.
