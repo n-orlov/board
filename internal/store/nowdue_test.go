@@ -3,13 +3,13 @@ package store_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/n-orlov/village-hall/internal/asks"
 	"github.com/n-orlov/village-hall/internal/attention"
 	"github.com/n-orlov/village-hall/internal/audit"
+	"github.com/n-orlov/village-hall/internal/initiatives"
 	"github.com/n-orlov/village-hall/internal/store"
 )
 
@@ -222,14 +222,97 @@ func TestTheNowReadRunsTheSameStatementsWhenItsFilterNamesNoTaskOnABoardWithDueL
 	checkDueOutcome(t, "nothing", seed, none, true)
 }
 
-// steadyBoards are boards that meet zero, one and many due leases, mixed with
-// live and ended ones, some of the due leases raising no stranded alert.
-var steadyBoards = []struct {
+// The statements a Now read that expires leases runs on top of the statements of
+// the same read with nothing due, the same number for one due lease or for many
+// (SPEC 4.3, 6.8.1). A read with nothing due looks for a due lease on a reader
+// and stops there; it never takes the writer, so it never runs these, and it is
+// never padded with stand-ins for them.
+const (
+	// expiryRead is the SELECT of the due leases (FOR UPDATE on PostgreSQL).
+	expiryRead = 1
+	// expiryUpdate is the one conditional UPDATE that marks them all expired.
+	expiryUpdate = 1
+	// expiryEventsInsert is the one INSERT of the lease_expired events.
+	expiryEventsInsert = 1
+	// expiryEventWriteLock is the lock PostgreSQL takes before it writes events.
+	expiryEventWriteLock = 1
+	// expiryOriginLookup is the lookup of the operator a request's origin names.
+	expiryOriginLookup = 1
+	// expiryAlertsInsert is the one INSERT of the stranded alerts, run with
+	// stranded alerts on even when no expired lease is the newest on its task.
+	expiryAlertsInsert = 1
+
+	// dueExtraStatements is the fixed difference between a Now read that expires
+	// due leases and one with nothing due, on SQLite, with no request origin and
+	// stranded alerts off: expiryRead, expiryUpdate and expiryEventsInsert.
+	dueExtraStatements = expiryRead + expiryUpdate + expiryEventsInsert
+)
+
+// dueExtra is dueExtraStatements plus the parts the leg, the request's origin
+// and the stranded-alert setting add: expiryEventWriteLock on PostgreSQL,
+// expiryOriginLookup when the request names an operator and expiryAlertsInsert
+// with alerts on.
+func dueExtra(leg string, origin string, alertsOn bool) int64 {
+	n := int64(dueExtraStatements)
+	if leg == "postgres" {
+		n += expiryEventWriteLock
+	}
+	if origin != "" {
+		n += expiryOriginLookup
+	}
+	if alertsOn {
+		n += expiryAlertsInsert
+	}
+	return n
+}
+
+// growth is how much a board holds: tasks per initiative of the two every board
+// has, extra tagged initiatives with a task each, and open asks.
+type growth struct{ perInitiative, extraInitiatives, asks int }
+
+// grownBoard is boardOn plus extra initiatives, tags and asks, with nothing due.
+func grownBoard(t *testing.T, leg string, g growth, alerts ...string) (attention.Store, func() int64) {
+	t.Helper()
+	ctx := context.Background()
+	a, count, _ := boardOn(t, leg, g.perInitiative, alerts...)
+	now := time.Date(2026, 11, 9, 13, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	op := audit.Actor{Handle: "nik@host", Operator: true}
+	agent := audit.Actor{Handle: "claude@host", WayBack: "tmux 1"}
+	ini, ask := initiatives.Store{Store: a.Store, Now: clock}, asks.Store{Store: a.Store, Now: clock}
+	for i := 1; i <= g.extraInitiatives; i++ {
+		slug := fmt.Sprintf("extra%d", i)
+		if _, err := ini.Create(ctx, op, "key:x", initiatives.New{Slug: slug, Title: slug, Tags: []string{"web", slug}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i <= g.asks; i++ {
+		if _, err := ask.Raise(ctx, agent, "key:x", asks.New{Initiative: "aa", Question: fmt.Sprintf("question %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return a, count.Load
+}
+
+// readOf is the number of statements one full Now read runs on a, under ctx, and
+// the number of tasks in flight it answered with.
+func readOf(ctx context.Context, t *testing.T, a attention.Store, count func() int64) (int64, int) {
+	t.Helper()
+	before := count()
+	b, err := a.Board(ctx, attention.Query{}, attention.Window24h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count() - before, len(b.InFlight)
+}
+
+// dueBoards are boards that meet one and many due leases, mixed with live and
+// ended ones, some of the due leases raising no stranded alert (a newer live or
+// a newer ended lease on their task).
+var dueBoards = []struct {
 	name string
 	seed dueSeed
 }{
-	{"nothing at all", dueSeed{}},
-	{"live and ended leases and none due", dueSeed{liveTasks: 5, endedTasks: 5}},
 	{"one due lease that raises an alert", dueSeed{tasks: 1, liveTasks: 5, endedTasks: 5}},
 	{"one due lease that raises no alert", dueSeed{tasks: 1, supersede: "ended", liveTasks: 5, endedTasks: 5}},
 	{"many due leases that all raise an alert", dueSeed{tasks: 40, olderEnded: true, liveTasks: 5, endedTasks: 5}},
@@ -237,28 +320,60 @@ var steadyBoards = []struct {
 	{"many due leases that raise none: a newer ended lease on each", dueSeed{tasks: 40, supersede: "ended", liveTasks: 5, endedTasks: 5}},
 }
 
-func TestTheNowReadRunsTheSameStatementsWithZeroOneAndManyDueLeasesOnEveryLeg(t *testing.T) {
-	requests := map[string]context.Context{
-		"no request origin":       context.Background(),
-		"an operator origin":      audit.WithOrigin(context.Background(), "nik@host"),
-		"an origin naming nobody": audit.WithOrigin(context.Background(), ""),
+// TestTheNowReadsStatementsDoNotGrowWithTheStoreAndExpiryAddsAFixedNumber states,
+// on every leg, for each stranded-alert setting and request origin: the total is
+// the same for one due lease and for many; the no-due total is the same on a
+// small and on a much larger board; and a read that expires leases runs
+// dueExtra more statements than one with nothing due.
+func TestTheNowReadsStatementsDoNotGrowWithTheStoreAndExpiryAddsAFixedNumber(t *testing.T) {
+	requests := []struct{ name, origin string }{
+		{"no request origin", ""},
+		{"an operator origin", "nik@host"},
 	}
+	small, large := growth{perInitiative: 3, extraInitiatives: 0, asks: 1}, growth{perInitiative: 24, extraInitiatives: 8, asks: 20}
 	eachLeg(t, func(t *testing.T, leg string) {
-		for alertName, alerts := range map[string][]string{"alerts off": nil, "stranded alerts on": {store.NotifyStranded}} {
-			for reqName, ctx := range requests {
-				want := int64(-1)
-				for _, b := range steadyBoards {
-					o := readDueBoardOn(ctx, t, leg, b.seed, attention.Query{}, alerts...)
-					checkDueOutcome(t, alertName+", "+b.name, b.seed, o, alerts != nil)
-					if o.statements == 0 {
-						t.Fatalf("%s, %s, %s: the read counted no statements, so the counter is not wired", alertName, reqName, b.name)
+		for _, alertSetting := range []struct {
+			name   string
+			alerts []string
+		}{{"alerts off", nil}, {"stranded alerts on", []string{store.NotifyStranded}}} {
+			alertsOn := alertSetting.alerts != nil
+			for _, req := range requests {
+				ctx := context.Background()
+				if req.origin != "" {
+					ctx = audit.WithOrigin(ctx, req.origin)
+				}
+				label := alertSetting.name + ", " + req.name
+
+				// (b) nothing due: the same total on a small and on a larger board
+				sa, scount := grownBoard(t, leg, small, alertSetting.alerts...)
+				smallNoDue, smallFlight := readOf(ctx, t, sa, scount)
+				la, lcount := grownBoard(t, leg, large, alertSetting.alerts...)
+				largeNoDue, largeFlight := readOf(ctx, t, la, lcount)
+				if smallNoDue == 0 || largeFlight <= smallFlight {
+					t.Fatalf("%s: %d statements on the small board, %d tasks in flight there and %d on the large one: it proves nothing",
+						label, smallNoDue, smallFlight, largeFlight)
+				}
+				if smallNoDue != largeNoDue {
+					t.Errorf("%s: %d statements with nothing due on the small board but %d on the large one: the read grows with the store",
+						label, smallNoDue, largeNoDue)
+				}
+
+				// (a) due leases: one and many cost the same, whatever mix they meet
+				first := int64(-1)
+				for _, b := range dueBoards {
+					o := readDueBoardOn(ctx, t, leg, b.seed, attention.Query{}, alertSetting.alerts...)
+					checkDueOutcome(t, label+", "+b.name, b.seed, o, alertsOn)
+					if first < 0 {
+						first = o.statements
 					}
-					if want < 0 {
-						want = o.statements
+					if o.statements != first {
+						t.Errorf("%s: %d statements on %q but %d on %q (%d due, %d expired, %d alerts)",
+							label, o.statements, b.name, first, dueBoards[0].name, b.seed.tasks, o.expired, o.alerts)
 					}
-					if o.statements != want {
-						t.Errorf("%s, %s: %d statements on %q but %d on %q (%d due, %d expired, %d alerts): the read is not constant",
-							alertName, reqName, o.statements, b.name, want, steadyBoards[0].name, b.seed.tasks, o.expired, o.alerts)
+					// (c) a read that expires leases runs the fixed expiry on top
+					if got, want := o.statements-smallNoDue, dueExtra(leg, req.origin, alertsOn); got != want {
+						t.Errorf("%s, %s: %d statements with %d due leases and %d with nothing due, a difference of %d, want the fixed %d (the expiry's read, update and events INSERT, plus the leg's lock, the origin lookup and the alerts INSERT where they apply)",
+							label, b.name, o.statements, b.seed.tasks, smallNoDue, got, want)
 					}
 				}
 			}
@@ -284,34 +399,6 @@ func TestANoDueNowReadCompletesWhileTheSQLiteWriterIsHeld(t *testing.T) {
 		}
 		if len(b.InFlight) != 5 {
 			t.Errorf("%s: %d tasks in flight, want the 5 live ones", alertName, len(b.InFlight))
-		}
-	}
-}
-
-func TestIdleRunsExactlyTheStatementsAskedForOnTheReaderWithoutTheWriter(t *testing.T) {
-	var count atomic.Int64
-	st, err := store.OpenCounting(filepath.Join(t.TempDir(), "b.db"), &count)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err := st.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	held, err := st.Writer().BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = held.Rollback() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, n := range []int{0, 1, 4, 7} {
-		before := count.Load()
-		if err := st.Idle(ctx, n); err != nil {
-			t.Fatalf("Idle(%d) with the writer held: %v", n, err)
-		}
-		if got := count.Load() - before; got != int64(n) {
-			t.Errorf("Idle(%d) ran %d statements", n, got)
 		}
 	}
 }

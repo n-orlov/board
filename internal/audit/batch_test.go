@@ -152,23 +152,3 @@ func TestABatchOfEventsRefusedWritesNone(t *testing.T) {
 		t.Fatalf("ids = %v, err = %v, want an error and no ids", ids, err)
 	}
 }
-
-func TestBatchStatementsCountsTheInsertTheLockAndTheOriginLookup(t *testing.T) {
-	bg := context.Background()
-	for _, c := range []struct {
-		name string
-		ctx  context.Context
-		d    store.Dialect
-		want int
-	}{
-		{"sqlite, no request", bg, store.SQLite{}, 1},
-		{"sqlite, an operator's request", WithOrigin(bg, "nik@host"), store.SQLite{}, 2},
-		{"sqlite, a request naming nobody", WithOrigin(bg, ""), store.SQLite{}, 1},
-		{"postgres, no request", bg, store.Postgres{}, 2},
-		{"postgres, an operator's request", WithOrigin(bg, "nik@host"), store.Postgres{}, 3},
-	} {
-		if got := BatchStatements(c.ctx, c.d); got != c.want {
-			t.Errorf("%s: %d statements, want %d", c.name, got, c.want)
-		}
-	}
-}

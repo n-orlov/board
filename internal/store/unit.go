@@ -114,23 +114,6 @@ func (s *Store) ReaderFor(ctx context.Context) Querier {
 	return s.reader
 }
 
-// Idle runs n read-only statements that read no row, on the reader (or inside
-// ctx's unit of work), and never takes the writer. A read uses it to run the
-// number of statements a write it did not need would have run, so its total
-// does not depend on whether there was anything to write.
-func (s *Store) Idle(ctx context.Context, n int) error {
-	for i := 0; i < n; i++ {
-		rows, err := s.ReaderFor(ctx).QueryContext(ctx, `SELECT 1 WHERE 1 = 0`)
-		if err != nil {
-			return fmt.Errorf("idle statement: %w", err)
-		}
-		if err := rows.Close(); err != nil {
-			return fmt.Errorf("idle statement: %w", err)
-		}
-	}
-	return nil
-}
-
 // Begin begins a write transaction: on the writer, or, under a unit of work, as
 // a savepoint inside the unit's transaction.
 func (s *Store) Begin(ctx context.Context) (*Tx, error) {
