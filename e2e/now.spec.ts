@@ -390,9 +390,17 @@ for (const vp of [
   test.describe(`the chip filter on Now, ${vp.name}`, () => {
     test.use({ viewport: vp.size });
 
-    test('the shared chip filter renders on Now with its tag and initiative chips', async ({ page, playwright, baseURL }) => {
-      const s = await seedChips(playwright, baseURL, `render-${vp.name}`);
+    test('the shared chip filter renders on Now with its tag and initiative chips', async ({ page, playwright, baseURL }, testInfo) => {
+      const s = await seedChips(playwright, baseURL, `render-${vp.name}-${testInfo.repeatEachIndex}`);
+      // The chips are drawn from the initiatives list, which the view reads page by page: until its last page is in, the
+      // filter holds no chip and has no height (on a wide screen its fold line is hidden too), so it is not visible. On a
+      // store of hundreds of initiatives that takes longer than any fixed wait, so wait for the last page itself.
+      const listed = page.waitForResponse(async (r) => {
+        const url = new URL(r.url());
+        return r.request().method() === 'GET' && url.pathname === '/api/v1/initiatives' && (await r.json()).next_after === undefined;
+      });
       await page.goto('/#/now');
+      await listed;
       await expect(page.getByTestId('now-filters').getByTestId('chip-filter')).toBeVisible(FIVE_SECONDS);
       await openChips(page);
       await expect(page.getByTestId('chip-tags')).toBeVisible();
