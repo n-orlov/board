@@ -3,7 +3,9 @@ package notify
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/n-orlov/village-hall/internal/domain"
@@ -36,21 +38,60 @@ func Enqueue(ctx context.Context, tx *sql.Tx, st *store.Store, eventID, kind str
 	return nil
 }
 
-// EnqueueStranded enqueues the stranded notification of the lease_expired event
-// eventID when the lease leaseID is the newest on its task, by started_at and
-// then id. A lease with a later one on the same task enqueues nothing.
-func EnqueueStranded(ctx context.Context, tx *sql.Tx, st *store.Store, eventID, leaseID string, now time.Time) error {
+// Stranded is a lease_expired event the caller has already read everything
+// about: the event, the lease and the task it was on, the holder, and whether
+// the lease is the newest on its task.
+type Stranded struct {
+	EventID   string
+	Newest    bool
+	Holder    Actor
+	LeaseRef  string
+	Intent    string
+	ExpiredAt time.Time
+	TaskRef   string
+	TaskTitle string
+}
+
+// StrandedPayload is the JSON of the stranded alert of s, the same document
+// BuildPayload reads from the database for the event of s. publicURL is
+// VH_PUBLIC_URL (empty when unset).
+func StrandedPayload(s Stranded, publicURL string) ([]byte, error) {
+	p := Payload{Kind: store.NotifyStranded, Actor: s.Holder, Task: &TaskInfo{Ref: s.TaskRef, Title: s.TaskTitle},
+		Lease: &LeaseInfo{Ref: s.LeaseRef, Intent: s.Intent, ExpiredAt: s.ExpiredAt.UTC().Format(time.RFC3339Nano)}}
+	if base := strings.TrimRight(publicURL, "/"); base != "" {
+		p.BoardURL = base + "/"
+		p.Task.URL = base + "/#/t/" + s.TaskRef
+	}
+	p.Text = p.text()
+	return json.Marshal(p)
+}
+
+// EnqueueStrandedBatch enqueues the stranded notification of each lease_expired
+// event in list whose lease is the newest on its task, when alerts are on and
+// VH_NOTIFY_ON names stranded. It runs a number of statements that does not
+// depend on how many events there are (one INSERT per store.InsertManyRows rows).
+func EnqueueStrandedBatch(ctx context.Context, tx *sql.Tx, st *store.Store, list []Stranded, now time.Time) error {
 	if !st.Notifies(store.NotifyStranded) {
 		return nil
 	}
-	var later int
-	err := tx.QueryRowContext(ctx, st.Dialect().Rebind(`SELECT COUNT(*) FROM leases o JOIN leases l ON l.task_id = o.task_id
-		WHERE l.id = ? AND (o.started_at > l.started_at OR (o.started_at = l.started_at AND o.id > l.id))`), leaseID).Scan(&later)
-	if err != nil {
-		return fmt.Errorf("find the newest lease: %w", err)
+	var args []any
+	at := store.EncodeTime(now)
+	for _, s := range list {
+		if !s.Newest {
+			continue
+		}
+		id, err := domain.NewULID(now)
+		if err != nil {
+			return err
+		}
+		payload, err := StrandedPayload(s, st.PublicURL())
+		if err != nil {
+			return err
+		}
+		args = append(args, id, store.NotifyStranded, s.EventID, string(payload), "pending", 0, at, at)
 	}
-	if later > 0 {
-		return nil
+	if err := store.InsertMany(ctx, tx, st.Dialect(), "notifications", columns, args); err != nil {
+		return fmt.Errorf("enqueue %s notifications: %w", store.NotifyStranded, err)
 	}
-	return Enqueue(ctx, tx, st, eventID, store.NotifyStranded, now)
+	return nil
 }

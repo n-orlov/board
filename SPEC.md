@@ -494,8 +494,8 @@ is `L<n>`, `data.task` the task's ref). The rules, with the pure parts in `inter
   the ending actor is not the holder (a forced done and a close record it on every lease they end, §4.3). A lease that is not live (ended or expired) is `ErrConflict`.
 - **Ack** of an expired lease sets `acked_at` and `acked_by` and writes `lease_acked`; a second ack changes nothing and writes no
   event. A lease that has not expired is `ErrConflict`.
-- **Expiry** (`ExpireDue`) marks live leases with `expires_at < now` as expired with the conditional update of §5.1 and writes one
-  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`) per lease it won. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, the authenticating key's `last_used_at`, and the authenticating session's row, §3.2), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
+- **Expiry** (`ExpireDue`) reads the live leases with `expires_at < now` (locking them on a database that can: Postgres `FOR UPDATE`), marks them all expired with one conditional update (§5.1) and writes one
+  `lease_expired` (principal `system:expiry`, actor the holder, `data.expired_at`, origin the holder's own) per lease, with the stranded alert of §4.11 for each that is the newest on its task. It runs a constant number of statements however many leases are due: the read, the update, one multi-row INSERT of the events and one of the alerts (a further INSERT only per 1000 rows). The update must touch exactly the leases the read listed; when another writer changed one in between, the transaction rolls back and a later call expires them. Every write above runs it first, inside the write's own transaction: the expiry commits only with a request that succeeds. A refused write (invalid, unknown, closed, gone or conflicting) rolls it back and changes no row of any table (lease, actor, event, the authenticating key's `last_used_at`, and the authenticating session's row, §3.2), even while unrelated live leases are past expiry; those are expired by the sweeper or by the next read (`ExpireDue`, `Current`, `List`, `LiveOf`, `CheckIn`), each writing exactly one `lease_expired`.
 - **Conflicts** (`domain.Conflicts`, §5.2): the live, unexpired leases of others sharing a resource, each with only the shared ones.
 - **LiveOf** (`Store.LiveOf(taskID)`) lists a task's leases in state `live` with `expires_at >= now`, oldest first, resources sorted. It first runs `ExpireDue` (§5.1), so a lease past its expiry is marked expired and left out.
 
@@ -1613,7 +1613,7 @@ without a store answers **503**. Like §6.8 it first expires the leases that ran
 - **Cost.** The read runs a constant number of SQL statements whatever the number of tasks, leases or events: one for the
   in-flight tasks with their leases, one for the recent tasks with their last events, four for the tags and marks of every task the answer names (none when it
   names none; they also give the attention items theirs, so §6.8's four are not run again), and the fixed statements of
-  §6.8. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
+  §6.8. That holds when the read meets leases that have run out: their expiry (§4.3) is a constant number of statements too, not a few per lease. A browser never pages `GET /api/v1/events` or `GET /api/v1/tasks` to build it.
 
 ### 6.9 Notifications
 

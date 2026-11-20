@@ -170,3 +170,17 @@ func TestOnlyPostgresLocksTheRowsOfATableAlias(t *testing.T) {
 		t.Errorf("Postgres LockRow = %q", got)
 	}
 }
+
+func TestInsertRowsHasTheMarksOfEveryRowInOrder(t *testing.T) {
+	got := InsertRows("actors", cols, 2)
+	want := "INSERT INTO actors (id, handle, kind) VALUES (?, ?, ?), (?, ?, ?)"
+	if got != want {
+		t.Errorf("InsertRows = %q, want %q", got, want)
+	}
+	if got := (Postgres{}).Rebind(InsertRows("actors", cols, 2)); !strings.HasSuffix(got, "($1, $2, $3), ($4, $5, $6)") {
+		t.Errorf("rebound = %q", got)
+	}
+	if one := InsertRows("actors", cols, 1); one != (SQLite{}).Insert("actors", cols) {
+		t.Errorf("one row = %q, want the single-row INSERT", one)
+	}
+}

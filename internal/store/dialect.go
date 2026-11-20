@@ -127,6 +127,14 @@ func (p Postgres) Rebind(q string) string {
 	return b.String()
 }
 
+// InsertRows is one INSERT of rows rows of cols, with the ? marks of every row in order,
+// for a write that puts many rows in one statement. rows is at least 1.
+func InsertRows(table string, cols []string, rows int) string {
+	one := "(" + strings.TrimSuffix(strings.Repeat("?, ", len(cols)), ", ") + ")"
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, strings.Join(cols, ", "),
+		strings.TrimSuffix(strings.Repeat(one+", ", rows), ", "))
+}
+
 func insert(table string, cols []string) string {
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(cols)), ", ")
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(cols, ", "), marks)

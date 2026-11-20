@@ -47,7 +47,7 @@ func seedOutbox(t *testing.T, e env) []seeded {
 		_, err = e.st.Writer().ExecContext(ctx, e.st.Dialect().Rebind(`INSERT INTO notifications
 			(id, kind, event_id, payload, state, attempts, next_attempt_at, last_error, created_at, sent_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			id, rows[i].kind, e.event(t, "task_created", "aa-1", ""), `{"kind":"`+rows[i].kind+`","text":"row `+id+`"}`,
+			id, rows[i].kind, e.event(t, "task_created"), `{"kind":"`+rows[i].kind+`","text":"row `+id+`"}`,
 			rows[i].state, rows[i].attempts, at+60000, lastErr, at, sent)
 		if err != nil {
 			t.Fatal(err)

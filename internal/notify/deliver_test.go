@@ -65,7 +65,7 @@ func newOutbox(t *testing.T, url string) *outbox {
 	o := &outbox{env: e, now: t0.Add(time.Hour)}
 	o.w = &notify.Worker{Store: e.st, URL: url, Timeout: 5 * time.Second, Now: func() time.Time { return o.now }}
 	for i := 0; i < 6; i++ {
-		o.event = append(o.event, e.event(t, "task_created", "aa-1", ""))
+		o.event = append(o.event, e.event(t, "task_created"))
 	}
 	return o
 }

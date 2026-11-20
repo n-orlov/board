@@ -20,6 +20,11 @@ const systemPrincipal = "system:expiry"
 type due struct {
 	ID, ActorID, TaskID, InitiativeID, Ref, Task string
 	ExpiresAt                                    time.Time
+	// TaskTitle, Intent, Handle and WayBack are what the stranded alert says;
+	// ActorOrigin is the holder's own origin as an event of it records; Newest
+	// says no later lease exists on the task.
+	TaskTitle, Intent, Handle, WayBack, ActorOrigin string
+	Newest                                          bool
 }
 
 // ExpireDue marks every live lease whose expires_at is before now as expired and
@@ -65,34 +70,52 @@ func (s Store) anyDue(ctx context.Context, now time.Time) (bool, error) {
 	return true, nil
 }
 
+// expireDue expires every due lease and records it, in a number of statements that
+// does not depend on how many are due: one read that locks them, one update, one
+// INSERT of the events and one of the notifications (more only past a thousand
+// rows). The read holds the rows, so the update finds the very leases the read
+// listed; a count that differs means another writer got in between, and the
+// transaction rolls back rather than expire a lease with no event.
 func (s Store) expireDue(ctx context.Context, tx *sql.Tx, now time.Time) (int, error) {
 	list, err := s.dueAt(ctx, tx, now)
-	if err != nil {
+	if err != nil || len(list) == 0 {
 		return 0, err
 	}
-	n := 0
-	for _, l := range list {
-		res, err := tx.ExecContext(ctx, s.Store.Dialect().Rebind(`UPDATE leases SET state = 'expired' WHERE id = ? AND state = 'live' AND expires_at < ?`),
-			l.ID, store.EncodeBound(now))
-		if err != nil {
-			return n, fmt.Errorf("expire lease: %w", err)
-		}
-		if won, _ := res.RowsAffected(); won != 1 {
-			continue
-		}
-		if err := s.appendExpired(ctx, tx, l, now); err != nil {
-			return n, err
-		}
-		n++
+	res, err := tx.ExecContext(ctx, s.Store.Dialect().Rebind(`UPDATE leases SET state = 'expired' WHERE state = 'live' AND expires_at < ?`),
+		store.EncodeBound(now))
+	if err != nil {
+		return 0, fmt.Errorf("expire leases: %w", err)
 	}
-	return n, nil
+	if err := wonAll(res, len(list)); err != nil {
+		return 0, err
+	}
+	if err := s.appendExpired(ctx, tx, list, now); err != nil {
+		return 0, err
+	}
+	return len(list), nil
 }
 
-// dueAt lists the live leases that expired before now, oldest first.
+// wonAll is nil when an update touched exactly the want rows the caller listed.
+func wonAll(res sql.Result, want int) error {
+	got, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("expire leases: %w", err)
+	}
+	if got != int64(want) {
+		return fmt.Errorf("expire leases: %d leases listed but %d expired, so another writer changed them", want, got)
+	}
+	return nil
+}
+
+// dueAt lists the live leases that expired before now, oldest first, with what
+// their events and stranded alerts say, and locks them where the database can.
 func (s Store) dueAt(ctx context.Context, tx *sql.Tx, now time.Time) ([]due, error) {
-	rows, err := tx.QueryContext(ctx, s.Store.Dialect().Rebind(`SELECT l.id, l.n, l.actor_id, l.task_id, t.initiative_id, i.slug, t.seq, l.expires_at
-		FROM leases l JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id
-		WHERE l.state = 'live' AND l.expires_at < ? ORDER BY l.expires_at, l.n`), store.EncodeBound(now))
+	rows, err := tx.QueryContext(ctx, s.Store.Dialect().Rebind(`SELECT l.id, l.n, l.actor_id, l.task_id, t.initiative_id, i.slug, t.seq, t.title,
+			l.intent, l.expires_at, a.handle, a.way_back, CASE WHEN a.kind = 'operator' THEN a.id ELSE a.origin END,
+			CASE WHEN EXISTS (SELECT 1 FROM leases o WHERE o.task_id = l.task_id
+				AND (o.started_at > l.started_at OR (o.started_at = l.started_at AND o.id > l.id))) THEN 0 ELSE 1 END
+		FROM leases l JOIN tasks t ON t.id = l.task_id JOIN initiatives i ON i.id = t.initiative_id JOIN actors a ON a.id = l.actor_id
+		WHERE l.state = 'live' AND l.expires_at < ? ORDER BY l.expires_at, l.n`+s.Store.Dialect().LockRow("l")), store.EncodeBound(now))
 	if err != nil {
 		return nil, fmt.Errorf("read expired leases: %w", err)
 	}
@@ -102,25 +125,39 @@ func (s Store) dueAt(ctx context.Context, tx *sql.Tx, now time.Time) ([]due, err
 		var l due
 		var n int64
 		var slug string
-		var seq int
+		var seq, newest int
 		var exp int64
-		if err := rows.Scan(&l.ID, &n, &l.ActorID, &l.TaskID, &l.InitiativeID, &slug, &seq, &exp); err != nil {
+		var wayBack, origin sql.NullString
+		if err := rows.Scan(&l.ID, &n, &l.ActorID, &l.TaskID, &l.InitiativeID, &slug, &seq, &l.TaskTitle,
+			&l.Intent, &exp, &l.Handle, &wayBack, &origin, &newest); err != nil {
 			return nil, fmt.Errorf("read expired leases: %w", err)
 		}
 		l.Ref, l.Task, l.ExpiresAt = domain.FormatLeaseRef(n), domain.FormatTaskRef(slug, seq), store.DecodeTime(exp)
+		l.WayBack, l.ActorOrigin, l.Newest = wayBack.String, origin.String, newest == 1
 		out = append(out, l)
 	}
 	return out, rows.Err()
 }
 
-func (s Store) appendExpired(ctx context.Context, tx *sql.Tx, l due, now time.Time) error {
-	eventID, err := audit.AppendAsID(ctx, tx, s.Store.Dialect(), l.ActorID, now, audit.Event{
-		Principal: systemPrincipal, Type: EventExpired, InitiativeID: l.InitiativeID, TaskID: l.TaskID, RefID: l.ID,
-		Summary: l.Ref + " expired on " + l.Task,
-		Data:    map[string]any{"ref": l.Ref, "task": l.Task, "expired_at": l.ExpiresAt.Format(time.RFC3339Nano)},
-	})
+// appendExpired records a lease_expired event for each lease of list, then the
+// stranded alerts of those that are the newest on their task.
+func (s Store) appendExpired(ctx context.Context, tx *sql.Tx, list []due, now time.Time) error {
+	events := make([]audit.Written, len(list))
+	for i, l := range list {
+		events[i] = audit.Written{ActorID: l.ActorID, ActorOrigin: l.ActorOrigin, Event: audit.Event{
+			Principal: systemPrincipal, Type: EventExpired, InitiativeID: l.InitiativeID, TaskID: l.TaskID, RefID: l.ID,
+			Summary: l.Ref + " expired on " + l.Task,
+			Data:    map[string]any{"ref": l.Ref, "task": l.Task, "expired_at": l.ExpiresAt.Format(time.RFC3339Nano)},
+		}}
+	}
+	ids, err := audit.AppendBatch(ctx, tx, s.Store.Dialect(), now, events)
 	if err != nil {
 		return err
 	}
-	return notify.EnqueueStranded(ctx, tx, s.Store, eventID, l.ID, now)
+	alerts := make([]notify.Stranded, len(list))
+	for i, l := range list {
+		alerts[i] = notify.Stranded{EventID: ids[i], Newest: l.Newest, Holder: notify.Actor{Handle: l.Handle, WayBack: l.WayBack},
+			LeaseRef: l.Ref, Intent: l.Intent, ExpiredAt: l.ExpiresAt, TaskRef: l.Task, TaskTitle: l.TaskTitle}
+	}
+	return notify.EnqueueStrandedBatch(ctx, tx, s.Store, alerts, now)
 }

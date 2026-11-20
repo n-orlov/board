@@ -1058,3 +1058,119 @@ func TestRenewHeldInWithNoLiveLeaseIsAConflictWithANext(t *testing.T) {
 		}
 	})
 }
+
+// strandedLeases is the lease refs the stranded notifications name, oldest event first.
+func strandedLeases(t *testing.T, e env) (refs []string) {
+	t.Helper()
+	rs, err := e.S.Store.Reader().QueryContext(ctx, `SELECT n.payload FROM notifications n JOIN events ev ON ev.id = n.event_id ORDER BY ev.n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var p struct{ Lease struct{ Ref string } }
+		var raw string
+		if err := rs.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			t.Fatal(err)
+		}
+		refs = append(refs, p.Lease.Ref)
+	}
+	return refs
+}
+
+func (e env) setStarted(t *testing.T, ref string, at time.Time) {
+	t.Helper()
+	if _, err := e.S.Store.Writer().ExecContext(ctx, `UPDATE leases SET started_at = ? WHERE n = ?`, store.EncodeTime(at), ref[1:]); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStrandedAlertJudgesTheNewestLeaseOfATaskByStartedAtThenID(t *testing.T) {
+	for name, tc := range map[string]struct {
+		first, second time.Duration // offsets of started_at from t0
+		want          string
+	}{
+		"the same started_at: the larger id":                {0, 0, "L2"},
+		"started_at outranks id: the first, started later":  {time.Hour, 0, "L1"},
+		"started_at outranks id: the second, started later": {0, time.Hour, "L2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.S.Store.SetNotify(store.NotifyKinds)
+			e.start(t, me, "aa-1", secs(60))
+			e.start(t, bob, "aa-1", secs(60))
+			e.start(t, me, "aa-2", secs(60))
+			e.setStarted(t, "L1", t0.Add(tc.first))
+			e.setStarted(t, "L2", t0.Add(tc.second))
+			e.Clock.add(2 * time.Hour)
+			if n, err := e.S.ExpireDue(ctx); err != nil || n != 3 {
+				t.Fatalf("ExpireDue = %d, %v", n, err)
+			}
+			if got := strandedLeases(t, e); !reflect.DeepEqual(got, []string{tc.want, "L3"}) {
+				t.Fatalf("stranded alerts name %q, want %s on aa-1 and L3 on aa-2", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExpiryOfManyLeasesWritesOneEventEachInOrderAsTheirHoldersWithTheirOrigins(t *testing.T) {
+	e := newEnv(t)
+	op := audit.Actor{Handle: "alice-op", Operator: true}
+	if _, err := e.Tasks.Create(ctx, op, "key:x", tasks.New{Initiative: "aa", Title: "third"}); err != nil {
+		t.Fatal(err)
+	}
+	owned := audit.WithOrigin(ctx, "alice-op")
+	var due []leases.Lease
+	for i, task := range []string{"aa-1", "aa-2", "aa-3"} {
+		a, c := bob, ctx
+		if i == 1 {
+			a, c = me, owned
+		}
+		e.Clock.add(time.Second)
+		r, err := e.S.Start(c, a, "key:x", leases.Start{Task: task, Intent: "work", TTL: secs(int64(60 * (3 - i)))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		due = append(due, r.Lease)
+	}
+	live := e.start(t, me, "aa-1", secs(86400)).Lease
+	e.Clock.add(2 * time.Hour)
+	if n, err := e.S.ExpireDue(ctx); err != nil || n != 3 {
+		t.Fatalf("ExpireDue = %d, %v", n, err)
+	}
+	evs := e.events(t, leases.EventExpired)
+	if len(evs) != 3 {
+		t.Fatalf("events = %+v", evs)
+	}
+	// the one that ran out first has its event first
+	for i, want := range []leases.Lease{due[2], due[1], due[0]} {
+		if evs[i].RefID != want.ID || evs[i].Summary != want.Ref+" expired on "+want.Task || evs[i].Principal != "system:expiry" {
+			t.Errorf("event %d = %+v, want the expiry of %s", i, evs[i], want.Ref)
+		}
+	}
+	if evs[0].Actor != bob.Handle || evs[1].Actor != me.Handle || evs[2].Actor != bob.Handle {
+		t.Errorf("event actors = %s, %s, %s, want each lease holder", evs[0].Actor, evs[1].Actor, evs[2].Actor)
+	}
+	origins := map[string]string{}
+	rs, err := e.S.Store.Reader().QueryContext(ctx, `SELECT e.ref_id, o.handle FROM events e JOIN actors o ON o.id = e.origin WHERE e.type = 'lease_expired'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var ref, origin string
+		if err := rs.Scan(&ref, &origin); err != nil {
+			t.Fatal(err)
+		}
+		origins[ref] = origin
+	}
+	if len(origins) != 1 || origins[due[1].ID] != "alice-op" {
+		t.Errorf("origins = %v, want only the lease whose holder's latest write named alice-op", origins)
+	}
+	if got, _ := e.S.Get(ctx, live.Ref); got.State != "live" {
+		t.Errorf("a lease not due is %s", got.State)
+	}
+}

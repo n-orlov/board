@@ -22,7 +22,6 @@ var (
 	ctx   = context.Background()
 	t0    = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	agent = audit.Actor{Handle: "claude@host"}
-	other = audit.Actor{Handle: "codex@host"}
 )
 
 type env struct {
@@ -73,13 +72,10 @@ func (e env) taskID(t *testing.T, ref string) string {
 	return id
 }
 
-// event appends an event of typ about the task ref (empty for none) and the row refID, and returns its id.
-func (e env) event(t *testing.T, typ, taskRef, refID string) string {
+// event appends an event of typ about task aa-1 and returns its id.
+func (e env) event(t *testing.T, typ string) string {
 	t.Helper()
-	ev := audit.Event{Principal: "key:x", Type: typ, Summary: typ, RefID: refID}
-	if taskRef != "" {
-		ev.TaskID = e.taskID(t, taskRef)
-	}
+	ev := audit.Event{Principal: "key:x", Type: typ, Summary: typ, TaskID: e.taskID(t, "aa-1")}
 	var id string
 	e.tx(t, func(tx *sql.Tx) error {
 		var err error
@@ -124,7 +120,7 @@ func (e env) count(t *testing.T) int {
 
 func TestEnqueueWritesAPendingRowForAKindThatIsOn(t *testing.T) {
 	e := newEnv(t, []string{store.NotifyDone})
-	id := e.event(t, "task_done", "aa-1", "")
+	id := e.event(t, "task_done")
 	e.enqueue(t, id, store.NotifyDone)
 	var kind, eventID, payload, state string
 	var attempts int
@@ -147,7 +143,7 @@ func TestEnqueueWritesNothingForAKindThatIsOffOrWhenAlertsAreOff(t *testing.T) {
 	for name, kinds := range map[string][]string{"kind not listed": {store.NotifyAsking}, "alerts off": nil} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, kinds)
-			e.enqueue(t, e.event(t, "task_done", "aa-1", ""), store.NotifyDone)
+			e.enqueue(t, e.event(t, "task_done"), store.NotifyDone)
 			if n := e.count(t); n != 0 {
 				t.Fatalf("%d rows", n)
 			}
@@ -212,84 +208,105 @@ func leaseN(t *testing.T, ref string) int {
 	return n
 }
 
-// taskRefOf is the ref of the task with the id.
-func (e env) taskRefOf(t *testing.T, id string) string {
+// expiredEvents makes n lease_expired events and returns the Stranded of each,
+// the newest flag true for every second one.
+func (e env) expiredEvents(t *testing.T, n int) []notify.Stranded {
 	t.Helper()
-	var seq int
-	if err := e.st.Reader().QueryRowContext(ctx, e.st.Dialect().Rebind(`SELECT seq FROM tasks WHERE id = ?`), id).Scan(&seq); err != nil {
-		t.Fatal(err)
-	}
-	return "aa-" + strconv.Itoa(seq)
+	var list []notify.Stranded
+	e.tx(t, func(tx *sql.Tx) error {
+		actorID, err := audit.UpsertActor(ctx, tx, e.st.Dialect(), agent, t0)
+		if err != nil {
+			return err
+		}
+		events := make([]audit.Written, n)
+		for i := range events {
+			events[i] = audit.Written{ActorID: actorID, Event: audit.Event{Principal: "system:expiry", Type: "lease_expired", Summary: "L" + strconv.Itoa(i)}}
+		}
+		ids, err := audit.AppendBatch(ctx, tx, e.st.Dialect(), t0, events)
+		for i, id := range ids {
+			list = append(list, notify.Stranded{EventID: id, Newest: i%2 == 0, Holder: notify.Actor{Handle: "claude@host"},
+				LeaseRef: "L" + strconv.Itoa(i), Intent: "work", ExpiredAt: t0, TaskRef: "aa-1", TaskTitle: "t"})
+		}
+		return err
+	})
+	return list
 }
 
-func (e env) stranded(t *testing.T, leaseID string) {
+func (e env) enqueueBatch(t *testing.T, list []notify.Stranded) {
 	t.Helper()
-	var taskID string
-	if err := e.st.Reader().QueryRowContext(ctx, e.st.Dialect().Rebind(`SELECT task_id FROM leases WHERE id = ?`), leaseID).Scan(&taskID); err != nil {
-		t.Fatal(err)
-	}
-	ev := e.event(t, "lease_expired", e.taskRefOf(t, taskID), leaseID)
-	e.tx(t, func(tx *sql.Tx) error { return notify.EnqueueStranded(ctx, tx, e.st, ev, leaseID, t0) })
+	e.tx(t, func(tx *sql.Tx) error { return notify.EnqueueStrandedBatch(ctx, tx, e.st, list, t0.Add(time.Minute)) })
 }
 
-func (e env) setStarted(t *testing.T, leaseID string, at time.Time) {
-	t.Helper()
-	if _, err := e.st.Writer().ExecContext(ctx, e.st.Dialect().Rebind(`UPDATE leases SET started_at = ? WHERE id = ?`), at.UnixMilli(), leaseID); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEnqueueStrandedForTheOnlyLeaseOfATask(t *testing.T) {
+func TestEnqueueStrandedBatchWritesARowOnlyForTheNewestLeaseOfEachTask(t *testing.T) {
 	e := newEnv(t, store.NotifyKinds)
-	e.stranded(t, e.leaseOn(t, agent, "aa-1"))
-	if n := e.count(t); n != 1 {
-		t.Fatalf("%d rows, want 1", n)
+	e.enqueueBatch(t, e.expiredEvents(t, 5))
+	if n := e.count(t); n != 3 {
+		t.Fatalf("%d rows for 5 events of which 3 are the newest lease of their task", n)
 	}
 }
 
-func TestEnqueueStrandedJudgesNewestByStartedAtThenID(t *testing.T) {
+func TestEnqueueStrandedBatchWritesEveryRowPastOneStatementsWorth(t *testing.T) {
 	e := newEnv(t, store.NotifyKinds)
-	first, second := e.leaseOn(t, agent, "aa-1"), e.leaseOn(t, other, "aa-1")
-
-	// the same started_at: the larger id is the newest
-	e.setStarted(t, first, t0)
-	e.setStarted(t, second, t0)
-	e.stranded(t, first)
-	if n := e.count(t); n != 0 {
-		t.Fatalf("the lease with the smaller id enqueued %d rows on a started_at tie", n)
-	}
-	e.stranded(t, second)
-	if n := e.count(t); n != 1 {
-		t.Fatalf("the lease with the larger id enqueued %d rows in total, want 1", n)
-	}
-
-	// started_at outranks id: the first lease, started later, is now the newest
-	e.setStarted(t, first, t0.Add(time.Hour))
-	e.stranded(t, second)
-	if n := e.count(t); n != 1 {
-		t.Fatalf("the lease that started earlier enqueued, %d rows in total", n)
-	}
-	e.stranded(t, first)
-	if n := e.count(t); n != 2 {
-		t.Fatalf("the lease that started later enqueued %d rows in total, want 2", n)
+	e.enqueueBatch(t, e.expiredEvents(t, 2301))
+	if n := e.count(t); n != 1151 {
+		t.Fatalf("%d rows for 2301 events, want the 1151 newest", n)
 	}
 }
 
-func TestEnqueueStrandedIgnoresLeasesOfOtherTasks(t *testing.T) {
-	e := newEnv(t, store.NotifyKinds)
-	older := e.leaseOn(t, agent, "aa-1")
-	e.leaseOn(t, agent, "aa-2")
-	e.setStarted(t, older, t0.Add(-time.Hour))
-	e.stranded(t, older)
-	if n := e.count(t); n != 1 {
-		t.Fatalf("%d rows: a lease on another task made this one not the newest", n)
-	}
-}
-
-func TestEnqueueStrandedWritesNothingWhenStrandedIsOff(t *testing.T) {
+func TestEnqueueStrandedBatchWritesNothingForNoEventsOrWhenStrandedIsOff(t *testing.T) {
 	e := newEnv(t, []string{store.NotifyDone})
-	e.stranded(t, e.leaseOn(t, agent, "aa-1"))
+	e.enqueueBatch(t, e.expiredEvents(t, 3))
+	e.enqueueBatch(t, nil)
 	if n := e.count(t); n != 0 {
 		t.Fatalf("%d rows", n)
+	}
+	on := newEnv(t, store.NotifyKinds)
+	on.enqueueBatch(t, nil)
+	if n := on.count(t); n != 0 {
+		t.Fatalf("%d rows for no events", n)
+	}
+}
+
+func TestEnqueueStrandedBatchRefusesASecondRowForOneEvent(t *testing.T) {
+	e := newEnv(t, store.NotifyKinds)
+	list := e.expiredEvents(t, 1)
+	e.enqueueBatch(t, list)
+	tx, err := e.st.Writer().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := notify.EnqueueStrandedBatch(ctx, tx, e.st, list, t0); err == nil {
+		t.Fatal("a second stranded row for the event was written")
+	}
+}
+
+// TestAStrandedPayloadIsTheDocumentBuildPayloadReads proves the payload a batch
+// writes from what the expiry read is the one BuildPayload reads back from the
+// database for the same event, with a public URL and without one.
+func TestAStrandedPayloadIsTheDocumentBuildPayloadReads(t *testing.T) {
+	for name, url := range map[string]string{"no public url": "", "public url": "https://board.example.com/"} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, store.NotifyKinds)
+			e.st.SetPublicURL(url)
+			e.leaseOn(t, audit.Actor{Handle: "claude@host", WayBack: "tmux 4"}, "aa-1")
+			e.tick(48 * time.Hour)
+			if n, err := e.leases.ExpireDue(ctx); err != nil || n != 1 {
+				t.Fatalf("ExpireDue = %d, %v", n, err)
+			}
+			var eventID, stored string
+			if err := e.st.Reader().QueryRowContext(ctx, `SELECT event_id, payload FROM notifications`).Scan(&eventID, &stored); err != nil {
+				t.Fatal(err)
+			}
+			var built []byte
+			e.tx(t, func(tx *sql.Tx) error {
+				var err error
+				built, err = notify.BuildPayload(ctx, tx, e.st, eventID, store.NotifyStranded, url)
+				return err
+			})
+			if stored != string(built) {
+				t.Fatalf("batch payload\n%s\nBuildPayload\n%s", stored, built)
+			}
+		})
 	}
 }
