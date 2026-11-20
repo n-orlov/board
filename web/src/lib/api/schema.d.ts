@@ -1819,6 +1819,11 @@ export interface components {
         /** @description A resource that two or more live leases hold. */
         AttentionConflict: {
             resource: string;
+            /**
+             * Format: date-time
+             * @description When the contest began, that is the newest `started_at` among the live leases that hold the resource.
+             */
+            since: string;
             /** @description Every live lease on the resource, in lease-number order. */
             holders: components["schemas"]["AttentionHolder"][];
             /** @description The distinct tasks of the holders, in the same order. */

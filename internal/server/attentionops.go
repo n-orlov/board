@@ -110,7 +110,7 @@ func apiHolder(h attention.Holder) AttentionHolder {
 
 func apiConflictItem(c attention.Conflict) AttentionConflict {
 	tasks := append([]string{}, c.Tasks...)
-	return AttentionConflict{Resource: c.Resource, Holders: *mapped(c.Holders, apiHolder), Tasks: tasks}
+	return AttentionConflict{Resource: c.Resource, Holders: *mapped(c.Holders, apiHolder), Tasks: tasks, Since: c.Since}
 }
 
 func apiAttention(r attention.Result) Attention {

@@ -58,11 +58,13 @@ const full: Attention = {
         { lease: 'L2', actor: sue, task: 'aa-2', intent: 'vacuum', expires_at: '2026-01-01T13:00:00Z' },
       ],
       tasks: ['aa-1', 'aa-2'],
+      since: '2026-01-01T09:30:00Z',
     },
     {
       resource: 'solo',
       holders: [{ lease: 'L5', actor: bob, task: 'aa-1', intent: 'x', expires_at: '2026-01-01T13:00:00Z' }],
       tasks: ['aa-1'],
+      since: '2026-01-01T08:00:00Z',
     },
   ],
 };
@@ -170,8 +172,9 @@ describe('rowsFor', () => {
         { role: 'L1', handle: 'bob', wayBack: 'ralphctl status bob' },
         { role: 'L2', handle: 'sue', wayBack: undefined },
       ],
-      at: undefined,
+      at: '2026-01-01T09:30:00Z',
     });
+    expect(one!.at).toBe('2026-01-01T08:00:00Z');
     expect(one!.href).toBe('#/t/aa-1');
   });
 

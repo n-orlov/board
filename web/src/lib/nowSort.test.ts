@@ -70,16 +70,44 @@ describe('the order inside each of the six band kinds', () => {
     }
   }
 
-  it('expired leases and conflicts sort together; a conflict has no time, so it sits last by time', () => {
-    const mixed: Attention = {
-      ...attention,
-      conflicts: [{ resource: 'db', holders: [{ lease: 'L1', actor: who('aaa'), task: 't-1', intent: 'i', expires_at: T.zed }], tasks: ['t-1'] }],
-    };
-    const key = (r: ReturnType<typeof bandRows>[number]) => ({ at: r.row.at, by: r.row.actors[0]?.handle });
-    const rows = bandRows(band('expired'), mixed, NOW);
-    expect(sortByOrder(rows, 'newest', key).map((r) => r.row.id)).toEqual(['L-zed', 'L-bob', 'L-amy', 'db']);
-    expect(sortByOrder(rows, 'oldest', key).map((r) => r.row.id)).toEqual(['L-amy', 'L-bob', 'L-zed', 'db']);
-    expect(sortByOrder(rows, 'actor', key).map((r) => r.row.id)).toEqual(['db', 'L-amy', 'L-bob', 'L-zed']);
+  // Conflicts began at: db 10:30 (holder zoe), cache 08:30 (holder amy), queue 11:30 (holder bob). Leases: zed 11:00, bob 10:00, amy 09:00.
+  const conflict = (resource: string, handle: string, since: string | undefined) => ({
+    resource,
+    holders: [{ lease: `H-${resource}`, actor: who(handle), task: 't-1', intent: 'i', expires_at: T.zed }],
+    tasks: ['t-1'],
+    since: since as string,
+  });
+  const key = (r: ReturnType<typeof bandRows>[number]) => ({ at: r.row.at, by: r.row.actors[0]?.handle });
+  const ids = (a: Attention, order: NowOrder) => sortByOrder(bandRows(band('expired'), a, NOW), order, key).map((r) => r.row.id);
+  const mixed: Attention = {
+    ...attention,
+    conflicts: [conflict('db', 'zoe', '2026-01-01T10:30:00Z'), conflict('cache', 'amy', '2026-01-01T08:30:00Z'), conflict('queue', 'bob', '2026-01-01T11:30:00Z')],
+  };
+
+  it('expired leases and conflicts sort together by time: a conflict is as old as its contest', () => {
+    expect(ids(mixed, 'newest')).toEqual(['queue', 'L-zed', 'db', 'L-bob', 'L-amy', 'cache']);
+    expect(ids(mixed, 'oldest')).toEqual(['cache', 'L-amy', 'L-bob', 'db', 'L-zed', 'queue']);
+  });
+
+  it('breaks an actor tie between a lease and a conflict with the newer time', () => {
+    expect(ids(mixed, 'actor')).toEqual(['L-amy', 'cache', 'queue', 'L-bob', 'L-zed', 'db']);
+    const tied: Attention = { ...mixed, conflicts: [conflict('older', 'amy', '2026-01-01T07:00:00Z'), conflict('newer', 'amy', '2026-01-01T11:45:00Z')] };
+    expect(ids(tied, 'actor').slice(0, 3)).toEqual(['newer', 'L-amy', 'older']);
+  });
+
+  it('orders conflicts of different ages among themselves in both time orders, whatever the order given', () => {
+    const only: Attention = { counts, conflicts: mixed.conflicts };
+    expect(ids(only, 'newest')).toEqual(['queue', 'db', 'cache']);
+    expect(ids(only, 'oldest')).toEqual(['cache', 'db', 'queue']);
+    expect(ids({ counts, conflicts: [...mixed.conflicts!].reverse() }, 'newest')).toEqual(['queue', 'db', 'cache']);
+  });
+
+  it('a conflict row carries the instant its contest began as its time', () => {
+    expect(bandRows(band('expired'), mixed, NOW).filter((r) => r.section === 'conflicts').map((r) => r.row.at)).toEqual([
+      '2026-01-01T10:30:00Z',
+      '2026-01-01T08:30:00Z',
+      '2026-01-01T11:30:00Z',
+    ]);
   });
 });
 

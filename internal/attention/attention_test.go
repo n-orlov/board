@@ -448,3 +448,28 @@ func TestAMalformedCheckEventIsAnError(t *testing.T) {
 		t.Error("lastCheck accepted data that is not JSON")
 	}
 }
+
+func TestAConflictIsSinceTheNewestStartAmongItsHoldersWhateverTheLeaseOrder(t *testing.T) {
+	e := newEnv(t)
+	first := e.lease(t, me, "aa-1", "repo:board")
+	e.tick(5 * time.Second)
+	second := e.lease(t, bob, "bb-1", "repo:board")
+	e.lease(t, me, "aa-2", "repo:old")
+	e.tick(20 * time.Second)
+	third := e.lease(t, bob, "aa-2", "repo:old")
+
+	r := e.get(t, Query{})
+	if len(r.Conflicts) != 2 {
+		t.Fatalf("conflicts = %+v, want 2", r.Conflicts)
+	}
+	since := map[string]time.Time{}
+	for _, c := range r.Conflicts {
+		since[c.Resource] = c.Since
+	}
+	if got := since["repo:board"]; !got.Equal(second.StartedAt) || !got.After(first.StartedAt) {
+		t.Errorf("repo:board since = %v, want the second lease's start %v", got, second.StartedAt)
+	}
+	if got := since["repo:old"]; !got.Equal(third.StartedAt) {
+		t.Errorf("repo:old since = %v, want the later holder's start %v", got, third.StartedAt)
+	}
+}

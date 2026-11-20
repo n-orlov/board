@@ -28,7 +28,7 @@ const attention: Attention = {
   done_not_closed: [{ task: 'aa-2', title: 'Ship', done_by: bob, done_at: '2026-01-01T10:00:00Z', tags: [], tag_marks: [] }],
   expired_leases: [{ lease: 'L4', holder: bob, task: 'aa-3', title: 'Slow', intent: 'ride', renewed_at: '2026-01-01T08:00:00Z', expired_at: '2026-01-01T09:00:00Z', tags: [], tag_marks: [] }],
   overdue_watches: [],
-  conflicts: [{ resource: 'db/main', holders: [{ lease: 'L1', actor: bob, task: 'aa-1', intent: 'm', expires_at: '2026-01-01T13:00:00Z' }], tasks: ['aa-1'] }],
+  conflicts: [{ resource: 'db/main', holders: [{ lease: 'L1', actor: bob, task: 'aa-1', intent: 'm', expires_at: '2026-01-01T13:00:00Z' }], tasks: ['aa-1'], since: '2026-01-01T11:00:00Z' }],
 };
 const band = (key: BandKey) => BANDS.find((b) => b.key === key)!;
 

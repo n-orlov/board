@@ -4020,10 +4020,15 @@ components:
     AttentionConflict:
       type: object
       description: A resource that two or more live leases hold.
-      required: [resource, holders, tasks]
+      required: [resource, holders, tasks, since]
       properties:
         resource:
           type: string
+        since:
+          type: string
+          format: date-time
+          description: >-
+            When the contest began, that is the newest `started_at` among the live leases that hold the resource.
         holders:
           type: array
           description: Every live lease on the resource, in lease-number order.

@@ -96,6 +96,9 @@ func conflictOf(resource string, held []leases.Lease, wayBacks map[string]string
 	for _, l := range held {
 		c.Holders = append(c.Holders, Holder{Lease: l.Ref, Actor: Actor{Handle: l.Actor, WayBack: wayBacks[l.Actor]},
 			Task: l.Task, Intent: l.Intent, ExpiresAt: l.ExpiresAt})
+		if l.StartedAt.After(c.Since) {
+			c.Since = l.StartedAt
+		}
 		if !seen[l.Task] {
 			seen[l.Task] = true
 			c.Tasks = append(c.Tasks, l.Task)

@@ -162,6 +162,7 @@ Feature: Attention over HTTP
     And the response path "conflicts.0.holders.1.lease" is "L2"
     And the response path "conflicts.0.holders.1.actor.handle" is "codex@laptop"
     And the response path "conflicts.0.tasks" is "aa-1,aa-2"
+    And the response path "conflicts.0.since" is present
     When I end the lease "L2" without a body as actor "codex@laptop"
     And I request the attention with "" as actor "operator@laptop"
     Then the attention counts are "0,0,0,0,0,0"

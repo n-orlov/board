@@ -122,11 +122,13 @@ type Holder struct {
 }
 
 // Conflict is a resource that two or more live leases hold, with the holders in
-// lease-number order and the distinct tasks they work on in the same order.
+// lease-number order and the distinct tasks they work on in the same order. Since is when the
+// contest began: the newest start among the holders, the moment the last of them took the resource.
 type Conflict struct {
 	Resource string
 	Holders  []Holder
 	Tasks    []string
+	Since    time.Time
 }
 
 // Counts is the size of each section and their sum.

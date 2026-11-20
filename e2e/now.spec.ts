@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type PlaywrightTestArgs } from '@playwright/test';
 import { initiativeChip, openChips, pickInitiative, pickTag, tagChip } from './chips';
-import { BANDS_KEY, FLIGHT_KEY, LAYOUT_KEY, actorApi, band, created, seedFlight, seedNeedsMe, showAllBands } from './now';
+import { BANDS_KEY, FLIGHT_KEY, LAYOUT_KEY, actorApi, band, created, openBand, seedFlight, seedNeedsMe, showAllBands } from './now';
 
 // The Now view's Needs me bands (PRD R1, SPEC 11): the four bands in order with their counts, every band open on the desktop
 // but Done, not closed, an accordion on the phone (Open asks and Expired leases and conflicts open when they hold something,
@@ -540,6 +540,34 @@ for (const vp of [
       await expect.poll(() => askOrder(page, s.refs)).toEqual(['a', 'z', 'm']);
       await page.reload();
       await expect(page.getByTestId('now-sort').getByTestId('sort-select')).toHaveValue('', FIVE_SECONDS);
+    });
+
+    test('conflicts of different ages sort by when their contest began, in both time orders', async ({ page, playwright, baseURL }) => {
+      const slug = `e2e-nowsort-conflicts-${vp.name}`;
+      const a = await actorApi(playwright, baseURL, `nowsort-ca-${vp.name}`);
+      const b = await actorApi(playwright, baseURL, `nowsort-cb-${vp.name}`);
+      await created(a, '/api/v1/initiatives', { slug, title: `Conflict sort ${vp.name}` });
+      const task = async (title: string) => (await created(a, '/api/v1/tasks', { initiative: slug, title })).ref;
+      const resources = [`repo:sort-old-${vp.name}`, `repo:sort-new-${vp.name}`];
+      for (const resource of resources) {
+        await created(a, '/api/v1/leases', { task: await task(`First on ${resource}`), intent: 'first', resources: [resource] });
+        await created(b, '/api/v1/leases', { task: await task(`Second on ${resource}`), intent: 'second', resources: [resource] });
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+      }
+      await a.dispose();
+      await b.dispose();
+      await showAllBands(page);
+      await page.goto(`/#/now?initiative=${slug}`);
+      await openBand(page, 'expired');
+      const rows = band(page, 'expired').getByTestId('attention-item');
+      await expect(rows).toHaveCount(2, FIVE_SECONDS);
+      const order = async () => (await rows.locator('p.font-medium').allInnerTexts()).map((t) => resources.findIndex((r) => t.includes(r)));
+      expect(await order()).toEqual([1, 0]);
+      const select = page.getByTestId('now-sort').getByTestId('sort-select');
+      await select.selectOption({ label: 'Oldest first' });
+      await expect.poll(order).toEqual([0, 1]);
+      await select.selectOption({ label: 'Newest first' });
+      await expect.poll(order).toEqual([1, 0]);
     });
 
     test('a bad stored value falls back to newest first, and the sort leaves the URL alone', async ({ page, playwright, baseURL }) => {

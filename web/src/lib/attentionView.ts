@@ -45,7 +45,7 @@ export interface ItemRow {
   initiative: string | undefined;
   details: string[];
   actors: ItemActor[];
-  /** The instant the item is ordered by (an ask's creation, a lease's expiry, a watch's due time, when a task was done); none for a conflict. */
+  /** The instant the item is ordered by (an ask's creation, a lease's expiry, a watch's due time, when a task was done, when a conflict began). */
   at: string | undefined;
 }
 
@@ -120,7 +120,7 @@ function conflictRows(items: NonNullable<Attention['conflicts']>): ItemRow[] {
     initiative: initiativeOfHref(c.tasks.length === 1 ? taskHref(c.tasks[0]!) : undefined),
     details: c.holders.map((h) => `${h.lease} on ${h.task}: ${h.intent}`),
     actors: c.holders.map((h) => actor(h.lease, h.actor)),
-    at: undefined,
+    at: c.since,
   }));
 }
 

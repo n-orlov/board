@@ -1281,6 +1281,9 @@ type AttentionConflict struct {
 	Holders  []AttentionHolder `json:"holders"`
 	Resource string            `json:"resource"`
 
+	// Since When the contest began, that is the newest `started_at` among the live leases that hold the resource.
+	Since time.Time `json:"since"`
+
 	// Tasks The distinct tasks of the holders, in the same order.
 	Tasks []string `json:"tasks"`
 }
