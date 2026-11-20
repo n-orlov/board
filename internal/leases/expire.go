@@ -72,8 +72,8 @@ func (s Store) anyDue(ctx context.Context, now time.Time) (bool, error) {
 
 // expireDue expires every due lease and records it, in a number of statements that
 // does not depend on how many are due: one read that locks them, one update, one
-// INSERT of the events and one of the notifications (more only past a thousand
-// rows). The read holds the rows, so the update finds the very leases the read
+// INSERT of the events and, with stranded alerts on, one of the notifications,
+// run even when no expired lease is the newest on its task. The read holds the rows, so the update finds the very leases the read
 // listed; a count that differs means another writer got in between, and the
 // transaction rolls back rather than expire a lease with no event.
 func (s Store) expireDue(ctx context.Context, tx *sql.Tx, now time.Time) (int, error) {

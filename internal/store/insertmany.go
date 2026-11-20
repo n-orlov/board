@@ -13,11 +13,9 @@ import (
 // (Dialect.InsertSet), so neither the statement count nor the number of bound
 // parameters grows with the rows. Each value is a string, an integer or nil, the
 // only kinds the board stores; anything else is refused before any write. No
-// rows runs no statement.
+// rows is the same one statement over an empty set, which writes nothing, so a
+// caller's statement count does not depend on whether it had rows to write.
 func InsertMany(ctx context.Context, tx *sql.Tx, d Dialect, table string, cols []string, args []any) error {
-	if len(args) == 0 {
-		return nil
-	}
 	set, err := rowSet(cols, args)
 	if err != nil {
 		return err

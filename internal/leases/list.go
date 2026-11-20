@@ -175,11 +175,8 @@ func (s Store) readLeases(ctx context.Context, query string, args []any) ([]Leas
 }
 
 // attachResources sets the Resources of every lease in list, each sorted, in one
-// query however many leases there are.
+// query however many leases there are, none included.
 func (s Store) attachResources(ctx context.Context, list []Lease) error {
-	if len(list) == 0 {
-		return nil
-	}
 	by, err := s.resourcesOfAll(ctx, list)
 	if err != nil {
 		return err

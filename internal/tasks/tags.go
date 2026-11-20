@@ -39,11 +39,9 @@ func (s Store) insertTags(ctx context.Context, tx *sql.Tx, taskID string, tags [
 }
 
 // loadTags sets Tags and TagMarks on every task of list: Tags from task_tags, sorted, and to an
-// empty list for a task that has none.
+// empty list for a task that has none. It runs three statements whatever the
+// number of tasks, none included.
 func (s Store) loadTags(ctx context.Context, q tagQuerier, list []Task) error {
-	if len(list) == 0 {
-		return nil
-	}
 	ids := make([]string, len(list))
 	for i, t := range list {
 		ids[i] = t.ID
@@ -89,12 +87,9 @@ type Tagged struct {
 
 // TaggedByRef reads the tags and marks of the tasks the refs name, keyed by the
 // canonical ref. A ref that names no task is left out. It makes four statements
-// whatever the number of refs, and none for no refs.
+// whatever the number of refs, none and refs that name no task included.
 func (s Store) TaggedByRef(ctx context.Context, refs []string) (map[string]Tagged, error) {
 	out := map[string]Tagged{}
-	if len(refs) == 0 {
-		return out, nil
-	}
 	q := s.Store.ReaderFor(ctx)
 	list, refOf, err := s.tasksByRef(ctx, q, refs)
 	if err != nil {

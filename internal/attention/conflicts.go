@@ -126,12 +126,10 @@ func (s Store) keptTasks(ctx context.Context, sc scope) (map[string]bool, error)
 	return kept, rows.Err()
 }
 
-// wayBacks maps the handle of each holder of live to the way back on record.
+// wayBacks maps the handle of each holder of live to the way back on record, in
+// one query however many leases there are, none included.
 func (s Store) wayBacks(ctx context.Context, live []leases.Lease) (map[string]string, error) {
 	out := map[string]string{}
-	if len(live) == 0 {
-		return out, nil
-	}
 	ids := make([]string, 0, len(live))
 	for _, l := range live {
 		ids = append(ids, l.ActorID)

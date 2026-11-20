@@ -143,3 +143,71 @@ func TestTheNowReadExpiresAndAnswersPastAThousandLeasesOnEveryLeg(t *testing.T) 
 		}
 	})
 }
+
+func TestTheNowReadRunsItsEmptySetStatementsOnEveryLeg(t *testing.T) {
+	forEachLeg(t, func(t *testing.T, _ string, dbs databases) {
+		// every due lease has a newer ended lease on its task, so the stranded
+		// alerts INSERT runs over no row; once they expire nothing is in
+		// flight, so the resources and holders lookups run over no lease; and
+		// the filter names no task, so the tags lookups run over no ref
+		ctx := context.Background()
+		st, err := store.Open(dbs.New(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		if err := st.Migrate(ctx); err != nil {
+			t.Fatal(err)
+		}
+		st.SetNotify([]string{store.NotifyStranded})
+		base := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+		op := audit.Actor{Handle: "nik@host", Operator: true}
+		ini, err := (initiatives.Store{Store: st, Now: func() time.Time { return base }}).Create(ctx, op, "key:x", initiatives.New{Slug: "gone", Title: "gone"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := st.Writer().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		exec := func(q string, args ...any) {
+			if _, err := tx.ExecContext(ctx, st.Dialect().Rebind(q), args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		exec(`INSERT INTO actors (id, handle, kind, first_seen_at, last_seen_at) VALUES ('agent', 'claude@host', 'agent', 1, 1)`)
+		at := store.EncodeTime(base)
+		const hour = int64(time.Hour / time.Millisecond)
+		const seeded = 12
+		for i := 1; i <= seeded; i++ {
+			task := fmt.Sprintf("gone-%02d", i)
+			exec(`INSERT INTO tasks (id, initiative_id, seq, title, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'agent', ?, ?)`,
+				task, ini.ID, i, task, at, at)
+			exec(`INSERT INTO leases (id, task_id, actor_id, intent, ttl_seconds, started_at, renewed_at, expires_at) VALUES (?, ?, 'agent', 'x', 3600, ?, ?, ?)`,
+				task+"-due", task, at-2*hour, at-2*hour, at+hour)
+			exec(`INSERT INTO leases (id, task_id, actor_id, intent, ttl_seconds, started_at, renewed_at, expires_at, state, ended_at) VALUES (?, ?, 'agent', 'x', 3600, ?, ?, ?, 'ended', ?)`,
+				task+"-new", task, at-hour, at-hour, at, at)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		now := base.Add(48 * time.Hour)
+		b, err := (attention.Store{Store: st, Now: func() time.Time { return now }}).Board(ctx, attention.Query{Tags: []string{"nothing"}}, attention.Window24h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(b.InFlight) != 0 || len(b.Recent) != 0 || len(b.TaskMarks) != 0 {
+			t.Errorf("the filter names no task, but the board has %d in flight, %d recent and marks for %d", len(b.InFlight), len(b.Recent), len(b.TaskMarks))
+		}
+		if got := column(t, st, `SELECT id FROM leases WHERE state = 'expired' ORDER BY id`); len(got) != seeded {
+			t.Errorf("%d leases expired, want the %d due ones", len(got), seeded)
+		}
+		if got := column(t, st, `SELECT ref_id FROM events WHERE type = 'lease_expired'`); len(got) != seeded {
+			t.Errorf("%d lease_expired events, want %d", len(got), seeded)
+		}
+		if got := column(t, st, `SELECT id FROM notifications`); len(got) != 0 {
+			t.Errorf("%d notifications, want none: no expired lease was the newest on its task", len(got))
+		}
+	})
+}

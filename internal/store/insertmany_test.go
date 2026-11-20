@@ -106,11 +106,13 @@ func assertActorRows(t *testing.T, st *store.Store, rows int) {
 	}
 }
 
-func TestInsertManyOfNoRowsRunsNoStatement(t *testing.T) {
+func TestInsertManyOfNoRowsRunsTheSameOneStatementAndWritesNothing(t *testing.T) {
+	// a caller's statement count must not depend on whether it had rows
 	st, n := countingStore(t)
-	if used, err := insertCounted(t, st, n, actorCols, nil); err != nil || used != 0 {
-		t.Errorf("no rows: %d statements, err %v", used, err)
+	if used, err := insertCounted(t, st, n, actorCols, nil); err != nil || used != 1 {
+		t.Errorf("no rows: %d statements, err %v; want the one statement of any row count", used, err)
 	}
+	assertActorRows(t, st, 0)
 }
 
 func TestInsertManyRefusesWhatItCannotCarryBeforeAnyStatement(t *testing.T) {
