@@ -294,7 +294,7 @@
     <ul class="flex flex-col gap-3">
       {#each rows as { section, row } (`${section}:${row.id}`)}
         {@const initiative = row.initiative}
-        <li class="flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item" data-section={section}>
+        <li class="vh-card flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-4 wrap-anywhere" data-testid="attention-item" data-section={section}>
           <p class="font-medium">
             {#if row.href !== undefined}
               <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="item-link">{row.title}</a>
@@ -349,7 +349,7 @@
   {:else}
     <ul class="flex flex-col gap-3" data-testid="flight-list">
       {#each flightList as row (row.task)}
-        <li class="flex flex-col gap-2 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="flight-row" data-task={row.task}>
+        <li class="vh-card flex flex-col gap-2 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="flight-row" data-task={row.task}>
           <p class="font-medium">
             <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="flight-task">{row.task} {row.title}</a>
           </p>
@@ -378,7 +378,7 @@
   {:else}
     <ul class="flex flex-col gap-3" aria-labelledby="band-toggle-recent" data-testid="recent-list">
       {#each recentList as row (row.task)}
-        <li class="flex flex-col gap-1 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="recent-row" data-task={row.task}>
+        <li class="vh-card flex flex-col gap-1 rounded-md border border-border bg-surface p-4 wrap-anywhere" data-testid="recent-row" data-task={row.task}>
           <p class="font-medium">
             <a class="inline-flex min-h-11 items-center text-accent hover:underline" href={row.href} data-testid="recent-task">{row.task} {row.title}</a>
           </p>
@@ -429,7 +429,7 @@
   </section>
 {/snippet}
 
-<section aria-labelledby="now-heading" class="mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
+<section aria-labelledby="now-heading" class="vh-dense mx-auto w-full max-w-[2560px] pb-16 md:pb-0" data-testid="now-view">
   <h2 id="now-heading" class="mb-4 text-xl font-bold">Now</h2>
 
   <div class="mb-4" data-testid="now-filters">

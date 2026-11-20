@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type PlaywrightTestArgs } from '@playwright/test';
 
 // The Timeline's rows hold still (SPEC 11, R4): the view asks `GET /timeline` for rows=all, so the rows of a filter are
-// the same however the chart is panned or zoomed, and every row has a fixed height (task 52 px, initiative 44 px) with a
+// the same however the chart is panned or zoomed, and every row has a fixed height (task 52 px, initiative 44 px; 40 and 32 in Compact at desktop) with a
 // fixed lane per kind of item (planned on top, the actual span with its markers, the leases below), so nothing moves
 // vertically. The seeded initiative has tasks whose spans lie inside the opening window and outside it.
 const viewports = [
@@ -184,15 +184,19 @@ for (const vp of viewports) {
       await s.api.dispose();
     });
 
-    test('a task row is 52 px and an initiative row 44 px, and the planned strip, the actual span with its marker and the lease each keep their lane', async ({ page, playwright, baseURL }) => {
-      const s = await seed(playwright, baseURL, `lane-${vp.name}`);
+    // Sparse, and any phone, draw a task row of 52 px and an initiative row of 44 px; Compact (the default) at desktop 40 and 32.
+    for (const density of ['compact', 'sparse'] as const) {
+      const [taskRow, initiativeRow] = density === 'compact' && vp.name === 'desktop' ? [40, 32] : [52, 44];
+    test(`${density}: a task row is ${taskRow} px and an initiative row ${initiativeRow} px, and the planned strip, the actual span with its marker and the lease each keep their lane`, async ({ page, playwright, baseURL }) => {
+      await page.addInitScript((d) => localStorage.setItem('vh.density.v1', d), density);
+      const s = await seed(playwright, baseURL, `lane-${density}-${vp.name}`);
       await page.goto(`/#/timeline?initiative=${s.slug}&closed=90`);
       await drawn(page);
       await expect(page.locator('.vis-item.tl-lease')).toHaveCount(1, FIVE_SECONDS);
       await expect(page.locator('.vis-item.tl-planned')).toHaveCount(1, FIVE_SECONDS); // R1's strip is in the window; R3's, a month ahead, is not drawn
       const { rows, lanes } = await layout(page);
-      expect(rows.map((r) => r.height)).toEqual([44, 52, 52, 52, 52, 52]);
-      expect(rows.map((r) => r.top - rows[0]!.top)).toEqual([0, 44, 96, 148, 200, 252]); // each row starts where the one above ends
+      expect(rows.map((r) => r.height)).toEqual([initiativeRow, ...Array(5).fill(taskRow)]);
+      expect(rows.map((r) => r.top - rows[0]!.top)).toEqual(Array.from({ length: 6 }, (_, n) => (n === 0 ? 0 : initiativeRow + (n - 1) * taskRow))); // each row starts where the one above ends
       expect(rows.map((r) => r.initiative)).toEqual([true, false, false, false, false, false]);
 
       const planned = lanes.planned![0]!;
@@ -202,8 +206,9 @@ for (const vp of viewports) {
       expect(planned.top + planned.height).toBeLessThanOrEqual(actual.top + 1); // planned on top
       expect(actual.top + actual.height).toBeLessThanOrEqual(lease.top + 1); // leases below the actual span
       expect(marker.top).toBeCloseTo(actual.top, 0); // markers ride the actual span's lane
-      expect(lease.top + lease.height).toBeLessThanOrEqual(52);
+      expect(lease.top + lease.height).toBeLessThanOrEqual(taskRow);
       await s.api.dispose();
     });
+    }
   });
 }

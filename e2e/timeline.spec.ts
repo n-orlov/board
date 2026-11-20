@@ -452,6 +452,8 @@ for (const vp of viewports) {
     });
 
     test('keeps the page from scrolling sideways, and its controls and rows are 44 px targets', async ({ page, playwright, baseURL }) => {
+      // The 44 px targets are the phone's and Sparse's; Compact (the default) from 768 px lowers them to 28 px (e2e/density-lists.spec.ts).
+      await page.addInitScript(() => localStorage.setItem('vh.density.v1', 'sparse'));
       const s = await seed(playwright, baseURL, `fit-${vp.name}`);
       await open(page, s);
       await expectNoSidewaysScroll(page);

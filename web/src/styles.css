@@ -233,7 +233,7 @@ button.vh-tag[aria-pressed='true'] {
 }
 
 /*
- * Density (SPEC 11). Compact is the default: from 768 px the list pages (marked `.vh-dense`) drop the 44 px touch
+ * Density (SPEC 11). Compact is the default: from 768 px the list pages (marked `.vh-dense`: Now, Tasks, Timeline, Initiatives, an initiative, Archive and Actors) drop the 44 px touch
  * minimum to 28 px (still above WCAG 2.5.8's 24 px) and the roomy cell padding. Sparse keeps the layout as it was,
  * and below 768 px both densities keep 44 px targets. `data-density` on <html> is set by lib/density.ts. These rules
  * are unlayered, so they win over the Tailwind utilities, which live in a layer.
@@ -252,5 +252,10 @@ button.vh-tag[aria-pressed='true'] {
   }
   [data-density='compact'] .vh-dense table {
     font-size: 0.875rem;
+  }
+  /* A card row (Now's flight, recent and needs-me rows): the padding and the gaps shrink with the touch minimum. */
+  [data-density='compact'] .vh-dense .vh-card {
+    padding: 0.5rem 0.75rem;
+    row-gap: 0.25rem;
   }
 }

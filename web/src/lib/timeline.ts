@@ -175,34 +175,30 @@ export interface Lane {
   height: number;
 }
 
+type LaneKind = 'planned' | 'actual' | 'marker' | 'lease';
+
+/**
+ * The geometry of the chart's rows at one density: the row heights, the lane of each kind of item, the area the lease
+ * slots divide and the bar height for a task whose leases need 1, 2 or 3 slots.
+ */
+export interface RowGeometry {
+  taskRow: number;
+  initiativeRow: number;
+  lanes: Record<LaneKind, Lane>;
+  leaseArea: number;
+  leaseHeights: readonly number[];
+}
+
 /**
  * Each kind of item keeps a lane of its own in a task row, from the top down: the planned strip, the actual span (the
  * markers sit on its lane) and the leases (overlapping leases share theirs). Items are never stacked, so no lane moves.
  */
-export const LANES: Record<'planned' | 'actual' | 'marker' | 'lease', Lane> = {
+export const LANES: Record<LaneKind, Lane> = {
   planned: { top: 4, height: 6 },
   actual: { top: 12, height: 20 },
   marker: { top: 12, height: 20 },
   lease: { top: 34, height: 14 },
 };
-
-/** The lanes and row heights as the CSS custom properties Timeline.svelte's rules read. */
-export function laneStyle(): string {
-  const lanes = (Object.keys(LANES) as (keyof typeof LANES)[]).map(
-    (k) => `--tl-${k}-top:${LANES[k].top}px;--tl-${k}-h:${LANES[k].height}px`,
-  );
-  const slots = [2, 3].flatMap((count) => [
-    `--tl-lease-c${count}-h:${leaseSlotBox(0, count).height}px`,
-    ...Array.from({ length: count }, (_, slot) => `--tl-lease-c${count}-s${slot}-top:${leaseSlotBox(slot, count).top}px`),
-  ]);
-  return [`--tl-task-row:${TASK_ROW_PX}px`, `--tl-initiative-row:${INITIATIVE_ROW_PX}px`, ...lanes, ...slots].join(';');
-}
-
-/**
- * The most slots a task's leases are spread over (R11). A lease takes the first slot whose last bar ended at or before
- * it began, so leases that touch end to start share one; a fourth lease overlapping three others shares the last slot.
- */
-export const LEASE_SLOTS = 3;
 
 /** The area the lease slots divide, below the actual span: 16 px from 34 px down, leaving the row's last 2 px free. */
 const LEASE_AREA_PX = 16;
@@ -211,11 +207,59 @@ const LEASE_AREA_PX = 16;
  * the bars overlap but each shows a strip no other bar covers (the middle one of three needs 2 x step > height). */
 const LEASE_SLOT_HEIGHT: readonly number[] = [LANES.lease.height, 11, 6];
 
+/** The roomy rows: Sparse, and every row on a phone (a task row of 52 px and an initiative row of 44 px are touch targets). */
+export const ROOMY_ROWS: RowGeometry = {
+  taskRow: TASK_ROW_PX,
+  initiativeRow: INITIATIVE_ROW_PX,
+  lanes: LANES,
+  leaseArea: LEASE_AREA_PX,
+  leaseHeights: LEASE_SLOT_HEIGHT,
+};
+
+const COMPACT_LANES: Record<LaneKind, Lane> = {
+  planned: { top: 3, height: 4 },
+  actual: { top: 8, height: 16 },
+  marker: { top: 8, height: 16 },
+  lease: { top: 26, height: 12 },
+};
+
+/** The tight rows of Compact from 768 px (a task row of 40 px, an initiative row of 32 px; 24 px is WCAG 2.5.8's floor), so more rows fit the chart. */
+export const COMPACT_ROWS: RowGeometry = {
+  taskRow: 40,
+  initiativeRow: 32,
+  lanes: COMPACT_LANES,
+  leaseArea: 12,
+  leaseHeights: [COMPACT_LANES.lease.height, 9, 5],
+};
+
+/** The rows for a density: only Compact on a viewport of 768 px or wider (`desktop`) is tight; a phone keeps 44 px targets. */
+export function rowGeometry(compact: boolean, desktop: boolean): RowGeometry {
+  return compact && desktop ? COMPACT_ROWS : ROOMY_ROWS;
+}
+
+/** The lanes and row heights as the CSS custom properties Timeline.svelte's rules read. */
+export function laneStyle(geometry: RowGeometry = ROOMY_ROWS): string {
+  const lanes = (Object.keys(geometry.lanes) as LaneKind[]).map(
+    (k) => `--tl-${k}-top:${geometry.lanes[k].top}px;--tl-${k}-h:${geometry.lanes[k].height}px`,
+  );
+  const slots = [2, 3].flatMap((count) => [
+    `--tl-lease-c${count}-h:${leaseSlotBox(0, count, geometry).height}px`,
+    ...Array.from({ length: count }, (_, slot) => `--tl-lease-c${count}-s${slot}-top:${leaseSlotBox(slot, count, geometry).top}px`),
+  ]);
+  return [`--tl-task-row:${geometry.taskRow}px`, `--tl-initiative-row:${geometry.initiativeRow}px`, ...lanes, ...slots].join(';');
+}
+
+/**
+ * The most slots a task's leases are spread over (R11). A lease takes the first slot whose last bar ended at or before
+ * it began, so leases that touch end to start share one; a fourth lease overlapping three others shares the last slot.
+ */
+export const LEASE_SLOTS = 3;
+
 /** Where a lease bar sits in a row whose leases fill `count` (1 to LEASE_SLOTS) slots: its top offset in the row and its height, in px. */
-export function leaseSlotBox(slot: number, count: number): Lane {
-  const height = LEASE_SLOT_HEIGHT[count - 1]!;
-  const step = count < 2 ? 0 : (LEASE_AREA_PX - height) / (count - 1);
-  return { top: LANES.lease.top + slot * step, height };
+export function leaseSlotBox(slot: number, count: number, geometry: RowGeometry = ROOMY_ROWS): Lane {
+  const height = geometry.leaseHeights[count - 1]!;
+  const step = count < 2 ? 0 : (geometry.leaseArea - height) / (count - 1);
+  return { top: geometry.lanes.lease.top + slot * step, height };
 }
 
 /** The class that places a lease bar: `tl-lease-c<count>` sets its height, `tl-lease-c<count>-s<slot>` its top. */

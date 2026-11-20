@@ -204,6 +204,8 @@ for (const vp of viewports) {
         const api = await apiAs(playwright, baseURL);
         const s = await seed(api, `axe-${theme}-${vp.name}`);
         await page.addInitScript(([key, t]) => localStorage.setItem(key!, t!), ['vh.theme', theme]);
+        // The 44 px targets are the phone's and Sparse's; Compact (the default) from 768 px lowers them to 28 px (e2e/density-lists.spec.ts).
+        await page.addInitScript(() => localStorage.setItem('vh.density.v1', 'sparse'));
         await open(page, s.slug, '&active=1&sort=active&dir=desc');
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
         await expect(page.getByTestId('timeline-window-control')).toBeVisible(FIVE_SECONDS);

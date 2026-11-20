@@ -21,7 +21,7 @@
         <li
           data-testid="needs-row"
           data-ref={row.ref}
-          class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-warning bg-surface-raised p-4"
+          class="vh-card flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-warning bg-surface-raised p-4"
         >
           <a class="inline-flex min-h-11 max-w-full min-w-11 items-center font-mono text-sm wrap-anywhere text-accent hover:underline" href={taskHref(row.ref)} data-testid="needs-ref">{row.ref}</a>
           {#if showInitiative}

@@ -3143,10 +3143,13 @@ tokens, light and dark, over vis-timeline's own sheet; at phone the label column
 
 *Fixed rows and lanes (R4).* The view asks `GET /timeline` for `rows=all` on every read (a pan, a zoom, a filter), so the
 rows are the tasks the filters keep wherever their spans fall and the window picks only the leases and markers drawn: no
-row appears, vanishes or changes place as the window moves. A task row is 52 px high and an initiative row 44 px, in every
-window, and each kind of item keeps a lane in the task row, measured from its top (`LANES` in `web/src/lib/timeline.ts`,
+row appears, vanishes or changes place as the window moves. A task row is 52 px high and an initiative row 44 px in Sparse and on
+every phone, and 40 px and 32 px in Compact (the default) from 768 px (`ROOMY_ROWS` and `COMPACT_ROWS`, chosen by
+`rowGeometry` and followed live by `web/src/lib/timelineRows.ts`: a change of the density switch or of the viewport redraws
+the chart with the other rows), in every window, and each kind of item keeps a lane in the task row, measured from its top (`LANES` in `web/src/lib/timeline.ts`,
 handed to the CSS as custom properties by `laneStyle`): the planned strip on top (4 px down, 6 px high), the actual span
-with the markers on its lane (12 px down, 20 px high) and the leases below (34 px down, in slots, next paragraph). Items are
+with the markers on its lane (12 px down, 20 px high) and the leases below (34 px down, in slots, next paragraph); the
+numbers are those of the roomy rows, Compact's are 3 and 4, 8 and 16, and 26 px down. Items are
 never stacked and sit in no subgroup, so vis-timeline never sizes a row by the items in view, and nothing on the chart
 moves vertically on a pan or a zoom.
 
@@ -3156,12 +3159,13 @@ leases of a task, in the order they began, each take the first slot free at thei
 its last bar ended, so two leases that touch end to start share one slot. A task whose leases never overlap uses one slot,
 a bar 14 px high at 34 px down (as before); two slots are bars 11 px high at 34 and 39 px down; three (for example a lease
 that lies inside another and a third that overlaps both) are bars 6 px high at 34, 39 and 44 px down, so every bar's box has
-rows the other boxes leave uncovered, whichever is drawn on top, and the lane ends at 50 px: the row stays 52 px high. The
+rows the other boxes leave uncovered, whichever is drawn on top, and the lane ends at 50 px: the row stays 52 px high (in
+Compact the bars are 12 px high for one slot, 9 for two and 5 for three, from 26 px down, and the row stays 40 px high). The
 bars carry `tl-lease-c<slots>` (height) and `tl-lease-c<slots>-s<slot>` (top), numbers from `laneStyle`; a 6 px bar shows
 no text (it is in the tooltip). At most three slots exist: a fourth lease overlapping three others shares the third.
 `e2e/timeline-leases.spec.ts` seeds a task for each case (two overlapping leases, three with one inside another, two
 touching) and at desktop asserts every bar is visible, that `elementFromPoint` at a point only that bar's box holds returns
-that bar and a click there opens its task, and that every task row is 52 px.
+that bar and a click there opens its task, and that every task row is 52 px in Sparse and 40 px in Compact.
 
 *Colours and legend (R2).* Each item sets `--tl` to a design token by its class, and draws itself from it (bars a light
 wash of the token with a solid edge, markers the token itself), so both themes read through the tokens' own values:
@@ -3326,7 +3330,7 @@ horizontal drag moves the window without zooming), the click-through from a task
 end points inside the two bars (also after zoom, pan and collapse), no sideways page scroll and 44 px controls and rows. `timeline-collapse.spec.ts` collapses one of two seeded initiatives at phone and desktop and finds it still collapsed after Tasks and Back, after Forward and Back again and after a reload, expanded after expanding it and reloading, and every initiative expanded on a visit through the nav and in a new tab. `timeline-rows.spec.ts` seeds an initiative whose tasks' spans lie inside and
 outside the opening window (two closed tasks dated months back, a planned strip ahead of it), records the row labels in order
 and each row's offset, and finds them unchanged within 1 px after a pan far past every span, a zoom in and a zoom out, with every
-`GET /timeline` carrying `rows=all`; it also reads the row heights (52 px and 44 px) and the lane order from the DOM, at phone and desktop.
+`GET /timeline` carrying `rows=all`; it also reads the row heights (52 px and 44 px; 40 px and 32 px in Compact at desktop) and the lane order from the DOM, at phone and desktop.
 
 **Actors view** (`#/actors`, `web/src/Actors.svelte`, R7). The route table holds it as the entry `actors` (nav label Actors, after Timeline).
 It reads `GET /actors` (`ActorsApi`, a `ThreadApi`, in `web/src/lib/actorsView.ts`) and draws one row per actor the board has
@@ -3646,9 +3650,12 @@ backdrop and one `role=dialog` panel under the same wrapper, and no second dialo
 **Display: density, theme and the sidebar** (R6). Three browser-kept preferences shape every list page. **Density** is
 **Compact** (the default) or **Sparse**, in `localStorage` under `vh.density.v1` (`web/src/lib/density.ts`; a value it
 does not know, or unreadable storage, is Compact). The controller sets `data-density` on `<html>`, and the list pages
-(Tasks, Initiatives, the initiative page, Archive, Actors; each carries the `vh-dense` class) read it in
+(Now, Tasks, Timeline, Initiatives, the initiative page, Archive, Actors; each carries the `vh-dense` class) read it in
 `web/src/styles.css`: from 768 px Compact drops the 44 px touch minimum of their controls to 28 px (above WCAG 2.5.8's
-24 px) and trims the cell padding, so a Tasks row is shorter; Sparse is the roomy layout; **below 768 px both densities
+24 px) and trims the cell padding, so a Tasks row is shorter, and the card rows (`vh-card`: Now's Needs me items, In flight
+and Recently touched rows, and the Needs attention cards) trim their padding and gaps, so Now fits more rows; the Timeline
+draws shorter rows (40 px for a task, 32 px for an initiative, 52 and 44 in Sparse; see "Fixed rows and lanes"); Sparse is the
+roomy layout; **below 768 px both densities
 keep 44 px targets and 16 px inputs**. The **sidebar-collapsed** preference is `localStorage` `vh.sidebar.v1`
 (`web/src/lib/sidebar.ts`): the stored word `collapsed` collapses, anything else, or unreadable storage, is expanded. At
 1024 px and wider (lg) a **Collapse sidebar** button in the sidebar's head turns the labelled sidebar into the icon rail the
@@ -3656,7 +3663,7 @@ keep 44 px targets and 16 px inputs**. The **sidebar-collapsed** preference is `
 keys are versioned `vh.` keys (never `vh.proto.`) and, like every `vh.*` key, are removed by signing out. The **density and
 theme switches sit together** (`DisplayControls`, two radio groups, **Compact / Sparse** and **Auto / Light / Dark**) in the
 sidebar foot and in the account menu, so they stay reachable on a phone and on the collapsed rail. Tests:
-`density.test.ts` and `sidebar.test.ts` (default, persist, bad stored value) and `e2e/density.spec.ts`.
+`density.test.ts` and `sidebar.test.ts` (default, persist, bad stored value), `e2e/density.spec.ts` and `e2e/density-lists.spec.ts` (at desktop the Now flight, Recently touched and Needs me rows, the Timeline's task and initiative rows with the bars on their lanes, and an Initiatives row are all shorter in Compact than in Sparse after a live switch; on a phone the Timeline keeps its 52 and 44 px rows and Now its 44 px links in both densities).
 
 **Theme.** The sidebar foot and the account menu have a Theme control with three settings: **Auto** (the default, the stored
 value `system`), **Light** and **Dark**. Auto follows the browser's `prefers-color-scheme`, Light and Dark ignore

@@ -21,6 +21,7 @@
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
+  import { currentRows, watchRows, rowsName, type RowsEnv } from './lib/timelineRows';
   import { carriedTags } from './lib/tagCarry';
   import { live } from './lib/live';
   import {
@@ -28,6 +29,7 @@
     DEFAULT_TIMELINE_FILTER,
     TIMELINE_LEGEND,
     laneStyle,
+    type RowGeometry,
     affectsTimeline,
     choiceOptions,
     isFiltered,
@@ -298,6 +300,34 @@
     replaceHash(timelineViewHash(view.filter, windowInHash ? view.window : undefined));
   }
 
+  // The rows follow the density preference and the viewport: tight in Compact from 768 px, roomy otherwise. A change is
+  // drawn into the frame's custom properties first, then vis-timeline measures the labels again.
+  const desktopQuery = window.matchMedia('(min-width: 768px)');
+  const rowsEnv: RowsEnv = {
+    compact: () => document.documentElement.getAttribute('data-density') !== 'sparse',
+    desktop: () => desktopQuery.matches,
+    subscribe: (callback) => {
+      const attributes = new MutationObserver(callback);
+      attributes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
+      desktopQuery.addEventListener('change', callback);
+      return () => {
+        attributes.disconnect();
+        desktopQuery.removeEventListener('change', callback);
+      };
+    },
+  };
+  let rowShape: RowGeometry = $state.raw(currentRows(rowsEnv)); // right from the first draw: no roomy flash that the chart then redraws
+  $effect(() =>
+    watchRows(rowsEnv, (next) => {
+      if (untrack(() => next === rowShape)) return;
+      rowShape = next;
+      void tick().then(() => {
+        chart?.redraw();
+        placeHandle();
+      });
+    }),
+  );
+
   /** The chart's tallest: the screen below the chart's top, less the phone's tab bar, so the axis stays in view as rows scroll. */
   function heightFor(target: HTMLElement): number {
     const top = target.getBoundingClientRect().top + window.scrollY;
@@ -368,7 +398,7 @@
 
 <svelte:window onhashchange={hashChanged} onresize={resized} onpagehide={() => entry.leaving()} />
 
-<section aria-labelledby="timeline-heading" class="w-full pb-16 md:pb-0" data-testid="timeline-view">
+<section aria-labelledby="timeline-heading" class="vh-dense w-full pb-16 md:pb-0" data-testid="timeline-view">
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
     <div class="w-full">
@@ -436,7 +466,7 @@
     </ul>
     <!-- vis-timeline scrolls inside this frame; the page itself never scrolls sideways -->
     <div class="relative max-w-full">
-      <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" style="{laneStyle()};--tl-label-w:{labelWidth}px" bind:this={frame}></div>
+      <div class="timeline-frame relative max-w-full overflow-hidden" data-testid="timeline-chart" data-rows={rowsName(rowShape)} style="{laneStyle(rowShape)};--tl-label-w:{labelWidth}px" bind:this={frame}></div>
       <!-- Drag (or Left/Right, Home, End) to resize the label column; double click resets it. -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex (a focusable separator is a widget) -->
       <div
@@ -511,7 +541,7 @@
   }
   /* Rows of fixed height: vis-timeline makes a row as tall as its label's inner box or its items, whichever is taller,
      and every item sits at the row's top inside it (lib/timelineView.ts chartOptions: no stacking, no item margin), so
-     a row is as tall wherever the chart is panned or zoomed to. An initiative row is 44 px to tap, a task row 52 px. */
+     a row is as tall wherever the chart is panned or zoomed to. A phone's or Sparse's initiative row is 44 px to tap, a task row 52 px; Compact from 768 px has 32 and 40 (lib/timeline.ts). */
   .timeline-frame :global(.vis-label .vis-inner) {
     display: block;
     box-sizing: border-box;

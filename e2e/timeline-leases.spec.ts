@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 
 // Overlapping leases stay readable and tappable (PRD R11, SPEC 11 "Lease slots"): on a task whose leases overlap, each
 // lease takes a slot of its own below the actual span, stepping down so every bar has a strip no other bar's box covers,
-// the row stays 52 px, and leases that touch end to start share one slot. Three tasks are seeded, one per case: two
+// the row keeps its height (52 px in Sparse, 40 px in Compact), and leases that touch end to start share one slot. Three tasks are seeded, one per case: two
 // overlapping leases, three where one lies inside another, two that touch end to start. At desktop.
 test.use({ viewport: { width: 1440, height: 900 } });
 const FIVE_SECONDS = { timeout: 5000 };
@@ -79,8 +79,11 @@ function uniquePoint(box: Box, others: Box[]): { x: number; y: number } | undefi
   return undefined;
 }
 
-test('every lease bar of overlapping, nested and touching leases is visible and tappable on a row that stays 52 px', async ({ page, playwright, baseURL }) => {
-  const slug = 'e2e-tll-slots';
+// The row is 52 px in Sparse and 40 px in Compact (the default) at desktop; the bars keep their strips in both.
+for (const [density, rowHeight] of [['compact', 40], ['sparse', 52]] as const) {
+test(`every lease bar of overlapping, nested and touching leases is visible and tappable on a ${density} row that stays ${rowHeight} px`, async ({ page, playwright, baseURL }) => {
+  const slug = `e2e-tll-slots-${density}`;
+  await page.addInitScript((d) => localStorage.setItem('vh.density.v1', d), density);
   const api = await playwright.request.newContext({
     baseURL,
     extraHTTPHeaders: { Authorization: `Bearer ${process.env.E2E_API_KEY}`, 'Board-Actor': 'tll-slots' },
@@ -97,7 +100,7 @@ test('every lease bar of overlapping, nested and touching leases is visible and 
   for (const name of Object.keys(CASES) as CaseName[]) {
     const { task, leases } = seeded[name];
     const label = page.locator('.vis-labelset .vis-label.tl-task', { hasText: task });
-    expect((await label.boundingBox())!.height, `${name}: the task row keeps its height`).toBeCloseTo(52, 0);
+    expect((await label.boundingBox())!.height, `${name}: the task row keeps its height`).toBeCloseTo(rowHeight, 0);
 
     const boxes: Box[] = [];
     for (const lease of leases) {
@@ -121,6 +124,7 @@ test('every lease bar of overlapping, nested and touching leases is visible and 
   }
 
   const rows = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.vis-labelset .vis-label.tl-task')].map((el) => el.getBoundingClientRect().height));
-  expect(rows).toEqual([52, 52, 52]);
+  expect(rows).toEqual([rowHeight, rowHeight, rowHeight]);
   await api.dispose();
 });
+}
