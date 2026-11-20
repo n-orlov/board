@@ -3197,7 +3197,8 @@ the milliseconds, `data-from-ms` and `data-to-ms` the window shown) and each but
 
 *Navigation (R1, `web/src/lib/timelineView.ts`).* Over the chart a **sideways wheel pans** the time axis and a **vertical
 wheel scrolls the rows** inside the chart (the chart is at most as tall as the screen below its top, `chartHeight`, and
-scrolls its rows past that, so the time axis stays in view; a phone gives it at least 70 % of the screen). **A plain wheel
+scrolls its rows past that, so the time axis stays in view; a phone gives it at least 70 % of the screen; the chart is measured
+again whenever its top moves, as the board's initiative chips land after it or "more" opens and folds). **A plain wheel
 never zooms.** **Shift+wheel and Ctrl+wheel** (a trackpad pinch arrives as Ctrl+wheel) **zoom around the pointer**: the
 instant under the pointer stays under it (`wheelGesture` classifies the event, `zoomAround` moves the window; one 100 px
 notch scales the range by about 1.22). A **two-finger pinch zooms** and a **one-finger drag pans on both axes**

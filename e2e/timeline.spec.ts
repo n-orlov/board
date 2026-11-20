@@ -474,6 +474,42 @@ for (const vp of viewports) {
   });
 }
 
+// The chart is as tall as the screen below its top (SPEC 11), whatever lands above it later: the board's initiative chips
+// come after the rows, so a slow initiatives answer draws the chips after the chart, and the chart follows its top down.
+test.describe('the chart under the filters that arrive late', () => {
+  test.use({ viewport: viewports[1].size });
+
+  test('a slow initiatives answer leaves the chart as tall as the screen below its top, not as it was drawn', async ({ page, playwright, baseURL }) => {
+    const s = await seed(playwright, baseURL, 'late-chips');
+    // Enough initiatives of its own that their chips wrap onto several lines, which pushes the chart down when they land.
+    for (let i = 0; i < 40; i++) await post(s.api, '/api/v1/initiatives', { slug: `${s.slug}-chip-${String(i).padStart(2, '0')}`, title: `Late chip ${i}` }, 201);
+    // More rows than the screen below the chart holds, so the chart takes all of it (it is no taller than its rows).
+    for (let i = 0; i < 30; i++) await post(s.api, '/api/v1/tasks', { initiative: s.slug, title: `Late chip row ${i}` }, 201);
+    let held = 0;
+    await page.route(/\/api\/v1\/initiatives\?/, async (route) => {
+      held++;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.goto(`/#/timeline?initiative=${s.slug}`);
+    await expect(page.locator('.vis-labelset .vis-label').first()).toBeVisible(FIVE_SECONDS);
+    const drawnAt = (await page.getByTestId('timeline-chart').boundingBox())!.y;
+    await expect(page.getByTestId('chip-initiative')).not.toHaveCount(1, { timeout: 10_000 }); // the chosen one's chip is there from the start
+    expect((await page.getByTestId('timeline-chart').boundingBox())!.y, 'the chips pushed the chart down').toBeGreaterThan(drawnAt + 20);
+    expect(held).toBeGreaterThan(0);
+
+    const viewport = page.viewportSize()!.height;
+    const tabBar = 16; // below 768 px the phone's tab bar takes 80; this is a desktop
+    const fits = async () => {
+      const box = (await page.getByTestId('timeline-chart').boundingBox())!;
+      const top = box.y + (await page.evaluate(() => window.scrollY));
+      return { height: Math.round(box.height), want: Math.floor(Math.max(300, viewport - top - tabBar, (viewport - tabBar) * 0.7)) };
+    };
+    await expect.poll(async () => Math.abs((await fits()).height - (await fits()).want), FIVE_SECONDS).toBeLessThanOrEqual(1);
+    await s.api.dispose();
+  });
+});
+
 // PRD R1: the wheel, a pinch and a drag navigate the chart. vis-timeline pans and pinches by itself; the view takes the
 // wheel (a sideways one pans, Shift or Ctrl zoom around the pointer, a vertical one scrolls the rows).
 test.describe('desktop wheel navigation', () => {

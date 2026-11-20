@@ -82,6 +82,7 @@
   let preview: string | undefined = $state(opened.task);
   let view: TimelineViewState = $state.raw(store.state);
   let frame: HTMLDivElement | undefined = $state();
+  let section: HTMLElement | undefined = $state();
   let chart: Chart | undefined;
   // Which initiatives are collapsed and how far the rows are scrolled belong to the history entry the chart is displayed
   // on, and are saved under that entry's key, however late the report comes (see lib/timelineEntry.ts).
@@ -340,6 +341,22 @@
     void setLabelWidth(labelWidth); // a narrower window may no longer hold the width
   }
 
+  // What sits above the chart changes after it is drawn (the board's initiative chips arrive after the rows, "more" opens
+  // and folds, a chosen chip wraps): the chart keeps the screen below its top, so it is measured again whenever its top moves.
+  $effect(() => {
+    if (section === undefined || frame === undefined) return;
+    const target = frame;
+    let top = target.getBoundingClientRect().top + window.scrollY;
+    const watch = new ResizeObserver(() => {
+      const now = target.getBoundingClientRect().top + window.scrollY;
+      if (now === top) return; // the chart's own height moves the section's, not its top
+      top = now;
+      if (chart !== undefined) chart.setHeight(heightFor(target));
+    });
+    watch.observe(section);
+    return () => watch.disconnect();
+  });
+
   // The label column (md and wider; a phone keeps its capped column): a separator beside it resizes it by drag or arrow keys,
   // double click resets it; the width is held between a minimum and a share of the chart and remembered per browser.
   let labelWidth = $state(loadLabelWidth(viewEnv.storage));
@@ -398,7 +415,7 @@
 
 <svelte:window onhashchange={hashChanged} onresize={resized} onpagehide={() => entry.leaving()} />
 
-<section aria-labelledby="timeline-heading" class="vh-dense w-full pb-16 md:pb-0" data-testid="timeline-view">
+<section aria-labelledby="timeline-heading" class="vh-dense w-full pb-16 md:pb-0" data-testid="timeline-view" bind:this={section}>
   <h2 id="timeline-heading" class="mb-4 text-xl font-bold">Timeline</h2>
   <div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="timeline-filters">
     <div class="w-full">
