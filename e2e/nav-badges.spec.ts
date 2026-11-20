@@ -174,8 +174,11 @@ for (const vp of viewports) {
           const task = (await created(api, '/api/v1/tasks', { initiative: slug, title: 'Held and asked about' })).ref;
           await created(api, '/api/v1/asks', { question: 'Axe?', task, mode: 'poll' });
           await created(api, '/api/v1/leases', { task, intent: 'axe scan' });
-          await page.goto('/#/tasks');
+          // Filtered to this test's own initiative: axe's cost follows the size of the page, and the unfiltered Tasks list
+          // draws every task of the shared store, which a long run grows to thousands.
+          await page.goto(`/#/tasks?initiative=${slug}`);
           const nav = page.getByTestId(vp.nav);
+          await expect(page.getByTestId('tasks-view')).toBeVisible(FIVE_SECONDS);
           await expect(nav.getByTestId('attention-badge')).toBeVisible(FIVE_SECONDS);
           await expect(nav.getByTestId('live-badge')).toBeVisible(FIVE_SECONDS);
           await scan(page, theme);
