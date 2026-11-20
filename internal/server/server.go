@@ -154,7 +154,7 @@ func WithLeases(st *leases.Store) Option {
 // WithAsks serves /api/v1/asks from st; without it the operations answer 503.
 func WithAsks(st *asks.Store) Option {
 	return func(o *operations) {
-		o.askOps = askOps{asks: st, touch: o.touch}
+		o.askOps = askOps{asks: st, touch: o.touch, clock: o.clock}
 		o.taskOps.asks = st
 	}
 }
@@ -163,6 +163,12 @@ func WithAsks(st *asks.Store) Option {
 // (DefaultAskTouch, 30 s, when unset or not above zero). Tests shorten it.
 func WithAskTouch(d time.Duration) Option {
 	return func(o *operations) { o.touch = d }
+}
+
+// WithAskClock makes the ask waits read the time from c (the real clock when
+// unset). Tests use it to order an end and a wait's until without sleeping.
+func WithAskClock(c AskClock) Option {
+	return func(o *operations) { o.clock = c }
 }
 
 // WithNotes serves /api/v1/notes from st; without it the operations answer 503.

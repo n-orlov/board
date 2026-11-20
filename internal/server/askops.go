@@ -24,6 +24,7 @@ type askOps struct {
 	asks  *asks.Store
 	waits *streamHub    // the change feed that wakes a wait; nil: waits answer 503
 	touch time.Duration // how often a held wait renews poll_seen_at; 0 is DefaultAskTouch
+	clock AskClock      // the time a wait reads; nil is the real clock
 	block checkin.Store // the stores a raise with lease_action stop ends the lease through; set once every option is applied
 }
 
@@ -144,7 +145,7 @@ func (o askOps) GetAsk(ctx context.Context, req GetAskRequestObject) (GetAskResp
 	if err != nil {
 		return askResult[GetAskResponseObject](err)
 	}
-	readBack := time.Now()
+	readBack := o.clk().Now()
 	if req.Params.Wait != nil {
 		k = o.lateMark(ctx, k, readBack, req.Params.Until)
 	}

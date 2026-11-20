@@ -20,6 +20,32 @@ const (
 // DefaultAskTouch is how often a held wait renews the ask's poll_seen_at.
 const DefaultAskTouch = 30 * time.Second
 
+// AskClock is the time the ask waits read: the instant a read of the ask came
+// back, the instant a request's until is compared with, and the timer that
+// takes the read as until passes. The real clock serves; tests supply their own
+// so the order of an end and until is theirs and no sleep decides it.
+type AskClock interface {
+	Now() time.Time
+	// At delivers once Now is at or after at, and the func releases it.
+	At(at time.Time) (<-chan time.Time, func())
+}
+
+type realAskClock struct{}
+
+func (realAskClock) Now() time.Time { return time.Now() }
+
+func (realAskClock) At(at time.Time) (<-chan time.Time, func()) {
+	t := time.NewTimer(time.Until(at))
+	return t.C, func() { t.Stop() }
+}
+
+func (o askOps) clk() AskClock {
+	if o.clock != nil {
+		return o.clock
+	}
+	return realAskClock{}
+}
+
 const nextAskWait = "Send wait as a whole number of seconds from 1 to 300, or leave it out to read the ask at once."
 
 // askWaitProblem is the 400 for a wait outside 1 to 300 and for an until
@@ -94,7 +120,7 @@ func (r askWaitResponse) touchEvery() time.Duration {
 // limits are what end the hold: the wait running out (timeout), or, when until
 // comes before that, the read made as until passes (asOf), and never both.
 func (r askWaitResponse) limits(w *waiter) (timeout <-chan time.Time, asOf <-chan snapshot, stop func()) {
-	if r.until != nil && time.Until(*r.until) <= r.max {
+	if r.until != nil && r.until.Sub(r.ops.clk().Now()) <= r.max {
 		return nil, w.readAt(*r.until), func() {}
 	}
 	t := time.NewTimer(r.max)
@@ -108,7 +134,7 @@ func (r askWaitResponse) limits(w *waiter) (timeout <-chan time.Time, asOf <-cha
 // write of the wait is made, so a write held up by the writer, begin's included,
 // does not move it.
 func (r askWaitResponse) hold() (k asks.Ask, proven bool, err error) {
-	w := &waiter{ctx: r.ctx, store: r.ops.asks, hub: r.ops.waits, k: r.ask, sub: r.ops.waits.feed.Subscribe(), until: r.until}
+	w := &waiter{ctx: r.ctx, store: r.ops.asks, hub: r.ops.waits, k: r.ask, sub: r.ops.waits.feed.Subscribe(), until: r.until, clock: r.ops.clk()}
 	defer func() { w.sub.Close() }()
 	// The limits come first: the read at until is timed from here, not from
 	// when begin's write (which waits for the writer) comes back.
@@ -180,6 +206,7 @@ type waiter struct {
 	err      error
 	until    *time.Time
 	proven   bool
+	clock    AskClock
 }
 
 // readAt reads the ask once at, on the readers, so a write holding the writer
@@ -189,10 +216,10 @@ func (w *waiter) readAt(at time.Time) <-chan snapshot {
 	out := make(chan snapshot, 1)
 	id := w.k.ID // read here: the wait rereads w.k while the goroutine runs
 	go func() {
-		t := time.NewTimer(time.Until(at))
-		defer t.Stop()
+		fired, stop := w.clock.At(at)
+		defer stop()
 		select {
-		case <-t.C:
+		case <-fired:
 		case <-w.ctx.Done():
 			out <- snapshot{err: w.ctx.Err()}
 			return
@@ -235,7 +262,7 @@ func (w *waiter) touch(ctx context.Context) error {
 func (w *waiter) reread(ctx context.Context) error {
 	k, err := w.store.Get(ctx, w.k.ID)
 	if err == nil {
-		w.k, w.readTime = k, time.Now()
+		w.k, w.readTime = k, w.clock.Now()
 		w.proven = w.proven || readProves(k.State, w.readTime, w.until)
 	}
 	return err

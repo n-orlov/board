@@ -18,16 +18,67 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// testClock is a clock the test moves.
-type testClock struct{ ms atomic.Int64 }
+// testClock is a clock the test moves. As an AskClock it also fires the timers
+// a wait takes its read at until by, when the test moves it to them.
+type testClock struct {
+	ms     atomic.Int64
+	mu     sync.Mutex
+	timers []clockTimer
+	armed  atomic.Int64 // timers ever set
+}
+
+type clockTimer struct {
+	at time.Time
+	ch chan time.Time
+}
 
 func newTestClock() *testClock {
 	c := &testClock{}
 	c.ms.Store(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).UnixMilli())
 	return c
 }
-func (c *testClock) Now() time.Time          { return time.UnixMilli(c.ms.Load()).UTC() }
-func (c *testClock) Advance(d time.Duration) { c.ms.Add(d.Milliseconds()) }
+func (c *testClock) Now() time.Time { return time.UnixMilli(c.ms.Load()).UTC() }
+
+// Advance moves the clock and fires every timer it reaches.
+func (c *testClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ms.Add(d.Milliseconds())
+	now := c.Now()
+	kept := c.timers[:0]
+	for _, t := range c.timers {
+		if t.at.After(now) {
+			kept = append(kept, t)
+			continue
+		}
+		t.ch <- now
+	}
+	c.timers = kept
+}
+
+// At is the timer of an AskClock: it fires when Advance reaches at, at once
+// when the clock is already there.
+func (c *testClock) At(at time.Time) (<-chan time.Time, func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.armed.Add(1)
+	t := clockTimer{at: at, ch: make(chan time.Time, 1)}
+	if !at.After(c.Now()) {
+		t.ch <- c.Now()
+		return t.ch, func() {}
+	}
+	c.timers = append(c.timers, t)
+	return t.ch, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for i, k := range c.timers {
+			if k.ch == t.ch {
+				c.timers = append(c.timers[:i], c.timers[i+1:]...)
+				return
+			}
+		}
+	}
+}
 
 // askRig is a rig that serves asks from a store with the clock, its ask waits
 // renewing poll_seen_at every touch.
@@ -38,6 +89,20 @@ func askRig(t *testing.T, st *store.Store, token string, clock *testClock, touch
 		return []Option{WithAsks(as), WithAskTouch(touch)}
 	}}
 	return startRig(t, st, token, cfg), as
+}
+
+// askClockRig is askRig with the waits reading the time from the test clock
+// too, so until, the reads of the wait and its timer at until are the test's to
+// order. Every call of the ask store's own clock (a poll mark's stamp) goes
+// through asNow, which a test counts to see the wait reach its marking of the
+// poll.
+func askClockRig(t *testing.T, st *store.Store, token string, clock *testClock, touch time.Duration, asNow func() time.Time) *rig {
+	t.Helper()
+	as := &asks.Store{Store: st, Now: asNow}
+	cfg := streamSettings{poll: 100 * time.Millisecond, heartbeat: time.Minute, extra: func(*store.Store) []Option {
+		return []Option{WithAsks(as), WithAskTouch(touch), WithAskClock(clock)}
+	}}
+	return startRig(t, st, token, cfg)
 }
 
 // raiseAsk raises a poll-mode global ask through the server and returns its ref.
@@ -430,43 +495,65 @@ func TestAWaitWithUntilAnswersWithTheAskAsReadAtUntil(t *testing.T) {
 }
 
 func testAWaitWithUntilAnswersAtUntil(t *testing.T, st *store.Store, held bool) {
-	{
-		if err := st.Migrate(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		r, _ := askRig(t, st, newToken(t, st), newTestClock(), time.Hour)
-		ref := r.raiseAsk()
-		until := time.Now().Add(500 * time.Millisecond)
-		release := make(chan struct{})
-		var once sync.Once
-		ender := &asks.Store{Store: st, Now: func() time.Time {
-			if held {
-				once.Do(func() { <-release })
-			}
-			return until.Add(-400 * time.Millisecond)
-		}}
-		w := r.startWait(ref, untilQuery("5", until))
-		ended := make(chan error, 1)
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			_, err := ender.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", ref, asks.Reply{Answer: "late"})
-			ended <- err
-		}()
-		go func() {
-			time.Sleep(time.Until(until.Add(200 * time.Millisecond)))
-			close(release)
-		}()
-		w.ends(t)
-		if err := <-ended; err != nil {
-			t.Fatal(err)
-		}
-		want := "answered"
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Time is the test clock's: until is 500 ms after the wait starts on it, it
+	// passes when the test advances it, and the end's commit mark is the instant
+	// the test gives it. Nothing here depends on how long anything takes.
+	clock := newTestClock()
+	var marked atomic.Int64
+	r := askClockRig(t, st, newToken(t, st), clock, time.Hour, func() time.Time { marked.Add(1); return clock.Now() })
+	as := &asks.Store{Store: st}
+	ref := r.raiseAsk()
+	until := clock.Now().Add(500 * time.Millisecond)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	// The end is stamped 400 ms before until either way. Held, its transaction
+	// stays open until released and its COMMIT returns after until; not held, it
+	// commits before until.
+	commit := until.Add(-300 * time.Millisecond)
+	if held {
+		commit = until.Add(200 * time.Millisecond)
+	}
+	ender := &asks.Store{Store: st, MarkClock: func() time.Time { return commit }, Now: func() time.Time {
 		if held {
-			want = "open"
+			once.Do(func() { close(entered); <-release })
 		}
-		if w.status != http.StatusOK || w.state != want {
-			t.Errorf("held=%v: the wait ended with %d %q, want 200 %q", held, w.status, w.state, want)
+		return until.Add(-400 * time.Millisecond)
+	}}
+	w := r.startWait(ref, untilQuery("5", until))
+	eventually(t, "the wait to be held", func() bool { return polledAt(t, as, ref) != nil && clock.armed.Load() > 0 })
+	ended := make(chan error, 1)
+	go func() {
+		_, err := ender.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", ref, asks.Reply{Answer: "late"})
+		ended <- err
+	}()
+	if held {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the end never began")
 		}
+		before := marked.Load()
+		clock.Advance(time.Second) // until passes with the end's transaction open
+		// The wait has taken its read as until passed once it marks the poll after it.
+		eventually(t, "the wait to take its read at until", func() bool { return marked.Load() > before })
+		close(release)
+	}
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	w.ends(t)
+	want := "answered"
+	if held {
+		want = "open"
+	}
+	if w.status != http.StatusOK || w.state != want {
+		t.Errorf("held=%v: the wait ended with %d %q, want 200 %q", held, w.status, w.state, want)
+	}
+	if k, err := as.Get(context.Background(), ref); err != nil || k.State != "answered" {
+		t.Errorf("held=%v: the end did not commit (%v)", held, err)
 	}
 }
 
@@ -492,14 +579,18 @@ func testAWaitUntilWithEndHoldingTheWriter(t *testing.T, st *store.Store, withdr
 	if err := st.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := askRig(t, st, newToken(t, st), newTestClock(), touch)
+	// Time is the test clock's, as in testAWaitWithUntilAnswersAtUntil: until
+	// passes when the test advances the clock, after the wait has set its timer
+	// and while the end still holds the writer.
+	clock := newTestClock()
+	r := askClockRig(t, st, newToken(t, st), clock, touch, clock.Now)
 	ref := r.raiseAsk()
-	start := time.Now()
+	start := clock.Now()
 	until := start.Add(600 * time.Millisecond)
-	release := make(chan struct{})
+	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	ender := &asks.Store{Store: st, Now: func() time.Time {
-		once.Do(func() { <-release })
+	ender := &asks.Store{Store: st, MarkClock: func() time.Time { return until.Add(300 * time.Millisecond) }, Now: func() time.Time {
+		once.Do(func() { close(entered); <-release })
 		return start
 	}}
 	ended := make(chan error, 1)
@@ -512,12 +603,17 @@ func testAWaitUntilWithEndHoldingTheWriter(t *testing.T, st *store.Store, withdr
 		_, err := ender.Answer(context.Background(), audit.Actor{Handle: "nik@host", Operator: true}, "key:x", ref, asks.Reply{Answer: "late"})
 		ended <- err
 	}()
-	time.Sleep(100 * time.Millisecond) // the end holds the writer now
-	go func() {
-		time.Sleep(time.Until(until.Add(300 * time.Millisecond)))
-		close(release)
-	}()
+	select {
+	case <-entered: // the end holds the writer now
+	case <-time.After(5 * time.Second):
+		t.Fatal("the end never began")
+	}
 	w := r.startWait(ref, untilQuery("5", until))
+	// The wait times its read at until before its first write, which waits for
+	// the end: once the timer is set, until may pass.
+	eventually(t, "the wait to set its timer at until", func() bool { return clock.armed.Load() > 0 })
+	clock.Advance(time.Second)
+	close(release)
 	w.ends(t)
 	if err := <-ended; err != nil {
 		t.Fatal(err)
@@ -529,7 +625,7 @@ func testAWaitUntilWithEndHoldingTheWriter(t *testing.T, st *store.Store, withdr
 		t.Errorf("withdraw=%v touch=%s: the end did not commit (%v)", withdraw, touch, err)
 	}
 	// started after the end committed, with until still ahead: the end counts
-	w = r.startWait(ref, untilQuery("5", time.Now().Add(time.Minute)))
+	w = r.startWait(ref, untilQuery("5", clock.Now().Add(time.Minute)))
 	w.ends(t)
 	if w.state == "open" {
 		t.Errorf("withdraw=%v touch=%s: a wait started after the end's commit still saw the ask open", withdraw, touch)
@@ -575,7 +671,7 @@ func TestAWaitStartsOverWhenTheFeedEndsItsSubscription(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := &waiter{ctx: context.Background(), store: as, hub: hub, k: k, sub: f.Subscribe()}
+		w := &waiter{ctx: context.Background(), store: as, hub: hub, k: k, sub: f.Subscribe(), clock: clock}
 		w.sub.Close() // the feed ended it: the channel is closed
 		if done, err := w.step(nil, nil, nil); done || err != nil {
 			t.Fatalf("step on an ended subscription = %v, %v, want to go on", done, err)
