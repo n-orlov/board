@@ -273,7 +273,7 @@ func (s Store) count4(ctx context.Context, q Query, live []leases.Lease) (Counts
 func (s Store) prepare(ctx context.Context) (time.Time, error) {
 	now := s.now()
 	l := leases.Store{Store: s.Store, Now: func() time.Time { return now }}
-	if _, err := l.ExpireDue(ctx); err != nil {
+	if _, err := l.ExpireDueSteady(ctx); err != nil {
 		return time.Time{}, err
 	}
 	return now, nil

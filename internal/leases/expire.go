@@ -34,6 +34,15 @@ type due struct {
 // writes no event.
 func (s Store) ExpireDue(ctx context.Context) (int, error) { return s.expireAt(ctx, s.now()) }
 
+// ExpireDueSteady is ExpireDue for a read whose number of statements must not
+// reveal what the store holds (the Now read, SPEC 6.8.1): when nothing is due it
+// runs, on a reader, as many no-op reads as the expiry runs statements when
+// something is, so the total is the same with zero, one or many due leases and
+// the writer connection is still never taken for nothing.
+func (s Store) ExpireDueSteady(ctx context.Context) (int, error) {
+	return s.expireWith(ctx, s.now(), true)
+}
+
 // expireAt is ExpireDue judged at the instant now, so a read can expire and
 // then list at one and the same instant.
 //
@@ -43,9 +52,21 @@ func (s Store) ExpireDue(ctx context.Context) (int, error) { return s.expireAt(c
 // look and the listing is expired by the next call; the listing itself drops
 // leases past their expiry.
 func (s Store) expireAt(ctx context.Context, now time.Time) (int, error) {
+	return s.expireWith(ctx, now, false)
+}
+
+// expireWith is expireAt that, when steady, stands in for the statements of an
+// expiry that found nothing due with no-op reads (see ExpireDueSteady).
+func (s Store) expireWith(ctx context.Context, now time.Time, steady bool) (int, error) {
 	pending, err := s.anyDue(ctx, now)
-	if err != nil || !pending {
+	if err != nil {
 		return 0, err
+	}
+	if !pending {
+		if steady {
+			return 0, s.Store.Idle(ctx, s.expiryStatements(ctx))
+		}
+		return 0, nil
 	}
 	var n int
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
@@ -68,6 +89,18 @@ func (s Store) anyDue(ctx context.Context, now time.Time) (bool, error) {
 		return false, fmt.Errorf("look for expired leases: %w", err)
 	}
 	return true, nil
+}
+
+// expiryStatements is how many statements the expiry transaction runs after the
+// look for a due lease: the read that locks the due leases, the update, the
+// events INSERT with whatever lock or origin lookup it takes (audit.BatchStatements)
+// and, with stranded alerts on, the alerts INSERT.
+func (s Store) expiryStatements(ctx context.Context) int {
+	n := 2 + audit.BatchStatements(ctx, s.Store.Dialect())
+	if s.Store.Notifies(store.NotifyStranded) {
+		n++
+	}
+	return n
 }
 
 // expireDue expires every due lease and records it, in a number of statements that

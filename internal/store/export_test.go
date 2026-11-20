@@ -36,6 +36,24 @@ func OpenCounting(path string, n *atomic.Int64) (*Store, error) {
 	return &Store{dialect: SQLite{}, writer: writer, reader: reader, migrations: mig}, nil
 }
 
+// OpenCountingPostgres opens the Postgres database at rawURL like Open does,
+// but every statement any connection of its pool runs adds one to n.
+func OpenCountingPostgres(rawURL string, n *atomic.Int64) (*Store, error) {
+	plain, err := sql.Open("pgx", rawURL)
+	if err != nil {
+		return nil, err
+	}
+	inner := plain.Driver()
+	_ = plain.Close()
+	db := sql.OpenDB(countingConnector{dsn: rawURL, inner: inner, n: n})
+	mig, err := dialectMigrations("postgres")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{dialect: Postgres{}, writer: db, reader: db, migrations: mig}, nil
+}
+
 type countingConnector struct {
 	dsn   string
 	inner driver.Driver

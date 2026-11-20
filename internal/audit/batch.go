@@ -21,6 +21,22 @@ type Written struct {
 	Event       Event
 }
 
+// BatchStatements is how many statements AppendBatch runs for a non-empty batch
+// under ctx on dialect d: its one INSERT, the event-write lock where the dialect
+// takes one, and the lookup of the operator the request names, when it names one.
+// A caller that must run the same number of statements whether or not it has
+// events to write counts them here, so the number stays next to AppendBatch.
+func BatchStatements(ctx context.Context, d store.Dialect) int {
+	n := 1
+	if d.LockEventWrite() != "" {
+		n++
+	}
+	if handle, ok := OriginFrom(ctx); ok && handle != "" {
+		n++
+	}
+	return n
+}
+
 // AppendBatch appends the events, each made by its own actor row, in tx, with the
 // same columns AppendAsID writes, and returns their ids in order. It runs a
 // number of statements that does not depend on how many events there are (one

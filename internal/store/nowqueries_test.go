@@ -22,9 +22,21 @@ import (
 // the pools have run.
 func boardOfSize(t *testing.T, n int, alerts ...string) (attention.Store, *atomic.Int64, func(time.Duration)) {
 	t.Helper()
+	return boardOn(t, "sqlite", n, alerts...)
+}
+
+// boardOn is boardOfSize on the database of the leg, "sqlite" or "postgres".
+func boardOn(t *testing.T, leg string, n int, alerts ...string) (attention.Store, *atomic.Int64, func(time.Duration)) {
+	t.Helper()
 	ctx := context.Background()
 	var count atomic.Int64
-	st, err := store.OpenCounting(filepath.Join(t.TempDir(), "b.db"), &count)
+	var st *store.Store
+	var err error
+	if leg == "postgres" {
+		st, err = store.OpenCountingPostgres(newPostgresDatabase(t), &count)
+	} else {
+		st, err = store.OpenCounting(filepath.Join(t.TempDir(), "b.db"), &count)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

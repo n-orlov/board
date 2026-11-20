@@ -3,10 +3,13 @@ package store_test
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/n-orlov/village-hall/internal/attention"
+	"github.com/n-orlov/village-hall/internal/audit"
 	"github.com/n-orlov/village-hall/internal/store"
 )
 
@@ -21,6 +24,8 @@ type dueSeed struct {
 	supersede  string
 	olderEnded bool
 	liveTasks  int
+	// endedTasks tasks in initiative bb hold one ended lease and nothing else
+	endedTasks int
 }
 
 // seedDue writes s onto a board that holds only the initiatives aa and bb (both
@@ -38,7 +43,7 @@ func seedDue(t *testing.T, st *store.Store, s dueSeed) (newest int) {
 	base := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC).UnixMilli()
 	exec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+		if _, err := tx.ExecContext(ctx, st.Dialect().Rebind(q), args...); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +51,7 @@ func seedDue(t *testing.T, st *store.Store, s dueSeed) (newest int) {
 		base-5*hour, base-5*hour)
 	iniOf := func(slug string) string {
 		var id string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM initiatives WHERE slug = ?`, slug).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, st.Dialect().Rebind(`SELECT id FROM initiatives WHERE slug = ?`), slug).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id
@@ -56,9 +61,13 @@ func seedDue(t *testing.T, st *store.Store, s dueSeed) (newest int) {
 			id, ini, seq, "seeded "+id, base-4*hour, base-4*hour)
 	}
 	lease := func(id, task, state string, started, expires int64) {
+		var ended any
+		if state == "ended" {
+			ended = expires
+		}
 		exec(`INSERT INTO leases (id, task_id, actor_id, intent, ttl_seconds, started_at, renewed_at, expires_at, state, ended_at)
-			VALUES (?, ?, 'seed-agent', 'bulk', 3600, ?, ?, ?, ?, CASE WHEN ? = 'ended' THEN ? END)`,
-			id, task, started, started, expires, state, state, expires)
+			VALUES (?, ?, 'seed-agent', 'bulk', 3600, ?, ?, ?, ?, ?)`,
+			id, task, started, started, expires, state, ended)
 	}
 	aa, bb := iniOf("aa"), iniOf("bb")
 	for i := 1; i <= s.tasks; i++ {
@@ -82,6 +91,11 @@ func seedDue(t *testing.T, st *store.Store, s dueSeed) (newest int) {
 		task(id, bb, i)
 		lease(id+"-live", id, "live", base-hour, base+100*hour)
 	}
+	for i := 1; i <= s.endedTasks; i++ {
+		id := fmt.Sprintf("ended-%d", i)
+		task(id, bb, 1000+i)
+		lease(id+"-end", id, "ended", base-3*hour, base-2*hour)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -100,13 +114,21 @@ type dueOutcome struct {
 // Now read narrowed by q.
 func readDueBoard(t *testing.T, s dueSeed, q attention.Query, alerts ...string) dueOutcome {
 	t.Helper()
+	return readDueBoardOn(context.Background(), t, "sqlite", s, q, alerts...)
+}
+
+// readDueBoardOn is readDueBoard on the database of the leg.
+// The read runs under readCtx (a request that names an operator's origin
+// writes through one more statement than a read that names none).
+func readDueBoardOn(readCtx context.Context, t *testing.T, leg string, s dueSeed, q attention.Query, alerts ...string) dueOutcome {
+	t.Helper()
 	ctx := context.Background()
-	a, count, advance := boardOfSize(t, 0, alerts...)
+	a, count, advance := boardOn(t, leg, 0, alerts...)
 	var o dueOutcome
 	o.newest = seedDue(t, a.Store, s)
 	advance(48 * time.Hour)
 	before := count.Load()
-	b, err := a.Board(ctx, q, attention.Window24h)
+	b, err := a.Board(readCtx, q, attention.Window24h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +149,7 @@ func readDueBoard(t *testing.T, s dueSeed, q attention.Query, alerts ...string) 
 // leave every other lease as it was.
 func checkDueOutcome(t *testing.T, name string, s dueSeed, o dueOutcome, alertsOn bool) {
 	t.Helper()
-	wantAlerts, wantLive, wantEnded := 0, s.liveTasks, 0
+	wantAlerts, wantLive, wantEnded := 0, s.liveTasks, s.endedTasks
 	if alertsOn {
 		wantAlerts = o.newest
 	}
@@ -198,4 +220,98 @@ func TestTheNowReadRunsTheSameStatementsWhenItsFilterNamesNoTaskOnABoardWithDueL
 	// the expiry is not narrowed by the filter: both reads expired every due lease
 	checkDueOutcome(t, "web", seed, all, true)
 	checkDueOutcome(t, "nothing", seed, none, true)
+}
+
+// steadyBoards are boards that meet zero, one and many due leases, mixed with
+// live and ended ones, some of the due leases raising no stranded alert.
+var steadyBoards = []struct {
+	name string
+	seed dueSeed
+}{
+	{"nothing at all", dueSeed{}},
+	{"live and ended leases and none due", dueSeed{liveTasks: 5, endedTasks: 5}},
+	{"one due lease that raises an alert", dueSeed{tasks: 1, liveTasks: 5, endedTasks: 5}},
+	{"one due lease that raises no alert", dueSeed{tasks: 1, supersede: "ended", liveTasks: 5, endedTasks: 5}},
+	{"many due leases that all raise an alert", dueSeed{tasks: 40, olderEnded: true, liveTasks: 5, endedTasks: 5}},
+	{"many due leases that raise none: a newer live lease on each", dueSeed{tasks: 40, supersede: "live", olderEnded: true, liveTasks: 5, endedTasks: 5}},
+	{"many due leases that raise none: a newer ended lease on each", dueSeed{tasks: 40, supersede: "ended", liveTasks: 5, endedTasks: 5}},
+}
+
+func TestTheNowReadRunsTheSameStatementsWithZeroOneAndManyDueLeasesOnEveryLeg(t *testing.T) {
+	requests := map[string]context.Context{
+		"no request origin":       context.Background(),
+		"an operator origin":      audit.WithOrigin(context.Background(), "nik@host"),
+		"an origin naming nobody": audit.WithOrigin(context.Background(), ""),
+	}
+	eachLeg(t, func(t *testing.T, leg string) {
+		for alertName, alerts := range map[string][]string{"alerts off": nil, "stranded alerts on": {store.NotifyStranded}} {
+			for reqName, ctx := range requests {
+				want := int64(-1)
+				for _, b := range steadyBoards {
+					o := readDueBoardOn(ctx, t, leg, b.seed, attention.Query{}, alerts...)
+					checkDueOutcome(t, alertName+", "+b.name, b.seed, o, alerts != nil)
+					if o.statements == 0 {
+						t.Fatalf("%s, %s, %s: the read counted no statements, so the counter is not wired", alertName, reqName, b.name)
+					}
+					if want < 0 {
+						want = o.statements
+					}
+					if o.statements != want {
+						t.Errorf("%s, %s: %d statements on %q but %d on %q (%d due, %d expired, %d alerts): the read is not constant",
+							alertName, reqName, o.statements, b.name, want, steadyBoards[0].name, b.seed.tasks, o.expired, o.alerts)
+					}
+				}
+			}
+		}
+	})
+}
+
+func TestANoDueNowReadCompletesWhileTheSQLiteWriterIsHeld(t *testing.T) {
+	for alertName, alerts := range map[string][]string{"alerts off": nil, "stranded alerts on": {store.NotifyStranded}} {
+		a, _, advance := boardOfSize(t, 0, alerts...)
+		seedDue(t, a.Store, dueSeed{liveTasks: 5, endedTasks: 5})
+		advance(time.Hour)
+		tx, err := a.Store.Writer().BeginTx(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		b, err := a.Board(ctx, attention.Query{}, attention.Window24h)
+		cancel()
+		_ = tx.Rollback()
+		if err != nil {
+			t.Fatalf("%s: a read with nothing due while the writer connection is held: %v", alertName, err)
+		}
+		if len(b.InFlight) != 5 {
+			t.Errorf("%s: %d tasks in flight, want the 5 live ones", alertName, len(b.InFlight))
+		}
+	}
+}
+
+func TestIdleRunsExactlyTheStatementsAskedForOnTheReaderWithoutTheWriter(t *testing.T) {
+	var count atomic.Int64
+	st, err := store.OpenCounting(filepath.Join(t.TempDir(), "b.db"), &count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	held, err := st.Writer().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Rollback() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, n := range []int{0, 1, 4, 7} {
+		before := count.Load()
+		if err := st.Idle(ctx, n); err != nil {
+			t.Fatalf("Idle(%d) with the writer held: %v", n, err)
+		}
+		if got := count.Load() - before; got != int64(n) {
+			t.Errorf("Idle(%d) ran %d statements", n, got)
+		}
+	}
 }
