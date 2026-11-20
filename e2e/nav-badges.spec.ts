@@ -14,10 +14,17 @@ const viewports = [
 ] as const;
 const FIVE_SECONDS = { timeout: 5000 };
 
-/** A badge's number, 0 while it is hidden (no element at all). */
-async function count(badge: Locator): Promise<number> {
-  if ((await badge.count()) === 0) return 0;
-  return Number.parseInt((await badge.innerText()).replace('+', ''), 10);
+/**
+ * A badge's whole number, 0 while it has none. The badge prints `99+` above 99, and a long run leaves the shared board
+ * past that, so the delta is read from the words the link carries for assistive technology, which hold the whole count.
+ */
+const WORDS = {
+  red: /(\d+) items? needs? attention/,
+  green: /(\d+) open tasks? ha(?:s|ve) a live lease/,
+} as const;
+async function count(link: Locator, kind: keyof typeof WORDS): Promise<number> {
+  const found = WORDS[kind].exec((await link.textContent()) ?? '');
+  return found === null ? 0 : Number.parseInt(found[1]!, 10);
 }
 
 async function scan(page: Page, theme: string) {
@@ -90,15 +97,14 @@ for (const vp of viewports) {
       await page.evaluate(() => ((window as unknown as { navMark: boolean }).navMark = true));
       const nav = page.getByTestId(vp.nav);
       const link = nav.getByRole('link', { name: /^Now/ });
-      const red = nav.getByTestId('attention-badge');
       const green = nav.getByTestId('live-badge');
       // The red count has our own open ask in it by now; wait for the stream to say so (it never reads 0 after the ask).
-      await expect.poll(() => count(red), FIVE_SECONDS).toBeGreaterThan(0);
-      const redBefore = await count(red);
-      const greenBefore = await count(green);
+      await expect.poll(() => count(link, 'red'), FIVE_SECONDS).toBeGreaterThan(0);
+      const redBefore = await count(link, 'red');
+      const greenBefore = await count(link, 'green');
 
       await created(api, '/api/v1/leases', { task: held, intent: `badge ${vp.name}` });
-      await expect.poll(async () => (await count(green)) - greenBefore, FIVE_SECONDS).toBeGreaterThanOrEqual(1);
+      await expect.poll(async () => (await count(link, 'green')) - greenBefore, FIVE_SECONDS).toBeGreaterThanOrEqual(1);
       await expect(green).toBeVisible();
       const label = await link.getAttribute('aria-label');
       expect(label).toBeNull(); // the words ride in the content so the name keeps the visible text
@@ -106,7 +112,7 @@ for (const vp of viewports) {
 
       const answered = await api.post(`/api/v1/asks/${ask}/answer`, { data: { answer: 'left' } });
       expect(answered.status(), await answered.text()).toBe(200);
-      await expect.poll(async () => (await count(red)) - redBefore, FIVE_SECONDS).toBeLessThanOrEqual(-1);
+      await expect.poll(async () => (await count(link, 'red')) - redBefore, FIVE_SECONDS).toBeLessThanOrEqual(-1);
       expect(await page.evaluate(() => (window as unknown as { navMark?: boolean }).navMark)).toBe(true);
       await api.dispose();
     });

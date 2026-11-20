@@ -577,6 +577,19 @@ async function openDock(page: Page, playwright: PlaywrightTestArgs['playwright']
   const s = await seedFlight(playwright, baseURL, `dock-${name}`);
   await page.goto(`/#/now?initiative=${s.slug}`);
   await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
+  // On a long run the shared board's filter chips push the dock below the fold, and a pointer drag only reaches what is on
+  // screen. The chips are still arriving at first, so wait for the dock to stop moving, then scroll it into view.
+  const dock = page.getByTestId('now-dock');
+  let last = -1;
+  await expect
+    .poll(async () => {
+      const top = await dock.evaluate((el) => Math.round(el.getBoundingClientRect().top + window.scrollY));
+      const still = top === last;
+      last = top;
+      return still;
+    }, { intervals: [300], timeout: 10000 })
+    .toBe(true);
+  await dock.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await s.api.dispose();
   return s;
 }

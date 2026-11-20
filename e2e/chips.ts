@@ -12,8 +12,14 @@ export async function openChips(page: Page): Promise<void> {
   if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
 }
 
-/** Folds the phone's filter again; a no-op where the filter is always open. */
+/**
+ * Folds the filter as a fresh mount draws it: the phone's filter behind its one line, and a long list of initiatives
+ * behind "more" (on a long run the shared board has hundreds, and an unfolded list makes the page much taller than the
+ * page that comes back). A no-op where neither is open.
+ */
 export async function foldChips(page: Page): Promise<void> {
+  const more = page.getByTestId('chip-more');
+  if ((await more.count()) > 0 && (await more.isVisible()) && (await more.getAttribute('aria-expanded')) === 'true') await more.click();
   const toggle = page.getByTestId('chip-toggle');
   if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
 }

@@ -122,6 +122,7 @@ async function backAndForward(page: Page, route: Route, left: Left, phone: boole
 
 /** Fills the route in, records how it looks, follows a link away and checks both returns. */
 async function leaveAndReturn(page: Page, route: Route, phone: boolean) {
+  await foldChips(page); // a fresh mount folds the filter: measure the page as tall as it comes back
   await scrollDown(page, (await route.scrollTo?.(page)) ?? SCROLL_TO);
   const rows = await route.rows(page);
   const sort = route.sortColumn === undefined ? undefined : await shownSort(page, phone || route.sharedSort === true, route.sortColumn);
@@ -203,6 +204,9 @@ for (const vp of viewports) {
         landing: /#\/i\//,
         sortColumn: 'title',
         sharedSort: true,
+        // This spec's first row sits 300 px below the top of the window: on a grown store the tag chips push the rows down.
+        scrollTo: (p) =>
+          p.locator(`[data-testid="initiative-row"][data-slug^="${prefix}-"]`).first().evaluate((row) => Math.max(0, Math.round(row.getBoundingClientRect().top + window.scrollY) - 300)),
       };
       await leaveAndReturn(page, route, phone);
     });
