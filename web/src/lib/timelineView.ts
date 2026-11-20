@@ -1117,14 +1117,21 @@ export function forgetTimeline(storage: ViewStorage | undefined): void {
   clearViewQuery(storage, TIMELINE_VIEW);
 }
 
+const NO_TAGS: ReadonlySet<string> = new Set();
+
 /**
  * A restored filter without the initiatives and tags the board no longer has: `known` is the list of initiatives with
- * their tags. The actor and the closed-within choice are kept. A filter with nothing to drop is returned as it is (the
+ * their tags, and `carried` the restored tags some task carries (its own or a derived actor kind; `carriedTags` in
+ * lib/tagCarry.ts), which are valid too. The actor and the closed-within choice are kept. A filter with nothing to drop is returned as it is (the
  * same object).
  */
-export function dropUnknown(filter: TimelineFilter, known: readonly { slug: string; tags: readonly string[] }[]): TimelineFilter {
+export function dropUnknown(
+  filter: TimelineFilter,
+  known: readonly { slug: string; tags: readonly string[] }[],
+  carried: ReadonlySet<string> = NO_TAGS,
+): TimelineFilter {
   const slugs = new Set(known.map((i) => i.slug));
-  const tags = new Set(known.flatMap((i) => i.tags));
+  const tags = new Set([...known.flatMap((i) => i.tags), ...carried]);
   const initiatives = filter.initiatives.filter((slug) => slugs.has(slug));
   const kept = filter.tags.filter((tag) => tags.has(tag));
   if (initiatives.length === filter.initiatives.length && kept.length === filter.tags.length) return filter;
@@ -1137,7 +1144,11 @@ export function dropUnknown(filter: TimelineFilter, known: readonly { slug: stri
  * list is an answer (the board has no initiatives), so every restored initiative and tag is dropped. A link's own query
  * is kept as it is, and the chart shows the server's answer for it.
  */
-export function startFilter(opened: OpenedTimeline, known: readonly { slug: string; tags: readonly string[] }[] | undefined): TimelineFilter {
+export function startFilter(
+  opened: OpenedTimeline,
+  known: readonly { slug: string; tags: readonly string[] }[] | undefined,
+  carried: ReadonlySet<string> = NO_TAGS,
+): TimelineFilter {
   if (!opened.restored || known === undefined) return opened.filter;
-  return dropUnknown(opened.filter, known);
+  return dropUnknown(opened.filter, known, carried);
 }

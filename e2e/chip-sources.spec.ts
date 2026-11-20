@@ -1,0 +1,84 @@
+import { expect, test, type Page } from '@playwright/test';
+import { actorApi, created } from './now';
+import { openChips, pickTag, tagChip } from './chips';
+
+// R7/R10 (SPEC 11, "Tag choices and saved filters on the task views"): Now and Timeline offer every tag of the tasks they show
+// (own, initiative and derived actor kind, with their sources), and a restored filter keeps a tag a task carries even when no
+// initiative lists it, the same rule the server filters by. Each test seeds an initiative of its own on the shared board.
+const viewports = [
+  { name: 'phone', size: { width: 390, height: 844 } },
+  { name: 'desktop', size: { width: 1440, height: 900 } },
+] as const;
+const views = [
+  { id: 'now', key: 'vh.view.v1.attention', endpoint: '/api/v1/attention/now' },
+  { id: 'timeline', key: 'vh.view.v1.timeline', endpoint: '/api/v1/timeline' },
+] as const;
+
+async function seed(playwright: Parameters<typeof actorApi>[0], baseURL: string | undefined, slug: string, own: string[], lease = true) {
+  const api = await actorApi(playwright, baseURL, 'ralph:review');
+  await created(api, '/api/v1/initiatives', { slug, title: slug, tags: [`${slug}-ini`] });
+  const { ref } = await created(api, '/api/v1/tasks', { initiative: slug, title: `task of ${slug}`, tags: own });
+  if (lease) await created(api, '/api/v1/leases', { task: ref, intent: 'review' });
+  await api.dispose();
+  return ref;
+}
+
+// A bare navigation to the view after another one: the saved query is restored, and the read it makes is returned.
+async function restoredRead(page: Page, view: (typeof views)[number], slug: string, query: string) {
+  await page.addInitScript(({ key, query }) => localStorage.setItem(key, JSON.stringify({ v: 1, query })), { key: view.key, query });
+  await page.goto('/#/actors');
+  await expect(page.getByTestId('actors-view')).toBeVisible();
+  const read = page.waitForResponse((r) => new URL(r.url()).pathname === view.endpoint && new URL(r.url()).searchParams.get('initiative') === slug);
+  await page.evaluate((id) => (window.location.hash = `#/${id}`), view.id);
+  return new URL((await read).url());
+}
+
+for (const viewport of viewports) {
+  for (const view of views) {
+    test.describe(`${view.id} at ${viewport.name}`, () => {
+      test.beforeEach(async ({ page }) => page.setViewportSize(viewport.size));
+
+      test('offers the task\'s own, its initiative\'s and its actor-kind tag, each with its source', async ({ page, playwright, baseURL }) => {
+        const slug = `src-offer-${view.id}-${viewport.name}`;
+        await seed(playwright, baseURL, slug, [`${slug}-own`]);
+        await page.goto(`/#/${view.id}?initiative=${slug}`);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-ini`)).toBeVisible();
+        await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', /task tag/);
+        await expect(tagChip(page, `${slug}-ini`)).toHaveAttribute('aria-label', /initiative tag/);
+        await expect(tagChip(page, 'ralph')).toHaveAttribute('aria-label', /actor kind/);
+      });
+
+      test('keeps the other chips on offer after one is chosen', async ({ page, playwright, baseURL }) => {
+        const slug = `src-keep-${view.id}-${viewport.name}`;
+        await seed(playwright, baseURL, slug, [`${slug}-own`]);
+        await page.goto(`/#/${view.id}?initiative=${slug}`);
+        await openChips(page);
+        await pickTag(page, `${slug}-own`);
+        await expect(tagChip(page, 'ralph')).toBeVisible();
+        await expect(tagChip(page, `${slug}-ini`)).toBeVisible();
+      });
+
+      test('restores a task-only tag, with its initiative', async ({ page, playwright, baseURL }) => {
+        const slug = `src-own-${view.id}-${viewport.name}`;
+        await seed(playwright, baseURL, slug, [`${slug}-own`]);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-own`);
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-own`]);
+      });
+
+      test('restores an actor-kind tag no initiative lists', async ({ page, playwright, baseURL }) => {
+        const slug = `src-actor-${view.id}-${viewport.name}`;
+        await seed(playwright, baseURL, slug, []);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=ralph`);
+        expect(url.searchParams.getAll('tag')).toEqual(['ralph']);
+      });
+
+      test('restores a task-only and an initiative tag together and still drops a tag nothing carries', async ({ page, playwright, baseURL }) => {
+        const slug = `src-mix-${view.id}-${viewport.name}`;
+        await seed(playwright, baseURL, slug, [`${slug}-own`]);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-ini&tag=${slug}-own&tag=${slug}-nothing`);
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-ini`, `${slug}-own`]);
+      });
+    });
+  }
+}

@@ -2081,6 +2081,11 @@ describe('saved Timeline filters', () => {
     expect(dropUnknown(DEFAULT_TIMELINE_FILTER, known)).toBe(DEFAULT_TIMELINE_FILTER);
   });
 
+  it('keeps a restored tag no initiative lists when a task carries it (its own, or a derived actor kind)', () => {
+    const filter = { ...DEFAULT_TIMELINE_FILTER, initiatives: [], tags: ['only-own', 'ralph', 'gone'] };
+    expect(dropUnknown(filter, known, new Set(['only-own', 'ralph'])).tags).toEqual(['only-own', 'ralph']);
+  });
+
   it('drops an unknown initiative and keeps the known one and the tags', () => {
     expect(dropUnknown({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['ghost', 'aa'], tags: ['work'] }, known)).toEqual({ ...DEFAULT_TIMELINE_FILTER, initiatives: ['aa'], tags: ['work'] });
   });

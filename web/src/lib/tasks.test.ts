@@ -35,6 +35,18 @@ describe('TasksApi', () => {
     expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=open');
   });
 
+  it('asks whether any task carries a tag with one limited read of every status', async () => {
+    const { api: a, fetchFn } = api(async (url) => (url.includes('tag=has') ? json({ items: [task('aa-1')] }) : json({ items: [] })));
+    expect(await a.carries('has')).toBe(true);
+    expect(await a.carries('none')).toBe(false);
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=all&limit=1&tag=has');
+  });
+
+  it('refuses the carries read when the server does', async () => {
+    const { api: a } = api(async () => problem(500, { title: 'boom' }));
+    await expect(a.carries('x')).rejects.toBeInstanceOf(InitiativesError);
+  });
+
   it('honours the mount prefix', async () => {
     const { api: a, fetchFn } = api(async () => json({ items: [] }), '/board/');
     await a.openTasks();

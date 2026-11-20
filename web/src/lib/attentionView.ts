@@ -148,13 +148,20 @@ export function copyLabel(a: ItemActor): string {
 }
 
 /**
- * The tag chips Now offers: the tags the board's initiatives carry, each once and marked as an initiative's, plus the
- * chosen ones (a link may name a tag no initiative carries; the server still filters by it). The initiative chips are
+ * The tag chips Now offers: the tags the board's initiatives carry (marked as an initiative's), every tag of every task the
+ * board read shows (`marks`: its own, its initiative's and derived actor-kind tags, each with its source, so a tag
+ * with two sources is one chip naming both), the ones already offered (`seen`: a narrower read must not take a chip away) and
+ * the chosen ones (a link may name a tag nothing carries; the server still filters by it). The initiative chips are
  * the slugs of the same list, which the shared chip filter adds the chosen ones to.
  */
-export function nowTagChoices(initiatives: readonly { tags: readonly string[] }[], chosen: readonly string[]): TagChoice[] {
-  const marks = initiatives.flatMap((i) => i.tags.map((tag) => ({ tag, source: 'initiative' as const })));
-  return mergeChoices([], marks, chosen);
+export function nowTagChoices(
+  initiatives: readonly { tags: readonly string[] }[],
+  chosen: readonly string[],
+  marks: Readonly<Record<string, readonly TagMark[]>> = {},
+  seen: readonly TagChoice[] = [],
+): TagChoice[] {
+  const own = initiatives.flatMap((i) => i.tags.map((tag) => ({ tag, source: 'initiative' as const })));
+  return mergeChoices(seen, [...own, ...Object.values(marks).flat()], chosen);
 }
 
 /**
@@ -293,13 +300,20 @@ export function forgetAttention(storage: ViewStorage | undefined): void {
   clearViewQuery(storage, ATTENTION_VIEW);
 }
 
+const NO_TAGS: ReadonlySet<string> = new Set();
+
 /**
  * A restored filter without the initiatives and tags the board no longer has: `known` is the list of initiatives with
- * their tags. A filter with nothing to drop is returned as it is (the same object).
+ * their tags, and `carried` the restored tags some task carries (its own or a derived actor kind; `carriedTags` in
+ * lib/tagCarry.ts), which are valid too. A filter with nothing to drop is returned as it is (the same object).
  */
-export function dropUnknown(filter: AttentionFilter, known: readonly { slug: string; tags: readonly string[] }[]): AttentionFilter {
+export function dropUnknown(
+  filter: AttentionFilter,
+  known: readonly { slug: string; tags: readonly string[] }[],
+  carried: ReadonlySet<string> = NO_TAGS,
+): AttentionFilter {
   const slugs = new Set(known.map((i) => i.slug));
-  const tags = new Set(known.flatMap((i) => i.tags));
+  const tags = new Set([...known.flatMap((i) => i.tags), ...carried]);
   const initiatives = filter.initiatives.filter((slug) => slugs.has(slug));
   const kept = filter.tags.filter((tag) => tags.has(tag));
   if (initiatives.length === filter.initiatives.length && kept.length === filter.tags.length) return filter;
@@ -315,7 +329,8 @@ export function dropUnknown(filter: AttentionFilter, known: readonly { slug: str
 export function startFilter(
   opened: OpenedAttention,
   known: readonly { slug: string; tags: readonly string[] }[] | undefined,
+  carried: ReadonlySet<string> = NO_TAGS,
 ): AttentionFilter {
   if (!opened.restored || known === undefined) return opened.filter;
-  return dropUnknown(opened.filter, known);
+  return dropUnknown(opened.filter, known, carried);
 }

@@ -217,6 +217,29 @@ describe('nowTagChoices', () => {
     ]);
     expect(nowTagChoices([], [])).toEqual([]);
   });
+
+  it('offers the own, initiative and actor-kind tags of the tasks shown, each with its sources, and one chip for a tag with two', () => {
+    const marks = {
+      'aa-1': [
+        { tag: 'urgent', source: 'task' as const },
+        { tag: 'work', source: 'initiative' as const },
+        { tag: 'ralph', source: 'actor' as const },
+      ],
+      'aa-2': [{ tag: 'work', source: 'task' as const }],
+    };
+    expect(nowTagChoices([{ tags: ['work'] }], [], marks)).toEqual([
+      { tag: 'ralph', sources: ['actor'] },
+      { tag: 'urgent', sources: ['task'] },
+      { tag: 'work', sources: ['initiative', 'task'] },
+    ]);
+  });
+
+  it('keeps a chip it offered before when a narrower read shows fewer tasks', () => {
+    const wide = nowTagChoices([], [], { 'aa-1': [{ tag: 'urgent', source: 'task' as const }] });
+    const narrow = nowTagChoices([{ tags: ['work'] }], ['work'], {}, wide);
+    expect(narrow.map((c) => c.tag)).toEqual(['urgent', 'work']);
+    expect(narrow[0]).toEqual({ tag: 'urgent', sources: ['task'] });
+  });
 });
 
 describe('nowQuery', () => {
@@ -524,6 +547,12 @@ describe('dropUnknown', () => {
 
   it('drops everything when the board knows nothing the filter names', () => {
     expect(dropUnknown({ initiatives: ['ghost'], tags: ['gone'] }, known)).toEqual({ initiatives: [], tags: [] });
+  });
+
+  it('keeps a tag no initiative lists when a task carries it (its own, or a derived actor kind)', () => {
+    const filter = { initiatives: ['aa'], tags: ['only-own', 'ralph', 'gone'] };
+    expect(dropUnknown(filter, known, new Set(['only-own', 'ralph']))).toEqual({ initiatives: ['aa'], tags: ['only-own', 'ralph'] });
+    expect(dropUnknown({ initiatives: [], tags: ['only-own'] }, known, new Set(['only-own']))).toEqual({ initiatives: [], tags: ['only-own'] });
   });
 });
 

@@ -17,9 +17,11 @@
   import { WINDOWS, loadWindow, saveWindow, type NowWindow } from './lib/nowFlight';
   import { ACTIVE_CHOICES, ACTIVE_COLUMNS, WINDOW_HINT, windowVisible, type TimelineOrder } from './lib/timelineActive';
   import type { SortState } from './lib/tableSort';
-  import type { ChipState } from './lib/chipFilter';
+  import type { ChipState, TagChoice } from './lib/chipFilter';
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
+  import { TasksApi } from './lib/tasks';
+  import { carriedTags } from './lib/tagCarry';
   import { live } from './lib/live';
   import {
     CLOSED_WITHIN_OPTIONS,
@@ -103,7 +105,14 @@
   /** What the filter selects offer: the board's initiatives, their tags and its actors. */
   let slugs: string[] = $state([]);
   let boardInitiatives: { tags: string[] }[] = $state([]);
-  const tags = $derived(tagChoices(boardInitiatives, view.filter.tags));
+  // The tag chips: the initiatives' tags and every tag of the task rows drawn, kept while a narrower read follows.
+  let seen: TagChoice[] = $state([]);
+  $effect(() => {
+    const rows = view.model.groups;
+    const chosen = view.filter.tags;
+    seen = untrack(() => tagChoices([], chosen, rows, seen));
+  });
+  const tags = $derived(tagChoices(boardInitiatives, view.filter.tags, [], seen));
   let actors: string[] = $state([]);
 
   // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
@@ -115,6 +124,11 @@
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
+  // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
+  const tasksApi = new TasksApi(browser, () => csrf);
+  async function carriedOf(filter: TimelineFilter): Promise<ReadonlySet<string> | undefined> {
+    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.carries(tag));
+  }
   async function start() {
     const current = turns.begin();
     listed = new InitiativesApi(browser, () => csrf)
@@ -129,10 +143,14 @@
       .actors()
       .then((handles) => (actors = handles))
       .catch(() => undefined);
-    if (opened.restored) await listed;
+    let carried: ReadonlySet<string> | undefined;
+    if (opened.restored) {
+      await listed;
+      carried = await carriedOf(opened.filter);
+    }
     if (!current()) return;
     turns.reading();
-    const kept = startFilter(opened, looked);
+    const kept = startFilter(opened, looked, carried);
     if (kept === opened.filter) {
       void store.load();
     } else {
@@ -193,9 +211,13 @@
     preview = next.task; // Back from a preview's entry closes it; Forward opens it again
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
-    if (next.restored) await listed;
+    let carried: ReadonlySet<string> | undefined;
+    if (next.restored) {
+      await listed;
+      carried = await carriedOf(next.filter);
+    }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    const filter = startFilter(next, looked);
+    const filter = startFilter(next, looked, carried);
     if (next.window !== undefined && !sameRange(next.window, view.window)) {
       windowInHash = true;
       chart?.moveTo(next.window);

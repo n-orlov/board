@@ -445,6 +445,17 @@ describe('the filter controls', () => {
     expect(tagChoices([], [])).toEqual([]);
   });
 
+  it('offers the tags of the task rows drawn with their sources, and keeps the chips offered before', () => {
+    const rows = [{ tags: [{ tag: 'review-own', sources: ['task' as const] }, { tag: 'ralph', sources: ['actor' as const] }] }, { tags: [{ tag: 'work', sources: ['task' as const] }] }];
+    expect(tagChoices([{ tags: ['work'] }], [], rows)).toEqual([
+      { tag: 'ralph', sources: ['actor'] },
+      { tag: 'review-own', sources: ['task'] },
+      { tag: 'work', sources: ['task', 'initiative'] },
+    ]);
+    const seen = tagChoices([], [], rows);
+    expect(tagChoices([], [], [], seen)).toEqual(seen);
+  });
+
   it('reads the closed-within select, an unknown value is off', () => {
     expect(withClosedWithin(DEFAULT_TIMELINE_FILTER, '30').closedWithin).toBe(30);
     expect(withClosedWithin({ ...DEFAULT_TIMELINE_FILTER, closedWithin: 7 }, '0').closedWithin).toBe(0);

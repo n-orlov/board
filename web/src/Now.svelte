@@ -23,7 +23,7 @@
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
   import { nowHash, type AttentionFilter } from './lib/attention';
-  import { chipsActive, initiativeChoices, type ChipState } from './lib/chipFilter';
+  import { chipsActive, initiativeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
@@ -40,6 +40,8 @@
   } from './lib/attentionView';
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
+  import { TasksApi } from './lib/tasks';
+  import { carriedTags } from './lib/tagCarry';
   import {
     BANDS,
     WIDE_QUERY,
@@ -101,6 +103,11 @@
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
+  // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
+  const tasksApi = new TasksApi(browser, () => csrf);
+  async function carriedOf(filter: AttentionFilter): Promise<ReadonlySet<string> | undefined> {
+    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.carries(tag));
+  }
   async function start() {
     const current = turns.begin();
     listed = new InitiativesApi(browser, () => csrf)
@@ -110,10 +117,14 @@
         known = looked;
       })
       .catch(() => undefined); // the chips then offer only what the URL names; the sections show the error
-    if (opened.restored) await listed;
+    let carried: ReadonlySet<string> | undefined;
+    if (opened.restored) {
+      await listed;
+      carried = await carriedOf(opened.filter);
+    }
     if (!current()) return;
     turns.reading();
-    const kept = startFilter(opened, looked);
+    const kept = startFilter(opened, looked, carried);
     if (kept === initial) {
       void store.load();
     } else {
@@ -163,9 +174,13 @@
     const next = openAttention(viewEnv, window.location.hash);
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
-    if (next.restored) await listed;
+    let carried: ReadonlySet<string> | undefined;
+    if (next.restored) {
+      await listed;
+      carried = await carriedOf(next.filter);
+    }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    const filter = startFilter(next, looked);
+    const filter = startFilter(next, looked, carried);
     if (filter !== next.filter) persist(filter);
     if (!turns.mustRead(nowHash(filter) === nowHash(view.filter))) return;
     turns.reading();
@@ -237,7 +252,14 @@
   }
 
   const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
-  const tagChoices = $derived(nowTagChoices(known, view.filter.tags));
+  // The tag chips: the initiatives' tags and every tag of the tasks the board read shows, kept while a narrower read follows.
+  let seen: TagChoice[] = $state([]);
+  $effect(() => {
+    const read = view.marks;
+    const chosen = view.filter.tags;
+    seen = untrack(() => nowTagChoices([], chosen, read, seen));
+  });
+  const tagChoices = $derived(nowTagChoices(known, view.filter.tags, {}, seen));
   const initiativeSlugs = $derived(initiativeChoices(known.map((i) => i.slug), view.filter.initiatives));
   // The ages and the time left on a lease are phrased against this instant: it moves with every answer and every half minute.
   let now = $state(new Date());

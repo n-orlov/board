@@ -579,10 +579,19 @@ export function choiceOptions(values: readonly string[], current: string, any: s
   return [{ value: '', label: any }, ...[...all].sort().map((value) => ({ value, label: value }))];
 }
 
-/** The tag chips Timeline offers: the tags the board's initiatives carry, each once and marked as an initiative's, plus the chosen ones. */
-export function tagChoices(initiatives: readonly { tags: readonly string[] }[], chosen: readonly string[]): TagChoice[] {
+/**
+ * The tag chips Timeline offers: the tags the board's initiatives carry (marked as an initiative's), every tag of the task rows
+ * drawn (own, initiative and derived actor-kind tags, each with its source), the ones already offered (`seen`: a narrower
+ * read must not take a chip away) and the chosen ones.
+ */
+export function tagChoices(
+  initiatives: readonly { tags: readonly string[] }[],
+  chosen: readonly string[],
+  rows: readonly { tags: readonly TagChoice[] }[] = [],
+  seen: readonly TagChoice[] = [],
+): TagChoice[] {
   const marks = initiatives.flatMap((i) => i.tags.map((tag) => ({ tag, source: 'initiative' as const })));
-  return mergeChoices([], marks, chosen);
+  return mergeChoices([...seen, ...rows.flatMap((r) => r.tags)], marks, chosen);
 }
 
 /** The filter with a closed-within choice read from a select's value. */

@@ -60,6 +60,14 @@ export class TasksApi {
     return items;
   }
 
+  /** Whether any task, of any status, matches the tag as its own, its initiative's or a derived actor-kind tag. */
+  async carries(tag: string): Promise<boolean> {
+    const query = new URLSearchParams({ status: 'all', limit: '1' });
+    query.append('tag', tag);
+    const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Looking for tasks with the tag', { headers: { Accept: 'application/json' } });
+    return ((await response.json()) as components['schemas']['TaskList']).items.length > 0;
+  }
+
   /** The Needs attention section for a `GET /tasks` query: the first 200 tasks that need a person and how many more there are. */
   needs(query: URLSearchParams): Promise<NeedsAttention> {
     return readNeeds(async (page) => {
