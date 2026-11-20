@@ -22,7 +22,7 @@ export const LAYOUT_KEY = 'vh.now.layout.v1';
 function seedAllOpen(keys: { bands: string; layout: string }): void {
   try {
     const open = { asks: true, expired: true, watches: true, done: true };
-    // On the stacked view In flight and Recently touched fold too (Recently touched starts closed on a phone).
+    // On the stacked view In flight and Recently touched fold too (both start closed on a phone).
     const folds = { ...open, flight: true, recent: true };
     if (localStorage.getItem(keys.bands) === null) localStorage.setItem(keys.bands, JSON.stringify({ wide: folds, narrow: folds }));
     if (localStorage.getItem(keys.layout) === null) {
@@ -63,7 +63,7 @@ export async function openBand(page: Page, key: BandKey): Promise<void> {
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 }
 
-/** Opens In flight or Recently touched when it is closed (a phone starts with Recently touched closed). */
+/** Opens In flight or Recently touched when it is closed (a phone starts with both closed). */
 export async function openFold(page: Page, key: 'flight' | 'recent'): Promise<void> {
   const toggle = page.getByTestId(`now-${key}`).getByTestId('widget-toggle');
   await expect(toggle).toBeVisible();

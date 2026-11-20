@@ -76,11 +76,24 @@ describe('default open states', () => {
     expect(keys.map((k) => defaultOpen(k, 'narrow', 0))).toEqual([false, false, false, false]);
   });
 
-  it('opens In flight only when it holds something, and Recently touched never, on a narrow screen', () => {
-    expect(defaultOpen('flight', 'narrow', 2)).toBe(true);
-    expect(defaultOpen('flight', 'narrow', 0)).toBe(false);
-    expect(defaultOpen('recent', 'narrow', 7)).toBe(false);
-    expect(defaultOpen('recent', 'narrow', 0)).toBe(false);
+  it('starts In flight and Recently touched closed on a narrow screen, however much they hold', () => {
+    for (const count of [0, 1, 2, 11, 500]) {
+      expect(defaultOpen('flight', 'narrow', count)).toBe(false);
+      expect(defaultOpen('recent', 'narrow', count)).toBe(false);
+    }
+  });
+
+  it('on a narrow screen opens no fold but a nonempty Open asks or Expired leases and conflicts', () => {
+    for (const key of FOLD_KEYS) {
+      for (const count of [0, 1, 11]) {
+        expect(defaultOpen(key, 'narrow', count)).toBe((key === 'asks' || key === 'expired') && count > 0);
+      }
+    }
+  });
+
+  it('starts nonempty Overdue watches and Done, not closed closed on a narrow screen', () => {
+    expect(defaultOpen('watches', 'narrow', 11)).toBe(false);
+    expect(defaultOpen('done', 'narrow', 1)).toBe(false);
   });
 
   it('opens In flight and Recently touched on a wide screen, empty or not', () => {
@@ -118,10 +131,32 @@ describe('remembered open state', () => {
     expect(isOpen(narrowRecent, 'recent', 'wide', 0)).toBe(true);
     const wideClosed = withChoice(narrowRecent, 'flight', 'wide', false);
     expect(isOpen(wideClosed, 'flight', 'wide', 3)).toBe(false);
-    expect(isOpen(wideClosed, 'flight', 'narrow', 3)).toBe(true);
-    const narrowClosed = withChoice(wideClosed, 'flight', 'narrow', false);
-    expect(isOpen(narrowClosed, 'flight', 'narrow', 3)).toBe(false);
-    expect(narrowClosed).toEqual({ wide: { flight: false }, narrow: { recent: true, flight: false } });
+    expect(isOpen(wideClosed, 'flight', 'narrow', 3)).toBe(false);
+    const narrowOpen = withChoice(wideClosed, 'flight', 'narrow', true);
+    expect(isOpen(narrowOpen, 'flight', 'narrow', 3)).toBe(true);
+    expect(isOpen(narrowOpen, 'flight', 'wide', 3)).toBe(false);
+    expect(narrowOpen).toEqual({ wide: { flight: false }, narrow: { recent: true, flight: true } });
+  });
+
+  it('keeps a nonempty In flight closed on a narrow screen when only a wide choice and a narrow Recently touched choice are saved', () => {
+    const prefs = withChoice(withChoice(NO_BAND_PREFS, 'flight', 'wide', true), 'recent', 'narrow', true);
+    expect(isOpen(prefs, 'flight', 'narrow', 11)).toBe(false);
+    expect(isOpen(prefs, 'flight', 'wide', 11)).toBe(true);
+    expect(isOpen(prefs, 'recent', 'narrow', 4)).toBe(true);
+  });
+
+  it('never lets a wide choice open a narrow fold the rule keeps closed, nor close one it opens', () => {
+    let wideAllOpen = NO_BAND_PREFS;
+    let wideAllClosed = NO_BAND_PREFS;
+    for (const key of FOLD_KEYS) {
+      wideAllOpen = withChoice(wideAllOpen, key, 'wide', true);
+      wideAllClosed = withChoice(wideAllClosed, key, 'wide', false);
+    }
+    for (const key of FOLD_KEYS) {
+      const expected = key === 'asks' || key === 'expired';
+      expect(isOpen(wideAllOpen, key, 'narrow', 6)).toBe(expected);
+      expect(isOpen(wideAllClosed, key, 'narrow', 6)).toBe(expected);
+    }
   });
 
   it('reads back what it saved under a versioned vh. key', () => {

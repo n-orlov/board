@@ -65,13 +65,13 @@ export function layoutOf(wide: boolean): Layout {
 }
 
 /**
- * Whether a fold starts open when the person has not chosen. Wide: every one but Done, not closed, empty or not.
- * Narrow (an accordion): Open asks, Expired leases and conflicts and In flight when they hold something, the others
- * closed (Recently touched always starts closed, it is the quietest part).
+ * Whether a fold starts open when the person has not chosen (PRD R1). Wide: every one but Done, not closed, empty or
+ * not. Narrow (an accordion): only Open asks and Expired leases and conflicts, and only when they hold something; every
+ * other fold, In flight and Recently touched included, starts closed however much it holds.
  */
 export function defaultOpen(key: FoldKey, layout: Layout, count: number): boolean {
   if (layout === 'wide') return key !== 'done';
-  return (key === 'asks' || key === 'expired' || key === 'flight') && count > 0;
+  return (key === 'asks' || key === 'expired') && count > 0;
 }
 
 /** The choices made so far on one kind of screen: a band absent from it has not been toggled. */

@@ -305,6 +305,7 @@ test.describe('the right column on the phone', () => {
   test('the column stacks under Needs me with 44 px targets and no horizontal scroll', async ({ page, playwright, baseURL }) => {
     const s = await seedFlight(playwright, baseURL, 'phone');
     await page.goto(`/#/now?initiative=${s.slug}`);
+    await openFold(page, 'flight'); // a phone starts In flight closed
     await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
     await openFold(page, 'recent');
     const needs = (await page.getByTestId('now-needs').boundingBox())!;
@@ -342,6 +343,7 @@ for (const vp of [
             [theme, density],
           );
           await page.goto(`/#/now?initiative=${s.slug}`);
+          await openFold(page, 'flight');
           await expect(flightRow(page, s.live)).toBeVisible(FIVE_SECONDS);
           await openFold(page, 'recent');
           await expect(recentRow(page, s.ended)).toBeVisible();

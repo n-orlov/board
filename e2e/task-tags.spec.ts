@@ -188,6 +188,7 @@ for (const vp of viewports) {
       const needs = page.locator('[data-testid=attention-item][data-section=open_asks]');
       await expect(needs).toHaveCount(1, FIVE_SECONDS);
       await expect(own(needs)).toBeVisible(FIVE_SECONDS);
+      await openFold(page, 'flight'); // a phone starts In flight closed
       const flightRow = page.locator(`[data-testid=flight-row][data-task="${s.target}"]`);
       await expect(flightRow).toHaveCount(1, FIVE_SECONDS);
       await expect(own(flightRow)).toBeVisible(FIVE_SECONDS);
@@ -238,6 +239,7 @@ for (const vp of viewports) {
       await expect(marked(needs, s.tag, 'task')).toBeVisible(FIVE_SECONDS);
       await expect(marked(needs, s.initiativeTag, 'initiative')).toBeVisible();
       await expect(marked(needs, 'ralph', 'actor')).toBeVisible();
+      await openFold(page, 'flight'); // a phone starts In flight closed
       const flightRow = page.locator(`[data-testid=flight-row][data-task="${s.target}"]`);
       await expect(marked(flightRow, s.tag, 'task')).toBeVisible(FIVE_SECONDS);
       await expect(marked(flightRow, s.initiativeTag, 'initiative')).toBeVisible();
