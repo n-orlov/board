@@ -143,14 +143,23 @@
     saveViewQuery(viewEnv.storage, ARCHIVE_VIEW, viewToQuery(next));
   }
 
+  // A user's change is the newest navigation: a restoration or a link check still running is superseded, so it neither reads the
+  // sources of its tags nor sets its own filter over this one. The change reads at once.
+  function userTurn() {
+    turns.begin();
+    turns.reading();
+  }
+
   // A window reads the lists again.
   function choose(next: ArchiveWindow) {
+    userTurn();
     remember({ window: next, chips: view.chips, sort });
     void store.setWindow(next);
   }
 
   // A chip change reads again, the server filtering.
   function setChips(next: ChipState) {
+    userTurn();
     remember({ window: view.window, chips: next, sort });
     void store.setChips(next);
   }
