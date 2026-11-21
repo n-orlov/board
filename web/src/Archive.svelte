@@ -185,6 +185,8 @@
     const restoring = queryOfHash(window.location.hash) === '';
     const next = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
     const current = turns.begin();
+    // The navigation begins now, not once its tags are checked: a list an earlier one began lands into nothing meanwhile.
+    store.begin();
     let chips = next.chips;
     // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
     if (chips.tags.length > 0) listed = readCatalog();

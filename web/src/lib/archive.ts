@@ -213,6 +213,8 @@ export class ArchiveStore {
   private readonly onChange: (state: ArchiveState) => void;
   private current: ArchiveState;
   private readonly fetches = new Fetches();
+  /** Whether the current navigation's window and chips are set: false from `begin` until its `navigate`. */
+  private scoped = true;
 
   constructor(api: StoreApi, onChange: (state: ArchiveState) => void, window: ArchiveWindow = DEFAULT_ARCHIVE_WINDOW, chips: ChipState = NO_CHIPS) {
     this.api = api;
@@ -237,11 +239,14 @@ export class ArchiveStore {
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
     const { window, chips, navigation } = this.current;
+    const owned = this.scoped;
     this.publish({ loading: true });
     let outcome: Partial<ArchiveState>;
     try {
       const [tasks, initiatives] = await Promise.all([this.api.tasks(window, chips), this.api.initiatives(window, chips)]);
-      outcome = { tasks, initiatives, read: navigation, loaded: true, error: '' };
+      // A read under a navigation whose window and chips are still being worked out (a refresh while a restoration is checked)
+      // is of the earlier scope: it may be shown, but its rows name nothing for the navigation that began.
+      outcome = { tasks, initiatives, ...(owned ? { read: navigation } : {}), loaded: true, error: '' };
     } catch (e) {
       outcome = { error: errorText(e) };
     }
@@ -250,8 +255,18 @@ export class ArchiveStore {
     this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy });
   }
 
+  /**
+   * Begins a navigation whose window and chips are not known yet (a restoration whose tags are being checked): from now on no
+   * list an earlier navigation began is shown or names anything, and the rows shown name nothing until `navigate` reads for it.
+   */
+  begin(): void {
+    this.scoped = false;
+    this.publish({ navigation: this.current.navigation + 1 });
+  }
+
   /** Begins a new navigation under the window and chips and reads for it, even when they are the ones already shown. */
   async navigate(window: ArchiveWindow, chips: ChipState): Promise<void> {
+    this.scoped = true;
     this.publish({ window, chips, navigation: this.current.navigation + 1 });
     await this.load();
   }

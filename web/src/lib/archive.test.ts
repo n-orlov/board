@@ -413,6 +413,58 @@ describe('ArchiveStore', () => {
       expect(store.state.tasks).toHaveLength(1);
     });
 
+    // A restoration begins its navigation before its tags are checked: the list an earlier navigation began (the opening read
+    // or a link's) lands into nothing in that interval, before or after the restoration's own list.
+    for (const order of ['before', 'after'] as const) {
+      it(`drops the list of the navigation a begun restoration superseded when it lands ${order} the restoration reads`, async () => {
+        const { resolvers, tasks } = held();
+        const { store } = setup({ tasks });
+        const opening = store.load();
+        store.begin();
+        expect(store.state).toMatchObject({ navigation: 1, read: -1 });
+        let restored: Promise<void> | undefined;
+        if (order === 'after') restored = store.navigate('30', chipsB);
+        resolvers[0]!(old());
+        await opening;
+        expect(store.state.tasks).toEqual([]);
+        expect(rowsAreCurrent(store.state)).toBe(false);
+        restored ??= store.navigate('30', chipsB);
+        resolvers[1]!([]);
+        await restored;
+        expect(store.state).toMatchObject({ tasks: [], chips: chipsB, navigation: 2, read: 2 });
+        expect(rowsAreCurrent(store.state)).toBe(true);
+      });
+    }
+
+    it('makes the rows shown no longer current the moment a navigation begins, before its scope is known', async () => {
+      const { store } = setup();
+      await store.setChips(chipsA);
+      expect(rowsAreCurrent(store.state)).toBe(true);
+      store.begin();
+      expect(store.state.tasks).toHaveLength(1);
+      expect(rowsAreCurrent(store.state)).toBe(false);
+    });
+
+    it('shows a refresh during a begun navigation as the earlier scope\'s rows, never as the begun navigation\'s', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.setChips(chipsA);
+      resolvers[0]!([]);
+      await first;
+      store.begin();
+      const refresh = store.load();
+      resolvers[1]!(old());
+      await refresh;
+      expect(store.state).toMatchObject({ chips: chipsA, navigation: 2, read: 1, loading: false });
+      expect(store.state.tasks).toHaveLength(1);
+      expect(rowsAreCurrent(store.state)).toBe(false);
+      const restored = store.navigate('30', chipsB);
+      resolvers[2]!([]);
+      await restored;
+      expect(store.state).toMatchObject({ tasks: [], navigation: 3, read: 3 });
+      expect(rowsAreCurrent(store.state)).toBe(true);
+    });
+
     it('names rows current only when the current navigation read them', () => {
       expect(rowsAreCurrent({ navigation: 0, read: -1 })).toBe(false);
       expect(rowsAreCurrent({ navigation: 2, read: 1 })).toBe(false);

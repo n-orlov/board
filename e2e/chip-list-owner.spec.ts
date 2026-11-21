@@ -67,6 +67,31 @@ const holdLists = (page: Page, isHeld: (query: URLSearchParams) => boolean) =>
 const holdLookup = (page: Page, tag: string) =>
   holdRequest(page, (url) => url.pathname === '/api/v1/tasks' && url.searchParams.get('limit') === '1000' && url.searchParams.get('tag') === tag && !url.searchParams.has('initiative'));
 
+// The board's list of initiatives (the catalog a restoration waits for), held at the network after the server answered.
+async function holdBoard(page: Page) {
+  const released = gate();
+  const seen = gate();
+  let armed = false;
+  let held = false;
+  await page.route('**/api/v1/initiatives?**', async (route) => {
+    if (!armed || held || new URL(route.request().url()).searchParams.get('status') !== 'all') return route.fallback();
+    held = true;
+    const response = await route.fetch();
+    seen.open();
+    await released.wait;
+    await route.fulfill({ response });
+  });
+  return {
+    arm: () => (armed = true),
+    seen: seen.wait,
+    release: async () => {
+      released.open();
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    },
+    open: released.open,
+  };
+}
+
 // The task source goes (the held list still says it is there); the tag keeps its initiative source.
 async function loseTaskSource(api: Api, s: Awaited<ReturnType<typeof seed>>) {
   // A closed task takes no edit: it is reopened, loses the tag and is closed again.
@@ -316,6 +341,92 @@ for (const viewport of viewports) {
           lookup.open();
           middle.open();
           back.open();
+          await api.dispose();
+        }
+      });
+    }
+
+    // A saved filter restored on a bare fragment is a navigation from the moment the fragment changes, not once its tags are checked:
+    // the list the navigation it superseded began (the opening read, or a later explicit link) names no source and shows no row
+    // while the restoration waits for the board's list or its per-tag lookup, nor after the restoration's own empty list landed.
+    // That list (`inh`, which then still lists the tag) is held; the link's own lookup and board list are let through only once
+    // the initiative has dropped the tag, so before the restoration the chip names the task source alone.
+    const restoreCases = [
+      { from: 'opening', at: 'lookup' },
+      { from: 'opening', at: 'catalog' },
+      { from: 'link', at: 'lookup' },
+      { from: 'link', at: 'after' },
+    ] as const;
+    for (const { from, at } of restoreCases) {
+      test(`a saved filter restored while the ${from} list is held supersedes it: released ${at === 'after' ? 'after the restored empty list' : `while the restoration's ${at} is out`}, it names no source`, async ({ page, playwright, baseURL }) => {
+        const api = await actorApi(playwright, baseURL, 'ralph:review');
+        const s = await seed(api, `lo-rs-${from[0]}${at[0]}-${viewport.name}-${run}`);
+        const link = `initiative=${s.inh}&tag=${s.tag}`;
+        const saved = `initiative=${s.empty}&tag=${s.tag}`;
+        const older = await holdLists(page, (q) => initiativesOf(q) === s.inh);
+        const gateOpen = gate();
+        let gated = false;
+        // The link's per-tag read and board list wait for the source to go before they ask.
+        await page.route(/\/api\/v1\/(tasks|initiatives)\?/, async (route) => {
+          const url = new URL(route.request().url());
+          const lookup = url.pathname === '/api/v1/tasks' && url.searchParams.get('limit') === '1000' && url.searchParams.get('tag') === s.tag;
+          const board = url.pathname === '/api/v1/initiatives' && url.searchParams.get('status') === 'all';
+          if (!gated || !(lookup || board)) return route.fallback();
+          await gateOpen.wait;
+          await route.fallback();
+        });
+        const restoreLookup = await holdLookup(page, s.tag);
+        const restoreBoard = await holdBoard(page);
+        try {
+          if (from === 'opening') {
+            older.arm();
+            gated = true;
+            await page.goto(`/#/archive?${link}`);
+          } else {
+            await page.goto(`/#/archive?initiative=${s.own}&tag=${s.tag}`);
+            await openChips(page);
+            await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'task tag, initiative tag'));
+            older.arm();
+            gated = true;
+            await page.evaluate((hash) => (window.location.hash = hash), `#/archive?${link}`);
+          }
+          await older.seen;
+          expect((await api.patch(`/api/v1/initiatives/${s.inh}`, { data: { tags: [] } })).status()).toBe(200);
+          gateOpen.open();
+          await openChips(page);
+          await expectInitiatives(page, [s.inh]);
+          await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'task tag'));
+          gated = false;
+
+          if (at !== 'after') (at === 'catalog' ? restoreBoard : restoreLookup).arm();
+          await page.evaluate((query) => {
+            localStorage.setItem('vh.view.v1.archive', JSON.stringify({ v: 1, query }));
+            window.location.hash = '#/archive';
+          }, saved);
+          if (at === 'after') {
+            await expect.poll(() => page.url()).toContain(`#/archive?${saved}`);
+            await expectInitiatives(page, [s.empty]);
+            await expect(page.getByTestId('archive-empty')).toBeVisible();
+            await older.release();
+          } else {
+            await (at === 'catalog' ? restoreBoard : restoreLookup).seen;
+            await expect.poll(() => page.url()).toContain(`#/archive?${saved}`);
+            await older.release();
+            expect(await labels(page, s.tag), 'the superseded list must name no source while the restoration is checked').toEqual(named(s.tag, 'task tag'));
+            await expect(page.getByText('Inherited source', { exact: true })).toHaveCount(0);
+            await (at === 'catalog' ? restoreBoard : restoreLookup).release();
+          }
+          await expectInitiatives(page, [s.empty]);
+          await expect(page.getByTestId('archive-empty')).toBeVisible();
+          await settle(page);
+          await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true');
+          await expect(page.getByText('Inherited source', { exact: true })).toHaveCount(0);
+          expect(await labels(page, s.tag)).toEqual(named(s.tag, 'task tag'));
+        } finally {
+          gateOpen.open();
+          older.open();
+          restoreLookup.open();
+          restoreBoard.open();
           await api.dispose();
         }
       });
