@@ -17,6 +17,7 @@
     reopenBody,
     reopenLabel,
     reopenedToast,
+    rowsAreCurrent,
     type ArchiveRow,
     type ArchiveState,
     type ArchiveWindow,
@@ -136,7 +137,9 @@
   });
 
   $effect(() => {
-    const { tasks, initiatives: closed } = view;
+    // Only the rows of the navigation that is current name sources: the rows still shown from an earlier window or chips, and a list
+    // that landed for one, put back a source the current navigation's own reads have taken away.
+    const { tasks, initiatives: closed } = rowsAreCurrent(view) ? view : { tasks: [], initiatives: [] };
     const chosen = view.chips.tags;
     tagChoices = untrack(() => archiveTagChoices(tagChoices, tasks, closed, chosen));
   });

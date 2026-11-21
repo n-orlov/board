@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  rowsAreCurrent,
+  scopeKey,
   affectsArchive,
   ARCHIVE_WINDOWS,
   ArchiveApi,
@@ -236,7 +238,7 @@ describe('ArchiveStore', () => {
   }
 
   it('starts loading the default window, with nothing loaded', () => {
-    expect(setup().store.state).toEqual({ window: '30', chips: NO_CHIPS, tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' });
+    expect(setup().store.state).toEqual({ window: '30', chips: NO_CHIPS, tasks: [], initiatives: [], read: '', loaded: false, loading: true, error: '', dialogError: '' });
   });
 
   it('shows both lists once the read lands', async () => {
@@ -287,6 +289,86 @@ describe('ArchiveStore', () => {
     await store.load();
     expect(store.state).toMatchObject({ loaded: true, loading: false, error: 'The server is not reachable.' });
     expect(store.state.tasks).toHaveLength(1);
+  });
+
+  describe('rows belong to the navigation that asked for them', () => {
+    const chipsA = { tags: ['x'], initiatives: ['a'] };
+    const chipsB = { tags: ['x'], initiatives: ['b'] };
+    const held = () => {
+      const resolvers: ((t: Task[]) => void)[] = [];
+      const tasks = () => new Promise<Task[]>((r) => resolvers.push(r));
+      return { resolvers, tasks };
+    };
+
+    it('drops a list whose chips are no longer the current ones when it lands before the current list', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.setChips(chipsA);
+      const second = store.setChips(chipsB);
+      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      await first;
+      expect(store.state.tasks).toEqual([]);
+      expect(store.state.read).toBe('');
+      expect(store.state.loading).toBe(true);
+      resolvers[1]!([]);
+      await second;
+      expect(store.state).toMatchObject({ tasks: [], loaded: true, loading: false, read: scopeKey('30', chipsB) });
+    });
+
+    it('drops a list whose chips are no longer the current ones when it lands after the current list', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.setChips(chipsA);
+      const second = store.setChips(chipsB);
+      resolvers[1]!([]);
+      await second;
+      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      await first;
+      expect(store.state).toMatchObject({ tasks: [], loading: false, read: scopeKey('30', chipsB) });
+    });
+
+    it('drops a list whose window is no longer the current one', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.setWindow('7');
+      const second = store.setWindow('90');
+      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      await first;
+      expect(store.state.tasks).toEqual([]);
+      resolvers[1]!([]);
+      await second;
+      expect(store.state).toMatchObject({ window: '90', read: scopeKey('90', NO_CHIPS) });
+    });
+
+    it('keeps the rows shown from an earlier scope until the current list lands, marked as that scope\'s', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.setChips(chipsA);
+      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      await first;
+      const second = store.setChips(chipsB);
+      expect(store.state.tasks.map((t) => t.ref)).toEqual(['E1-1']);
+      expect(store.state.read).toBe(scopeKey('30', chipsA));
+      expect(rowsAreCurrent(store.state)).toBe(false);
+      resolvers[1]!([]);
+      await second;
+      expect(rowsAreCurrent(store.state)).toBe(true);
+    });
+
+    it('still shows a refresh of the same scope', async () => {
+      const { store } = setup();
+      await store.setChips(chipsA);
+      await store.load();
+      expect(store.state).toMatchObject({ read: scopeKey('30', chipsA), loading: false });
+      expect(store.state.tasks).toHaveLength(1);
+    });
+
+    it('tells scopes apart by window, tags and initiatives, in the order chosen', () => {
+      expect(scopeKey('7', chipsA)).not.toBe(scopeKey('30', chipsA));
+      expect(scopeKey('7', chipsA)).not.toBe(scopeKey('7', chipsB));
+      expect(scopeKey('7', { tags: ['x', 'y'], initiatives: [] })).not.toBe(scopeKey('7', { tags: ['y', 'x'], initiatives: [] }));
+      expect(scopeKey('7', chipsA)).toBe(scopeKey('7', { tags: ['x'], initiatives: ['a'] }));
+    });
   });
 
   it('drops an answer that lands after a newer one', async () => {

@@ -180,6 +180,8 @@ export interface ArchiveState {
   chips: ChipState;
   tasks: Task[];
   initiatives: Initiative[];
+  /** The window and chips (`scopeKey`) the `tasks` and `initiatives` were read under: rows belong to the navigation that asked for them. */
+  read: string;
   /** Whether the first read has landed. */
   loaded: boolean;
   loading: boolean;
@@ -194,6 +196,16 @@ function chipsKey(chips: ChipState): string {
   return JSON.stringify([chips.tags, chips.initiatives]);
 }
 
+/** The window and the chips as one comparable string: what a list was asked for, so which navigation its rows belong to. */
+export function scopeKey(window: ArchiveWindow, chips: ChipState): string {
+  return `${window}|${chipsKey(chips)}`;
+}
+
+/** Whether the rows a state holds were read for its own window and chips: only then do they name anything about the chips on offer. */
+export function rowsAreCurrent(state: Pick<ArchiveState, 'read' | 'window' | 'chips'>): boolean {
+  return state.read === scopeKey(state.window, state.chips);
+}
+
 type StoreApi = Pick<ArchiveApi, 'tasks' | 'initiatives' | 'reopenTask' | 'reopenInitiative'>;
 
 export class ArchiveStore {
@@ -205,7 +217,7 @@ export class ArchiveStore {
   constructor(api: StoreApi, onChange: (state: ArchiveState) => void, window: ArchiveWindow = DEFAULT_ARCHIVE_WINDOW, chips: ChipState = NO_CHIPS) {
     this.api = api;
     this.onChange = onChange;
-    this.current = { window, chips, tasks: [], initiatives: [], loaded: false, loading: true, error: '', dialogError: '' };
+    this.current = { window, chips, tasks: [], initiatives: [], read: '', loaded: false, loading: true, error: '', dialogError: '' };
   }
 
   get state(): ArchiveState {
@@ -217,19 +229,24 @@ export class ArchiveStore {
     this.onChange(this.current);
   }
 
-  /** Reads the window. A refresh keeps what is shown until the answer lands; an answer older than one already shown is dropped. */
+  /**
+   * Reads the window. A refresh keeps what is shown until the answer lands; an answer older than one already shown is dropped, and
+   * so is one whose window and chips are no longer the current ones: its rows belong to a navigation that has been superseded.
+   */
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
     const { window, chips } = this.current;
+    const asked = scopeKey(window, chips);
     this.publish({ loading: true });
     let outcome: Partial<ArchiveState>;
     try {
       const [tasks, initiatives] = await Promise.all([this.api.tasks(window, chips), this.api.initiatives(window, chips)]);
-      outcome = { tasks, initiatives, loaded: true, error: '' };
+      outcome = { tasks, initiatives, read: asked, loaded: true, error: '' };
     } catch (e) {
       outcome = { error: errorText(e) };
     }
-    const show = this.fetches.end(ticket);
+    const newest = this.fetches.end(ticket);
+    const show = newest && asked === scopeKey(this.current.window, this.current.chips);
     this.publish({ ...(show ? outcome : {}), loading: this.fetches.busy });
   }
 
