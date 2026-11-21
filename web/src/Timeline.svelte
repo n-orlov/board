@@ -17,12 +17,12 @@
   import { WINDOWS, loadWindow, saveWindow, type NowWindow } from './lib/nowFlight';
   import { ACTIVE_CHOICES, ACTIVE_COLUMNS, WINDOW_HINT, windowVisible, type TimelineOrder } from './lib/timelineActive';
   import type { SortState } from './lib/tableSort';
-  import type { ChipState, TagChoice } from './lib/chipFilter';
+  import { mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
   import { currentRows, watchRows, rowsName, type RowsEnv } from './lib/timelineRows';
-  import { carriedTags } from './lib/tagCarry';
+  import { carriedTags, type Carried } from './lib/tagCarry';
   import { live } from './lib/live';
   import {
     CLOSED_WITHIN_OPTIONS,
@@ -129,8 +129,16 @@
   let listed: Promise<void> = Promise.resolve();
   // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
   const tasksApi = new TasksApi(browser, () => csrf);
-  async function carriedOf(filter: TimelineFilter): Promise<ReadonlySet<string> | undefined> {
-    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.carries(tag));
+  async function carriedOf(filter: TimelineFilter): Promise<Carried | undefined> {
+    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.tagMarks(tag));
+  }
+  // A link's own tags are kept as they are, but their chips still name the sources the tasks give them: read in the background,
+  // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
+  function offerSources(filter: TimelineFilter) {
+    if (filter.tags.length === 0) return;
+    void carriedTags(filter.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
+      seen = mergeChoices(seen, c.marks, []);
+    });
   }
   async function start() {
     const current = turns.begin();
@@ -146,14 +154,18 @@
       .actors()
       .then((handles) => (actors = handles))
       .catch(() => undefined);
-    let carried: ReadonlySet<string> | undefined;
+    let carried: Carried | undefined;
     if (opened.restored) {
       await listed;
       carried = await carriedOf(opened.filter);
+    } else {
+      offerSources(opened.filter);
     }
     if (!current()) return;
+    // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
+    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
     turns.reading();
-    const kept = startFilter(opened, looked, carried);
+    const kept = startFilter(opened, looked, carried?.tags);
     if (kept === opened.filter) {
       void store.load();
     } else {
@@ -214,13 +226,16 @@
     preview = next.task; // Back from a preview's entry closes it; Forward opens it again
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
-    let carried: ReadonlySet<string> | undefined;
+    let carried: Carried | undefined;
     if (next.restored) {
       await listed;
       carried = await carriedOf(next.filter);
+    } else {
+      offerSources(next.filter);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    const filter = startFilter(next, looked, carried);
+    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    const filter = startFilter(next, looked, carried?.tags);
     if (next.window !== undefined && !sameRange(next.window, view.window)) {
       windowInHash = true;
       chart?.moveTo(next.window);

@@ -35,16 +35,30 @@ describe('TasksApi', () => {
     expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=open');
   });
 
-  it('asks whether any task carries a tag with one limited read of every status', async () => {
-    const { api: a, fetchFn } = api(async (url) => (url.includes('tag=has') ? json({ items: [task('aa-1')] }) : json({ items: [] })));
-    expect(await a.carries('has')).toBe(true);
-    expect(await a.carries('none')).toBe(false);
-    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=all&limit=1&tag=has');
+  it('reads the marks a tag has on the tasks that match it, one per source, across pages until all three are found', async () => {
+    const m = (tag: string, source: string) => ({ tag, source });
+    const { api: a, fetchFn } = api(async (url) =>
+      url.includes('after=aa-2')
+        ? json({ items: [{ ...task('aa-3'), tag_marks: [m('has', 'actor'), m('has', 'initiative')] }] })
+        : json({ items: [{ ...task('aa-1'), tag_marks: [m('has', 'task'), m('other', 'task')] }, { ...task('aa-2'), tag_marks: [m('has', 'task')] }], next_after: 'aa-2' }),
+    );
+    expect(await a.tagMarks('has')).toEqual([m('has', 'task'), m('has', 'actor'), m('has', 'initiative')]);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/tasks?status=all&limit=1000&tag=has', '/api/v1/tasks?status=all&limit=1000&tag=has&after=aa-2']);
   });
 
-  it('refuses the carries read when the server does', async () => {
+  it('stops reading once every source is found, and has no marks for a tag nothing carries', async () => {
+    const m = (source: string) => ({ tag: 'has', source });
+    const { api: a, fetchFn } = api(async (url) =>
+      url.includes('tag=has') ? json({ items: [{ ...task('aa-1'), tag_marks: [m('task'), m('actor'), m('initiative')] }], next_after: 'aa-1' }) : json({ items: [] }),
+    );
+    expect(await a.tagMarks('has')).toHaveLength(3);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(await a.tagMarks('none')).toEqual([]);
+  });
+
+  it('refuses the tag read when the server does', async () => {
     const { api: a } = api(async () => problem(500, { title: 'boom' }));
-    await expect(a.carries('x')).rejects.toBeInstanceOf(InitiativesError);
+    await expect(a.tagMarks('x')).rejects.toBeInstanceOf(InitiativesError);
   });
 
   it('honours the mount prefix', async () => {

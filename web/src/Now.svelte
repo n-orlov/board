@@ -23,7 +23,7 @@
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
   import { nowHash, type AttentionFilter } from './lib/attention';
-  import { chipsActive, initiativeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { chipsActive, initiativeChoices, mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
@@ -41,7 +41,7 @@
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
-  import { carriedTags } from './lib/tagCarry';
+  import { carriedTags, type Carried } from './lib/tagCarry';
   import {
     BANDS,
     WIDE_QUERY,
@@ -106,8 +106,16 @@
   let listed: Promise<void> = Promise.resolve();
   // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
   const tasksApi = new TasksApi(browser, () => csrf);
-  async function carriedOf(filter: AttentionFilter): Promise<ReadonlySet<string> | undefined> {
-    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.carries(tag));
+  async function carriedOf(filter: AttentionFilter): Promise<Carried | undefined> {
+    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.tagMarks(tag));
+  }
+  // A link's own tags are kept as they are, but their chips still name the sources the tasks give them: read in the background,
+  // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
+  function offerSources(filter: AttentionFilter) {
+    if (filter.tags.length === 0) return;
+    void carriedTags(filter.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
+      seen = mergeChoices(seen, c.marks, []);
+    });
   }
   async function start() {
     const current = turns.begin();
@@ -118,14 +126,18 @@
         known = looked;
       })
       .catch(() => undefined); // the chips then offer only what the URL names; the sections show the error
-    let carried: ReadonlySet<string> | undefined;
+    let carried: Carried | undefined;
     if (opened.restored) {
       await listed;
       carried = await carriedOf(opened.filter);
+    } else {
+      offerSources(opened.filter);
     }
     if (!current()) return;
+    // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
+    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
     turns.reading();
-    const kept = startFilter(opened, looked, carried);
+    const kept = startFilter(opened, looked, carried?.tags);
     if (kept === initial) {
       void store.load();
     } else {
@@ -175,13 +187,16 @@
     const next = openAttention(viewEnv, window.location.hash);
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
-    let carried: ReadonlySet<string> | undefined;
+    let carried: Carried | undefined;
     if (next.restored) {
       await listed;
       carried = await carriedOf(next.filter);
+    } else {
+      offerSources(next.filter);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    const filter = startFilter(next, looked, carried);
+    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    const filter = startFilter(next, looked, carried?.tags);
     if (filter !== next.filter) persist(filter);
     if (!turns.mustRead(nowHash(filter) === nowHash(view.filter))) return;
     turns.reading();

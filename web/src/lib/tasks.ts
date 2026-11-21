@@ -60,12 +60,24 @@ export class TasksApi {
     return items;
   }
 
-  /** Whether any task, of any status, matches the tag as its own, its initiative's or a derived actor-kind tag. */
-  async carries(tag: string): Promise<boolean> {
-    const query = new URLSearchParams({ status: 'all', limit: '1' });
-    query.append('tag', tag);
-    const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Looking for tasks with the tag', { headers: { Accept: 'application/json' } });
-    return ((await response.json()) as components['schemas']['TaskList']).items.length > 0;
+  /**
+   * The marks of `tag` on the tasks that match it, of any status, under the server's rule (own, initiative or derived actor
+   * kind): one mark per source some task shows it by. Empty when no task matches. It reads pages until all three sources
+   * are found or the tasks end, so a tag's sources do not depend on which task the server lists first.
+   */
+  async tagMarks(tag: string): Promise<TagMark[]> {
+    const found = new Map<string, TagMark>();
+    let after: string | undefined;
+    do {
+      const query = new URLSearchParams({ status: 'all', limit: '1000' });
+      query.append('tag', tag);
+      if (after !== undefined) query.set('after', after);
+      const response = await this.call(`/api/v1/tasks?${query.toString()}`, 'Looking for tasks with the tag', { headers: { Accept: 'application/json' } });
+      const body = (await response.json()) as components['schemas']['TaskList'];
+      for (const task of body.items) for (const mark of task.tag_marks) if (mark.tag === tag && !found.has(mark.source)) found.set(mark.source, mark);
+      after = found.size < 3 ? body.next_after : undefined;
+    } while (after !== undefined);
+    return [...found.values()];
   }
 
   /** The Needs attention section for a `GET /tasks` query: the first 200 tasks that need a person and how many more there are. */

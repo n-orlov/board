@@ -23,6 +23,16 @@ async function seed(playwright: Parameters<typeof actorApi>[0], baseURL: string 
   return ref;
 }
 
+// Two tasks of one initiative, each with tags of its own; the first is leased when `lease` (a derived actor-kind tag).
+async function seedTwo(playwright: Parameters<typeof actorApi>[0], baseURL: string | undefined, slug: string, first: string[], second: string[], lease = false) {
+  const api = await actorApi(playwright, baseURL, 'ralph:review');
+  await created(api, '/api/v1/initiatives', { slug, title: slug });
+  const a = await created(api, '/api/v1/tasks', { initiative: slug, title: 'first', tags: first });
+  await created(api, '/api/v1/tasks', { initiative: slug, title: 'second', tags: second });
+  if (lease) await created(api, '/api/v1/leases', { task: a.ref, intent: 'review' });
+  await api.dispose();
+}
+
 // A bare navigation to the view after another one: the saved query is restored, and the read it makes is returned.
 async function restoredRead(page: Page, view: (typeof views)[number], slug: string, query: string) {
   await page.addInitScript(({ key, query }) => localStorage.setItem(key, JSON.stringify({ v: 1, query })), { key: view.key, query });
@@ -71,6 +81,74 @@ for (const viewport of viewports) {
         await seed(playwright, baseURL, slug, []);
         const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=ralph`);
         expect(url.searchParams.getAll('tag')).toEqual(['ralph']);
+      });
+
+      // A chip names the sources its tag has on the tasks, not on the rows the combined filter keeps: with an intersection that keeps
+      // none the view has no rows to read them from, so the sources come from the tasks that carry the tag.
+      test('names the task source of two restored task-only tags whose intersection is empty', async ({ page, playwright, baseURL }) => {
+        const slug = `src-empty-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`]);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-left&tag=${slug}-right`);
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-left`, `${slug}-right`]);
+        await openChips(page);
+        for (const side of ['left', 'right']) {
+          const chip = tagChip(page, `${slug}-${side}`);
+          await expect(chip).toHaveAttribute('aria-pressed', 'true');
+          await expect(chip).toHaveAttribute('aria-label', `${slug}-${side}, task tag`);
+          await expect(chip).toHaveAttribute('title', `${slug}-${side}: task tag`);
+        }
+      });
+
+      test('names every source of a restored tag an initiative lists and another task owns, with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-both-${view.id}-${viewport.name}`;
+        const api = await actorApi(playwright, baseURL, 'ralph:review');
+        await created(api, '/api/v1/initiatives', { slug: `${slug}-x`, title: 'x', tags: [`${slug}-shared`] });
+        await created(api, '/api/v1/initiatives', { slug, title: slug });
+        await created(api, '/api/v1/tasks', { initiative: slug, title: 'shared', tags: [`${slug}-shared`] });
+        await created(api, '/api/v1/tasks', { initiative: slug, title: 'other', tags: [`${slug}-other`] });
+        await api.dispose();
+        await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-shared&tag=${slug}-other`);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-shared`)).toHaveAttribute('aria-label', `${slug}-shared, task tag, initiative tag`);
+        await expect(tagChip(page, `${slug}-other`)).toHaveAttribute('aria-label', `${slug}-other, task tag`);
+      });
+
+      test('names the actor kind of a restored derived tag next to a task-only tag, with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-kind-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-leased`], [`${slug}-bare`], true);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=ralph&tag=${slug}-bare`);
+        expect(url.searchParams.getAll('tag')).toEqual(['ralph', `${slug}-bare`]);
+        await openChips(page);
+        await expect(tagChip(page, 'ralph')).toHaveAttribute('aria-label', /^ralph, actor kind/);
+        await expect(tagChip(page, `${slug}-bare`)).toHaveAttribute('aria-label', `${slug}-bare, task tag`);
+      });
+
+      test('names the sources of a linked (not restored) pair of tags with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-link-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`]);
+        await page.goto(`/#/${view.id}?initiative=${slug}&tag=${slug}-left&tag=${slug}-right`);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-left`)).toHaveAttribute('aria-label', `${slug}-left, task tag`);
+        await expect(tagChip(page, `${slug}-right`)).toHaveAttribute('aria-label', `${slug}-right, task tag`);
+      });
+
+      test('keeps the sources of the restored chips across navigation away and back', async ({ page, playwright, baseURL }) => {
+        const slug = `src-nav-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`]);
+        await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-left&tag=${slug}-right`);
+        await page.evaluate(() => (window.location.hash = '#/actors'));
+        await expect(page.getByTestId('actors-view')).toBeVisible();
+        await page.evaluate((id) => (window.location.hash = `#/${id}`), view.id);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-left`)).toHaveAttribute('aria-label', `${slug}-left, task tag`);
+        await expect(tagChip(page, `${slug}-right`)).toHaveAttribute('aria-pressed', 'true');
+      });
+
+      test('still drops a restored tag nothing carries beside a valid pair with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-ghost-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`]);
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-left&tag=${slug}-ghost&tag=${slug}-right`);
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-left`, `${slug}-right`]);
       });
 
       test('restores a task-only and an initiative tag together and still drops a tag nothing carries', async ({ page, playwright, baseURL }) => {
