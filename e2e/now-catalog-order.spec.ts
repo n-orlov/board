@@ -22,6 +22,15 @@ const COUNT_READS = () => {
 };
 const readsDone = (page: Page) => page.evaluate(() => (window as unknown as { __catalogReads: number }).__catalogReads);
 
+// The initiative chips fold behind "N more initiatives" once the catalog holds more than fit; until a read carrying them has
+// been applied there is nothing to unfold. So unfold again until the chip is on show.
+async function showInitiative(page: Page, slug: string): Promise<void> {
+  await expect(async () => {
+    await showAllInitiatives(page);
+    await expect(initiativeChip(page, slug)).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+}
+
 interface Held {
   /** The body of the held page, once the server answered it. */
   captured: Promise<{ items: { slug: string; tags: string[] }[] }>;
@@ -135,6 +144,7 @@ for (const vp of viewports) {
       const timeOrigin = await page.evaluate(() => performance.timeOrigin);
 
       const held = await holdNextRead(page);
+      const readsBefore = await readsDone(page);
       expect((await api.patch(`/api/v1/initiatives/${slug}`, { data: { tags: [stale] } })).ok()).toBe(true);
       expect((await held.captured).items).toContainEqual(expect.objectContaining({ slug, tags: [stale] }));
       await expect(row).toHaveCount(0);
@@ -142,6 +152,9 @@ for (const vp of viewports) {
       await expect(row).toBeVisible();
       await expect(tagChip(page, current)).toHaveAttribute('aria-label', `${current}, initiative tag`);
       await expect(tagChip(page, stale)).toHaveCount(0);
+      // The chip's source can come from the tag's own lookup first: the held read is older only once a newer catalog read has
+      // landed (the held one has not been parsed yet, so the count moving is the newer read's).
+      await page.waitForFunction((n) => (window as unknown as { __catalogReads: number }).__catalogReads > n, readsBefore);
 
       await held.release();
       expect(await tagChip(page, stale).count()).toBe(0);
@@ -163,6 +176,8 @@ for (const vp of viewports) {
       await created(api, '/api/v1/initiatives', { slug: chosen, title: chosen });
       const hash = `#/now?initiative=${chosen}`;
       await openNow(page, `/${hash}`);
+      // The page's first read has ended, so the read held below is a live one (a long run's catalog takes many pages).
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 1);
       await showAllInitiatives(page);
       await expect(initiativeChip(page, chosen)).toHaveAttribute('aria-pressed', 'true');
 
@@ -172,8 +187,9 @@ for (const vp of viewports) {
       expect(old).toContain(first);
       expect(old).not.toContain(second);
       await created(api, '/api/v1/initiatives', { slug: second, title: second });
-      await showAllInitiatives(page);
-      await expect(initiativeChip(page, second)).toBeVisible();
+      // The newer read (begun on the second initiative's event) ends while the older one is still held.
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 2);
+      await showInitiative(page, second);
       await expect(initiativeChip(page, first)).toBeVisible();
 
       await held.release();

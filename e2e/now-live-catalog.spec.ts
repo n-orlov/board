@@ -8,11 +8,33 @@ import { initiativeChip, openChips, showAllInitiatives, tagChip } from './chips'
 const FIVE_SECONDS = { timeout: 5000 };
 const streamUp = (page: Page) => page.waitForResponse((r) => r.headers()['content-type']?.includes('text/event-stream') === true);
 
+// Resolves once a catalog read has ended (its last page, `next_after` absent) whose last page lists `slug`, or any read's last
+// page when no slug is named. A new initiative sorts last, so the read that carries it ends with it. The catalog is read page
+// by page and a long run grows it to many pages, so a test waits for the read itself, never for a time.
+function catalogRead(page: Page, slug?: string) {
+  return page.waitForResponse(async (r) => {
+    if (r.request().method() !== 'GET' || new URL(r.url()).pathname !== '/api/v1/initiatives') return false;
+    const body = (await r.json()) as { items: { slug: string }[]; next_after?: string };
+    return body.next_after === undefined && (slug === undefined || body.items.some((i) => i.slug === slug));
+  });
+}
+
 async function openNow(page: Page, hash: string): Promise<void> {
   const ready = streamUp(page);
+  const listed = catalogRead(page);
   await page.goto(hash);
   await ready;
+  await listed;
   await openChips(page);
+}
+
+// The initiative chips fold behind "N more initiatives" once the catalog holds more than fit; until the catalog read has been
+// applied there is nothing to unfold. So unfold again until the chip is on show (the catalog read that carries it has ended).
+async function showInitiative(page: Page, slug: string): Promise<void> {
+  await expect(async () => {
+    await showAllInitiatives(page);
+    await expect(initiativeChip(page, slug)).toBeVisible({ timeout: 500 });
+  }).toPass(FIVE_SECONDS);
 }
 
 const viewports = [
@@ -33,9 +55,10 @@ for (const vp of viewports) {
       await showAllInitiatives(page);
       await expect(initiativeChip(page, first)).toHaveAttribute('aria-pressed', 'true');
       expect(await initiativeChip(page, second).count()).toBe(0);
+      const reread = catalogRead(page, second);
       await created(api, '/api/v1/initiatives', { slug: second, title: second });
-      await showAllInitiatives(page);
-      await expect(initiativeChip(page, second)).toBeVisible(FIVE_SECONDS);
+      await reread;
+      await showInitiative(page, second);
       // The chosen one stays chosen and the fragment keeps the filter.
       await expect(initiativeChip(page, first)).toHaveAttribute('aria-pressed', 'true');
       await expect(initiativeChip(page, second)).toHaveAttribute('aria-pressed', 'false');
@@ -90,9 +113,10 @@ for (const vp of viewports) {
       await expect(initiativeChip(page, slug)).toBeVisible();
       expect((await api.post(`/api/v1/initiatives/${slug}/close`, { data: {} })).ok()).toBe(true);
       // A later initiative is the proof the catalog was read again after the close.
+      const reread = catalogRead(page, other);
       await created(api, '/api/v1/initiatives', { slug: other, title: other });
-      await showAllInitiatives(page);
-      await expect(initiativeChip(page, other)).toBeVisible(FIVE_SECONDS);
+      await reread;
+      await showInitiative(page, other);
       await expect(initiativeChip(page, slug)).toHaveAttribute('aria-pressed', 'true');
       await api.dispose();
     });
