@@ -110,3 +110,45 @@ export class SourceReads {
     };
   }
 }
+
+/**
+ * The reads that keep a view's chip sources current after a live event (PRD R1, SPEC 11): an event may change any tag's sources,
+ * so the sources of the tags on offer are read again. One round runs at a time; an event while a round is out makes that round's
+ * answer stale (it began before the event, so it could put back a source the event removed): it is dropped and a new round
+ * runs. Events landing together are one round. `round` is handed the extra tags still to read and `stale()`, and must not apply
+ * its answer once that says so.
+ */
+export class SourceRefresh {
+  private running = false;
+  private dirty = false;
+  private readonly extra = new Set<string>();
+
+  constructor(private readonly round: (extra: readonly string[], stale: () => boolean) => Promise<void>) {}
+
+  /** Something that can change sources happened (or an older read was dropped as stale: its tags are `extra`, read again). */
+  poke(extra: readonly string[] = []): void {
+    for (const tag of extra) this.extra.add(tag);
+    this.dirty = true;
+    if (!this.running) void this.loop();
+  }
+
+  private async loop(): Promise<void> {
+    this.running = true;
+    try {
+      while (this.dirty) {
+        this.dirty = false;
+        const extra = [...this.extra];
+        try {
+          await this.round(extra, () => this.dirty);
+          // An answer that was applied has read its extra tags; one dropped as stale leaves them for the round that follows.
+          if (!this.dirty) this.extra.clear();
+        } catch {
+          // A failed read keeps the chips as they were; the next event reads again.
+          if (!this.dirty) this.extra.clear();
+        }
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+}

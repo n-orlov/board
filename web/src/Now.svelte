@@ -23,12 +23,13 @@
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
   import { nowHash, type AttentionFilter } from './lib/attention';
-  import { chipsActive, initiativeChoices, withFreshSources, withoutSource, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { chipsActive, initiativeChoices, withCurrentSources, withFreshSources, withoutSource, type ChipState, type TagChoice } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
     affectsAttention,
     affectsInitiativeCatalog,
+    affectsTagSources,
     copyLabel,
     nowTagChoices,
     forgetAttention,
@@ -43,7 +44,7 @@
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
-  import { SourceReads, type SourceRead } from './lib/tagCarry';
+  import { SourceReads, SourceRefresh, type SourceRead } from './lib/tagCarry';
   import {
     BANDS,
     WIDE_QUERY,
@@ -130,11 +131,35 @@
   // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
   function offerSources(filter: AttentionFilter) {
     if (filter.tags.length === 0) return;
+    const began = catalogReads;
+    const at = tagEvents;
     void sources.read(filter.tags).then((read) => {
+      // An event since the read began may have changed what it answered (a source it names can be gone): its answer is dropped
+      // and the tags are read again after the event.
+      if (tagEvents !== at) return refresh.poke(filter.tags);
       // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
-      const c = read.fresh();
+      const c = read.fresh(catalogReads !== began);
       seen = withFreshSources(seen, c.answered, c.marks);
     });
+  }
+  // A live event that can change a tag's sources (an initiative's tags, a task's tags, a lease's holder) reads the sources of the
+  // tags on offer again, in place: the chosen ones (whether or not the filter still returns a row for them) and every one kept
+  // from an earlier read with a task or actor source. What the answer no longer reports goes, and a reply that began before
+  // the event is dropped, so no source an event removed comes back. A failed read keeps the chips as they were.
+  let tagEvents = 0;
+  const refresh = new SourceRefresh(async (extra, stale) => {
+    const began = catalogReads;
+    const offered = untrack(() => seen).filter((c) => c.sources.some((s) => s !== 'initiative')).map((c) => c.tag);
+    const tags = [...new Set([...view.filter.tags, ...offered, ...extra])];
+    if (tags.length === 0) return;
+    const read = await sources.read(tags);
+    if (stale()) return;
+    const c = read.fresh(catalogReads !== began);
+    seen = withCurrentSources(seen, c.answered, c.marks, view.filter.tags);
+  });
+  function tagSourcesChanged() {
+    tagEvents += 1;
+    refresh.poke();
   }
   // An initiative made, edited, closed or reopened while the page is open: the catalog the chips offer is read again in place.
   // The initiative source of the chips kept from earlier reads is dropped first, so a tag an initiative no longer carries
@@ -161,6 +186,7 @@
       catalogReads += 1;
     });
     let carried: Restored | undefined;
+    const at = tagEvents;
     if (opened.restored) {
       await catalog.settled();
       carried = await carriedOf(opened.filter);
@@ -172,6 +198,8 @@
     if (carried !== undefined) {
       const c = carried.read.fresh(carried.moved);
       seen = withFreshSources(seen, c.answered, c.marks);
+      // An event while the lookup was out may have changed what it answered: the chosen tags are read again after it.
+      if (tagEvents !== at) refresh.poke(opened.filter.tags);
     }
     turns.reading();
     const kept = startFilter(opened, looked, carried?.tags);
@@ -188,9 +216,11 @@
     void untrack(start);
     const rows = live().subscribe(affectsAttention, () => (turns.hasRead() ? store.load() : undefined));
     const choices = live().subscribe(affectsInitiativeCatalog, refreshCatalog);
+    const tagSources = live().subscribe(affectsTagSources, tagSourcesChanged);
     return () => {
       rows();
       choices();
+      tagSources();
     };
   });
 
@@ -230,6 +260,7 @@
     const current = turns.begin();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
     let carried: Restored | undefined;
+    const at = tagEvents;
     if (next.restored) {
       await catalog.settled();
       carried = await carriedOf(next.filter);
@@ -240,6 +271,7 @@
     if (carried !== undefined) {
       const c = carried.read.fresh(carried.moved);
       seen = withFreshSources(seen, c.answered, c.marks);
+      if (tagEvents !== at) refresh.poke(next.filter.tags);
     }
     const filter = startFilter(next, looked, carried?.tags);
     if (filter !== next.filter) persist(filter);

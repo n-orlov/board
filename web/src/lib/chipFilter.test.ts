@@ -12,6 +12,7 @@ import {
   chipsToParams,
   initiativeChoices,
   mergeChoices,
+  withCurrentSources,
   withFreshSources,
   withoutSource,
   sourceLabel,
@@ -260,5 +261,26 @@ describe('withFreshSources', () => {
     expect(next.find((c) => c.tag === 'agent')?.sources).toEqual(['actor', 'task']);
     expect(next.find((c) => c.tag === 'new')?.sources).toEqual(['initiative']);
     expect(known[0]).toEqual({ tag: 'shared', sources: ['task', 'initiative'] });
+  });
+});
+
+describe('withCurrentSources', () => {
+  const known = [
+    { tag: 'shared', sources: ['task' as const, 'initiative' as const] },
+    { tag: 'other', sources: ['task' as const] },
+    { tag: 'agent', sources: ['actor' as const] },
+  ];
+  it('replaces the sources of an answered tag with the ones the answer holds', () => {
+    const next = withCurrentSources(known, new Set(['shared']), [{ tag: 'shared', source: 'task' }], []);
+    expect(next.find((c) => c.tag === 'shared')?.sources).toEqual(['task']);
+  });
+  it('takes away an answered tag nothing carries any more when it is not chosen, and keeps it with no source when it is', () => {
+    expect(withCurrentSources(known, new Set(['other']), [], []).map((c) => c.tag)).toEqual(['agent', 'shared']);
+    const kept = withCurrentSources(known, new Set(['other']), [], ['other']);
+    expect(kept.find((c) => c.tag === 'other')).toEqual({ tag: 'other', sources: [] });
+  });
+  it('leaves a tag it has no answer for as it was', () => {
+    const next = withCurrentSources(known, new Set(['other']), [], []);
+    expect(next.find((c) => c.tag === 'agent')?.sources).toEqual(['actor']);
   });
 });

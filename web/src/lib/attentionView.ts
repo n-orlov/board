@@ -154,6 +154,15 @@ export function affectsInitiativeCatalog(event: Pick<BoardEvent, 'type'>): boole
   return event.type.startsWith('initiative_');
 }
 
+/**
+ * Whether a live event can change the sources of a tag (PRD R1): an initiative's tags change with an initiative event, a task's
+ * own tags and its initiative with a task event, and a derived actor-kind tag with a lease starting, ending or expiring (a
+ * renewal, an ask, a note, a dependency or a check changes none).
+ */
+export function affectsTagSources(event: Pick<BoardEvent, 'type'>): boolean {
+  return event.type.startsWith('initiative_') || event.type.startsWith('task_') || ['lease_started', 'lease_ended', 'lease_expired'].includes(event.type);
+}
+
 export function copyLabel(a: ItemActor): string {
   return `Copy way back of ${a.handle}`;
 }

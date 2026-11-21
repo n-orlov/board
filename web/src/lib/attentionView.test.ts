@@ -6,6 +6,7 @@ import {
   ATTENTION_VIEW,
   affectsAttention,
   affectsInitiativeCatalog,
+  affectsTagSources,
   copyLabel,
   dropUnknown,
   nowQuery,
@@ -608,5 +609,14 @@ describe('startFilter', () => {
     const opened = openAttention(e, '#/now');
     expect(opened.restored).toBe(true);
     expect(startFilter(opened, [])).toEqual(DEFAULT_ATTENTION_FILTER);
+  });
+});
+
+describe('affectsTagSources', () => {
+  it.each(['initiative_created', 'initiative_updated', 'initiative_closed', 'initiative_reopened', 'task_created', 'task_updated', 'task_closed', 'lease_started', 'lease_ended', 'lease_expired'])('%s can change a tag source', (type) => {
+    expect(affectsTagSources({ type })).toBe(true);
+  });
+  it.each(['lease_renewed', 'lease_acked', 'ask_raised', 'ask_answered', 'note_posted', 'dep_added', 'check_recorded', 'milestone', 'key_created', 'catchup'])('%s changes none', (type) => {
+    expect(affectsTagSources({ type })).toBe(false);
   });
 });

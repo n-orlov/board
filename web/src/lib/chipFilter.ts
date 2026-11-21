@@ -120,6 +120,15 @@ export function withFreshSources(known: readonly TagChoice[], answered: Readonly
 }
 
 /**
+ * The choices after the sources of some tags were read again because a live event may have changed them: like `withFreshSources`,
+ * but a tag the answer found nothing for that is not chosen is taken away, not kept with no source. A chosen tag stays on offer
+ * (a link or a saved filter may name one nothing carries), its chip naming just the tag.
+ */
+export function withCurrentSources(known: readonly TagChoice[], answered: ReadonlySet<string>, marks: readonly TagMark[], chosen: readonly string[]): TagChoice[] {
+  return withFreshSources(known, answered, marks).filter((c) => c.sources.length > 0 || !answered.has(c.tag) || chosen.includes(c.tag));
+}
+
+/**
  * The choices without one source: a chip that had only that source goes, one with another source keeps it. For a catalog that
  * has just been read again: what it still carries is offered again from the new list, what it dropped is not kept by memory.
  */

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TagMark } from './chipFilter';
-import { carriedTags, SourceReads } from './tagCarry';
+import { carriedTags, SourceReads, SourceRefresh } from './tagCarry';
 
 const known = [{ tags: ['work'] }, { tags: ['home'] }];
 const mark = (tag: string, source: TagMark['source']): TagMark => ({ tag, source });
@@ -152,5 +152,70 @@ describe('SourceReads', () => {
       const answer = await new SourceReads(() => Promise.reject(new Error('down'))).read(['shared'], before);
       expect([...answer.carriedAgainst(after, true)]).toEqual(['shared']);
     });
+  });
+});
+
+describe('SourceRefresh', () => {
+  const gate = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => (resolve = done));
+    return { promise, resolve };
+  };
+
+  it('runs a round for a poke, handing it the extra tags', async () => {
+    const seen: string[][] = [];
+    const refresh = new SourceRefresh(async (extra) => void seen.push([...extra]));
+    refresh.poke(['a']);
+    await vi.waitFor(() => expect(seen).toEqual([['a']]));
+  });
+
+  it('calls an answer stale once an event came after its round began, and runs the next round with the same extra tags', async () => {
+    const first = gate();
+    const rounds: { extra: string[]; stale: () => boolean }[] = [];
+    const refresh = new SourceRefresh(async (extra, stale) => {
+      rounds.push({ extra: [...extra], stale });
+      if (rounds.length === 1) await first.promise;
+    });
+    refresh.poke(['linked']);
+    await vi.waitFor(() => expect(rounds).toHaveLength(1));
+    expect(rounds[0].stale()).toBe(false);
+    refresh.poke();
+    expect(rounds[0].stale()).toBe(true);
+    expect(rounds).toHaveLength(1); // one round at a time
+    first.resolve();
+    await vi.waitFor(() => expect(rounds).toHaveLength(2));
+    expect(rounds[1].extra).toEqual(['linked']);
+    expect(rounds[1].stale()).toBe(false);
+  });
+
+  it('merges events that land while a round is out into one more round, and forgets the extra tags once a round was applied', async () => {
+    const first = gate();
+    const rounds: string[][] = [];
+    const refresh = new SourceRefresh(async (extra) => {
+      rounds.push([...extra]);
+      if (rounds.length === 1) await first.promise;
+    });
+    refresh.poke();
+    await vi.waitFor(() => expect(rounds).toHaveLength(1));
+    refresh.poke();
+    refresh.poke(['x']);
+    refresh.poke();
+    first.resolve();
+    await vi.waitFor(() => expect(rounds).toHaveLength(2));
+    refresh.poke();
+    await vi.waitFor(() => expect(rounds).toHaveLength(3));
+    expect(rounds).toEqual([[], ['x'], []]);
+  });
+
+  it('survives a round that fails and runs again on the next event', async () => {
+    let calls = 0;
+    const refresh = new SourceRefresh(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('down');
+    });
+    refresh.poke();
+    await vi.waitFor(() => expect(calls).toBe(1));
+    refresh.poke();
+    await vi.waitFor(() => expect(calls).toBe(2));
   });
 });
