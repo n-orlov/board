@@ -39,6 +39,7 @@
     type AttentionState,
     type ItemActor,
   } from './lib/attentionView';
+  import { CatalogReads } from './lib/catalogReads';
   import { copyText } from './lib/clipboard';
   import { InitiativesApi } from './lib/initiatives';
   import { TasksApi } from './lib/tasks';
@@ -121,26 +122,24 @@
   // An initiative made, edited, closed or reopened while the page is open: the catalog the chips offer is read again in place.
   // The initiative source of the chips kept from earlier reads is dropped first, so a tag an initiative no longer carries
   // goes; the new list offers every tag still carried. A failed read keeps the choices as they were.
+  // The first read and every live one share one sequence: a read landing after a newer one was applied is dropped.
+  const catalog = new CatalogReads(() => new InitiativesApi(browser, () => csrf).list('all'));
   async function refreshCatalog() {
     if (!turns.hasRead()) return;
-    try {
-      const list = await new InitiativesApi(browser, () => csrf).list('all');
-      looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
-      known = looked;
-      seen = withoutSource(seen, 'initiative');
-    } catch {
-      // the choices stay as they were
-    }
+    const list = await catalog.next();
+    if (list === undefined) return; // failed or stale: the choices stay as they were
+    looked = list;
+    known = list;
+    seen = withoutSource(seen, 'initiative');
   }
   async function start() {
     const current = turns.begin();
-    listed = new InitiativesApi(browser, () => csrf)
-      .list('all')
-      .then((list) => {
-        looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
-        known = looked;
-      })
-      .catch(() => undefined); // the chips then offer only what the URL names; the sections show the error
+    // A failed first read: the chips then offer only what the URL names; the sections show the error.
+    listed = catalog.next().then((list) => {
+      if (list === undefined) return;
+      looked = list;
+      known = list;
+    });
     let carried: Carried | undefined;
     if (opened.restored) {
       await listed;
@@ -165,10 +164,10 @@
     // Read nothing reactive here: a filter change must not run the first load again.
     void untrack(start);
     const rows = live().subscribe(affectsAttention, () => (turns.hasRead() ? store.load() : undefined));
-    const catalog = live().subscribe(affectsInitiativeCatalog, refreshCatalog);
+    const choices = live().subscribe(affectsInitiativeCatalog, refreshCatalog);
     return () => {
       rows();
-      catalog();
+      choices();
     };
   });
 
