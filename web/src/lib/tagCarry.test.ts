@@ -37,4 +37,20 @@ describe('carriedTags', () => {
     expect((await carriedTags([], known, probe)).tags.size).toBe(0);
     expect(probe).not.toHaveBeenCalled();
   });
+
+  it('reads each tag in the server\'s spelling: a padded or upper-case saved tag is probed and listed as the server holds it', async () => {
+    const probe = vi.fn(async (tag: string) => [mark(tag, 'task')]);
+    const { tags, marks } = await carriedTags(['\u0085only-own\u0085', 'WORK', ' Only-Own'], known, probe);
+    expect(probe.mock.calls.map((c) => c[0]).sort()).toEqual(['only-own', 'work']);
+    expect([...tags]).toEqual(['only-own']);
+    expect(marks).toEqual([mark('only-own', 'task'), mark('work', 'task')]);
+  });
+
+  it('drops a tag the server\'s grammar refuses without asking: it can be on no task, and the server would answer 400', async () => {
+    const probe = vi.fn(async (tag: string) => [mark(tag, 'task')]);
+    const { tags, marks } = await carriedTags(['\ufeffonly-own', 'has space', 'x'.repeat(41), 'fine'], known, probe);
+    expect(probe.mock.calls.map((c) => c[0])).toEqual(['fine']);
+    expect([...tags]).toEqual(['fine']);
+    expect(marks).toEqual([mark('fine', 'task')]);
+  });
 });

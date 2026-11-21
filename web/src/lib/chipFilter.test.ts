@@ -79,6 +79,19 @@ describe('the fragment round trip', () => {
     expect(chipsFromQuery('tag=%20OWN-TAG%20&tag=RALPH&tag=own-tag&tag=%20&initiative=Mixed')).toEqual({ tags: ['own-tag', 'ralph'], initiatives: ['Mixed'] });
   });
 
+  it('trims and lower-cases the way the server (Go) does, not the way String.trim does', () => {
+    // Go's strings.TrimSpace strips U+0085, U+00A0 and the Unicode space separators; it keeps U+FEFF (which String.trim strips).
+    expect(canonicalTag('\u0085own\u0085')).toBe('own');
+    expect(canonicalTag('\u00a0\u2003own\u3000\u2028')).toBe('own');
+    expect(canonicalTag('\t\n\v\f\r own \t')).toBe('own');
+    expect(canonicalTag('\ufeffown')).toBe('\ufeffown');
+    expect(canonicalTag('own\u200b')).toBe('own\u200b');
+    // Go lower-cases rune by rune: U+0130 is `i`, where String.toLowerCase gives `i` and a combining dot.
+    expect(canonicalTag('\u0130vy')).toBe('ivy');
+    expect(canonicalTag('\u212aey')).toBe('key');
+    expect(canonicalTags(['\u0085A\u0085', 'a', '\u0085'])).toEqual(['a']);
+  });
+
   it('adds to the parameters already there', () => {
     const params = new URLSearchParams('status=all');
     chipsToParams(params, { tags: ['a'], initiatives: [] });

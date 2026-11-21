@@ -35,12 +35,18 @@ export function toggle(values: readonly string[], value: string): string[] {
   return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 }
 
+// The runes Go's `strings.TrimSpace` strips (`unicode.IsSpace`): not `String.prototype.trim`'s set, which keeps U+0085 and strips U+FEFF.
+const SERVER_SPACE = '\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const SERVER_TRIM = new RegExp(`^[${SERVER_SPACE}]+|[${SERVER_SPACE}]+$`, 'g');
+
 /**
- * A tag as the server holds it (SPEC 6.4, `domain.NormalizeTags`): trimmed and lower case. A link or a saved filter may spell
- * a tag ` RALPH ` and the server reads it as `ralph`; the chip, its source and the restore check all use this one spelling.
+ * A tag as the server holds it (SPEC 6.4, `domain.NormalizeTags`: `strings.ToLower(strings.TrimSpace(raw))`). A link or a saved
+ * filter may spell a tag ` RALPH ` and the server reads it as `ralph`; the chip, its source and the restore check all use this one
+ * spelling. The trim is Go's (U+0085 goes, U+FEFF stays) and the lower-casing is Go's per-rune one (U+0130 is `i`, where
+ * JavaScript's full mapping adds a combining dot).
  */
 export function canonicalTag(raw: string): string {
-  return raw.trim().toLowerCase();
+  return raw.replace(SERVER_TRIM, '').replaceAll('\u0130', 'i').toLowerCase();
 }
 
 /** Tags in the server's spelling, each once, in the order given, blanks dropped. */

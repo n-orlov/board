@@ -4,7 +4,8 @@
 // the server instead of re-deriving the rule. The same answer names the sources the tag has on those tasks, so a restored chip
 // keeps its accessible name and hover text whether or not the combined filter returns a row.
 
-import type { TagMark } from './chipFilter';
+import { canonicalTag, type TagMark } from './chipFilter';
+import { TAG_PATTERN } from './taskTags';
 
 /** The marks of a tag on the tasks that match it (one per source); empty when no task matches. Rejects when the answer cannot be had. */
 export type TagProbe = (tag: string) => Promise<readonly TagMark[]>;
@@ -17,7 +18,7 @@ export interface Carried {
 }
 
 /**
- * What the restored `tags` carry. Every tag is probed once, the initiatives' own too, because a tag an initiative lists may also be
+ * What the restored `tags` carry (in the server's spelling). Every tag is probed once, the initiatives' own too, because a tag an initiative lists may also be
  * a task's own and the chip names both. A tag an initiative of `known` lists needs no probe to be valid. A probe that fails keeps
  * its tag, with no marks: what cannot be checked is not dropped, the view shows the server's answer for it.
  */
@@ -26,8 +27,10 @@ export async function carriedTags(
   known: readonly { tags: readonly string[] }[],
   probe: TagProbe,
 ): Promise<Carried> {
-  const listed = new Set(known.flatMap((i) => i.tags));
-  const wanted = [...new Set(tags)];
+  const listed = new Set(known.flatMap((i) => i.tags.map(canonicalTag)));
+  // Each tag in the server's spelling, once; one the server's grammar refuses cannot be on any task or initiative, so it is unknown
+  // without asking (the server would answer 400, which is a failed check and would keep it).
+  const wanted = [...new Set(tags.map(canonicalTag))].filter((tag) => TAG_PATTERN.test(tag));
   const answers = await Promise.all(wanted.map((tag) => probe(tag).then((marks) => ({ marks, failed: false }), () => ({ marks: [] as readonly TagMark[], failed: true }))));
   const carried = new Set<string>();
   const marks: TagMark[] = [];

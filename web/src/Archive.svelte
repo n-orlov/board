@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { replaceHash } from './lib/historyEntry';
   import ChipFilter from './ChipFilter.svelte';
   import TagChips from './TagChips.svelte';
@@ -22,13 +22,15 @@
     type ArchiveWindow,
   } from './lib/archive';
   import { ARCHIVE_COLUMNS, ARCHIVE_SORT_LABELS, ARCHIVE_VIEW, archiveTagChoices, archiveViewHash, queryOfHash, viewFromQuery, viewToQuery, type ArchiveViewState } from './lib/archiveView';
-  import { chipsActive, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { chipsActive, mergeChoices, type ChipState, type TagChoice, type TagMark } from './lib/chipFilter';
   import { InitiativesApi } from './lib/initiatives';
   import { live } from './lib/live';
   import { hashPath } from './lib/routes';
   import { currentBrowser } from './lib/session';
   import { sortRows, type SortState } from './lib/tableSort';
-  import { currentViewEnv, openView, saveViewQuery } from './lib/viewState';
+  import { carriedTags, type Carried } from './lib/tagCarry';
+  import { TasksApi } from './lib/tasks';
+  import { currentViewEnv, FilterTurns, openView, saveViewQuery } from './lib/viewState';
 
   // The Archive view (PRD R7, SPEC 11): the closed tasks and closed initiatives of a window, newest closed first, each
   // with a Reopen button that confirms in the shared Dialog. The window, the shared chip filter (tags AND, initiatives OR,
@@ -38,7 +40,9 @@
 
   const viewEnv = currentViewEnv();
   // A fragment with a query wins and is saved; a bare one restores the saved query (in place, before the first fetch).
+  const bare = queryOfHash(window.location.hash) === '';
   const opened = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
+  const restored = bare && opened.chips.tags.length > 0;
   const browser = currentBrowser();
   const store = new ArchiveStore(new ArchiveApi(browser, () => csrf), (s) => (view = s), opened.window, opened.chips);
   let sort: SortState = $state(opened.sort);
@@ -52,12 +56,71 @@
   // The default order (newest closed first) is the one a sort replaces.
   const rows = $derived(sortRows(archiveRows(view.tasks, view.initiatives, new Date()), sort, ARCHIVE_COLUMNS));
 
-  $effect(() => {
-    void untrack(() => new InitiativesApi(browser, () => csrf).list('all'))
-      .then((list) => (initiatives = list.map((i) => i.slug)))
+  // A restored tag that no initiative lists is valid when some task of any status carries it (own, or a derived actor kind): the
+  // server says, and the same answer names the sources the tag has, so its chip keeps them whatever the closed rows hold. A link's
+  // own tags are kept as they are, their chips named the same way in the background. A link, a chip change or a restoration
+  // while a check runs is newer and wins; leaving the view drops a check still running.
+  const turns = new FilterTurns();
+  onDestroy(() => turns.end());
+  const tasksApi = new TasksApi(browser, () => csrf);
+  const listApi = new InitiativesApi(browser, () => csrf);
+  let looked: { slug: string; tags: string[] }[] | undefined;
+  let listed: Promise<void> = Promise.resolve();
+  function readCatalog(): Promise<void> {
+    return listApi
+      .list('all')
+      .then((list) => {
+        initiatives = list.map((i) => i.slug);
+        looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
+      })
       .catch(() => undefined); // the chips then offer only the initiatives the fragment names; the list shows its own error
-    void store.load();
-    return live().subscribe(affectsArchive, () => store.load());
+  }
+  const initiativeMarks = (tags: readonly string[]): TagMark[] => {
+    const have = new Set((looked ?? []).flatMap((i) => i.tags));
+    return tags.filter((tag) => have.has(tag)).map((tag) => ({ tag, source: 'initiative' as const }));
+  };
+  function offerSources(chips: ChipState) {
+    if (chips.tags.length === 0) return;
+    void carriedTags(chips.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
+      tagChoices = mergeChoices(tagChoices, c.marks, []);
+    });
+    void listed.then(() => {
+      tagChoices = mergeChoices(tagChoices, initiativeMarks(chips.tags), []);
+    });
+  }
+  // The chips a restored state keeps: the tags some initiative lists or some task carries; the sources of every kept tag are shown.
+  async function checkedChips(chips: ChipState): Promise<ChipState> {
+    await listed;
+    if (looked === undefined) return chips;
+    const carried: Carried = await carriedTags(chips.tags, looked, (tag) => tasksApi.tagMarks(tag));
+    const have = new Set([...looked.flatMap((i) => i.tags), ...carried.tags]);
+    const tags = chips.tags.filter((tag) => have.has(tag));
+    tagChoices = mergeChoices(tagChoices, [...carried.marks, ...initiativeMarks(chips.tags)], []);
+    return tags.length === chips.tags.length ? chips : { ...chips, tags };
+  }
+  async function start() {
+    const current = turns.begin();
+    listed = readCatalog();
+    let chips = opened.chips;
+    if (restored) {
+      chips = await checkedChips(chips);
+    } else {
+      offerSources(chips);
+    }
+    if (!current()) return;
+    turns.reading();
+    if (chips === opened.chips) {
+      void store.load();
+    } else {
+      remember({ window: view.window, chips, sort });
+      void store.setChips(chips);
+    }
+  }
+
+  $effect(() => {
+    // Read nothing reactive here: a chip change must not run the first load again.
+    void untrack(start);
+    return live().subscribe(affectsArchive, () => (turns.hasRead() ? store.load() : undefined));
   });
 
   $effect(() => {
@@ -91,11 +154,22 @@
   }
 
   // The fragment edited by hand, or the back button after a link with another query. A bare '#/archive' restores the saved query.
-  function hashChanged() {
+  async function hashChanged() {
     if (hashPath(window.location.hash) !== '#/archive') return;
+    const restoring = queryOfHash(window.location.hash) === '';
     const next = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
+    const current = turns.begin();
+    let chips = next.chips;
+    if (restoring && chips.tags.length > 0) {
+      chips = await checkedChips(chips);
+    } else {
+      offerSources(chips);
+    }
+    if (!current()) return; // the fragment changed again while the tags were checked
     sort = next.sort;
-    void store.setScope(next.window, next.chips);
+    if (chips !== next.chips) remember({ window: next.window, chips, sort });
+    turns.reading();
+    void store.setScope(next.window, chips);
   }
 
   function openReopen(row: ArchiveRow) {

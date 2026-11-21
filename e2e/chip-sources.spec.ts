@@ -207,6 +207,37 @@ for (const viewport of viewports) {
         await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', `${slug}-own, task tag`);
       });
 
+      // The server trims what Go's `strings.TrimSpace` does (U+0085 and U+00A0 among them) and lower-cases rune by rune (U+0130 is `i`),
+      // which is not what JavaScript's trim and lower-casing do: the chip, its sources and the restore check follow the server.
+      test('names the task source of a linked tag the server reads through U+0085 padding, with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-nel-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`]);
+        const read = page.waitForResponse((r) => new URL(r.url()).pathname === view.endpoint && new URL(r.url()).searchParams.get('initiative') === slug);
+        await page.goto(`/#/${view.id}?initiative=${slug}&tag=${encodeURIComponent(`\u0085${slug}-left\u0085`)}&tag=${slug}-right`);
+        expect(new URL((await read).url()).searchParams.getAll('tag')).toEqual([`${slug}-left`, `${slug}-right`]);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-left`)).toHaveAttribute('aria-label', `${slug}-left, task tag`);
+        await expect(tagChip(page, `${slug}-left`)).toHaveAttribute('title', `${slug}-left: task tag`);
+      });
+
+      test('restores tags padded with U+0085 or U+00A0 and spelled with U+0130, naming their sources, and drops a U+FEFF-padded one the server refuses', async ({ page, playwright, baseURL }) => {
+        const slug = `src-uni-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-left`], [`${slug}-right`, `${slug}-ivy`]);
+        const query = new URLSearchParams([
+          ['initiative', slug],
+          ['tag', `\u0085${slug}-left\u0085`],
+          ['tag', `\u00a0${slug}-right`],
+          ['tag', `${slug}-\u0130vy`],
+          ['tag', `\ufeff${slug}-left`],
+        ]);
+        const url = await restoredRead(page, view, slug, query.toString());
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-left`, `${slug}-right`, `${slug}-ivy`]);
+        await openChips(page);
+        for (const side of ['left', 'right', 'ivy']) {
+          await expect(tagChip(page, `${slug}-${side}`)).toHaveAttribute('aria-label', `${slug}-${side}, task tag`);
+        }
+      });
+
       test('reads two spellings of one tag in a link as one chip and keeps it across navigation away and back', async ({ page, playwright, baseURL }) => {
         const slug = `src-casedup-${view.id}-${viewport.name}`;
         await seedTwo(playwright, baseURL, slug, [`${slug}-own`], [], false);
