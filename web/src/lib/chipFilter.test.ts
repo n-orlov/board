@@ -12,6 +12,7 @@ import {
   chipsToParams,
   initiativeChoices,
   mergeChoices,
+  withoutSource,
   sourceLabel,
   tagHue,
   tagStyle,
@@ -189,5 +190,33 @@ describe('the tag colour', () => {
       expect(hue).toBeLessThan(360);
       expect(tagStyle(tag)).toBe(`--h:${hue}`);
     }
+  });
+});
+
+describe('withoutSource', () => {
+  const kept = [
+    { tag: 'a', sources: ['initiative' as const] },
+    { tag: 'b', sources: ['task' as const, 'initiative' as const] },
+    { tag: 'c', sources: ['actor' as const] },
+    { tag: 'd', sources: [] },
+  ];
+  it('drops a chip that had only that source and keeps the others of a chip that had several', () => {
+    expect(withoutSource(kept, 'initiative')).toEqual([
+      { tag: 'b', sources: ['task'] },
+      { tag: 'c', sources: ['actor'] },
+      { tag: 'd', sources: [] },
+    ]);
+  });
+  it('keeps a chip that never named a source (a chosen tag) and does not change its input', () => {
+    expect(withoutSource(kept, 'actor').map((c) => c.tag)).toEqual(['a', 'b', 'd']);
+    expect(kept[0]).toEqual({ tag: 'a', sources: ['initiative'] });
+  });
+  it('is the identity when no chip has the source', () => {
+    expect(withoutSource([{ tag: 'x', sources: ['task'] }], 'actor')).toEqual([{ tag: 'x', sources: ['task'] }]);
+  });
+  it('lets the catalog read again offer what it still carries, then merges it back with the sources of the tasks', () => {
+    const next = mergeChoices(withoutSource(kept, 'initiative'), [{ tag: 'b', source: 'initiative' }], []);
+    expect(next.find((c) => c.tag === 'a')).toBeUndefined();
+    expect(next.find((c) => c.tag === 'b')?.sources).toEqual(['task', 'initiative']);
   });
 });

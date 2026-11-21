@@ -5,6 +5,7 @@ import {
   AttentionStore,
   ATTENTION_VIEW,
   affectsAttention,
+  affectsInitiativeCatalog,
   copyLabel,
   dropUnknown,
   nowQuery,
@@ -209,6 +210,15 @@ describe('affectsAttention', () => {
   it.each([['key_created'], ['key_revoked']])('ignores %s, even when a task is named', (type) => {
     expect(affectsAttention({ type })).toBe(false);
     expect(affectsAttention({ type, task: 'aa-1' })).toBe(false);
+  });
+});
+
+describe('affectsInitiativeCatalog', () => {
+  it.each([['initiative_created'], ['initiative_updated'], ['initiative_closed'], ['initiative_reopened']])('keeps %s', (type) => {
+    expect(affectsInitiativeCatalog({ type })).toBe(true);
+  });
+  it.each([['task_created'], ['task_updated'], ['note_posted'], ['key_created'], ['lease_expired'], ['ask_raised']])('ignores %s: the board read carries its tag marks', (type) => {
+    expect(affectsInitiativeCatalog({ type })).toBe(false);
   });
 });
 

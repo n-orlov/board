@@ -102,6 +102,16 @@ export function mergeChoices(known: readonly TagChoice[], marks: readonly { tag:
   return [...map.entries()].map(([tag, sources]) => ({ tag, sources: [...sources] })).sort((a, b) => a.tag.localeCompare(b.tag));
 }
 
+/**
+ * The choices without one source: a chip that had only that source goes, one with another source keeps it. For a catalog that
+ * has just been read again: what it still carries is offered again from the new list, what it dropped is not kept by memory.
+ */
+export function withoutSource(choices: readonly TagChoice[], source: TagSource): TagChoice[] {
+  return choices
+    .filter((c) => c.sources.length === 0 || c.sources.some((s) => s !== source))
+    .map((c) => ({ tag: c.tag, sources: c.sources.filter((s) => s !== source) }));
+}
+
 /** The initiative chips on offer: every slug of the board plus the chosen ones (a link may name one the list lacks), sorted. */
 export function initiativeChoices(slugs: readonly string[], chosen: readonly string[]): string[] {
   return [...new Set([...slugs, ...chosen])].sort();

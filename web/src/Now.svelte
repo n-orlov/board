@@ -23,11 +23,12 @@
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
   import { nowHash, type AttentionFilter } from './lib/attention';
-  import { chipsActive, initiativeChoices, mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { chipsActive, initiativeChoices, mergeChoices, withoutSource, type ChipState, type TagChoice } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
     affectsAttention,
+    affectsInitiativeCatalog,
     copyLabel,
     nowTagChoices,
     forgetAttention,
@@ -117,6 +118,20 @@
       seen = mergeChoices(seen, c.marks, []);
     });
   }
+  // An initiative made, edited, closed or reopened while the page is open: the catalog the chips offer is read again in place.
+  // The initiative source of the chips kept from earlier reads is dropped first, so a tag an initiative no longer carries
+  // goes; the new list offers every tag still carried. A failed read keeps the choices as they were.
+  async function refreshCatalog() {
+    if (!turns.hasRead()) return;
+    try {
+      const list = await new InitiativesApi(browser, () => csrf).list('all');
+      looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
+      known = looked;
+      seen = withoutSource(seen, 'initiative');
+    } catch {
+      // the choices stay as they were
+    }
+  }
   async function start() {
     const current = turns.begin();
     listed = new InitiativesApi(browser, () => csrf)
@@ -149,7 +164,12 @@
   $effect(() => {
     // Read nothing reactive here: a filter change must not run the first load again.
     void untrack(start);
-    return live().subscribe(affectsAttention, () => (turns.hasRead() ? store.load() : undefined));
+    const rows = live().subscribe(affectsAttention, () => (turns.hasRead() ? store.load() : undefined));
+    const catalog = live().subscribe(affectsInitiativeCatalog, refreshCatalog);
+    return () => {
+      rows();
+      catalog();
+    };
   });
 
   // The filter lives in the fragment and in the saved query: a change rewrites both in place (no history entry per choice).

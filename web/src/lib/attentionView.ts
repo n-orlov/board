@@ -146,6 +146,14 @@ export function affectsAttention(event: Pick<BoardEvent, 'type' | 'task'>): bool
   return !event.type.startsWith('note_') || !!event.task;
 }
 
+/**
+ * Whether a live event can change the initiative catalog the filter controls offer: an initiative made, edited (its tags),
+ * closed or reopened. Task events change the rows and their tag marks, which the board read carries.
+ */
+export function affectsInitiativeCatalog(event: Pick<BoardEvent, 'type'>): boolean {
+  return event.type.startsWith('initiative_');
+}
+
 export function copyLabel(a: ItemActor): string {
   return `Copy way back of ${a.handle}`;
 }
