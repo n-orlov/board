@@ -9,7 +9,7 @@
 // Text that vis-timeline renders as HTML (`content`, `title`) is escaped here.
 import type { components } from './api/schema';
 import { attentionBadges, clean } from './attention';
-import { mergeChoices, type TagChoice, type TagMark } from './chipFilter';
+import { canonicalTags, mergeChoices, type TagChoice, type TagMark } from './chipFilter';
 import { ACTIVE_COLUMNS, type TimelineOrder } from './timelineActive';
 import { sortFragment, sortFromFragment } from './sortControl';
 import type { NowWindow } from './nowFlight';
@@ -559,7 +559,7 @@ export function filterFromQuery(query: string): TimelineFilter {
   const params = new URLSearchParams(query);
   return {
     initiatives: clean(params.getAll('initiative')),
-    tags: clean(params.getAll('tag')),
+    tags: canonicalTags(params.getAll('tag')),
     actor: (params.get('actor') ?? '').trim(),
     closedWithin: closedFrom(params.get('closed')),
     activeOnly: params.get('active') === ACTIVE_ONLY_ON,
@@ -571,7 +571,7 @@ export function filterFromQuery(query: string): TimelineFilter {
 export function filterToQuery(filter: TimelineFilter): string {
   const params = new URLSearchParams();
   for (const value of clean(filter.initiatives)) params.append('initiative', value);
-  for (const value of clean(filter.tags)) params.append('tag', value);
+  for (const value of canonicalTags(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());
   if (filter.closedWithin !== 0) params.set('closed', String(filter.closedWithin));
   if (filter.activeOnly) params.set('active', ACTIVE_ONLY_ON);
@@ -599,7 +599,7 @@ export function filterFromHash(hash: string): TimelineFilter {
 export function apiQuery(filter: TimelineFilter, from: Date, to: Date, active?: NowWindow): URLSearchParams {
   const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), rows: 'all' });
   for (const value of clean(filter.initiatives)) params.append('initiative', value);
-  for (const value of clean(filter.tags)) params.append('tag', value);
+  for (const value of canonicalTags(filter.tags)) params.append('tag', value);
   if (filter.actor.trim() !== '') params.set('actor', filter.actor.trim());
   if (filter.closedWithin !== 0) params.set('closed_within', `${filter.closedWithin}d`);
   if (active !== undefined) {

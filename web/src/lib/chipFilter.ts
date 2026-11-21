@@ -35,11 +35,24 @@ export function toggle(values: readonly string[], value: string): string[] {
   return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 }
 
-/** The chips a query names: each repeated `tag` and `initiative` once, in the order given, blanks dropped. */
+/**
+ * A tag as the server holds it (SPEC 6.4, `domain.NormalizeTags`): trimmed and lower case. A link or a saved filter may spell
+ * a tag ` RALPH ` and the server reads it as `ralph`; the chip, its source and the restore check all use this one spelling.
+ */
+export function canonicalTag(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+/** Tags in the server's spelling, each once, in the order given, blanks dropped. */
+export function canonicalTags(values: readonly string[]): string[] {
+  return [...new Set(values.map(canonicalTag).filter((v) => v !== ''))];
+}
+
+/** The chips a query names: each repeated `tag` (in the server's spelling) and `initiative` once, in the order given, blanks dropped. */
 export function chipsFromQuery(query: string): ChipState {
   const params = new URLSearchParams(query);
-  const clean = (name: string) => [...new Set(params.getAll(name).filter((v) => v !== ''))];
-  return { tags: clean('tag'), initiatives: clean('initiative') };
+  const initiatives = [...new Set(params.getAll('initiative').filter((v) => v !== ''))];
+  return { tags: canonicalTags(params.getAll('tag')), initiatives };
 }
 
 /** Adds the chips to `params` as repeated `initiative` then repeated `tag`: the form the fragment and `GET /tasks` share. */

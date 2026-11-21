@@ -365,6 +365,12 @@ describe('filter round trip', () => {
     expect(filterFromQuery('sort=active').order).toBe('active');
   });
 
+  it('reads and sends each tag in the server\'s spelling, so an upper-case or padded saved tag is the chip the rows carry', () => {
+    const filter = filterFromQuery('tag=%20OWN-TAG%20&tag=CODER&tag=own-tag');
+    expect(filter.tags).toEqual(['own-tag', 'coder']);
+    expect(apiQuery({ ...DEFAULT_TIMELINE_FILTER, tags: [' Work ', 'work'] }, new Date(0), new Date(1)).getAll('tag')).toEqual(['work']);
+  });
+
   it('sends active=true and the window to GET /timeline only when asked', () => {
     const w = [new Date('2026-03-01T00:00:00Z'), new Date('2026-03-02T00:00:00Z')] as const;
     expect(apiQuery(DEFAULT_TIMELINE_FILTER, ...w).has('active')).toBe(false);

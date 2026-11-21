@@ -3,6 +3,7 @@
 // fragment's query (`#/now?tag=work&tag=home&initiative=aa`) and in the query of `GET /attention`.
 import type { components } from './api/schema';
 import type { Tone } from './presentation';
+import { canonicalTags } from './chipFilter';
 
 export type AttentionCounts = components['schemas']['AttentionCounts'];
 export type SectionKey = 'open_asks' | 'done_not_closed' | 'expired_leases' | 'overdue_watches' | 'conflicts';
@@ -72,7 +73,7 @@ export function clean(values: readonly string[]): string[] {
 /** The filter a query names; repeated `tag` and `initiative` keys each add one value. */
 export function filterFromQuery(query: string): AttentionFilter {
   const params = new URLSearchParams(query);
-  return { initiatives: clean(params.getAll('initiative')), tags: clean(params.getAll('tag')) };
+  return { initiatives: clean(params.getAll('initiative')), tags: canonicalTags(params.getAll('tag')) };
 }
 
 function repeated(params: URLSearchParams, name: string, values: readonly string[]): void {

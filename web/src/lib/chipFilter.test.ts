@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   INITIATIVE_FOLD,
   NO_CHIPS,
+  canonicalTag,
+  canonicalTags,
   chipName,
   chipSourceText,
   chipSummary,
@@ -67,6 +69,13 @@ describe('the fragment round trip', () => {
 
   it('drops blanks and repeats and ignores other parameters', () => {
     expect(chipsFromQuery('status=all&tag=&tag=a&tag=a&initiative=&initiative=x&q=t')).toEqual({ tags: ['a'], initiatives: ['x'] });
+  });
+
+  it('reads each tag in the server\'s spelling (trimmed, lower case), so a link or saved filter that spells it otherwise names the same chip', () => {
+    expect(canonicalTag(' RALPH ')).toBe('ralph');
+    expect(canonicalTag('Release.2026:Q1')).toBe('release.2026:q1');
+    expect(canonicalTags([' Own-Tag ', 'own-tag', 'CODER', '  ', 'b'])).toEqual(['own-tag', 'coder', 'b']);
+    expect(chipsFromQuery('tag=%20OWN-TAG%20&tag=RALPH&tag=own-tag&tag=%20&initiative=Mixed')).toEqual({ tags: ['own-tag', 'ralph'], initiatives: ['Mixed'] });
   });
 
   it('adds to the parameters already there', () => {

@@ -46,6 +46,13 @@ describe('TasksApi', () => {
     expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/v1/tasks?status=all&limit=1000&tag=has', '/api/v1/tasks?status=all&limit=1000&tag=has&after=aa-2']);
   });
 
+  it('reads the marks of a tag spelled otherwise (padded, upper case) under the server\'s spelling', async () => {
+    const m = (source: string) => ({ tag: 'ralph', source });
+    const { api: a, fetchFn } = api(async () => json({ items: [{ ...task('aa-1'), tag_marks: [m('actor'), { tag: 'other', source: 'task' }] }] }));
+    expect(await a.tagMarks(' RALPH ')).toEqual([m('actor')]);
+    expect(fetchFn.mock.calls[0]![0]).toBe('/api/v1/tasks?status=all&limit=1000&tag=ralph');
+  });
+
   it('stops reading once every source is found, and has no marks for a tag nothing carries', async () => {
     const m = (source: string) => ({ tag: 'has', source });
     const { api: a, fetchFn } = api(async (url) =>

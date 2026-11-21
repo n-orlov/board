@@ -158,6 +158,69 @@ for (const viewport of viewports) {
         const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug}-ini&tag=${slug}-own&tag=${slug}-nothing`);
         expect(url.searchParams.getAll('tag')).toEqual([`${slug}-ini`, `${slug}-own`]);
       });
+
+      // The server reads a tag trimmed and in lower case (SPEC 6.4), so ` OWN ` and `RALPH` in a link or a saved filter name the tags
+      // `own` and `ralph`: the chip, its sources and the restore check use that spelling, whatever the link or the saved query wrote.
+      test('names the sources of a linked task-only and actor-kind tag spelled in upper case and padded, with an empty intersection', async ({ page, playwright, baseURL }) => {
+        const slug = `src-case-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [], [`${slug}-own`], true);
+        const read = page.waitForResponse((r) => new URL(r.url()).pathname === view.endpoint && new URL(r.url()).searchParams.get('initiative') === slug);
+        await page.goto(`/#/${view.id}?initiative=${slug}&tag=${encodeURIComponent(` ${slug.toUpperCase()}-OWN `)}&tag=RALPH`);
+        expect(new URL((await read).url()).searchParams.getAll('tag')).toEqual([`${slug}-own`, 'ralph']);
+        await openChips(page);
+        const own = tagChip(page, `${slug}-own`);
+        await expect(own).toHaveAttribute('aria-pressed', 'true');
+        await expect(own).toHaveAttribute('aria-label', `${slug}-own, task tag`);
+        await expect(own).toHaveAttribute('title', `${slug}-own: task tag`);
+        const kind = tagChip(page, 'ralph');
+        await expect(kind).toHaveAttribute('aria-pressed', 'true');
+        await expect(kind).toHaveAttribute('aria-label', /^ralph, (.+, )?actor kind, from the holder of a lease$/);
+        await expect(kind).toHaveAttribute('title', /^ralph: (.+, )?actor kind, from the holder of a lease$/);
+      });
+
+      test('restores a task-only and an actor-kind tag saved in upper case, keeps them in the server\'s spelling and drops a tag nothing carries', async ({ page, playwright, baseURL }) => {
+        const slug = `src-cased-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [], [`${slug}-own`], true);
+        const query = new URLSearchParams([['initiative', slug], ['tag', ` ${slug.toUpperCase()}-OWN `], ['tag', 'RALPH'], ['tag', `${slug}-UNKNOWN`]]);
+        const url = await restoredRead(page, view, slug, query.toString());
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-own`, 'ralph']);
+        await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.split('?')[1]).getAll('tag')).toEqual([`${slug}-own`, 'ralph']);
+        await expect
+          .poll(() => page.evaluate((key) => new URLSearchParams(JSON.parse(localStorage.getItem(key) ?? '{}').query ?? '').getAll('tag'), view.key))
+          .toEqual([`${slug}-own`, 'ralph']);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', `${slug}-own, task tag`);
+        await expect(tagChip(page, 'ralph')).toHaveAttribute('aria-label', /^ralph, (.+, )?actor kind/);
+      });
+
+      test('restores an initiative tag saved in upper case beside a task-only tag, naming the initiative source', async ({ page, playwright, baseURL }) => {
+        const slug = `src-caseini-${view.id}-${viewport.name}`;
+        const api = await actorApi(playwright, baseURL, 'ralph:review');
+        await created(api, '/api/v1/initiatives', { slug, title: slug, tags: [`${slug}-ini`] });
+        await created(api, '/api/v1/initiatives', { slug: `${slug}-x`, title: 'x' });
+        await created(api, '/api/v1/tasks', { initiative: `${slug}-x`, title: 'own', tags: [`${slug}-own`] });
+        await api.dispose();
+        const url = await restoredRead(page, view, slug, `initiative=${slug}&tag=${slug.toUpperCase()}-INI&tag=${slug}-Own`);
+        expect(url.searchParams.getAll('tag')).toEqual([`${slug}-ini`, `${slug}-own`]);
+        await openChips(page);
+        await expect(tagChip(page, `${slug}-ini`)).toHaveAttribute('aria-label', `${slug}-ini, initiative tag`);
+        await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', `${slug}-own, task tag`);
+      });
+
+      test('reads two spellings of one tag in a link as one chip and keeps it across navigation away and back', async ({ page, playwright, baseURL }) => {
+        const slug = `src-casedup-${view.id}-${viewport.name}`;
+        await seedTwo(playwright, baseURL, slug, [`${slug}-own`], [], false);
+        const read = page.waitForResponse((r) => new URL(r.url()).pathname === view.endpoint && new URL(r.url()).searchParams.get('initiative') === slug);
+        await page.goto(`/#/${view.id}?initiative=${slug}&tag=${slug.toUpperCase()}-OWN&tag=${encodeURIComponent(` ${slug}-own`)}`);
+        expect(new URL((await read).url()).searchParams.getAll('tag')).toEqual([`${slug}-own`]);
+        await page.evaluate(() => (window.location.hash = '#/actors'));
+        await expect(page.getByTestId('actors-view')).toBeVisible();
+        await page.evaluate((id) => (window.location.hash = `#/${id}`), view.id);
+        await openChips(page);
+        await expect(page.locator('[data-testid="chip-tag"][aria-pressed="true"]')).toHaveCount(1);
+        await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', `${slug}-own, task tag`);
+        await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('title', `${slug}-own: task tag`);
+      });
     });
   }
 }

@@ -109,6 +109,7 @@ describe('the filter round trip', () => {
   });
   it('drops blank and repeated values', () => {
     expect(filterFromQuery('tag=&tag=%20&tag=a&tag=a&initiative=')).toEqual({ initiatives: [], tags: ['a'] });
+    expect(filterFromQuery('tag=%20OWN%20&tag=Ralph&tag=own&initiative=aa')).toEqual({ initiatives: ['aa'], tags: ['own', 'ralph'] });
     expect(filterToQuery(set({ tags: ['a', '', 'a', ' b '] }))).toBe('tag=a&tag=b');
     expect(isFiltered(set({ tags: [' '] }))).toBe(false);
   });
