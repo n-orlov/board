@@ -273,6 +273,11 @@ for (const vp of viewports) {
       const sorted = await own(page);
       expect(sorted, 'the picked sort must reorder the rows').not.toEqual([...byDefault, ...titles.slice(2, 4).map((t) => `${t} ${slug}`)]);
       expect(sorted).toEqual([...titles].map((t) => `${t} ${slug}`).sort((a, b) => b.toLowerCase().localeCompare(a.toLowerCase())));
+      // The tag chips offered stay offered while the view is mounted (a narrower read takes none away), so the view that began on
+      // the whole board offers every tag of the shared store, and a Back mounts it on the narrow read, with only the tags of the
+      // chosen initiative's tasks: a page of another height. Mount it the way Back does before measuring.
+      await page.reload();
+      await expect.poll(() => own(page), FIVE_SECONDS).toEqual(sorted);
 
       const route: Route = {
         rows: own,
