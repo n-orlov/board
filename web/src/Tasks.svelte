@@ -37,12 +37,14 @@
     TASKS_VIEW,
     TASK_COLUMNS,
     TASK_SORT_LABELS,
-    dropUnknownInitiative,
+    dropUnknown,
+    listedMarks,
     viewFromQuery,
     viewHash,
     viewToQuery,
     type TasksViewState,
   } from './lib/tasksView';
+  import { carriedTags, type Carried } from './lib/tagCarry';
   import { clearViewQuery, currentViewEnv, FilterTurns, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
@@ -54,15 +56,18 @@
   const bare = queryOf(window.location.hash) === '';
   const opened = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(window.location.hash)));
   const initial = opened.filter;
-  // A restored initiative may have been deleted since: the first fetch waits for the list of initiatives to drop it.
-  const restoredInitiative = bare && initial.initiatives.length > 0;
+  // A restored initiative may have been deleted since, and a restored tag may no longer be on any task: the first fetch waits for
+  // the list of initiatives (and, for a tag, the server's answer) to drop it.
+  const checksRestored = (filter: TasksFilter) => filter.initiatives.length > 0 || filter.tags.length > 0;
+  const restoredFilter = bare && checksRestored(initial);
   let sort: SortState = $state(opened.sort);
   let view: TasksState = $state({ tasks: [], filter: initial, loading: true, error: undefined });
   let initiatives: string[] = $state([]);
   // The tag chips on offer: every tag seen on the tasks read so far (a filtered list only holds what it matches) plus the chosen ones.
   let tagChoices: TagChoice[] = $state([]);
-  // Whether the list answered: an empty answer still drops a restored initiative, only a failed lookup keeps it.
-  let listAnswered = false;
+  // The board's initiatives with their tags once the list answered: an empty answer still drops a restored initiative, only a
+  // failed lookup (undefined) keeps it.
+  let looked: { slug: string; tags: string[] }[] | undefined;
   let formOpen = $state(false);
   let toast = $state('');
 
@@ -84,20 +89,47 @@
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
+  // A restored tag no initiative lists is valid when some task carries it (own, or a derived actor kind): the server says. The same
+  // answer names the sources every restored tag has, so its chip keeps them whatever the combined filter returns.
+  async function carriedOf(filter: TasksFilter): Promise<Carried | undefined> {
+    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => api.tagMarks(tag));
+  }
+  // A link's own tags are kept as they are, but their chips still name the sources the tasks and the initiatives give them: read
+  // in the background, so the first read does not wait for it. A failed read leaves the chip as the rows name it.
+  function offerSources(filter: TasksFilter) {
+    if (filter.tags.length === 0) return;
+    void carriedTags(filter.tags, [], (tag) => api.tagMarks(tag)).then((c) => {
+      tagChoices = mergeChoices(tagChoices, c.marks, []);
+    });
+    void listed.then(() => {
+      if (looked !== undefined) tagChoices = mergeChoices(tagChoices, listedMarks(filter.tags, looked), []);
+    });
+  }
+  function restoredState(state: TasksViewState, carried: Carried | undefined): TasksViewState {
+    if (looked === undefined) return state;
+    tagChoices = mergeChoices(tagChoices, [...(carried?.marks ?? []), ...listedMarks(state.filter.tags, looked)], []);
+    return dropUnknown(state, looked, carried?.tags);
+  }
   async function start() {
     const current = turns.begin();
     listed = new InitiativesApi(browser, () => csrf)
       .list('all')
       .then((list) => {
         initiatives = list.map((i) => i.slug);
-        listAnswered = true;
+        looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
       })
       .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
-    if (restoredInitiative) await listed;
+    let carried: Carried | undefined;
+    if (restoredFilter) {
+      await listed;
+      carried = await carriedOf(initial);
+    } else {
+      offerSources(initial);
+    }
     if (!current()) return;
     turns.reading();
-    // Only a restored initiative is checked: one a link names stays, and a refusal for it shows in the list.
-    const kept = restoredInitiative && listAnswered ? dropUnknownInitiative({ filter: initial, sort }, initiatives) : { filter: initial, sort };
+    // Only a restored filter is checked: what a link names stays, and a refusal for it shows in the list.
+    const kept = restoredFilter ? restoredState({ filter: initial, sort }, carried) : { filter: initial, sort };
     if (kept.filter === initial) {
       void store.load();
     } else {
@@ -152,12 +184,20 @@
     const restoring = queryOf(hash) === '';
     let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
     const current = turns.begin();
-    // A restored initiative waits for the board's list like the first one does; a link's own query does not.
-    if (restoring && next.filter.initiatives.length > 0) await listed;
+    // A restored filter waits for the board's list and the tags' check like the first one does; a link's own query does not.
+    const checking = restoring && checksRestored(next.filter);
+    let carried: Carried | undefined;
+    if (checking) {
+      await listed;
+      carried = await carriedOf(next.filter);
+    } else {
+      offerSources(next.filter);
+    }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    if (restoring && listAnswered && next.filter.initiatives.length > 0) {
-      next = dropUnknownInitiative(next, initiatives);
-      persist(next);
+    if (checking) {
+      const kept = restoredState(next, carried);
+      if (kept !== next) persist(kept);
+      next = kept;
     }
     sort = next.sort;
     if (!turns.mustRead(viewToQuery({ filter: next.filter, sort: null }) === viewToQuery({ filter: view.filter, sort: null }))) return;

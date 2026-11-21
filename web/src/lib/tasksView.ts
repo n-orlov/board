@@ -5,6 +5,7 @@
 import { sortFromQuery, sortToQuery, type Columns, type SortState } from './tableSort';
 import { flagsText, type TaskRow } from './initiativePage';
 import { filterFromQuery, filterToQuery, type TasksFilter } from './taskFilters';
+import type { TagMark } from './chipFilter';
 
 /** The name of the view's saved state: the key is `vh.view.v1.tasks`. */
 export const TASKS_VIEW = 'tasks';
@@ -62,12 +63,32 @@ export function viewFromHash(hash: string): TasksViewState {
   return viewFromQuery(at < 0 ? '' : hash.slice(at + 1));
 }
 
+const NO_TAGS: ReadonlySet<string> = new Set();
+
 /**
- * A restored state without the initiatives the board no longer has (deleted since it was saved): those chips go, so the table
- * is not an empty list under a filter nobody can see. The other values were already checked when the query was read.
+ * The initiative source of each of `tags` some initiative of `known` lists, so a chosen chip names it even when no task of that
+ * initiative is in the rows (or none exists): the tasks' marks give the other sources.
  */
-export function dropUnknownInitiative(state: TasksViewState, slugs: readonly string[]): TasksViewState {
-  const kept = state.filter.initiatives.filter((slug) => slugs.includes(slug));
-  if (kept.length === state.filter.initiatives.length) return state;
-  return { ...state, filter: { ...state.filter, initiatives: kept } };
+export function listedMarks(tags: readonly string[], known: readonly { tags: readonly string[] }[]): TagMark[] {
+  const listed = new Set(known.flatMap((i) => i.tags));
+  return [...new Set(tags)].filter((tag) => listed.has(tag)).map((tag) => ({ tag, source: 'initiative' as const }));
+}
+
+/**
+ * A restored state without the initiatives the board no longer has (deleted since it was saved) and without the tags nothing
+ * carries any more: those chips go, so the table is not an empty list under a filter nobody can see. `known` is the board's
+ * initiatives with their tags; `carried` the restored tags some task carries as its own or as a derived actor kind (or whose
+ * check could not be made), which the initiatives do not list. The other values were already checked when the query was read.
+ */
+export function dropUnknown(
+  state: TasksViewState,
+  known: readonly { slug: string; tags: readonly string[] }[],
+  carried: ReadonlySet<string> = NO_TAGS,
+): TasksViewState {
+  const slugs = new Set(known.map((i) => i.slug));
+  const tags = new Set([...known.flatMap((i) => i.tags), ...carried]);
+  const initiatives = state.filter.initiatives.filter((slug) => slugs.has(slug));
+  const kept = state.filter.tags.filter((tag) => tags.has(tag));
+  if (initiatives.length === state.filter.initiatives.length && kept.length === state.filter.tags.length) return state;
+  return { ...state, filter: { ...state.filter, initiatives, tags: kept } };
 }

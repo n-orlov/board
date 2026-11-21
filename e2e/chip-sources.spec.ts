@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { actorApi, created } from './now';
 import { openChips, pickTag, tagChip } from './chips';
 
-// R7/R10 (SPEC 11, "Tag choices and saved filters on the task views"): Now and Timeline offer every tag of the tasks they show
+// R7/R10 (SPEC 11, "Tag choices and saved filters on the task views"): Tasks, Now and Timeline offer every tag of the tasks they show
 // (own, initiative and derived actor kind, with their sources), and a restored filter keeps a tag a task carries even when no
 // initiative lists it, the same rule the server filters by. Each test seeds an initiative of its own on the shared board.
 const viewports = [
@@ -10,6 +10,7 @@ const viewports = [
   { name: 'desktop', size: { width: 1440, height: 900 } },
 ] as const;
 const views = [
+  { id: 'tasks', key: 'vh.view.v1.tasks', endpoint: '/api/v1/tasks' },
   { id: 'now', key: 'vh.view.v1.attention', endpoint: '/api/v1/attention/now' },
   { id: 'timeline', key: 'vh.view.v1.timeline', endpoint: '/api/v1/timeline' },
 ] as const;
@@ -159,4 +160,20 @@ for (const viewport of viewports) {
       });
     });
   }
+}
+
+// Tasks has filters of its own besides the chips: a restored search that matches nothing leaves no row to read the sources from either.
+for (const viewport of viewports) {
+  test(`tasks at ${viewport.name}: names the sources of restored tags under a search that matches no task`, async ({ page, playwright, baseURL }) => {
+    const slug = `src-text-tasks-${viewport.name}`;
+    await seed(playwright, baseURL, slug, [`${slug}-own`]);
+    await page.setViewportSize(viewport.size);
+    const url = await restoredRead(page, views[0], slug, `initiative=${slug}&tag=${slug}-own&tag=ralph&q=${slug}-matches-nothing`);
+    expect(url.searchParams.getAll('tag')).toEqual([`${slug}-own`, 'ralph']);
+    await expect(page.getByTestId('tasks-skeleton')).toHaveCount(0);
+    await openChips(page);
+    await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('aria-label', `${slug}-own, task tag`);
+    await expect(tagChip(page, `${slug}-own`)).toHaveAttribute('title', `${slug}-own: task tag`);
+    await expect(tagChip(page, 'ralph')).toHaveAttribute('aria-label', /^ralph, (.+, )?actor kind/);
+  });
 }

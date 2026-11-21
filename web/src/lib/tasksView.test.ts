@@ -8,7 +8,8 @@ import {
   TASK_COLUMNS,
   TASK_SORT_COLUMNS,
   TASK_SORT_LABELS,
-  dropUnknownInitiative,
+  dropUnknown,
+  listedMarks,
   viewFromHash,
   viewFromQuery,
   viewHash,
@@ -168,30 +169,31 @@ describe('the columns', () => {
 });
 
 describe('dropping a restored initiative the board no longer has', () => {
+  const board = (...slugs: string[]) => slugs.map((slug) => ({ slug, tags: [] as string[] }));
   const state = viewFromQuery('initiative=gone&kind=work&sort=ref&dir=desc');
   const two = viewFromQuery('initiative=gone&initiative=board&tag=t');
 
   it('drops an unknown initiative and keeps the other filters and the sort', () => {
-    const dropped = dropUnknownInitiative(state, ['board', 'other']);
+    const dropped = dropUnknown(state, board('board', 'other'));
     expect(dropped.filter.initiatives).toEqual([]);
     expect(dropped.filter.kind).toBe('work');
     expect(dropped.sort).toEqual({ column: 'ref', dir: 'desc' });
     expect(viewToQuery(dropped)).toBe('kind=work&sort=ref&dir=desc');
   });
   it('drops only the unknown one of two and keeps the tags', () => {
-    const dropped = dropUnknownInitiative(two, ['board']);
+    const dropped = dropUnknown(two, [{ slug: 'board', tags: ['t'] }]);
     expect(dropped.filter.initiatives).toEqual(['board']);
     expect(dropped.filter.tags).toEqual(['t']);
   });
   it('keeps an initiative the board has', () => {
-    expect(dropUnknownInitiative(state, ['gone'])).toBe(state);
+    expect(dropUnknown(state, board('gone'))).toBe(state);
   });
   it('drops the initiative when the board lists none (an empty answer is an answer)', () => {
-    expect(dropUnknownInitiative(state, []).filter.initiatives).toEqual([]);
+    expect(dropUnknown(state, []).filter.initiatives).toEqual([]);
   });
   it('keeps a state with no initiative as it is', () => {
     const none = viewFromQuery('sort=ref');
-    expect(dropUnknownInitiative(none, [])).toBe(none);
+    expect(dropUnknown(none, [])).toBe(none);
   });
 
   it('drops the unknown initiative of a saved query restored by the shared helper, and unknown enum values with it', () => {
@@ -201,9 +203,48 @@ describe('dropping a restored initiative the board no longer has', () => {
     expect(storage.data.has('vh.view.v1.tasks')).toBe(true);
     const hashes: string[] = [];
     const query = openView({ storage, replaceHash: (h) => hashes.push(h) }, TASKS_VIEW, '#/tasks', '');
-    const restored = dropUnknownInitiative(viewFromQuery(query), ['board']);
+    const restored = dropUnknown(viewFromQuery(query), board('board'));
     expect(restored.filter).toEqual(DEFAULT_TASKS_FILTER);
     expect(restored.sort).toEqual({ column: 'title', dir: 'asc' });
     expect(hashes).toEqual(['#/tasks?status=bogus&kind=nope&initiative=gone&sort=title&dir=asc']);
+  });
+});
+
+describe('dropping a restored tag nothing carries any more', () => {
+  const known = [{ slug: 'board', tags: ['listed'] }];
+  const saved = viewFromQuery('tag=listed&tag=own&tag=ralph&tag=ghost&initiative=board&status=all&sort=title&dir=asc');
+
+  it('keeps an initiative tag and the tags tasks carry (own, actor kind), and drops the unknown one with the rest kept', () => {
+    const kept = dropUnknown(saved, known, new Set(['own', 'ralph']));
+    expect(kept.filter.tags).toEqual(['listed', 'own', 'ralph']);
+    expect(kept.filter.initiatives).toEqual(['board']);
+    expect(kept.filter.status).toBe('all');
+    expect(kept.sort).toEqual({ column: 'title', dir: 'asc' });
+  });
+  it('keeps a task-only and an actor-kind tag no initiative lists', () => {
+    const own = viewFromQuery('tag=own&tag=agent');
+    expect(dropUnknown(own, known, new Set(['own', 'agent']))).toBe(own);
+  });
+  it('drops every unlisted tag when no task carries it', () => {
+    expect(dropUnknown(saved, known).filter.tags).toEqual(['listed']);
+  });
+  it('drops the tags when the board has no initiatives and no task carries them', () => {
+    expect(dropUnknown(viewFromQuery('tag=a&kind=work'), []).filter).toEqual({ ...DEFAULT_TASKS_FILTER, kind: 'work' });
+  });
+});
+
+describe('the initiative source of chosen tags', () => {
+  const known = [{ tags: ['a', 'b'] }, { tags: ['b', 'c'] }];
+
+  it('names the initiative source of each chosen tag some initiative lists, once', () => {
+    expect(listedMarks(['b', 'own', 'a', 'b'], known)).toEqual([
+      { tag: 'b', source: 'initiative' },
+      { tag: 'a', source: 'initiative' },
+    ]);
+  });
+  it('names none when no initiative lists the chosen tags, or nothing is chosen', () => {
+    expect(listedMarks(['own'], known)).toEqual([]);
+    expect(listedMarks([], known)).toEqual([]);
+    expect(listedMarks(['a'], [])).toEqual([]);
   });
 });
