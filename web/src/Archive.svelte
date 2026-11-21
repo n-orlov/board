@@ -126,7 +126,7 @@
       void store.load();
     } else {
       remember({ window: view.window, chips, sort });
-      void store.setChips(chips);
+      void store.navigate(view.window, chips);
     }
   }
 
@@ -137,8 +137,8 @@
   });
 
   $effect(() => {
-    // Only the rows of the navigation that is current name sources: the rows still shown from an earlier window or chips, and a list
-    // that landed for one, put back a source the current navigation's own reads have taken away.
+    // Only the rows the current navigation read name sources: rows still shown from an earlier navigation, even one that asked for
+    // the same window and chips, would put back a source the current navigation's own reads have taken away.
     const { tasks, initiatives: closed } = rowsAreCurrent(view) ? view : { tasks: [], initiatives: [] };
     const chosen = view.chips.tags;
     tagChoices = untrack(() => archiveTagChoices(tagChoices, tasks, closed, chosen));
@@ -163,14 +163,14 @@
   function choose(next: ArchiveWindow) {
     userTurn(view.chips);
     remember({ window: next, chips: view.chips, sort });
-    void store.setWindow(next);
+    void store.navigate(next, view.chips);
   }
 
   // A chip change reads again, the server filtering.
   function setChips(next: ChipState) {
     userTurn(next);
     remember({ window: view.window, chips: next, sort });
-    void store.setChips(next);
+    void store.navigate(view.window, next);
   }
 
   // A sort only reorders the rows the view holds: no request is made.
@@ -198,7 +198,7 @@
     sort = next.sort;
     if (chips !== next.chips) remember({ window: next.window, chips, sort });
     turns.reading();
-    void store.setScope(next.window, chips);
+    void store.navigate(next.window, chips);
   }
 
   function openReopen(row: ArchiveRow) {

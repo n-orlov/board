@@ -7,6 +7,8 @@ import { expectInitiatives, openChips, revealInitiative, tagChip } from './chips
 // a chip) names no source however it lands: before the current list, while it is out or after it. The held list here carries the
 // rows of an initiative that listed the tag when it was read; the server then stops reporting that source, so the current
 // navigation's per-tag read names only the task source and the current list has no row (or only rows without it).
+// Rows belong to a navigation, not to a window and chips: a list an earlier visit began names no source on a later visit back to
+// the same window and chips (A, then B, then A again), by an explicit link, a window or a chip.
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
@@ -201,5 +203,122 @@ for (const viewport of viewports) {
         await api.dispose();
       }
     });
+
+    // A, then B, then A again by explicit links. The first visit to A (`inh`, which then still lists the tag) asks for the same
+    // window and chips as the current one; B's list is held too, so no newer list lands before the first visit's.
+    for (const order of ['before', 'after'] as const) {
+      test(`a first visit's list landing ${order} the empty list of the visit back to it (link A, B, A) leaves the confirmed sources`, async ({ page, playwright, baseURL }) => {
+        const api = await actorApi(playwright, baseURL, 'ralph:review');
+        const s = await seed(api, `lo-back-${order}-${viewport.name}-${run}`);
+        const linkA = `#/archive?initiative=${s.inh}&tag=${s.tag}`;
+        const first = await holdLists(page, (q) => initiativesOf(q) === s.inh);
+        const middle = await holdLists(page, (q) => initiativesOf(q) === s.empty);
+        const back = await holdLists(page, (q) => initiativesOf(q) === s.inh);
+        try {
+          await page.goto(`/#/archive?initiative=${s.own}&tag=${s.tag}`);
+          await openChips(page);
+          await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'task tag, initiative tag'));
+          first.arm();
+          await page.evaluate((hash) => (window.location.hash = hash), linkA);
+          await first.seen;
+          middle.arm();
+          await page.evaluate((hash) => (window.location.hash = hash), `#/archive?initiative=${s.empty}&tag=${s.tag}`);
+          await middle.seen;
+          // The initiative stops listing the tag; the first visit's held list still says it does.
+          expect((await api.patch(`/api/v1/initiatives/${s.inh}`, { data: { tags: [] } })).status()).toBe(200);
+          back.arm();
+          await page.evaluate((hash) => (window.location.hash = hash), linkA);
+          await back.seen;
+          await expectInitiatives(page, [s.inh]);
+          await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'task tag'));
+
+          if (order === 'before') {
+            await first.release();
+            expect(await labels(page, s.tag), 'the first visit\'s list must name no source').toEqual(named(s.tag, 'task tag'));
+            await back.release();
+          } else {
+            await back.release();
+            await expect(page.getByTestId('archive-empty')).toBeVisible();
+            await first.release();
+          }
+          await middle.release();
+          await settle(page);
+          await expect(page.getByTestId('archive-empty')).toBeVisible();
+          await expect(tagChip(page, s.tag)).toHaveAttribute('aria-pressed', 'true');
+          expect(await labels(page, s.tag)).toEqual(named(s.tag, 'task tag'));
+        } finally {
+          first.open();
+          middle.open();
+          back.open();
+          await api.dispose();
+        }
+      });
+    }
+
+    // The same rule through the user's own controls: the link's list (window 30, `own`, which then still carries the tag) is held
+    // with its per-tag read, the user leaves for another window or chip set and comes back to the link's own window and chips.
+    type Seeded = Awaited<ReturnType<typeof seed>>;
+    const windowSelect = (page: Page) => page.getByTestId('archive-window');
+    const returns: Record<string, { away: (q: URLSearchParams) => boolean; go: (page: Page, s: Seeded) => Promise<unknown>; back: (page: Page, s: Seeded) => Promise<unknown>; shown: (page: Page, s: Seeded) => Promise<void> }> = {
+      window: {
+        away: (q) => q.get('closed_within') === '90d',
+        go: (page) => windowSelect(page).selectOption('90'),
+        back: (page) => windowSelect(page).selectOption('30'),
+        shown: (page) => expect(windowSelect(page)).toHaveValue('30'),
+      },
+      chip: {
+        away: (q) => q.getAll('initiative').length === 2,
+        go: async (page, s) => (await revealInitiative(page, s.empty)).click(),
+        back: async (page, s) => (await revealInitiative(page, s.empty)).click(),
+        shown: (page, s) => expectInitiatives(page, [s.own]),
+      },
+    };
+    for (const [how, r] of Object.entries(returns)) {
+      test(`a ${how} the user changes and changes back supersedes the link's held list for the same scope: its rows name no source`, async ({ page, playwright, baseURL }) => {
+        const api = await actorApi(playwright, baseURL, 'ralph:review');
+        const s = await seed(api, `lo-ret-${how}-${viewport.name}-${run}`);
+        const linkScope = (q: URLSearchParams) => initiativesOf(q) === s.own && q.get('closed_within') === '30d';
+        const first = await holdLists(page, linkScope);
+        const lookup = await holdLookup(page, s.tag);
+        const middle = await holdLists(page, r.away);
+        const back = await holdLists(page, linkScope);
+        try {
+          await page.goto(`/#/archive?initiative=${s.empty}&tag=${s.tag}`);
+          await openChips(page);
+          await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'task tag, initiative tag'));
+          first.arm();
+          lookup.arm();
+          await page.evaluate((hash) => (window.location.hash = hash), `#/archive?initiative=${s.own}&tag=${s.tag}`);
+          await Promise.all([first.seen, lookup.seen]);
+          await loseTaskSource(api, s);
+          middle.arm();
+          await r.go(page, s);
+          await middle.seen;
+          back.arm();
+          await r.back(page, s);
+          await back.seen;
+          await r.shown(page, s);
+          await openChips(page);
+          await expect.poll(() => labels(page, s.tag)).toEqual(named(s.tag, 'initiative tag'));
+          // The link's list lands while the list of the return to its own scope is still out.
+          await first.release();
+          expect(await labels(page, s.tag), 'the link\'s list must name no source on the return').toEqual(named(s.tag, 'initiative tag'));
+          await lookup.release();
+          await back.release();
+          await expect(page.getByTestId('archive-empty')).toBeVisible();
+          await middle.release();
+          await settle(page);
+          await r.shown(page, s);
+          await expect(page.getByTestId('archive-empty')).toBeVisible();
+          expect(await labels(page, s.tag), 'no superseded list may name a source').toEqual(named(s.tag, 'initiative tag'));
+        } finally {
+          first.open();
+          lookup.open();
+          middle.open();
+          back.open();
+          await api.dispose();
+        }
+      });
+    }
   });
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   rowsAreCurrent,
-  scopeKey,
   affectsArchive,
   ARCHIVE_WINDOWS,
   ArchiveApi,
@@ -238,7 +237,7 @@ describe('ArchiveStore', () => {
   }
 
   it('starts loading the default window, with nothing loaded', () => {
-    expect(setup().store.state).toEqual({ window: '30', chips: NO_CHIPS, tasks: [], initiatives: [], read: '', loaded: false, loading: true, error: '', dialogError: '' });
+    expect(setup().store.state).toEqual({ window: '30', chips: NO_CHIPS, tasks: [], initiatives: [], navigation: 0, read: -1, loaded: false, loading: true, error: '', dialogError: '' });
   });
 
   it('shows both lists once the read lands', async () => {
@@ -294,6 +293,7 @@ describe('ArchiveStore', () => {
   describe('rows belong to the navigation that asked for them', () => {
     const chipsA = { tags: ['x'], initiatives: ['a'] };
     const chipsB = { tags: ['x'], initiatives: ['b'] };
+    const old = () => [task('E1-1', '2026-03-09T00:00:00Z')];
     const held = () => {
       const resolvers: ((t: Task[]) => void)[] = [];
       const tasks = () => new Promise<Task[]>((r) => resolvers.push(r));
@@ -305,14 +305,14 @@ describe('ArchiveStore', () => {
       const { store } = setup({ tasks });
       const first = store.setChips(chipsA);
       const second = store.setChips(chipsB);
-      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      resolvers[0]!(old());
       await first;
       expect(store.state.tasks).toEqual([]);
-      expect(store.state.read).toBe('');
+      expect(store.state.read).toBe(-1);
       expect(store.state.loading).toBe(true);
       resolvers[1]!([]);
       await second;
-      expect(store.state).toMatchObject({ tasks: [], loaded: true, loading: false, read: scopeKey('30', chipsB) });
+      expect(store.state).toMatchObject({ tasks: [], loaded: true, loading: false, navigation: 2, read: 2 });
     });
 
     it('drops a list whose chips are no longer the current ones when it lands after the current list', async () => {
@@ -322,9 +322,9 @@ describe('ArchiveStore', () => {
       const second = store.setChips(chipsB);
       resolvers[1]!([]);
       await second;
-      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      resolvers[0]!(old());
       await first;
-      expect(store.state).toMatchObject({ tasks: [], loading: false, read: scopeKey('30', chipsB) });
+      expect(store.state).toMatchObject({ tasks: [], loading: false, navigation: 2, read: 2 });
     });
 
     it('drops a list whose window is no longer the current one', async () => {
@@ -332,42 +332,91 @@ describe('ArchiveStore', () => {
       const { store } = setup({ tasks });
       const first = store.setWindow('7');
       const second = store.setWindow('90');
-      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      resolvers[0]!(old());
       await first;
       expect(store.state.tasks).toEqual([]);
       resolvers[1]!([]);
       await second;
-      expect(store.state).toMatchObject({ window: '90', read: scopeKey('90', NO_CHIPS) });
+      expect(store.state).toMatchObject({ window: '90', navigation: 2, read: 2 });
     });
 
-    it('keeps the rows shown from an earlier scope until the current list lands, marked as that scope\'s', async () => {
+    // A, then B, then A again: the first visit to A asked for the same window and chips as the current one, but it is not the current navigation.
+    for (const order of ['before', 'after'] as const) {
+      it(`drops the list of an earlier visit to the same scope when it lands ${order} the current visit's list (A, B, A)`, async () => {
+        const { resolvers, tasks } = held();
+        const { store } = setup({ tasks });
+        const firstA = store.navigate('30', chipsA);
+        void store.navigate('30', chipsB);
+        const secondA = store.navigate('30', chipsA);
+        if (order === 'after') {
+          resolvers[2]!([]);
+          await secondA;
+        }
+        resolvers[0]!(old());
+        await firstA;
+        expect(store.state.tasks).toEqual([]);
+        expect(store.state.read).toBe(order === 'after' ? 3 : -1);
+        resolvers[2]!([]);
+        await secondA;
+        expect(store.state).toMatchObject({ tasks: [], navigation: 3, read: 3 });
+        expect(rowsAreCurrent(store.state)).toBe(true);
+      });
+    }
+
+    it('reads again for a navigation to the scope already shown, and drops the earlier navigation\'s list (A, A)', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const first = store.navigate('30', chipsA);
+      const second = store.navigate('30', chipsA);
+      expect(resolvers).toHaveLength(2);
+      resolvers[0]!(old());
+      await first;
+      expect(store.state).toMatchObject({ tasks: [], read: -1 });
+      resolvers[1]!([]);
+      await second;
+      expect(store.state).toMatchObject({ tasks: [], navigation: 2, read: 2 });
+    });
+
+    it('drops a refresh begun before a newer navigation, even one back to the refreshed scope', async () => {
+      const { resolvers, tasks } = held();
+      const { store } = setup({ tasks });
+      const refresh = store.load();
+      const back = store.navigate('30', NO_CHIPS);
+      resolvers[0]!(old());
+      await refresh;
+      expect(store.state.tasks).toEqual([]);
+      resolvers[1]!([]);
+      await back;
+      expect(store.state).toMatchObject({ tasks: [], navigation: 1, read: 1 });
+    });
+
+    it('keeps the rows shown from an earlier navigation until the current list lands, marked as that navigation\'s', async () => {
       const { resolvers, tasks } = held();
       const { store } = setup({ tasks });
       const first = store.setChips(chipsA);
-      resolvers[0]!([task('E1-1', '2026-03-09T00:00:00Z')]);
+      resolvers[0]!(old());
       await first;
       const second = store.setChips(chipsB);
       expect(store.state.tasks.map((t) => t.ref)).toEqual(['E1-1']);
-      expect(store.state.read).toBe(scopeKey('30', chipsA));
+      expect(store.state.read).toBe(1);
       expect(rowsAreCurrent(store.state)).toBe(false);
       resolvers[1]!([]);
       await second;
       expect(rowsAreCurrent(store.state)).toBe(true);
     });
 
-    it('still shows a refresh of the same scope', async () => {
+    it('still shows a refresh within the current navigation', async () => {
       const { store } = setup();
       await store.setChips(chipsA);
       await store.load();
-      expect(store.state).toMatchObject({ read: scopeKey('30', chipsA), loading: false });
+      expect(store.state).toMatchObject({ navigation: 1, read: 1, loading: false });
       expect(store.state.tasks).toHaveLength(1);
     });
 
-    it('tells scopes apart by window, tags and initiatives, in the order chosen', () => {
-      expect(scopeKey('7', chipsA)).not.toBe(scopeKey('30', chipsA));
-      expect(scopeKey('7', chipsA)).not.toBe(scopeKey('7', chipsB));
-      expect(scopeKey('7', { tags: ['x', 'y'], initiatives: [] })).not.toBe(scopeKey('7', { tags: ['y', 'x'], initiatives: [] }));
-      expect(scopeKey('7', chipsA)).toBe(scopeKey('7', { tags: ['x'], initiatives: ['a'] }));
+    it('names rows current only when the current navigation read them', () => {
+      expect(rowsAreCurrent({ navigation: 0, read: -1 })).toBe(false);
+      expect(rowsAreCurrent({ navigation: 2, read: 1 })).toBe(false);
+      expect(rowsAreCurrent({ navigation: 2, read: 2 })).toBe(true);
     });
   });
 
