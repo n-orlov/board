@@ -36,7 +36,8 @@ async function holdNextRead(page: Page): Promise<Held> {
   await page.route(
     (url) => url.pathname === '/api/v1/initiatives',
     async (route) => {
-      if (!armed) return route.continue();
+      // A later hold is registered on top of this one and answers first: once spent it falls back to the one below.
+      if (!armed) return route.fallback();
       const response = await route.fetch();
       const body = await response.json();
       if (body.next_after != null) return route.fulfill({ response });
@@ -56,6 +57,11 @@ async function holdNextRead(page: Page): Promise<Held> {
       await page.evaluate(() => new Promise((done) => setTimeout(done, 0)));
     },
   };
+}
+
+// A bare #/now restores the saved query (vh.view.v1.attention), checked against the catalog before the board's first read.
+async function saveQuery(page: Page, query: string): Promise<void> {
+  await page.addInitScript((q) => localStorage.setItem('vh.view.v1.attention', JSON.stringify({ v: 1, query: q })), query);
 }
 
 async function openNow(page: Page, hash: string): Promise<void> {
@@ -169,6 +175,84 @@ for (const vp of viewports) {
       await expect(tagChip(page, after)).toHaveAttribute('aria-label', `${after}, initiative tag`);
       await expect(initiativeChip(page, slug)).toHaveAttribute('aria-pressed', 'true');
       expect(new URL(page.url()).hash).toBe(hash);
+      await api.dispose();
+    });
+
+    // A saved filter is restored against the page's first catalog read; an initiative event while that read is out is
+    // read again too, and the restore and the choices follow whichever answer is the newest.
+    test('an initiative edit while a saved filter is restored still reaches the choices', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const anchor = `e2e-catorder-f-${n}`;
+      const edited = `e2e-catorder-g-${n}`;
+      const stale = `catorder-rstale-${n}`;
+      const current = `catorder-rcur-${n}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await created(api, '/api/v1/initiatives', { slug: anchor, title: anchor });
+      await created(api, '/api/v1/initiatives', { slug: edited, title: edited, tags: [stale] });
+      const task = await created(api, '/api/v1/tasks', { initiative: anchor, title: 'restored filter row' });
+      const query = `initiative=${anchor}`;
+      await saveQuery(page, query);
+      const held = await holdNextRead(page);
+      await openNow(page, '/#/now');
+      expect((await held.captured).items).toContainEqual(expect.objectContaining({ slug: edited, tags: [stale] }));
+      const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+
+      expect((await api.patch(`/api/v1/initiatives/${edited}`, { data: { tags: [current] } })).ok()).toBe(true);
+      // The live read (the first to finish, the first one being held) has landed before the first read is released.
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 1);
+      await held.release();
+      await openFold(page, 'recent');
+      await expect(page.locator(`[data-testid="recent-row"][data-task="${task.ref}"]`)).toBeVisible();
+      await expect(initiativeChip(page, anchor)).toHaveAttribute('aria-pressed', 'true');
+      await expect(tagChip(page, current)).toHaveAttribute('aria-label', `${current}, initiative tag`);
+      expect(await tagChip(page, stale).count()).toBe(0);
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+      await api.dispose();
+    });
+
+    test('a saved initiative made while the first catalog read is out stays chosen', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const made = `e2e-catorder-h-${n}`;
+      const query = `initiative=${made}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await saveQuery(page, query);
+      const held = await holdNextRead(page);
+      await openNow(page, '/#/now');
+      expect((await held.captured).items.map((i) => i.slug)).not.toContain(made);
+
+      await created(api, '/api/v1/initiatives', { slug: made, title: made });
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 1);
+      await held.release();
+      await showAllInitiatives(page);
+      await expect(initiativeChip(page, made)).toHaveAttribute('aria-pressed', 'true');
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      await api.dispose();
+    });
+
+    test('a saved tag an initiative takes on while the first read is out stays chosen when the live read lands last', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const slug = `e2e-catorder-i-${n}`;
+      const later = `catorder-later-${n}`;
+      // No task carries the tag (the initiative has none): only the newest catalog makes the saved tag a valid choice.
+      const query = `tag=${later}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await created(api, '/api/v1/initiatives', { slug, title: slug });
+      await saveQuery(page, query);
+      const first = await holdNextRead(page);
+      await openNow(page, '/#/now');
+      expect((await first.captured).items).toContainEqual(expect.objectContaining({ slug, tags: [] }));
+
+      const live = await holdNextRead(page);
+      expect((await api.patch(`/api/v1/initiatives/${slug}`, { data: { tags: [later] } })).ok()).toBe(true);
+      expect((await live.captured).items).toContainEqual(expect.objectContaining({ slug, tags: [later] }));
+      await first.release();
+      // The restore waits for the live read: the saved tag is neither dropped nor read yet.
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      await live.release();
+      await expect(tagChip(page, later)).toHaveAttribute('aria-pressed', 'true');
+      await expect(tagChip(page, later)).toHaveAttribute('aria-label', `${later}, initiative tag`);
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
       await api.dispose();
     });
   });

@@ -85,4 +85,62 @@ describe('CatalogReads', () => {
     pending[1].resolve(NEW);
     expect(await second).toEqual(NEW);
   });
+
+  it('hands the newest answer to apply before the read resolves, and never a dropped or failed one', async () => {
+    const { reads, pending } = controlled();
+    const seen: CatalogEntry[][] = [];
+    const older = reads.next((list) => seen.push(list));
+    const newer = reads.next((list) => seen.push(list));
+    const failed = reads.next((list) => seen.push(list));
+    pending[2].reject(new Error('down'));
+    await failed;
+    expect(seen).toEqual([]);
+    pending[1].resolve(NEW);
+    await newer;
+    expect(seen).toEqual([NEW]);
+    pending[0].resolve(OLD);
+    await older;
+    expect(seen).toEqual([NEW]);
+  });
+
+  it('settles only once every read begun so far has landed, whatever order they land in', async () => {
+    const { reads, pending } = controlled();
+    let applied: CatalogEntry[] | undefined;
+    void reads.next((list) => (applied = list));
+    void reads.next((list) => (applied = list));
+    let settled = false;
+    const done = reads.settled().then(() => (settled = true));
+    pending[1].resolve(NEW);
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+    pending[0].resolve(OLD);
+    await done;
+    expect(applied).toEqual(NEW);
+  });
+
+  it('waits for a read begun while it was already waiting, so a restore checks against the newest catalog', async () => {
+    const { reads, pending } = controlled();
+    let applied: CatalogEntry[] | undefined;
+    void reads.next((list) => (applied = list));
+    let settled = false;
+    const done = reads.settled().then(() => (settled = true));
+    void reads.next((list) => (applied = list));
+    pending[0].resolve(OLD);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+    expect(applied).toEqual(OLD);
+    pending[1].resolve(NEW);
+    await done;
+    expect(applied).toEqual(NEW);
+  });
+
+  it('settles after a failed read too, and at once when no read was begun', async () => {
+    await new CatalogReads(async () => NEW).settled();
+    const { reads, pending } = controlled();
+    void reads.next();
+    const done = reads.settled();
+    pending[0].reject(new Error('down'));
+    await expect(done).resolves.toBeUndefined();
+  });
 });

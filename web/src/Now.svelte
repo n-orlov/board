@@ -105,7 +105,6 @@
   const turns = new FilterTurns();
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
-  let listed: Promise<void> = Promise.resolve();
   // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
   const tasksApi = new TasksApi(browser, () => csrf);
   async function carriedOf(filter: AttentionFilter): Promise<Carried | undefined> {
@@ -123,26 +122,27 @@
   // The initiative source of the chips kept from earlier reads is dropped first, so a tag an initiative no longer carries
   // goes; the new list offers every tag still carried. A failed read keeps the choices as they were.
   // The first read and every live one share one sequence: a read landing after a newer one was applied is dropped.
+  // An event while the first read is still out (a saved filter is being checked against it) reads again too: that first
+  // answer may predate the event, and the restore then checks the filter against whichever answer is the newest.
   const catalog = new CatalogReads(() => new InitiativesApi(browser, () => csrf).list('all'));
   async function refreshCatalog() {
-    if (!turns.hasRead()) return;
-    const list = await catalog.next();
-    if (list === undefined) return; // failed or stale: the choices stay as they were
-    looked = list;
-    known = list;
-    seen = withoutSource(seen, 'initiative');
+    // Failed or stale: the choices stay as they were.
+    await catalog.next((list) => {
+      looked = list;
+      known = list;
+      seen = withoutSource(seen, 'initiative');
+    });
   }
   async function start() {
     const current = turns.begin();
     // A failed first read: the chips then offer only what the URL names; the sections show the error.
-    listed = catalog.next().then((list) => {
-      if (list === undefined) return;
+    void catalog.next((list) => {
       looked = list;
       known = list;
     });
     let carried: Carried | undefined;
     if (opened.restored) {
-      await listed;
+      await catalog.settled();
       carried = await carriedOf(opened.filter);
     } else {
       offerSources(opened.filter);
@@ -208,7 +208,7 @@
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
     let carried: Carried | undefined;
     if (next.restored) {
-      await listed;
+      await catalog.settled();
       carried = await carriedOf(next.filter);
     } else {
       offerSources(next.filter);
