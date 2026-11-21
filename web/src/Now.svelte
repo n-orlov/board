@@ -193,6 +193,9 @@
     const at = tagEvents;
     if (opened.restored) {
       await catalog.settled();
+      // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
+      // invalidate the answer of the navigation that is current.
+      if (!current()) return;
       carried = await carriedOf(opened.filter);
     } else {
       offerSources(opened.filter);
@@ -271,6 +274,9 @@
     const at = tagEvents;
     if (next.restored) {
       await catalog.settled();
+      // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
+      // invalidate the answer of the navigation that is current.
+      if (!current()) return;
       carried = await carriedOf(next.filter);
     } else {
       offerSources(next.filter);

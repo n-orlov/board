@@ -94,9 +94,11 @@
     });
   }
   // The chips a restored state keeps: the tags some initiative lists or some task carries; the sources of every kept tag are shown.
-  async function checkedChips(chips: ChipState): Promise<ChipState> {
+  async function checkedChips(chips: ChipState, current: () => boolean): Promise<ChipState> {
     await listed;
-    if (looked === undefined) return chips;
+    // A restore a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
+    // invalidate the answer of the navigation that is current.
+    if (looked === undefined || !current()) return chips;
     const carried = await sources.read(chips.tags, looked);
     const have = new Set([...looked.flatMap((i) => i.tags), ...carried.tags]);
     const tags = chips.tags.filter((tag) => have.has(tag));
@@ -109,7 +111,7 @@
     listed = readCatalog();
     let chips = opened.chips;
     if (restored) {
-      chips = await checkedChips(chips);
+      chips = await checkedChips(chips, current);
     } else {
       offerSources(chips);
     }
@@ -169,7 +171,7 @@
     // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
     if (chips.tags.length > 0) listed = readCatalog();
     if (restoring && chips.tags.length > 0) {
-      chips = await checkedChips(chips);
+      chips = await checkedChips(chips, current);
     } else {
       offerSources(chips);
     }

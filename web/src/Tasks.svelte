@@ -131,6 +131,9 @@
     let carried: SourceRead | undefined;
     if (restoredFilter) {
       await listed;
+      // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
+      // invalidate the answer of the navigation that is current.
+      if (!current()) return;
       carried = await carriedOf(initial);
     } else {
       offerSources(initial);
@@ -200,6 +203,9 @@
     let carried: SourceRead | undefined;
     if (checking) {
       await listed;
+      // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
+      // invalidate the answer of the navigation that is current.
+      if (!current()) return;
       carried = await carriedOf(next.filter);
     } else {
       offerSources(next.filter);
