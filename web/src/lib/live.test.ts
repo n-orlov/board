@@ -166,6 +166,33 @@ describe('attention', () => {
   });
 });
 
+describe('arrival', () => {
+  it('hears each board event as it arrives, before the debounced refetch, and undefined on a reset or a reconnect', async () => {
+    const { l, sources } = rig();
+    const order: string[] = [];
+    l.subscribe(() => true, () => order.push('refetch'));
+    const off = l.onArrival((e) => order.push(e === undefined ? 'missed' : e.type));
+    l.start();
+    sources[0].opens();
+    sources[0].send('board', ev('task_updated'));
+    sources[0].send('board', 'garbage');
+    expect(order).toEqual(['task_updated']);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    expect(order).toEqual(['task_updated', 'refetch']);
+    sources[0].send('reset', { reason: 'too_many' });
+    expect(order).toEqual(['task_updated', 'refetch', 'missed']);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    sources[0].errors();
+    sources[0].opens();
+    expect(order).toEqual(['task_updated', 'refetch', 'missed', 'refetch', 'missed']);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    off();
+    sources[0].send('board', ev('lease_started'));
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    expect(order).toEqual(['task_updated', 'refetch', 'missed', 'refetch', 'missed', 'refetch', 'refetch']);
+  });
+});
+
 describe('reset and reconnect', () => {
   it('refetches every subscriber on reset', async () => {
     const { l, sources } = rig();

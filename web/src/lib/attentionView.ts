@@ -227,10 +227,24 @@ export interface AttentionState {
   recent: Recent[] | undefined;
   /** The tag marks of every task the answer names, by ref (its `task_marks`): Now draws all its chips from them. */
   marks: Record<string, TagMark[]>;
+  /**
+   * The store's epoch when the read that gave `marks` began (the count of events that can change a tag's sources, as the
+   * view keeps it): marks read before a later such event may name a source that event removed.
+   */
+  marksAt: number;
   filter: AttentionFilter;
   window: NowWindow;
   loading: boolean;
   error: string | undefined;
+}
+
+/**
+ * The marks of the shown answer the chips may take sources from: all of them while no event that can change a tag's sources
+ * arrived since its read began (`epoch` is that count now), else none. An answer read before such an event may name a
+ * source the event removed; the read that event starts brings the current ones.
+ */
+export function currentMarks(state: Pick<AttentionState, 'marks' | 'marksAt'>, epoch: number): Record<string, TagMark[]> {
+  return state.marksAt === epoch ? state.marks : {};
 }
 
 /** The marks of every task a board answer names, by ref, from its `task_marks`. */
@@ -243,16 +257,20 @@ export class AttentionStore {
   private readonly onChange: (state: AttentionState) => void;
   private current: AttentionState;
   private readonly fetches = new Fetches();
+  private readonly epoch: () => number;
 
+  /** `epoch` counts the events that can change a tag's sources; each answer's marks carry its value when the read began. */
   constructor(
     api: Pick<AttentionApi, 'board'>,
     onChange: (state: AttentionState) => void,
     filter: AttentionFilter = DEFAULT_ATTENTION_FILTER,
     window: NowWindow = DEFAULT_WINDOW,
+    epoch: () => number = () => 0,
   ) {
     this.api = api;
     this.onChange = onChange;
-    this.current = { attention: undefined, flight: undefined, recent: undefined, marks: {}, filter, window, loading: true, error: undefined };
+    this.epoch = epoch;
+    this.current = { attention: undefined, flight: undefined, recent: undefined, marks: {}, marksAt: epoch(), filter, window, loading: true, error: undefined };
   }
 
   private publish(change: Partial<AttentionState>): void {
@@ -263,12 +281,13 @@ export class AttentionStore {
   /** Reads the sections under the current filter. A refresh keeps what is shown until the answer lands. */
   async load(): Promise<void> {
     const ticket = this.fetches.begin();
+    const marksAt = this.epoch();
     const { filter, window } = this.current;
     this.publish({ loading: true });
     let outcome: Partial<AttentionState>;
     try {
       const board = await this.api.board(filter, window);
-      outcome = { attention: board.attention, flight: board.in_flight, recent: board.recent, marks: marksOfBoard(board), error: undefined };
+      outcome = { attention: board.attention, flight: board.in_flight, recent: board.recent, marks: marksOfBoard(board), marksAt, error: undefined };
     } catch (e) {
       outcome = { error: errorText(e) };
     }

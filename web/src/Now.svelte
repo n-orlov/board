@@ -31,6 +31,7 @@
     affectsInitiativeCatalog,
     affectsTagSources,
     copyLabel,
+    currentMarks,
     nowTagChoices,
     forgetAttention,
     openAttention,
@@ -91,13 +92,16 @@
   const opened = openAttention(viewEnv, window.location.hash);
   const initial = opened.filter;
   const initialWindow = loadWindow(viewEnv.storage);
-  let view: AttentionState = $state({ attention: undefined, flight: undefined, recent: undefined, marks: {}, filter: initial, window: initialWindow, loading: true, error: undefined });
+  let view: AttentionState = $state({ attention: undefined, flight: undefined, recent: undefined, marks: {}, marksAt: 0, filter: initial, window: initialWindow, loading: true, error: undefined });
   let known: { slug: string; tags: string[] }[] = $state([]);
   // The lookup's answer, or undefined until it answers (or when it failed): an empty answer still drops restored values.
   let looked: { slug: string; tags: string[] }[] | undefined;
   let toast = $state('');
 
-  const store = new AttentionStore(new AttentionApi(browser), (s) => (view = s), initial, initialWindow);
+  // Every event that can change a tag's sources, counted as it arrives (a reset or a reconnect counts too: events may have
+  // been missed): a board answer read before one of them does not give the chips sources (see `seen`).
+  let sourceEpoch = 0;
+  const store = new AttentionStore(new AttentionApi(browser), (s) => (view = s), initial, initialWindow, () => sourceEpoch);
   let acting: ActionsState = $state(NO_ACTIONS);
   const actions = new AttentionActions(new ActionsApi(browser, () => csrf), (s) => (acting = s));
 
@@ -217,7 +221,11 @@
     const rows = live().subscribe(affectsAttention, () => (turns.hasRead() ? store.load() : undefined));
     const choices = live().subscribe(affectsInitiativeCatalog, refreshCatalog);
     const tagSources = live().subscribe(affectsTagSources, tagSourcesChanged);
+    const arrivals = live().onArrival((event) => {
+      if (event === undefined || affectsTagSources(event)) sourceEpoch += 1;
+    });
     return () => {
+      arrivals();
       rows();
       choices();
       tagSources();
@@ -346,9 +354,11 @@
 
   const ACK_BODY = 'The lease ran out without being ended. Acknowledging it records that you have seen it and takes it off Expired leases.';
   // The tag chips: the initiatives' tags and every tag of the tasks the board read shows, kept while a narrower read follows.
+  // An answer read before an event that can change a tag's sources gives none (it may name a source the event removed, which
+  // the live read of the sources took off): every such event reads the board again, and that answer gives them.
   let seen: TagChoice[] = $state([]);
   $effect(() => {
-    const read = view.marks;
+    const read = currentMarks(view, untrack(() => sourceEpoch));
     const chosen = view.filter.tags;
     seen = untrack(() => nowTagChoices([], chosen, read, seen));
   });

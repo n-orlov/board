@@ -12,6 +12,7 @@ import {
   nowQuery,
   nowTagChoices,
   forgetAttention,
+  currentMarks,
   marksOfBoard,
   openAttention,
   rowsFor,
@@ -461,6 +462,33 @@ describe('the marks of a board answer', () => {
     await store.load();
     expect(states[states.length - 1]!.marks).toEqual({ 'aa-2': [] });
     expect(board).toHaveBeenCalledTimes(2);
+  });
+
+  it('carry the epoch their read began at, not the one they landed at', async () => {
+    const waits: ((b: unknown) => void)[] = [];
+    const board = () => new Promise((resolve) => waits.push(resolve));
+    const states: AttentionState[] = [];
+    let epoch = 3;
+    const store = new AttentionStore({ board } as never, (s) => states.push(s), DEFAULT_ATTENTION_FILTER, '24h', () => epoch);
+    const first = store.load();
+    epoch = 4;
+    const second = store.load();
+    waits[0]!({ window: '24h', attention: full, in_flight: [], recent: [], task_marks });
+    await first;
+    expect(states[states.length - 1]).toMatchObject({ marksAt: 3 });
+    expect(currentMarks(states[states.length - 1]!, epoch)).toEqual({});
+    waits[1]!({ window: '24h', attention: full, in_flight: [], recent: [], task_marks: { 'aa-2': task_marks['aa-2'] } });
+    await second;
+    expect(states[states.length - 1]).toMatchObject({ marksAt: 4, error: undefined });
+    expect(states[states.length - 1]!.marks).toEqual({ 'aa-2': [] });
+    expect(currentMarks(states[states.length - 1]!, epoch)).toEqual({ 'aa-2': [] });
+  });
+
+  it('give the chips sources only while no source event arrived since their read began', () => {
+    const marks = { 'aa-1': [{ tag: 'mine', source: 'task' as const }] };
+    expect(currentMarks({ marks, marksAt: 2 }, 2)).toBe(marks);
+    expect(currentMarks({ marks, marksAt: 2 }, 3)).toEqual({});
+    expect(currentMarks({ marks: {}, marksAt: 0 }, 0)).toEqual({});
   });
 
   it('are kept while a refresh is out (the rows keep their chips) and start empty', async () => {

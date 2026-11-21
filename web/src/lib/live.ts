@@ -1,7 +1,9 @@
 // Live refresh (SPEC 11, 7.1): one EventSource per tab on GET /api/v1/stream. A view subscribes
 // with a predicate over the events that concern it and a refetch; a matching event refetches that
 // view, at most once per DEBOUNCE_MS burst. `attention` counts go to a listener without a fetch.
-// A `reset` and a reconnect after an error refetch every subscribed (visible) view. Nothing here
+// A `reset` and a reconnect after an error refetch every subscribed (visible) view. An arrival listener hears each
+// event the moment it arrives (before any debounce), and `undefined` when events may have been missed (a reset or a
+// reconnect), so a view can tell a read begun before an event from one begun after it. Nothing here
 // polls: the only timers are the debounce and the reopen of a stream the browser gave up on.
 import type { components } from './api/schema';
 import { apiUrl, currentApiBase } from './apibase';
@@ -49,6 +51,7 @@ export class Live {
   private source?: StreamSource;
   private subs = new Set<Subscription>();
   private attention = new Set<(counts: AttentionCounts) => void>();
+  private arrivals = new Set<(event: BoardEvent | undefined) => void>();
   private states = new Set<(state: LiveState) => void>();
   private online = true;
   private open = false;
@@ -93,6 +96,15 @@ export class Live {
   onAttention(listener: (counts: AttentionCounts) => void): () => void {
     this.attention.add(listener);
     return () => this.attention.delete(listener);
+  }
+
+  /**
+   * Hears every board event as it arrives, before the debounced refetches it schedules, and `undefined` on a reset or a
+   * reconnect (events may have been missed then). The refetches of that arrival always run after it.
+   */
+  onArrival(listener: (event: BoardEvent | undefined) => void): () => void {
+    this.arrivals.add(listener);
+    return () => this.arrivals.delete(listener);
   }
 
   onState(listener: (state: LiveState) => void): () => void {
@@ -150,6 +162,7 @@ export class Live {
   private board(data: string): void {
     const event = parse<BoardEvent>(data);
     if (event === undefined) return;
+    for (const listener of this.arrivals) listener(event);
     for (const sub of this.subs) if (sub.matches(event)) this.schedule(sub);
   }
 
@@ -160,6 +173,7 @@ export class Live {
   }
 
   private refetchAll(): void {
+    for (const listener of this.arrivals) listener(undefined);
     for (const sub of this.subs) this.schedule(sub);
   }
 
