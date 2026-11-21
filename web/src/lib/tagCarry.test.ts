@@ -109,6 +109,57 @@ describe('SourceReads', () => {
     expect((await older).fresh()).toEqual({ answered: new Set(), marks: [] });
   });
 
+  it('names nothing from a read whose navigation was superseded, even when no newer read names its tag', async () => {
+    const { pending, reads } = gated();
+    let mine = true;
+    const abandoned = reads.read(['own'], [], () => mine);
+    mine = false; // a chip change made a newer navigation current, and read nothing for this tag
+    pending[0]!.release([mark('own', 'task')]);
+    expect((await abandoned).fresh()).toEqual({ answered: new Set(), marks: [] });
+  });
+
+  it('owes a chosen tag whose newest read is out or was abandoned, and no longer once a read of it was applied', async () => {
+    const { pending, reads } = gated();
+    expect(reads.owed(['own'])).toEqual([]);
+    let mine = true;
+    const abandoned = reads.read(['own', 'ralph'], [], () => mine);
+    expect(reads.owed(['OWN', 'ralph', 'never'])).toEqual(['OWN', 'ralph']);
+    mine = false;
+    pending[0]!.release([mark('own', 'task')]);
+    pending[1]!.release([mark('ralph', 'actor')]);
+    (await abandoned).fresh();
+    expect(reads.owed(['own', 'ralph'])).toEqual(['own', 'ralph']);
+    const again = reads.read(['own']);
+    pending[2]!.release([mark('own', 'task'), mark('own', 'initiative')]);
+    expect((await again).fresh().marks).toEqual([mark('own', 'task'), mark('own', 'initiative')]);
+    expect(reads.owed(['own', 'ralph'])).toEqual(['ralph']);
+  });
+
+  it('owes the tags a restoration claimed before it read them, until a read of them is applied', async () => {
+    const { pending, reads } = gated();
+    reads.claim(['own', 'kept']);
+    expect(reads.owed(['own', 'kept', 'other'])).toEqual(['own', 'kept']);
+    const own = reads.read(['own']);
+    pending[0]!.release([mark('own', 'task')]);
+    (await own).fresh();
+    expect(reads.owed(['own', 'kept'])).toEqual(['kept']);
+  });
+
+  it('owes a tag again once a restoration claims it after it was read, and drops the older read\'s answer', async () => {
+    const { pending, reads } = gated();
+    const older = reads.read(['own']);
+    reads.claim(['own']);
+    pending[0]!.release([mark('own', 'task')]);
+    expect((await older).fresh()).toEqual({ answered: new Set(), marks: [] });
+    expect(reads.owed(['own'])).toEqual(['own']);
+  });
+
+  it('owes no tag the server\'s grammar refuses: no read can answer for it', async () => {
+    const reads = new SourceReads(async () => []);
+    void reads.read(['bad tag!']);
+    expect(reads.owed(['bad tag!'])).toEqual([]);
+  });
+
   it('checks a restored tag against the initiatives it is given', async () => {
     const reads = new SourceReads(async () => []);
     const answer = await reads.read(['work', 'ghost'], known);

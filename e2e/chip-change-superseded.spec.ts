@@ -5,7 +5,9 @@ import { chosenTags, openChips, tagChip } from './chips';
 // R7/R10 (SPEC 11, "Tag choices and saved filters on the task views"): only the navigation that is current reads the sources of
 // its tags or sets the filter. A chip the user clicks (or, on Archive, a window the user picks) is newer than a saved filter still
 // being restored: the restoration, waiting on the board's list of initiatives, is abandoned. It must start no per-tag read, send
-// no request under its own filter and leave the chips, the fragment and the saved query as the user left them. Each test seeds
+// no request under its own filter and leave the chips, the fragment and the saved query as the user left them. The user's change
+// is then the navigation that reads: it reads, as its own, the sources of each tag it keeps chosen that the abandoned
+// restoration had named but not yet answered for, so that chip still names its source. Each test seeds
 // initiatives and tasks of its own on the shared board: the combined filter is always empty, so only the per-tag answers can name
 // the sources of its chips.
 const viewports = [
@@ -109,13 +111,17 @@ async function restoreInPlace(page: Page, view: View, s: Awaited<ReturnType<type
   await held.catalogStarted;
 }
 
+// The per-tag reads of `tag` begun before the user's change.
+const readsBefore = (held: Awaited<ReturnType<typeof hold>>, tag: string) => (held.reads.get(tag) ?? 0) - held.readsAfter.filter((t) => t === tag).length;
+
 async function expectUserChipsKept(page: Page, view: View, s: Awaited<ReturnType<typeof seed>>, held: Awaited<ReturnType<typeof hold>>) {
   expect(await chosenTags(page)).toEqual([s.keep]);
   expect(page.url()).not.toContain(`tag=${s.drop}`);
   expect(await savedQuery(page, view.key)).not.toContain(`tag=${s.drop}`);
-  expect(held.readsAfter).toEqual([]);
+  // The only read after the change is the user's own, of the tag it keeps chosen: the restoration reads nothing.
+  expect(held.readsAfter).toEqual([s.keep]);
   // Held at its list of initiatives, the restoration had begun no read before the change either.
-  if (view.id !== 'now') expect([held.reads.get(s.drop) ?? 0, held.reads.get(s.keep) ?? 0]).toEqual([0, 0]);
+  if (view.id !== 'now') expect([readsBefore(held, s.drop), readsBefore(held, s.keep)]).toEqual([0, 0]);
   expect(held.staleRequests).toEqual([]);
   await expect.poll(() => labels(page, s.keep)).toEqual(named(s.keep, 'task tag'));
 }
@@ -163,8 +169,12 @@ for (const viewport of viewports) {
           expect(page.url()).not.toContain(`tag=${s.drop}`);
           expect(await savedQuery(page, view.key)).not.toContain(`tag=${s.drop}`);
           expect(held.reads.get(s.drop) ?? 0).toBe(0);
-          expect(held.readsAfter).toEqual([]);
+          // The user's change reads the tag it keeps as its own; the restoration that named it reads nothing.
+          expect(held.readsAfter).toEqual([s.keep]);
+          expect(readsBefore(held, s.keep)).toBe(0);
           expect(held.staleRequests).toEqual([]);
+          // No combined row matches, and the restoration that named the chip was abandoned: the chip still names its source.
+          await expect.poll(() => labels(page, s.keep)).toEqual(named(s.keep, 'task tag'));
         } finally {
           held.releaseCatalog();
           await api.dispose();
@@ -196,9 +206,10 @@ for (const viewport of viewports) {
         expect(page.url()).toContain('window=90');
         expect(await savedQuery(page, view.key)).toContain('window=90');
         expect(await chosenTags(page)).toEqual([s.drop, s.keep].sort());
-        expect(held.reads.get(s.drop) ?? 0).toBe(0);
-        expect(held.reads.get(s.keep) ?? 0).toBe(0);
-        expect(held.readsAfter).toEqual([]);
+        // The restoration read nothing; the window the user picked read both chosen tags as its own.
+        expect([readsBefore(held, s.drop), readsBefore(held, s.keep)]).toEqual([0, 0]);
+        expect([...held.readsAfter].sort()).toEqual([s.drop, s.keep].sort());
+        await expect.poll(() => labels(page, s.drop)).toEqual(named(s.drop, 'task tag'));
         await expect.poll(() => labels(page, s.keep)).toEqual(named(s.keep, 'task tag'));
       } finally {
         held.releaseCatalog();

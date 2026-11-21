@@ -123,24 +123,26 @@
     tags: ReadonlySet<string>;
     moved: boolean;
   }
-  async function carriedOf(filter: AttentionFilter): Promise<Restored | undefined> {
+  async function carriedOf(filter: AttentionFilter, current: () => boolean): Promise<Restored | undefined> {
     if (looked === undefined) return undefined;
     const began = catalogReads;
-    const read = await sources.read(filter.tags, looked);
+    const read = await sources.read(filter.tags, looked, current);
     await catalog.settled();
     const moved = catalogReads !== began;
     return { read, moved, tags: read.carriedAgainst(looked, moved) };
   }
   // A link's own tags are kept as they are, but their chips still name the sources the tasks give them: read in the background,
   // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
-  function offerSources(filter: AttentionFilter) {
-    if (filter.tags.length === 0) return;
+  function offerSources(tags: readonly string[], current: () => boolean) {
+    if (tags.length === 0) return;
     const began = catalogReads;
     const at = tagEvents;
-    void sources.read(filter.tags).then((read) => {
+    void sources.read(tags, [], current).then((read) => {
+      // A navigation superseded by the time it lands names nothing: the current one owns the chips.
+      if (!current()) return;
       // An event since the read began may have changed what it answered (a source it names can be gone): its answer is dropped
       // and the tags are read again after the event.
-      if (tagEvents !== at) return refresh.poke(filter.tags);
+      if (tagEvents !== at) return refresh.poke(tags);
       // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
       const c = read.fresh(catalogReads !== began);
       seen = withFreshSources(seen, c.answered, c.marks);
@@ -192,13 +194,14 @@
     let carried: Restored | undefined;
     const at = tagEvents;
     if (opened.restored) {
+      sources.claim(opened.filter.tags);
       await catalog.settled();
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(opened.filter);
+      carried = await carriedOf(opened.filter, current);
     } else {
-      offerSources(opened.filter);
+      offerSources(opened.filter.tags, current);
     }
     if (!current()) return;
     // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
@@ -241,9 +244,12 @@
     saveAttention(viewEnv.storage, filter);
   }
 
+  // A change is the newest navigation: it reads as its own the sources of every chosen tag whose newest read a superseded one
+  // had not applied.
   function apply(filter: AttentionFilter) {
-    turns.begin();
+    const current = turns.begin();
     turns.reading();
+    offerSources(sources.owed(filter.tags), current);
     persist(filter);
     void store.setFilter(filter);
   }
@@ -273,13 +279,14 @@
     let carried: Restored | undefined;
     const at = tagEvents;
     if (next.restored) {
+      sources.claim(next.filter.tags);
       await catalog.settled();
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(next.filter);
+      carried = await carriedOf(next.filter, current);
     } else {
-      offerSources(next.filter);
+      offerSources(next.filter.tags, current);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     if (carried !== undefined) {

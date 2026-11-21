@@ -105,18 +105,19 @@
   // answer names the sources every restored tag has, so its chip keeps them whatever the combined filter returns.
   // Every read of a tag's sources (a link's, a restoration's) shares one order: an older answer never overwrites a newer one.
   const sources = new SourceReads((tag) => api.tagMarks(tag));
-  async function carriedOf(filter: TasksFilter): Promise<SourceRead | undefined> {
-    return looked === undefined ? undefined : sources.read(filter.tags, looked);
+  async function carriedOf(filter: TasksFilter, current: () => boolean): Promise<SourceRead | undefined> {
+    return looked === undefined ? undefined : sources.read(filter.tags, looked, current);
   }
   // A link's own tags are kept as they are, but their chips still name the sources the tasks and the initiatives give them: read
   // in the background, so the first read does not wait for it. A failed read leaves the chip as the rows name it.
-  function offerSources(filter: TasksFilter) {
-    if (filter.tags.length === 0) return;
+  function offerSources(tags: readonly string[], current: () => boolean) {
+    if (tags.length === 0) return;
     // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
-    // server no longer reports goes.
-    void Promise.all([sources.read(filter.tags), listed]).then(([read]) => {
+    // server no longer reports goes. A navigation superseded by the time it lands names nothing: the current one owns the chips.
+    void Promise.all([sources.read(tags, [], current), listed]).then(([read]) => {
+      if (!current()) return;
       const c = read.fresh();
-      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...listedMarks(filter.tags, looked ?? [])]);
+      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...listedMarks(tags, looked ?? [])]);
     });
   }
   function restoredState(state: TasksViewState, carried: SourceRead | undefined): TasksViewState {
@@ -130,13 +131,14 @@
     readCatalog();
     let carried: SourceRead | undefined;
     if (restoredFilter) {
+      sources.claim(initial.tags);
       await listed;
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(initial);
+      carried = await carriedOf(initial, current);
     } else {
-      offerSources(initial);
+      offerSources(initial.tags, current);
     }
     if (!current()) return;
     turns.reading();
@@ -164,10 +166,12 @@
     tagChoices = untrack(() => mergeChoices(tagChoices, marks, chosen));
   });
 
-  // The filters and the sort live in the fragment and in the saved query: a change fetches (the sort only reorders).
+  // The filters and the sort live in the fragment and in the saved query: a change fetches (the sort only reorders). It is the
+  // newest navigation, so it reads as its own the sources of every chosen tag whose newest read a superseded one had not applied.
   function apply(filter: TasksFilter) {
-    turns.begin();
+    const current = turns.begin();
     turns.reading();
+    offerSources(sources.owed(filter.tags), current);
     persist({ filter, sort });
     void store.setFilter(filter);
     void reloadNeeds();
@@ -202,13 +206,14 @@
     const checking = restoring && checksRestored(next.filter);
     let carried: SourceRead | undefined;
     if (checking) {
+      sources.claim(next.filter.tags);
       await listed;
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(next.filter);
+      carried = await carriedOf(next.filter, current);
     } else {
-      offerSources(next.filter);
+      offerSources(next.filter.tags, current);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     if (checking) {

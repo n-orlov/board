@@ -144,14 +144,16 @@
   const tasksApi = new TasksApi(browser, () => csrf);
   // Every read of a tag's sources (a link's, a restoration's) shares one order: an older answer never overwrites a newer one.
   const sources = new SourceReads((tag) => tasksApi.tagMarks(tag));
-  async function carriedOf(filter: TimelineFilter): Promise<SourceRead | undefined> {
-    return looked === undefined ? undefined : sources.read(filter.tags, looked);
+  async function carriedOf(filter: TimelineFilter, current: () => boolean): Promise<SourceRead | undefined> {
+    return looked === undefined ? undefined : sources.read(filter.tags, looked, current);
   }
   // A link's own tags are kept as they are, but their chips still name the sources the tasks give them: read in the background,
   // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
-  function offerSources(filter: TimelineFilter) {
-    if (filter.tags.length === 0) return;
-    void sources.read(filter.tags).then((read) => {
+  function offerSources(tags: readonly string[], current: () => boolean) {
+    if (tags.length === 0) return;
+    void sources.read(tags, [], current).then((read) => {
+      // A navigation superseded by the time it lands names nothing: the current one owns the chips.
+      if (!current()) return;
       // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
       const c = read.fresh();
       seen = withFreshSources(seen, c.answered, c.marks);
@@ -166,13 +168,14 @@
       .catch(() => undefined);
     let carried: SourceRead | undefined;
     if (opened.restored) {
+      sources.claim(opened.filter.tags);
       await listed;
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(opened.filter);
+      carried = await carriedOf(opened.filter, current);
     } else {
-      offerSources(opened.filter);
+      offerSources(opened.filter.tags, current);
     }
     if (!current()) return;
     // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
@@ -219,9 +222,12 @@
   }
 
   const setChips = (chips: ChipState) => apply({ ...view.filter, ...chips });
+  // A change is the newest navigation: it reads as its own the sources of every chosen tag whose newest read a superseded one
+  // had not applied.
   function apply(filter: TimelineFilter) {
-    turns.begin();
+    const current = turns.begin();
     turns.reading();
+    offerSources(sources.owed(filter.tags), current);
     persist(filter);
     void store.setFilter(filter);
   }
@@ -246,13 +252,14 @@
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
     let carried: SourceRead | undefined;
     if (next.restored) {
+      sources.claim(next.filter.tags);
       await listed;
       // A restore that a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
       // invalidate the answer of the navigation that is current.
       if (!current()) return;
-      carried = await carriedOf(next.filter);
+      carried = await carriedOf(next.filter, current);
     } else {
-      offerSources(next.filter);
+      offerSources(next.filter.tags, current);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
     if (carried !== undefined) {

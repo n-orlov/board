@@ -83,23 +83,31 @@ export interface SourceRead extends Carried {
 }
 
 /**
- * The per-tag source reads of one view, in the order they began (PRD R7/R10, SPEC 11). A link, a restoration and a hash change
- * each read the sources of their tags; their answers may land in any order, and only the newest read of a tag names its sources.
- * The validity of a restored tag (`tags`) is the read's own: the view's filter turns already drop a restore that is no longer current.
+ * The per-tag source reads of one view, in the order they began (PRD R7/R10, SPEC 11). A link, a restoration, a hash change
+ * and a chip change each read the sources of their tags; their answers may land in any order, and only the newest read of a tag
+ * names its sources. A read belongs to the navigation that began it (`owner`): once a newer navigation is current, its answer
+ * names nothing, so an abandoned link or restoration can neither set nor take away a source the current one shows. The
+ * validity of a restored tag (`tags`) is the read's own: the view's filter turns already drop a restore that is no longer current.
  */
 export class SourceReads {
   private began = 0;
   private readonly newest = new Map<string, number>();
+  private readonly applied = new Map<string, number>();
 
   constructor(private readonly probe: TagProbe) {}
 
-  /** Begins a read of `tags` (now, before it awaits anything) against the initiatives of `known`. */
-  async read(tags: readonly string[], known: readonly { tags: readonly string[] }[] = []): Promise<SourceRead> {
+  /**
+   * Begins a read of `tags` (now, before it awaits anything) against the initiatives of `known`, for the navigation `owner`
+   * answers for (true while it is current).
+   */
+  async read(tags: readonly string[], known: readonly { tags: readonly string[] }[] = [], owner: () => boolean = () => true): Promise<SourceRead> {
     const turn = ++this.began;
     for (const tag of tags) this.newest.set(canonicalTag(tag), turn);
     const answers = await probeAll(tags, this.probe);
     const current = (tag: string) => this.newest.get(tag) === turn;
     const fresh = (initiativeMoved = false) => {
+      if (!owner()) return { answered: new Set<string>(), marks: [] };
+      for (const answer of answers) if (current(answer.tag)) this.applied.set(answer.tag, turn);
       const c = carriedFrom(answers, [], initiativeMoved);
       return { answered: new Set([...c.answered].filter(current)), marks: c.marks.filter((m) => current(m.tag)) };
     };
@@ -108,6 +116,28 @@ export class SourceReads {
       fresh,
       carriedAgainst: (newest, initiativeMoved = false) => carriedFrom(answers, newest, initiativeMoved).tags,
     };
+  }
+
+  /**
+   * A restoration names `tags` before it can read them (it waits for the board's list first): they are owed from now on, so a
+   * change that supersedes it before it reads (or before its read is applied) reads them as its own.
+   */
+  claim(tags: readonly string[]): void {
+    const turn = ++this.began;
+    for (const tag of tags) this.newest.set(canonicalTag(tag), turn);
+  }
+
+  /**
+   * The tags of `tags` (as given) whose newest read (or claim) has not been applied: it is still out, or the navigation that
+   * began it was superseded before it named anything. A new navigation selecting one of them reads it again as its own, so its chip still
+   * names the tag's sources when no row of the combined filter does.
+   */
+  owed(tags: readonly string[]): string[] {
+    return tags.filter((tag) => {
+      const key = canonicalTag(tag);
+      const turn = this.newest.get(key);
+      return TAG_PATTERN.test(key) && turn !== undefined && this.applied.get(key) !== turn;
+    });
   }
 }
 

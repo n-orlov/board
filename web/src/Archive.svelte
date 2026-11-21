@@ -84,13 +84,14 @@
     const have = new Set((looked ?? []).flatMap((i) => i.tags));
     return tags.filter((tag) => have.has(tag)).map((tag) => ({ tag, source: 'initiative' as const }));
   };
-  function offerSources(chips: ChipState) {
-    if (chips.tags.length === 0) return;
+  function offerSources(tags: readonly string[], current: () => boolean) {
+    if (tags.length === 0) return;
     // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
-    // server no longer reports goes.
-    void Promise.all([sources.read(chips.tags), listed]).then(([read]) => {
+    // server no longer reports goes. A navigation superseded by the time it lands names nothing: the current one owns the chips.
+    void Promise.all([sources.read(tags, [], current), listed]).then(([read]) => {
+      if (!current()) return;
       const c = read.fresh();
-      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...initiativeMarks(chips.tags)]);
+      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...initiativeMarks(tags)]);
     });
   }
   // The chips a restored state keeps: the tags some initiative lists or some task carries; the sources of every kept tag are shown.
@@ -99,7 +100,9 @@
     // A restore a newer navigation has superseded reads nothing: a read it began now would be the newest for its tags and
     // invalidate the answer of the navigation that is current.
     if (looked === undefined || !current()) return chips;
-    const carried = await sources.read(chips.tags, looked);
+    const carried = await sources.read(chips.tags, looked, current);
+    // Superseded while the lookup was out: the navigation that is current names the chips' sources, not this one.
+    if (!current()) return chips;
     const have = new Set([...looked.flatMap((i) => i.tags), ...carried.tags]);
     const tags = chips.tags.filter((tag) => have.has(tag));
     const c = carried.fresh();
@@ -111,9 +114,10 @@
     listed = readCatalog();
     let chips = opened.chips;
     if (restored) {
+      sources.claim(chips.tags);
       chips = await checkedChips(chips, current);
     } else {
-      offerSources(chips);
+      offerSources(chips.tags, current);
     }
     if (!current()) return;
     turns.reading();
@@ -144,22 +148,24 @@
   }
 
   // A user's change is the newest navigation: a restoration or a link check still running is superseded, so it neither reads the
-  // sources of its tags nor sets its own filter over this one. The change reads at once.
-  function userTurn() {
-    turns.begin();
+  // sources of its tags nor names them nor sets its own filter over this one. The change reads at once, and reads as its own the
+  // sources of every chosen tag whose newest read the superseded navigation had not yet applied.
+  function userTurn(chips: ChipState) {
+    const current = turns.begin();
     turns.reading();
+    offerSources(sources.owed(chips.tags), current);
   }
 
   // A window reads the lists again.
   function choose(next: ArchiveWindow) {
-    userTurn();
+    userTurn(view.chips);
     remember({ window: next, chips: view.chips, sort });
     void store.setWindow(next);
   }
 
   // A chip change reads again, the server filtering.
   function setChips(next: ChipState) {
-    userTurn();
+    userTurn(next);
     remember({ window: view.window, chips: next, sort });
     void store.setChips(next);
   }
@@ -180,9 +186,10 @@
     // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
     if (chips.tags.length > 0) listed = readCatalog();
     if (restoring && chips.tags.length > 0) {
+      sources.claim(chips.tags);
       chips = await checkedChips(chips, current);
     } else {
-      offerSources(chips);
+      offerSources(chips.tags, current);
     }
     if (!current()) return; // the fragment changed again while the tags were checked
     sort = next.sort;
