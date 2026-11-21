@@ -29,20 +29,40 @@ export async function carriedTags(
   known: readonly { tags: readonly string[] }[],
   probe: TagProbe,
 ): Promise<Carried> {
-  const listed = new Set(known.flatMap((i) => i.tags.map(canonicalTag)));
+  return carriedFrom(await probeAll(tags, probe), known);
+}
+
+/** One tag's answer: the marks the probe found, or that it failed. */
+interface Answer {
+  tag: string;
+  marks: readonly TagMark[];
+  failed: boolean;
+}
+
+async function probeAll(tags: readonly string[], probe: TagProbe): Promise<Answer[]> {
   // Each tag in the server's spelling, once; one the server's grammar refuses cannot be on any task or initiative, so it is unknown
   // without asking (the server would answer 400, which is a failed check and would keep it).
   const wanted = [...new Set(tags.map(canonicalTag))].filter((tag) => TAG_PATTERN.test(tag));
-  const answers = await Promise.all(wanted.map((tag) => probe(tag).then((marks) => ({ marks, failed: false }), () => ({ marks: [] as readonly TagMark[], failed: true }))));
+  return Promise.all(wanted.map((tag) => probe(tag).then((marks): Answer => ({ tag, marks, failed: false }), (): Answer => ({ tag, marks: [], failed: true }))));
+}
+
+/**
+ * What the answers carry against the initiatives of `known`, which may be newer than the catalog the probe began under. With
+ * `initiativeMoved` the catalog has been read again since the probe began, so its `initiative` marks may name an initiative that
+ * no longer lists the tag: they are dropped (`known` offers what the initiatives list now), and a tag is then confirmed only by
+ * the sources the answer still holds, not by one that may have gone while the lookup was out.
+ */
+function carriedFrom(answers: readonly Answer[], known: readonly { tags: readonly string[] }[], initiativeMoved = false): Carried {
+  const listed = new Set(known.flatMap((i) => i.tags.map(canonicalTag)));
   const carried = new Set<string>();
   const answered = new Set<string>();
   const marks: TagMark[] = [];
-  wanted.forEach((tag, n) => {
-    const answer = answers[n]!;
-    marks.push(...answer.marks);
-    if (!answer.failed) answered.add(tag);
-    if (!listed.has(tag) && (answer.failed || answer.marks.length > 0)) carried.add(tag);
-  });
+  for (const answer of answers) {
+    const own = initiativeMoved ? answer.marks.filter((m) => m.source !== 'initiative') : answer.marks;
+    marks.push(...own);
+    if (!answer.failed) answered.add(answer.tag);
+    if (!listed.has(answer.tag) && (answer.failed || own.length > 0)) carried.add(answer.tag);
+  }
   return { tags: carried, marks, answered };
 }
 
@@ -53,7 +73,13 @@ export interface SourceRead extends Carried {
    * after a newer one (or while it is out) must not put back a source the newer one no longer reports. Asked when the answer is
    * applied, not when it lands, so a wait in between (the catalog's read) cannot let a stale answer through.
    */
-  fresh(): Pick<Carried, 'answered' | 'marks'>;
+  fresh(initiativeMoved?: boolean): Pick<Carried, 'answered' | 'marks'>;
+  /**
+   * The restored tags a task carries when checked against the newest catalog (`known`), not the one the read began under: a tag
+   * an initiative listed then and a task confirms now stays valid after an event takes it off its last initiative.
+   * `initiativeMoved` is whether the catalog was read again since the read began.
+   */
+  carriedAgainst(known: readonly { tags: readonly string[] }[], initiativeMoved?: boolean): ReadonlySet<string>;
 }
 
 /**
@@ -71,11 +97,16 @@ export class SourceReads {
   async read(tags: readonly string[], known: readonly { tags: readonly string[] }[] = []): Promise<SourceRead> {
     const turn = ++this.began;
     for (const tag of tags) this.newest.set(canonicalTag(tag), turn);
-    const carried = await carriedTags(tags, known, this.probe);
+    const answers = await probeAll(tags, this.probe);
     const current = (tag: string) => this.newest.get(tag) === turn;
+    const fresh = (initiativeMoved = false) => {
+      const c = carriedFrom(answers, [], initiativeMoved);
+      return { answered: new Set([...c.answered].filter(current)), marks: c.marks.filter((m) => current(m.tag)) };
+    };
     return {
-      ...carried,
-      fresh: () => ({ answered: new Set([...carried.answered].filter(current)), marks: carried.marks.filter((m) => current(m.tag)) }),
+      ...carriedFrom(answers, known),
+      fresh,
+      carriedAgainst: (newest, initiativeMoved = false) => carriedFrom(answers, newest, initiativeMoved).tags,
     };
   }
 }

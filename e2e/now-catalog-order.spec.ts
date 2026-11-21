@@ -71,6 +71,40 @@ async function openNow(page: Page, hash: string): Promise<void> {
   await openChips(page);
 }
 
+// Holds the page's first task-tag lookup of `tag` at the network (the read that says which sources a restored tag has and whether
+// any task carries it): `captured` resolves with the sources it answered, `release()` lets it land and waits until it is applied.
+const lookupOf = (tag: string) => `/api/v1/tasks?status=all&limit=1000&tag=${tag}`;
+async function holdLookup(page: Page, tag: string) {
+  const captured = Promise.withResolvers<string[]>();
+  const gate = Promise.withResolvers<void>();
+  let armed = true;
+  await page.route('**/api/v1/tasks?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (!armed || url.pathname + url.search !== lookupOf(tag)) return route.fallback();
+    armed = false;
+    const response = await route.fetch();
+    const body = (await response.json()) as { items: { tag_marks: { tag: string; source: string }[] }[] };
+    captured.resolve([...new Set(body.items.flatMap((i) => i.tag_marks.filter((m) => m.tag === tag).map((m) => m.source)))].sort());
+    await gate.promise;
+    await route.fulfill({ response });
+  });
+  return {
+    captured: captured.promise,
+    release: async () => {
+      const landed = page.waitForResponse((r) => r.url().endsWith(lookupOf(tag)));
+      gate.resolve();
+      await (await landed).finished();
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+    },
+  };
+}
+const savedQuery = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('vh.view.v1.attention') ?? 'null')?.query ?? null);
+// The chip's accessible name with its sources in a fixed order: `<tag>, <source tag>, ...`.
+const labelOf = async (page: Page, tag: string) => {
+  const [name, ...sources] = ((await tagChip(page, tag).getAttribute('aria-label')) ?? '').split(', ');
+  return [name, ...sources.sort()].join(', ');
+};
+
 const viewports = [
   { name: 'phone', size: { width: 390, height: 844 } },
   { name: 'desktop', size: { width: 1440, height: 900 } },
@@ -253,6 +287,93 @@ for (const vp of viewports) {
       await expect(tagChip(page, later)).toHaveAttribute('aria-pressed', 'true');
       await expect(tagChip(page, later)).toHaveAttribute('aria-label', `${later}, initiative tag`);
       expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      await api.dispose();
+    });
+
+    // R1: the saved filter is restored once a task-tag lookup answers; an initiative event while the lookup is out must not
+    // make the restore forget what the lookup confirms, nor offer a source that event removed.
+    test('a saved tag a task carries stays chosen when an event takes it off its last initiative while the lookup is out', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const owner = `e2e-catorder-j-${n}`;
+      const holder = `e2e-catorder-k-${n}`;
+      const tag = `catorder-last-${n}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await created(api, '/api/v1/initiatives', { slug: holder, title: holder, tags: [tag] });
+      await created(api, '/api/v1/initiatives', { slug: owner, title: owner });
+      const match = await created(api, '/api/v1/tasks', { initiative: owner, title: 'carries the tag itself', tags: [tag] });
+      const other = await created(api, '/api/v1/tasks', { initiative: owner, title: 'carries no tag' });
+      const viaInitiative = await created(api, '/api/v1/tasks', { initiative: holder, title: 'matches only through the initiative' });
+      const query = `tag=${tag}`;
+      await saveQuery(page, query);
+      const lookup = await holdLookup(page, tag);
+      await openNow(page, '/#/now');
+      expect(await lookup.captured).toEqual(['initiative', 'task']);
+
+      const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+      expect((await api.patch(`/api/v1/initiatives/${holder}`, { data: { tags: [] } })).ok()).toBe(true);
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 2);
+      await lookup.release();
+
+      await expect(tagChip(page, tag)).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => labelOf(page, tag)).toBe(`${tag}, task tag`);
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      expect(await savedQuery(page)).toBe(query);
+      await openFold(page, 'recent');
+      await expect(page.locator(`[data-testid="recent-row"][data-task="${match.ref}"]`)).toBeVisible();
+      await expect(page.locator(`[data-testid="recent-row"][data-task="${other.ref}"]`)).toHaveCount(0);
+      await expect(page.locator(`[data-testid="recent-row"][data-task="${viaInitiative.ref}"]`)).toHaveCount(0);
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+      await api.dispose();
+    });
+
+    test('a saved tag a task carries offers the initiative source of an initiative an event gave it while the lookup is out', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const owner = `e2e-catorder-l-${n}`;
+      const taker = `e2e-catorder-m-${n}`;
+      const tag = `catorder-gain-${n}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await created(api, '/api/v1/initiatives', { slug: taker, title: taker });
+      await created(api, '/api/v1/initiatives', { slug: owner, title: owner });
+      const match = await created(api, '/api/v1/tasks', { initiative: owner, title: 'carries the tag itself', tags: [tag] });
+      const query = `tag=${tag}`;
+      await saveQuery(page, query);
+      const lookup = await holdLookup(page, tag);
+      await openNow(page, '/#/now');
+      expect(await lookup.captured).toEqual(['task']);
+
+      expect((await api.patch(`/api/v1/initiatives/${taker}`, { data: { tags: [tag] } })).ok()).toBe(true);
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 2);
+      await lookup.release();
+
+      await expect(tagChip(page, tag)).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => labelOf(page, tag)).toBe(`${tag}, initiative tag, task tag`);
+      expect(new URL(page.url()).hash).toBe(`#/now?${query}`);
+      expect(await savedQuery(page)).toBe(query);
+      await openFold(page, 'recent');
+      await expect(page.locator(`[data-testid="recent-row"][data-task="${match.ref}"]`)).toBeVisible();
+      await api.dispose();
+    });
+
+    test('a saved tag only the initiative gave a task is dropped when an event takes it off the initiative while the lookup is out', async ({ page, playwright, baseURL }, testInfo) => {
+      const n = `${vp.name}${testInfo.repeatEachIndex}`;
+      const holder = `e2e-catorder-p-${n}`;
+      const tag = `catorder-gone-${n}`;
+      const api = await actorApi(playwright, baseURL, 'pi:catorder');
+      await created(api, '/api/v1/initiatives', { slug: holder, title: holder, tags: [tag] });
+      await created(api, '/api/v1/tasks', { initiative: holder, title: 'matches only through the initiative' });
+      await saveQuery(page, `tag=${tag}`);
+      const lookup = await holdLookup(page, tag);
+      await openNow(page, '/#/now');
+      expect(await lookup.captured).toEqual(['initiative']);
+
+      expect((await api.patch(`/api/v1/initiatives/${holder}`, { data: { tags: [] } })).ok()).toBe(true);
+      await page.waitForFunction(() => (window as unknown as { __catalogReads: number }).__catalogReads >= 2);
+      await lookup.release();
+
+      // Nothing carries the tag any more: it is no choice, and the restored filter does not name it.
+      await expect(tagChip(page, tag)).toHaveCount(0);
+      expect(new URL(page.url()).hash).not.toContain(tag);
+      expect((await savedQuery(page)) ?? '').not.toContain(tag);
       await api.dispose();
     });
   });

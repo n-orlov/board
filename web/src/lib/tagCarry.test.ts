@@ -115,4 +115,42 @@ describe('SourceReads', () => {
     expect([...answer.tags]).toEqual([]);
     expect([...answer.fresh().answered].sort()).toEqual(['ghost', 'work']);
   });
+
+  // The restore's lookup is out while an initiative event takes the tag off its last initiative: the answer is checked against
+  // the catalog as it is now, not the one the lookup began under.
+  describe('carriedAgainst the newest catalog', () => {
+    const before = [{ tags: ['shared'] }];
+    const after = [{ tags: [] as string[] }];
+
+    it('keeps a tag a task confirms after the catalog stopped listing it, which the catalog it began under still did', async () => {
+      const answer = await new SourceReads(async (tag) => [mark(tag, 'task'), mark(tag, 'initiative')]).read(['shared'], before);
+      expect(answer.tags.size).toBe(0);
+      expect([...answer.carriedAgainst(after, true)]).toEqual(['shared']);
+      expect([...answer.carriedAgainst(after)]).toEqual(['shared']);
+    });
+
+    it('does not carry a tag the newest catalog still lists: the initiatives offer it', async () => {
+      const answer = await new SourceReads(async (tag) => [mark(tag, 'task')]).read(['shared'], after);
+      expect([...answer.tags]).toEqual(['shared']);
+      expect(answer.carriedAgainst(before, true).size).toBe(0);
+    });
+
+    it('drops the initiative marks of an answer that predates a catalog read, and keeps the task and actor ones', async () => {
+      const answer = await new SourceReads(async (tag) => [mark(tag, 'initiative'), mark(tag, 'task'), mark(tag, 'actor')]).read(['shared'], before);
+      expect(answer.fresh().marks).toEqual([mark('shared', 'initiative'), mark('shared', 'task'), mark('shared', 'actor')]);
+      expect(answer.fresh(true).marks).toEqual([mark('shared', 'task'), mark('shared', 'actor')]);
+      expect([...answer.fresh(true).answered]).toEqual(['shared']);
+    });
+
+    it('drops a tag only an initiative source confirmed once the catalog moved and no initiative lists it', async () => {
+      const answer = await new SourceReads(async (tag) => [mark(tag, 'initiative')]).read(['shared'], before);
+      expect(answer.carriedAgainst(after, false).has('shared')).toBe(true);
+      expect(answer.carriedAgainst(after, true).size).toBe(0);
+    });
+
+    it('keeps a tag whose check failed whatever the catalog says', async () => {
+      const answer = await new SourceReads(() => Promise.reject(new Error('down'))).read(['shared'], before);
+      expect([...answer.carriedAgainst(after, true)]).toEqual(['shared']);
+    });
+  });
 });
