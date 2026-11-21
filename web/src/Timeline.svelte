@@ -23,7 +23,7 @@
   import { CatalogReads } from './lib/catalogReads';
   import { TasksApi } from './lib/tasks';
   import { currentRows, watchRows, rowsName, type RowsEnv } from './lib/timelineRows';
-  import { carriedTags, type Carried } from './lib/tagCarry';
+  import { SourceReads, type SourceRead } from './lib/tagCarry';
   import { live } from './lib/live';
   import {
     CLOSED_WITHIN_OPTIONS,
@@ -142,15 +142,18 @@
   }
   // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
   const tasksApi = new TasksApi(browser, () => csrf);
-  async function carriedOf(filter: TimelineFilter): Promise<Carried | undefined> {
-    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => tasksApi.tagMarks(tag));
+  // Every read of a tag's sources (a link's, a restoration's) shares one order: an older answer never overwrites a newer one.
+  const sources = new SourceReads((tag) => tasksApi.tagMarks(tag));
+  async function carriedOf(filter: TimelineFilter): Promise<SourceRead | undefined> {
+    return looked === undefined ? undefined : sources.read(filter.tags, looked);
   }
   // A link's own tags are kept as they are, but their chips still name the sources the tasks give them: read in the background,
   // so the board's first read does not wait for it. A failed read leaves the chip as the view's own rows name it.
   function offerSources(filter: TimelineFilter) {
     if (filter.tags.length === 0) return;
-    void carriedTags(filter.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
+    void sources.read(filter.tags).then((read) => {
       // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
+      const c = read.fresh();
       seen = withFreshSources(seen, c.answered, c.marks);
     });
   }
@@ -161,7 +164,7 @@
       .actors()
       .then((handles) => (actors = handles))
       .catch(() => undefined);
-    let carried: Carried | undefined;
+    let carried: SourceRead | undefined;
     if (opened.restored) {
       await listed;
       carried = await carriedOf(opened.filter);
@@ -170,7 +173,10 @@
     }
     if (!current()) return;
     // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
-    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
+    if (carried !== undefined) {
+      const c = carried.fresh();
+      seen = withFreshSources(seen, c.answered, c.marks);
+    }
     turns.reading();
     const kept = startFilter(opened, looked, carried?.tags);
     if (kept === opened.filter) {
@@ -235,7 +241,7 @@
     // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
     if (next.filter.tags.length > 0) readCatalog();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
-    let carried: Carried | undefined;
+    let carried: SourceRead | undefined;
     if (next.restored) {
       await listed;
       carried = await carriedOf(next.filter);
@@ -243,7 +249,10 @@
       offerSources(next.filter);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
+    if (carried !== undefined) {
+      const c = carried.fresh();
+      seen = withFreshSources(seen, c.answered, c.marks);
+    }
     const filter = startFilter(next, looked, carried?.tags);
     if (next.window !== undefined && !sameRange(next.window, view.window)) {
       windowInHash = true;

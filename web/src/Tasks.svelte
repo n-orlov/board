@@ -45,7 +45,7 @@
     viewToQuery,
     type TasksViewState,
   } from './lib/tasksView';
-  import { carriedTags, type Carried } from './lib/tagCarry';
+  import { SourceReads, type SourceRead } from './lib/tagCarry';
   import { clearViewQuery, currentViewEnv, FilterTurns, openView, saveViewQuery } from './lib/viewState';
 
   let { csrf }: { csrf: string; param?: string } = $props();
@@ -103,8 +103,10 @@
   }
   // A restored tag no initiative lists is valid when some task carries it (own, or a derived actor kind): the server says. The same
   // answer names the sources every restored tag has, so its chip keeps them whatever the combined filter returns.
-  async function carriedOf(filter: TasksFilter): Promise<Carried | undefined> {
-    return looked === undefined ? undefined : carriedTags(filter.tags, looked, (tag) => api.tagMarks(tag));
+  // Every read of a tag's sources (a link's, a restoration's) shares one order: an older answer never overwrites a newer one.
+  const sources = new SourceReads((tag) => api.tagMarks(tag));
+  async function carriedOf(filter: TasksFilter): Promise<SourceRead | undefined> {
+    return looked === undefined ? undefined : sources.read(filter.tags, looked);
   }
   // A link's own tags are kept as they are, but their chips still name the sources the tasks and the initiatives give them: read
   // in the background, so the first read does not wait for it. A failed read leaves the chip as the rows name it.
@@ -112,19 +114,21 @@
     if (filter.tags.length === 0) return;
     // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
     // server no longer reports goes.
-    void Promise.all([carriedTags(filter.tags, [], (tag) => api.tagMarks(tag)), listed]).then(([c]) => {
+    void Promise.all([sources.read(filter.tags), listed]).then(([read]) => {
+      const c = read.fresh();
       tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...listedMarks(filter.tags, looked ?? [])]);
     });
   }
-  function restoredState(state: TasksViewState, carried: Carried | undefined): TasksViewState {
+  function restoredState(state: TasksViewState, carried: SourceRead | undefined): TasksViewState {
     if (looked === undefined) return state;
-    tagChoices = withFreshSources(tagChoices, carried?.answered ?? new Set(), [...(carried?.marks ?? []), ...listedMarks(state.filter.tags, looked)]);
+    const c = carried?.fresh();
+    tagChoices = withFreshSources(tagChoices, c?.answered ?? new Set(), [...(c?.marks ?? []), ...listedMarks(state.filter.tags, looked)]);
     return dropUnknown(state, looked, carried?.tags);
   }
   async function start() {
     const current = turns.begin();
     readCatalog();
-    let carried: Carried | undefined;
+    let carried: SourceRead | undefined;
     if (restoredFilter) {
       await listed;
       carried = await carriedOf(initial);
@@ -193,7 +197,7 @@
     if (next.filter.tags.length > 0) readCatalog();
     // A restored filter waits for the board's list and the tags' check like the first one does; a link's own query does not.
     const checking = restoring && checksRestored(next.filter);
-    let carried: Carried | undefined;
+    let carried: SourceRead | undefined;
     if (checking) {
       await listed;
       carried = await carriedOf(next.filter);

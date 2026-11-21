@@ -29,7 +29,7 @@
   import { hashPath } from './lib/routes';
   import { currentBrowser } from './lib/session';
   import { sortRows, type SortState } from './lib/tableSort';
-  import { carriedTags, type Carried } from './lib/tagCarry';
+  import { SourceReads } from './lib/tagCarry';
   import { TasksApi } from './lib/tasks';
   import { currentViewEnv, FilterTurns, openView, saveViewQuery } from './lib/viewState';
 
@@ -78,6 +78,8 @@
     });
     return catalog.settled();
   }
+  // Every read of a tag's sources (a link's, a restoration's) shares one order: an older answer never overwrites a newer one.
+  const sources = new SourceReads((tag) => tasksApi.tagMarks(tag));
   const initiativeMarks = (tags: readonly string[]): TagMark[] => {
     const have = new Set((looked ?? []).flatMap((i) => i.tags));
     return tags.filter((tag) => have.has(tag)).map((tag) => ({ tag, source: 'initiative' as const }));
@@ -86,7 +88,8 @@
     if (chips.tags.length === 0) return;
     // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
     // server no longer reports goes.
-    void Promise.all([carriedTags(chips.tags, [], (tag) => tasksApi.tagMarks(tag)), listed]).then(([c]) => {
+    void Promise.all([sources.read(chips.tags), listed]).then(([read]) => {
+      const c = read.fresh();
       tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...initiativeMarks(chips.tags)]);
     });
   }
@@ -94,10 +97,11 @@
   async function checkedChips(chips: ChipState): Promise<ChipState> {
     await listed;
     if (looked === undefined) return chips;
-    const carried: Carried = await carriedTags(chips.tags, looked, (tag) => tasksApi.tagMarks(tag));
+    const carried = await sources.read(chips.tags, looked);
     const have = new Set([...looked.flatMap((i) => i.tags), ...carried.tags]);
     const tags = chips.tags.filter((tag) => have.has(tag));
-    tagChoices = withFreshSources(tagChoices, carried.answered, [...carried.marks, ...initiativeMarks(chips.tags)]);
+    const c = carried.fresh();
+    tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...initiativeMarks(chips.tags)]);
     return tags.length === chips.tags.length ? chips : { ...chips, tags };
   }
   async function start() {

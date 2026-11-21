@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TagMark } from './chipFilter';
-import { carriedTags } from './tagCarry';
+import { carriedTags, SourceReads } from './tagCarry';
 
 const known = [{ tags: ['work'] }, { tags: ['home'] }];
 const mark = (tag: string, source: TagMark['source']): TagMark => ({ tag, source });
@@ -55,5 +55,64 @@ describe('carriedTags', () => {
     expect(probe.mock.calls.map((c) => c[0])).toEqual(['fine']);
     expect([...tags]).toEqual(['fine']);
     expect(marks).toEqual([mark('fine', 'task')]);
+  });
+});
+
+describe('SourceReads', () => {
+  // A probe whose answers are released by hand, so the test chooses the order they land in.
+  function gated() {
+    const pending: { tag: string; release: (marks: TagMark[]) => void; fail: () => void }[] = [];
+    const probe = (tag: string) =>
+      new Promise<readonly TagMark[]>((resolve, reject) => pending.push({ tag, release: resolve, fail: () => reject(new Error('down')) }));
+    return { pending, reads: new SourceReads(probe) };
+  }
+
+  it('drops an older answer for a tag that lands after a newer read of it', async () => {
+    const { pending, reads } = gated();
+    const older = reads.read(['own']);
+    const newer = reads.read(['own']);
+    pending[1]!.release([mark('own', 'initiative')]);
+    expect((await newer).fresh()).toEqual({ answered: new Set(['own']), marks: [mark('own', 'initiative')] });
+    pending[0]!.release([mark('own', 'task'), mark('own', 'initiative')]);
+    expect((await older).fresh()).toEqual({ answered: new Set(), marks: [] });
+  });
+
+  it('drops an older answer that landed first but is applied after a newer read began', async () => {
+    const { pending, reads } = gated();
+    const older = reads.read(['own']);
+    pending[0]!.release([mark('own', 'task')]);
+    const answer = await older;
+    expect(answer.fresh().marks).toEqual([mark('own', 'task')]);
+    void reads.read(['own']);
+    expect(answer.fresh()).toEqual({ answered: new Set(), marks: [] });
+  });
+
+  it('keeps an older answer for the tags no newer read names, in any spelling', async () => {
+    const { pending, reads } = gated();
+    const older = reads.read(['own', 'ralph']);
+    void reads.read(['  OWN ']);
+    pending[0]!.release([mark('own', 'task')]);
+    pending[1]!.release([mark('ralph', 'actor')]);
+    const answer = await older;
+    expect(answer.fresh()).toEqual({ answered: new Set(['ralph']), marks: [mark('ralph', 'actor')] });
+    // validity is the read's own: the view's filter turns decide whether a restore still applies
+    expect([...answer.tags].sort()).toEqual(['own', 'ralph']);
+  });
+
+  it('keeps nothing from a newer read that failed, and still drops the older answer', async () => {
+    const { pending, reads } = gated();
+    const older = reads.read(['own']);
+    const newer = reads.read(['own']);
+    pending[1]!.fail();
+    expect((await newer).fresh()).toEqual({ answered: new Set(), marks: [] });
+    pending[0]!.release([mark('own', 'task')]);
+    expect((await older).fresh()).toEqual({ answered: new Set(), marks: [] });
+  });
+
+  it('checks a restored tag against the initiatives it is given', async () => {
+    const reads = new SourceReads(async () => []);
+    const answer = await reads.read(['work', 'ghost'], known);
+    expect([...answer.tags]).toEqual([]);
+    expect([...answer.fresh().answered].sort()).toEqual(['ghost', 'work']);
   });
 });

@@ -45,3 +45,37 @@ export async function carriedTags(
   });
   return { tags: carried, marks, answered };
 }
+
+/** One source read's answer: the `Carried` of its tags, and the part of it that still holds when it is applied. */
+export interface SourceRead extends Carried {
+  /**
+   * The answered tags and their marks, less every tag a newer read has begun for since this one began: an older answer landing
+   * after a newer one (or while it is out) must not put back a source the newer one no longer reports. Asked when the answer is
+   * applied, not when it lands, so a wait in between (the catalog's read) cannot let a stale answer through.
+   */
+  fresh(): Pick<Carried, 'answered' | 'marks'>;
+}
+
+/**
+ * The per-tag source reads of one view, in the order they began (PRD R7/R10, SPEC 11). A link, a restoration and a hash change
+ * each read the sources of their tags; their answers may land in any order, and only the newest read of a tag names its sources.
+ * The validity of a restored tag (`tags`) is the read's own: the view's filter turns already drop a restore that is no longer current.
+ */
+export class SourceReads {
+  private began = 0;
+  private readonly newest = new Map<string, number>();
+
+  constructor(private readonly probe: TagProbe) {}
+
+  /** Begins a read of `tags` (now, before it awaits anything) against the initiatives of `known`. */
+  async read(tags: readonly string[], known: readonly { tags: readonly string[] }[] = []): Promise<SourceRead> {
+    const turn = ++this.began;
+    for (const tag of tags) this.newest.set(canonicalTag(tag), turn);
+    const carried = await carriedTags(tags, known, this.probe);
+    const current = (tag: string) => this.newest.get(tag) === turn;
+    return {
+      ...carried,
+      fresh: () => ({ answered: new Set([...carried.answered].filter(current)), marks: carried.marks.filter((m) => current(m.tag)) }),
+    };
+  }
+}
