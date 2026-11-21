@@ -7,6 +7,7 @@
   import NowPanel from './NowPanel.svelte';
   import Toast from './Toast.svelte';
   import { InitiativesApi } from './lib/initiatives';
+  import { CatalogReads } from './lib/catalogReads';
   import { taskRows } from './lib/initiativePage';
   import { NO_NEEDS, NeedsStore, withoutNeeds, type NeedsState } from './lib/needsAttention';
   import { toneClasses } from './lib/presentation';
@@ -31,7 +32,7 @@
   import { tagEditor } from './lib/taskTags';
   import type { TaskRow } from './lib/initiativePage';
   import SortControl from './SortControl.svelte';
-  import { mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { mergeChoices, withFreshSources, type ChipState, type TagChoice } from './lib/chipFilter';
   import { sortRows, type SortState } from './lib/tableSort';
   import {
     TASKS_VIEW,
@@ -89,6 +90,17 @@
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
+  // The board's initiatives, read on opening and again on every link or restoration, so a chip's initiative source is the
+  // catalog's as it is now; a read landing after a newer one is dropped, and a failed one changes nothing.
+  const catalog = new CatalogReads(() => new InitiativesApi(browser, () => csrf).list('all'));
+  function readCatalog() {
+    // the select then offers only the initiative the URL names; the list shows the error
+    void catalog.next((list) => {
+      initiatives = list.map((i) => i.slug);
+      looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
+    });
+    listed = catalog.settled();
+  }
   // A restored tag no initiative lists is valid when some task carries it (own, or a derived actor kind): the server says. The same
   // answer names the sources every restored tag has, so its chip keeps them whatever the combined filter returns.
   async function carriedOf(filter: TasksFilter): Promise<Carried | undefined> {
@@ -98,27 +110,20 @@
   // in the background, so the first read does not wait for it. A failed read leaves the chip as the rows name it.
   function offerSources(filter: TasksFilter) {
     if (filter.tags.length === 0) return;
-    void carriedTags(filter.tags, [], (tag) => api.tagMarks(tag)).then((c) => {
-      tagChoices = mergeChoices(tagChoices, c.marks, []);
-    });
-    void listed.then(() => {
-      if (looked !== undefined) tagChoices = mergeChoices(tagChoices, listedMarks(filter.tags, looked), []);
+    // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
+    // server no longer reports goes.
+    void Promise.all([carriedTags(filter.tags, [], (tag) => api.tagMarks(tag)), listed]).then(([c]) => {
+      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...listedMarks(filter.tags, looked ?? [])]);
     });
   }
   function restoredState(state: TasksViewState, carried: Carried | undefined): TasksViewState {
     if (looked === undefined) return state;
-    tagChoices = mergeChoices(tagChoices, [...(carried?.marks ?? []), ...listedMarks(state.filter.tags, looked)], []);
+    tagChoices = withFreshSources(tagChoices, carried?.answered ?? new Set(), [...(carried?.marks ?? []), ...listedMarks(state.filter.tags, looked)]);
     return dropUnknown(state, looked, carried?.tags);
   }
   async function start() {
     const current = turns.begin();
-    listed = new InitiativesApi(browser, () => csrf)
-      .list('all')
-      .then((list) => {
-        initiatives = list.map((i) => i.slug);
-        looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
-      })
-      .catch(() => undefined); // the select then offers only the initiative the URL names; the list shows the error
+    readCatalog();
     let carried: Carried | undefined;
     if (restoredFilter) {
       await listed;
@@ -184,6 +189,8 @@
     const restoring = queryOf(hash) === '';
     let next = viewFromQuery(openView(viewEnv, TASKS_VIEW, '#/tasks', queryOf(hash)));
     const current = turns.begin();
+    // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
+    if (next.filter.tags.length > 0) readCatalog();
     // A restored filter waits for the board's list and the tags' check like the first one does; a link's own query does not.
     const checking = restoring && checksRestored(next.filter);
     let carried: Carried | undefined;

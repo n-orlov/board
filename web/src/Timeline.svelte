@@ -17,9 +17,10 @@
   import { WINDOWS, loadWindow, saveWindow, type NowWindow } from './lib/nowFlight';
   import { ACTIVE_CHOICES, ACTIVE_COLUMNS, WINDOW_HINT, windowVisible, type TimelineOrder } from './lib/timelineActive';
   import type { SortState } from './lib/tableSort';
-  import { mergeChoices, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { withFreshSources, type ChipState, type TagChoice } from './lib/chipFilter';
   import TaskPreview from './TaskPreview.svelte';
   import { InitiativesApi } from './lib/initiatives';
+  import { CatalogReads } from './lib/catalogReads';
   import { TasksApi } from './lib/tasks';
   import { currentRows, watchRows, rowsName, type RowsEnv } from './lib/timelineRows';
   import { carriedTags, type Carried } from './lib/tagCarry';
@@ -127,6 +128,18 @@
   // Leaving the view drops a check still running: its late answer must not rewrite the view navigated to, nor read.
   onDestroy(() => turns.end());
   let listed: Promise<void> = Promise.resolve();
+  // The board's initiatives, read on opening and again on every link or restoration with tags, so a chip's initiative source is
+  // the catalog's as it is now; a read landing after a newer one is dropped, and a failed one changes nothing.
+  const catalog = new CatalogReads(() => new InitiativesApi(browser, () => csrf).list('all'));
+  function readCatalog() {
+    // the selects then offer only what the URL names; the chart shows the error
+    void catalog.next((list) => {
+      looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
+      slugs = list.map((i) => i.slug);
+      boardInitiatives = list.map((i) => ({ tags: i.tags }));
+    });
+    listed = catalog.settled();
+  }
   // The restored tags no initiative lists are valid when some task carries them (own, or a derived actor kind): the server says.
   const tasksApi = new TasksApi(browser, () => csrf);
   async function carriedOf(filter: TimelineFilter): Promise<Carried | undefined> {
@@ -137,19 +150,13 @@
   function offerSources(filter: TimelineFilter) {
     if (filter.tags.length === 0) return;
     void carriedTags(filter.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
-      seen = mergeChoices(seen, c.marks, []);
+      // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
+      seen = withFreshSources(seen, c.answered, c.marks);
     });
   }
   async function start() {
     const current = turns.begin();
-    listed = new InitiativesApi(browser, () => csrf)
-      .list('all')
-      .then((list) => {
-        looked = list.map((i) => ({ slug: i.slug, tags: i.tags }));
-        slugs = list.map((i) => i.slug);
-        boardInitiatives = list.map((i) => ({ tags: i.tags }));
-      })
-      .catch(() => undefined); // the selects then offer only what the URL names; the chart shows the error
+    readCatalog();
     void api
       .actors()
       .then((handles) => (actors = handles))
@@ -163,7 +170,7 @@
     }
     if (!current()) return;
     // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
-    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
     turns.reading();
     const kept = startFilter(opened, looked, carried?.tags);
     if (kept === opened.filter) {
@@ -225,6 +232,8 @@
     const next = openTimeline(viewEnv, window.location.hash);
     preview = next.task; // Back from a preview's entry closes it; Forward opens it again
     const current = turns.begin();
+    // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
+    if (next.filter.tags.length > 0) readCatalog();
     // A restored filter waits for the board's list like the first one does; a link's own query does not.
     let carried: Carried | undefined;
     if (next.restored) {
@@ -234,7 +243,7 @@
       offerSources(next.filter);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
     const filter = startFilter(next, looked, carried?.tags);
     if (next.window !== undefined && !sameRange(next.window, view.window)) {
       windowInHash = true;

@@ -15,6 +15,8 @@ export interface Carried {
   /** Valid without an initiative listing them: a task matches them, or the check could not be made. */
   tags: ReadonlySet<string>;
   marks: TagMark[];
+  /** The tags the probe answered for: `marks` holds every source each of them has now (a failed probe's tag is not here). */
+  answered: ReadonlySet<string>;
 }
 
 /**
@@ -33,11 +35,13 @@ export async function carriedTags(
   const wanted = [...new Set(tags.map(canonicalTag))].filter((tag) => TAG_PATTERN.test(tag));
   const answers = await Promise.all(wanted.map((tag) => probe(tag).then((marks) => ({ marks, failed: false }), () => ({ marks: [] as readonly TagMark[], failed: true }))));
   const carried = new Set<string>();
+  const answered = new Set<string>();
   const marks: TagMark[] = [];
   wanted.forEach((tag, n) => {
     const answer = answers[n]!;
     marks.push(...answer.marks);
+    if (!answer.failed) answered.add(tag);
     if (!listed.has(tag) && (answer.failed || answer.marks.length > 0)) carried.add(tag);
   });
-  return { tags: carried, marks };
+  return { tags: carried, marks, answered };
 }

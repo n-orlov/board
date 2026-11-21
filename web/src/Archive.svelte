@@ -22,8 +22,9 @@
     type ArchiveWindow,
   } from './lib/archive';
   import { ARCHIVE_COLUMNS, ARCHIVE_SORT_LABELS, ARCHIVE_VIEW, archiveTagChoices, archiveViewHash, queryOfHash, viewFromQuery, viewToQuery, type ArchiveViewState } from './lib/archiveView';
-  import { chipsActive, mergeChoices, type ChipState, type TagChoice, type TagMark } from './lib/chipFilter';
+  import { chipsActive, withFreshSources, type ChipState, type TagChoice, type TagMark } from './lib/chipFilter';
   import { InitiativesApi } from './lib/initiatives';
+  import { CatalogReads } from './lib/catalogReads';
   import { live } from './lib/live';
   import { hashPath } from './lib/routes';
   import { currentBrowser } from './lib/session';
@@ -66,14 +67,16 @@
   const listApi = new InitiativesApi(browser, () => csrf);
   let looked: { slug: string; tags: string[] }[] | undefined;
   let listed: Promise<void> = Promise.resolve();
+  // Read on opening and again on every link or restoration with tags, so a chip's initiative source is the catalog's as it is
+  // now; a read landing after a newer one is dropped, and a failed one changes nothing.
+  const catalog = new CatalogReads(() => listApi.list('all'));
   function readCatalog(): Promise<void> {
-    return listApi
-      .list('all')
-      .then((list) => {
-        initiatives = list.map((i) => i.slug);
-        looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
-      })
-      .catch(() => undefined); // the chips then offer only the initiatives the fragment names; the list shows its own error
+    // the chips then offer only the initiatives the fragment names; the list shows its own error
+    void catalog.next((list) => {
+      initiatives = list.map((i) => i.slug);
+      looked = list.map((i) => ({ slug: i.slug, tags: [...i.tags] }));
+    });
+    return catalog.settled();
   }
   const initiativeMarks = (tags: readonly string[]): TagMark[] => {
     const have = new Set((looked ?? []).flatMap((i) => i.tags));
@@ -81,11 +84,10 @@
   };
   function offerSources(chips: ChipState) {
     if (chips.tags.length === 0) return;
-    void carriedTags(chips.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
-      tagChoices = mergeChoices(tagChoices, c.marks, []);
-    });
-    void listed.then(() => {
-      tagChoices = mergeChoices(tagChoices, initiativeMarks(chips.tags), []);
+    // The answer is what each tag carries now, with the catalog read for this link: a source an earlier read showed and the
+    // server no longer reports goes.
+    void Promise.all([carriedTags(chips.tags, [], (tag) => tasksApi.tagMarks(tag)), listed]).then(([c]) => {
+      tagChoices = withFreshSources(tagChoices, c.answered, [...c.marks, ...initiativeMarks(chips.tags)]);
     });
   }
   // The chips a restored state keeps: the tags some initiative lists or some task carries; the sources of every kept tag are shown.
@@ -95,7 +97,7 @@
     const carried: Carried = await carriedTags(chips.tags, looked, (tag) => tasksApi.tagMarks(tag));
     const have = new Set([...looked.flatMap((i) => i.tags), ...carried.tags]);
     const tags = chips.tags.filter((tag) => have.has(tag));
-    tagChoices = mergeChoices(tagChoices, [...carried.marks, ...initiativeMarks(chips.tags)], []);
+    tagChoices = withFreshSources(tagChoices, carried.answered, [...carried.marks, ...initiativeMarks(chips.tags)]);
     return tags.length === chips.tags.length ? chips : { ...chips, tags };
   }
   async function start() {
@@ -160,6 +162,8 @@
     const next = viewFromQuery(openView(viewEnv, ARCHIVE_VIEW, '#/archive', queryOfHash(window.location.hash)));
     const current = turns.begin();
     let chips = next.chips;
+    // The chips' initiative sources (and the restore check) use the catalog as it is now, not as it was on opening.
+    if (chips.tags.length > 0) listed = readCatalog();
     if (restoring && chips.tags.length > 0) {
       chips = await checkedChips(chips);
     } else {

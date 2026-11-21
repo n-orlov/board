@@ -12,6 +12,7 @@ import {
   chipsToParams,
   initiativeChoices,
   mergeChoices,
+  withFreshSources,
   withoutSource,
   sourceLabel,
   tagHue,
@@ -231,5 +232,33 @@ describe('withoutSource', () => {
     const next = mergeChoices(withoutSource(kept, 'initiative'), [{ tag: 'b', source: 'initiative' }], []);
     expect(next.find((c) => c.tag === 'a')).toBeUndefined();
     expect(next.find((c) => c.tag === 'b')?.sources).toEqual(['task', 'initiative']);
+  });
+});
+
+describe('withFreshSources', () => {
+  const known = [
+    { tag: 'shared', sources: ['task' as const, 'initiative' as const] },
+    { tag: 'other', sources: ['task' as const] },
+    { tag: 'agent', sources: ['actor' as const, 'task' as const] },
+  ];
+  it('drops a source the fresh answer no longer reports and keeps the one it does', () => {
+    const next = withFreshSources(known, new Set(['shared']), [{ tag: 'shared', source: 'initiative' }]);
+    expect(next.find((c) => c.tag === 'shared')?.sources).toEqual(['initiative']);
+  });
+  it('drops the initiative source when only a task carries the tag now (the other direction)', () => {
+    const next = withFreshSources(known, new Set(['shared']), [{ tag: 'shared', source: 'task' }]);
+    expect(next.find((c) => c.tag === 'shared')?.sources).toEqual(['task']);
+  });
+  it('keeps a tag nothing carries any more on offer with no source, so its chip names just the tag', () => {
+    const next = withFreshSources(known, new Set(['agent']), []);
+    expect(next.find((c) => c.tag === 'agent')).toEqual({ tag: 'agent', sources: [] });
+    expect(chipName(next.find((c) => c.tag === 'agent')!)).toBe('agent');
+  });
+  it('leaves the tags it has no answer for (a failed check) as they were and adds the sources of the others', () => {
+    const next = withFreshSources(known, new Set(['shared']), [{ tag: 'shared', source: 'task' }, { tag: 'other', source: 'actor' }, { tag: 'new', source: 'initiative' }]);
+    expect(next.find((c) => c.tag === 'other')?.sources).toEqual(['task', 'actor']);
+    expect(next.find((c) => c.tag === 'agent')?.sources).toEqual(['actor', 'task']);
+    expect(next.find((c) => c.tag === 'new')?.sources).toEqual(['initiative']);
+    expect(known[0]).toEqual({ tag: 'shared', sources: ['task', 'initiative'] });
   });
 });

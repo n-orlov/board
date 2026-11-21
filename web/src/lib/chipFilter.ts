@@ -109,6 +109,17 @@ export function mergeChoices(known: readonly TagChoice[], marks: readonly { tag:
 }
 
 /**
+ * The choices after a fresh answer for some tags (the per-tag read of `carriedTags`, the server's rule over tasks of any status):
+ * each tag of `answered` has exactly the sources `marks` give it now, so a source the server no longer reports goes instead of
+ * being kept from an earlier read; the other tags keep theirs. A tag stays on offer with no source rather than being taken away.
+ * `marks` may carry sources for other tags too (the initiatives' list): those are added as `mergeChoices` adds them.
+ */
+export function withFreshSources(known: readonly TagChoice[], answered: ReadonlySet<string>, marks: readonly TagMark[]): TagChoice[] {
+  const reset = known.filter((c) => !answered.has(c.tag));
+  return mergeChoices(reset, marks, known.filter((c) => answered.has(c.tag)).map((c) => c.tag));
+}
+
+/**
  * The choices without one source: a chip that had only that source goes, one with another source keeps it. For a catalog that
  * has just been read again: what it still carries is offered again from the new list, what it dropped is not kept by memory.
  */

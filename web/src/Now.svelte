@@ -23,7 +23,7 @@
   } from './lib/attentionActions';
   import { onDestroy, untrack } from 'svelte';
   import { nowHash, type AttentionFilter } from './lib/attention';
-  import { chipsActive, initiativeChoices, mergeChoices, withoutSource, type ChipState, type TagChoice } from './lib/chipFilter';
+  import { chipsActive, initiativeChoices, withFreshSources, withoutSource, type ChipState, type TagChoice } from './lib/chipFilter';
   import {
     AttentionApi,
     AttentionStore,
@@ -115,7 +115,8 @@
   function offerSources(filter: AttentionFilter) {
     if (filter.tags.length === 0) return;
     void carriedTags(filter.tags, [], (tag) => tasksApi.tagMarks(tag)).then((c) => {
-      seen = mergeChoices(seen, c.marks, []);
+      // The answer is what each tag carries now: a source an earlier read showed and the server no longer reports goes.
+      seen = withFreshSources(seen, c.answered, c.marks);
     });
   }
   // An initiative made, edited, closed or reopened while the page is open: the catalog the chips offer is read again in place.
@@ -149,7 +150,7 @@
     }
     if (!current()) return;
     // The restored chips name the sources the tasks give them, whatever the combined filter then returns.
-    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
     turns.reading();
     const kept = startFilter(opened, looked, carried?.tags);
     if (kept === initial) {
@@ -214,7 +215,7 @@
       offerSources(next.filter);
     }
     if (!current()) return; // the fragment (or the filter) changed again while the list was read
-    if (carried !== undefined) seen = mergeChoices(seen, carried.marks, []);
+    if (carried !== undefined) seen = withFreshSources(seen, carried.answered, carried.marks);
     const filter = startFilter(next, looked, carried?.tags);
     if (filter !== next.filter) persist(filter);
     if (!turns.mustRead(nowHash(filter) === nowHash(view.filter))) return;
